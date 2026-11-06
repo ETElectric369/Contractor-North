@@ -9,7 +9,7 @@ import { cogsWords, overheadWords } from "./analytics/profit-and-loss";
 import { DOCK, visibleDock } from "./dock";
 import { helpRows } from "./onboarding/help-rows";
 import { ALL_ON } from "./features";
-import { translator } from "./i18n";
+import { dict, translator } from "./i18n";
 import { appointmentTypeLabel } from "./statuses";
 import { RECONCILE_KINDS } from "./reconcile-kinds";
 import { words as nav } from "./words/nav";
@@ -299,7 +299,9 @@ describe("Nort's product map after the shell wave", () => {
     expect(enums.length).toBe(2); // customer.create and customer.update
     for (const e of enums) expect(e).toContain('"contractor"');
     for (const p of ["src/app/(app)/crm/new-customer-button.tsx", "src/app/(app)/crm/[id]/edit-customer-button.tsx"]) {
-      expect(readFileSync(join(process.cwd(), p), "utf8"), p).toContain('<option value="contractor">Contractor</option>');
+      // The option's words live in lib/words/customers since cn-v1146: the key, whose English is Contractor.
+      expect(readFileSync(join(process.cwd(), p), "utf8"), p).toContain('<option value="contractor">{t("cu_btn_typeContractor")}</option>');
     }
+    expect(dict("en").cu_btn_typeContractor).toBe("Contractor");
   });
 });

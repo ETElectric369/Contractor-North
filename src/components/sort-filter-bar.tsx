@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { ArrowDownAZ, ArrowUpAZ, Layers } from "lucide-react";
 import { Select } from "@/components/ui/input";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 import { loadPrefs, savePrefs, type SortFilterPrefs, type SortOption, type SortSpec } from "@/lib/sort-filter";
 
 /**
@@ -46,6 +48,8 @@ export function SortFilterBar({
   onChange: (patch: Partial<SortFilterPrefs>) => void;
   className?: string;
 }) {
+  // Shared (Contacts, the price list): the bar's own words in the reader's language; the options' labels are the caller's.
+  const t = translator(useLang());
   const sort: SortSpec | null = prefs.sort;
   const dir = sort?.dir ?? "asc";
   const active = new Set(prefs.chips);
@@ -58,14 +62,14 @@ export function SortFilterBar({
   return (
     <div className={`flex flex-wrap items-center gap-2 ${className ?? ""}`}>
       <label className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
-        Sort
+        {t("cu_sort")}
         <Select
-          aria-label="Sort by"
+          aria-label={t("cu_sortBy")}
           className="h-9 w-auto text-sm"
           value={sort?.key ?? ""}
           onChange={(e) => onChange({ sort: e.target.value ? { key: e.target.value, dir } : null })}
         >
-          <option value="">Default</option>
+          <option value="">{t("cu_btn_sortDefault")}</option>
           {sortOptions.map((o) => (
             <option key={o.key} value={o.key}>
               {o.label}
@@ -75,8 +79,8 @@ export function SortFilterBar({
       </label>
       <button
         type="button"
-        aria-label={dir === "asc" ? "Ascending — tap for descending" : "Descending — tap for ascending"}
-        title={dir === "asc" ? "A → Z, low → high" : "Z → A, high → low"}
+        aria-label={dir === "asc" ? t("cu_ascending") : t("cu_descending")}
+        title={dir === "asc" ? t("cu_ascTitle") : t("cu_descTitle")}
         disabled={!sort}
         onClick={() => sort && onChange({ sort: { ...sort, dir: dir === "asc" ? "desc" : "asc" } })}
         className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40"
@@ -85,9 +89,9 @@ export function SortFilterBar({
       </button>
       {groupOptions.length > 0 && (
         <label className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
-          <Layers className="h-3.5 w-3.5" /> Group
-          <Select aria-label="Group by" className="h-9 w-auto text-sm" value={prefs.group ?? ""} onChange={(e) => onChange({ group: e.target.value || null })}>
-            <option value="">None</option>
+          <Layers className="h-3.5 w-3.5" /> {t("cu_group")}
+          <Select aria-label={t("cu_groupBy")} className="h-9 w-auto text-sm" value={prefs.group ?? ""} onChange={(e) => onChange({ group: e.target.value || null })}>
+            <option value="">{t("cu_btn_groupNone")}</option>
             {groupOptions.map((g) => (
               <option key={g.key} value={g.key}>
                 {g.label}

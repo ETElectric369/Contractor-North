@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { FEATURE_KEYS, type FeatureKey } from "./features";
 import { featureForPath } from "./feature-doors";
+import { words as inspectionsWords } from "./words/inspections";
 
 /**
  * EVERY RECORD PAGE OF A SWITCHABLE FEATURE CARRIES ITS OFF LINE (0352). A switch hides the doors
@@ -90,10 +91,15 @@ describe("the Off line on every record page", () => {
     // NewInspectionButton (Start An Inspection) renders only with Leads on, so the empty state's
     // words follow it (the site visit's one word, lib/statuses).
     const src = readFileSync(join(ROOT, "inspections/page.tsx"), "utf8");
-    const at = src.indexOf('title="No open inspections"');
+    // The words live in lib/words/inspections since cn-v1146: the page names the keys, the catalog the words.
+    const at = src.indexOf('title={t("ip_noOpenInspections")}');
     expect(at).toBeGreaterThan(-1);
+    expect(inspectionsWords.en.ip_noOpenInspections).toBe("No open inspections");
     const block = src.slice(at, src.indexOf("</EmptyState>", at));
-    expect(block).toMatch(/description=\{leadsOn \? "[^"]*Start An Inspection[^"]*" : "Nothing open right now\."\}/);
+    expect(block).toContain('description={leadsOn ? t("ip_emptyDescLeadsOn") : t("ip_emptyDescLeadsOff")}');
+    expect(inspectionsWords.en.ip_emptyDescLeadsOn).toContain("Start An Inspection");
+    expect(inspectionsWords.es.ip_emptyDescLeadsOn).toContain("Empezar Una Inspección");
+    expect(inspectionsWords.en.ip_emptyDescLeadsOff).toBe("Nothing open right now.");
     expect(block).toContain("{leadsOn && <NewInspectionButton");
   });
 

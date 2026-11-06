@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useOrgPublicBase } from "@/components/use-org-public-base";
 import { useRouter } from "next/navigation";
 import { CalendarPlus, Check, Copy, FileText, MessageSquare } from "lucide-react";
@@ -11,6 +11,20 @@ import { Input, Label } from "@/components/ui/input";
 import { NewInspectionButton } from "../appointments/new-inspection-button";
 import { convertInquiry, suggestVisitSlots } from "./actions";
 import { workKind } from "@/lib/schedule/work-shape";
+import { useLang } from "@/components/lang-provider";
+import { translator, fillText } from "@/lib/i18n";
+
+/** A sentence with one person's name (or a number) set in it as a node: ONE key, its {slot} split. */
+function around(words: string, slot: string, node: ReactNode) {
+  const [before, after = ""] = words.split(`{${slot}}`);
+  return (
+    <>
+      {before}
+      {node}
+      {after}
+    </>
+  );
+}
 
 /** A sensible default inspection day: 2 days out. */
 function defaultInspectDate(): string {
@@ -78,7 +92,8 @@ export function ConvertMenu({
 }) {
   const kind = workKind({ kind: "lead", workKind: workKindProp });
   const isWork = kind === "job" || kind === "service";
-  const workNoun = kind === "job" ? "job" : "service call";
+  const lang = useLang();
+  const t = translator(lang);
   const router = useRouter();
   const [inspectOpen, setInspectOpen] = useState(false);
   const [inspectDate, setInspectDate] = useState(defaultInspectDate());
@@ -118,7 +133,7 @@ export function ConvertMenu({
       router.push(res.redirect);
       return;
     }
-    setError(res.error ?? "Something went wrong.");
+    setError(res.error ?? t("ld_somethingWrong"));
     setBusy(null);
   }
 
@@ -153,6 +168,8 @@ export function ConvertMenu({
   // The BUSINESS's domain, not the browser's — see useOrgPublicBase.
   const origin = useOrgPublicBase();
   const pickLink = link && origin ? `${origin}/pick/${link.token}` : null;
+  // THE CUSTOMER'S TEXT STAYS ENGLISH (the Spanish waves' law: what a tenant's customer reads is the
+  // tenant's English, whatever language the office seat reads the app in). leads-spanish.test pins it.
   const smsBody = `Hi! Pick a time for your site visit and we'll lock it in: ${pickLink}`;
 
   async function copyLink() {
@@ -189,8 +206,8 @@ export function ConvertMenu({
             one line at 375px (the words carry the meaning). */}
         <NewInspectionButton
           nowOnly
-          label="Inspection"
-          title="Start an inspection now — you're already there"
+          label={t("ld_btn_inspection")}
+          title={t("ld_inspectionNowTitle")}
           iconClassName="hidden h-4 w-4 sm:block"
           inquiryId={inquiryId}
           variant="outline"
@@ -203,13 +220,13 @@ export function ConvertMenu({
           variant="outline"
           onClick={openInspect}
           disabled={busy !== null}
-          title={isWork ? `Put the ${workNoun} on the Schedule` : "Book an inspection — the lead stays open"}
+          title={isWork ? t(kind === "job" ? "ld_putJobOnSchedule" : "ld_putServiceCallOnSchedule") : t("ld_bookInspectionStaysOpen")}
         >
-          <CalendarPlus className="hidden h-4 w-4 sm:block" /> Schedule
+          <CalendarPlus className="hidden h-4 w-4 sm:block" /> {t("ld_btn_schedule")}
         </Button>
         {estimateDoor && (
           <Button onClick={() => run("estimate")} disabled={busy !== null}>
-            <FileText className="hidden h-4 w-4 sm:block" /> {busy === "estimate" ? "Opening…" : "Estimate"}
+            <FileText className="hidden h-4 w-4 sm:block" /> {busy === "estimate" ? t("ld_btn_opening") : t("ld_btn_estimate")}
           </Button>
         )}
         {/* THE CONTACT BUTTON IS GONE — the NAME is that control now (see inquiry-row).
@@ -224,23 +241,23 @@ export function ConvertMenu({
         open={inspectOpen}
         onClose={closeInspect}
         title={
-          link ? "Text Them These Times"
+          link ? t("ld_btn_textThemTheseTimes")
           // Pick mode books a PROPOSAL for every kind — a job can't be placed on an unchosen
           // day, so the work-flavored title would promise a conversion pick mode never does.
-          : isWork && mode === "book" ? (kind === "job" ? "Schedule The Job" : "Book The Service Call")
-          : isWork ? "Offer Times For The Visit"
-          : "Book An Inspection"
+          : isWork && mode === "book" ? (kind === "job" ? t("ld_btn_scheduleTheJob") : t("ld_btn_bookTheServiceCall"))
+          : isWork ? t("ld_btn_offerTimesForTheVisit")
+          : t("ld_btn_bookAnInspection")
         }
         size="sm"
         footer={
           link ? (
-            <ModalActions onCancel={closeInspect} onSave={closeInspect} saveLabel="Done" hideCancel />
+            <ModalActions onCancel={closeInspect} onSave={closeInspect} saveLabel={t("ld_btn_done")} hideCancel />
           ) : (
             <ModalActions
               onCancel={closeInspect}
               onSave={() => run("inspection")}
               saving={busy === "inspection"}
-              saveLabel={mode === "pick" ? "Create Link" : isWork ? (kind === "job" ? "Schedule Job" : "Book Service Call") : "Book It"}
+              saveLabel={mode === "pick" ? t("ld_btn_createLink") : isWork ? (kind === "job" ? t("ld_btn_scheduleJob") : t("ld_btn_bookServiceCall")) : t("ld_btn_bookIt")}
             />
           )
         }
@@ -248,14 +265,13 @@ export function ConvertMenu({
         {link ? (
           <div className="space-y-3">
             <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-              Link ready — text it to <strong>{inquiryName}</strong>. The visit confirms onto your
-              calendar the moment they tap a time, and the lead stays open for the estimate.
+              {around(t("ld_linkReady"), "name", <strong>{inquiryName}</strong>)}
             </div>
             <code className="block break-all rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-700">{pickLink}</code>
             <div className="flex flex-wrap gap-2">
               <Button type="button" onClick={copyLink}>
                 {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                {copied ? "Copied" : "Copy Link"}
+                {copied ? t("ld_btn_copied") : t("ld_btn_copyLink")}
               </Button>
               <a
                 // iOS convention (matches propose-dates-button): with a number the body
@@ -263,22 +279,15 @@ export function ConvertMenu({
                 href={`sms:${link.phone ?? ""}${link.phone ? "&" : "?"}body=${encodeURIComponent(smsBody)}`}
                 className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-brand px-4 text-sm font-medium text-white hover:bg-brand-dark"
               >
-                <MessageSquare className="h-4 w-4 shrink-0" /> Text It
+                <MessageSquare className="h-4 w-4 shrink-0" /> {t("ld_btn_textIt")}
               </a>
             </div>
             {/* Say which number it goes out from BEFORE he sends it — see the businessPhone prop. */}
             <p className="text-xs text-slate-500">
               {businessPhone ? (
-                <>
-                  Text It opens this phone&rsquo;s own messaging app, so it sends from this phone&rsquo;s number —
-                  not <span className="font-medium">{businessPhone}</span>. To send it from the business line,
-                  use Copy Link and paste it there.
-                </>
+                around(t("ld_textItNotBusiness"), "phone", <span className="font-medium">{businessPhone}</span>)
               ) : (
-                <>
-                  Text It opens this phone&rsquo;s own messaging app, so it sends from this phone&rsquo;s number.
-                  No business number is saved yet — Settings &rarr; Company is where it goes.
-                </>
+                t("ld_textItNoBusiness")
               )}
             </p>
           </div>
@@ -286,13 +295,11 @@ export function ConvertMenu({
           <div className="space-y-4">
             {isWork && mode === "book" ? (
               <p className="text-sm text-slate-600">
-                Puts <strong>{inquiryName}</strong> on your Schedule as the {workNoun} itself — the lead
-                becomes a real job on that day, and Done / Pay now wait on its job page.
+                {around(t(kind === "job" ? "ld_putsJobOnSchedule" : "ld_putsServiceCallOnSchedule"), "name", <strong>{inquiryName}</strong>)}
               </p>
             ) : (
               <p className="text-sm text-slate-600">
-                Books an inspection for <strong>{inquiryName}</strong> onto your Schedule (a booking you can move or
-                reassign). The lead stays open, so you can create the estimate after the visit.
+                {around(t("ld_booksInspectionFor"), "name", <strong>{inquiryName}</strong>)}
               </p>
             )}
 
@@ -301,21 +308,21 @@ export function ConvertMenu({
               activeId={mode}
               onSelect={(id) => setMode(id as typeof mode)}
               items={[
-                { id: "book", label: "Book It" },
-                { id: "pick", label: "Let Them Pick" },
+                { id: "book", label: t("ld_btn_bookIt") },
+                { id: "pick", label: t("ld_btn_letThemPick") },
               ]}
             />
 
             {mode === "book" ? (
               <div>
-                <Label htmlFor="inspect-date">{isWork ? "Start date" : "Day"}</Label>
+                <Label htmlFor="inspect-date">{isWork ? t("ld_startDate") : t("ld_day")}</Label>
                 <Input id="inspect-date" type="date" value={inspectDate} onChange={(e) => { touchedRef.current = true; setSlotNote(null); setInspectDate(e.target.value); }} />
                 {slotNote && <p className="mt-1 text-xs text-brand">{slotNote}</p>}
-                <p className="mt-1 text-xs text-slate-400">Defaults to 9:00 AM — fine-tune the time on the Schedule.</p>
+                <p className="mt-1 text-xs text-slate-400">{t("ld_defaultsToNine")}</p>
               </div>
             ) : (
               <div className="space-y-2 rounded-lg border border-brand/30 bg-brand-light/20 p-3">
-                <Label>Offer up to 3 times — they tap one and it books itself</Label>
+                <Label>{t("ld_offerUpToThree")}</Label>
                 {slotNote && <p className="text-xs text-brand">{slotNote}</p>}
                 {slots.map((sl, i) => (
                   <div key={i} className="grid grid-cols-2 gap-2">
@@ -323,23 +330,23 @@ export function ConvertMenu({
                       type="date"
                       value={sl.date}
                       onChange={(ev) => { touchedRef.current = true; setSlots((a) => a.map((x, xi) => (xi === i ? { ...x, date: ev.target.value } : x))); }}
-                      aria-label={`Option ${i + 1} date`}
+                      aria-label={fillText(t("ld_optionDate"), { n: String(i + 1) })}
                     />
                     <Input
                       type="time"
                       value={sl.time}
                       onChange={(ev) => { touchedRef.current = true; setSlots((a) => a.map((x, xi) => (xi === i ? { ...x, time: ev.target.value } : x))); }}
-                      aria-label={`Option ${i + 1} time`}
+                      aria-label={fillText(t("ld_optionTime"), { n: String(i + 1) })}
                     />
                   </div>
                 ))}
                 <div>
-                  <Label htmlFor="inspect-window">Arrival window (optional)</Label>
+                  <Label htmlFor="inspect-window">{t("ld_arrivalWindow")}</Label>
                   <Input
                     id="inspect-window"
                     value={timeNote}
                     onChange={(e) => setTimeNote(e.target.value)}
-                    placeholder="e.g. 8–10 AM"
+                    placeholder={t("ld_arrivalExample")}
                   />
                 </div>
               </div>

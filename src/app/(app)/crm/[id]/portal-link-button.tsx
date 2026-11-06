@@ -8,6 +8,8 @@ import { formatDateTime } from "@/lib/utils";
 import { orgPublicBase } from "@/app/(app)/share-actions";
 import { openOfficeLook } from "@/components/portal/open-office-look";
 import { portalOfficeLookUrl } from "../../portal-look-actions";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 import { emailPortalLink, rotatePortalLink, setPortalEnabled, signOutPortalDevices, type PortalLinkState } from "../actions";
 
 /**
@@ -50,6 +52,9 @@ export function PortalLinkButton({
   /** The contact's own Edit, labelled to add the email: shown when there is no email on file. */
   addEmailDoor?: React.ReactNode;
 }) {
+  // Office words in the reader's language (cu_…); the link and what is copied for the customer are untouched.
+  const lang = useLang();
+  const t = translator(lang);
   const [state, setState] = useState<PortalLinkState | null>(initial);
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
@@ -59,12 +64,13 @@ export function PortalLinkButton({
   if (!state) {
     return (
       <p className="text-sm text-slate-500">
-        Their own page isn&apos;t set up for this customer yet. Refresh the page in a minute; if it stays like
-        this, send a bug report so it can be fixed.
+        {t("cu_portalNotSetUp")}
       </p>
     );
   }
   const on = state.enabled;
+  // The sheet's heading, a name in the middle ("Make a New Link for {name}?" — today's English).
+  const confirmTitle = fillText(t("cu_makeNewLinkTitle"), { name: customerName });
   const devices = state.devices;
 
   /** The link is asked of the SERVER, not read off window.location — the customer's page lives on
@@ -92,8 +98,8 @@ export function PortalLinkButton({
     say(null);
     start(async () => {
       const res = await emailPortalLink(customerId);
-      if (res.ok) say(`Emailed to ${customerName} ✓`);
-      else say(null, res.error ?? "Couldn't send it.");
+      if (res.ok) say(fillText(t("cu_emailedTo"), { name: customerName }));
+      else say(null, res.error ?? t("cu_couldntSend"));
     });
   }
   function copyIt() {
@@ -102,7 +108,7 @@ export function PortalLinkButton({
     start(async () => {
       const l = await link(token);
       navigator.clipboard?.writeText(l).then(
-        () => say("Copied ✓"),
+        () => say(t("cu_copied")),
         () => say(l),
       );
     });
@@ -112,12 +118,12 @@ export function PortalLinkButton({
     start(async () => {
       const res = await rotatePortalLink(customerId);
       if (!res.ok || !res.link) {
-        say(null, res.error ?? "Couldn't make a new link.");
+        say(null, res.error ?? t("cu_couldntMakeLink"));
         return;
       }
       setState(res.link);
       setConfirmNew(false);
-      say(`New link made. The old one stopped working and every device on it was signed out. Send ${customerName} the new one.`);
+      say(fillText(t("cu_newLinkMade"), { name: customerName }));
     });
   }
   function toggle() {
@@ -126,14 +132,12 @@ export function PortalLinkButton({
     start(async () => {
       const res = await setPortalEnabled(customerId, next);
       if (!res.ok || !res.link) {
-        say(null, res.error ?? "That didn't take.");
+        say(null, res.error ?? t("cu_didntTake"));
         return;
       }
       setState(res.link);
       say(
-        next
-          ? "Turned on. Their link works again; each device asks for a code from their email."
-          : "Turned off. Their link now says it was turned off, and every device was signed out.",
+        next ? t("cu_turnedOn") : t("cu_turnedOff"),
       );
     });
   }
@@ -142,12 +146,12 @@ export function PortalLinkButton({
     start(async () => {
       const res = await signOutPortalDevices(customerId);
       if (!res.ok || !res.link) {
-        say(null, res.error ?? "That didn't sign them out.");
+        say(null, res.error ?? t("cu_didntSignOut"));
         return;
       }
       setState(res.link);
       const n = res.ended ?? 0;
-      say(`Signed out of ${n} device${n === 1 ? "" : "s"}. Their link still works; each device needs a new code from their email.`);
+      say(fillText(t(n === 1 ? "cu_signedOutOne" : "cu_signedOutMany"), { n: String(n) }));
     });
   }
 
@@ -155,57 +159,56 @@ export function PortalLinkButton({
     <div className="space-y-2">
       {/* Say whose page it is BEFORE the verbs, so no button has to carry that job alone. */}
       <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
-        Their own page — jobs, bills, estimates, contracts
+        {t("cu_theirOwnPage")}
       </div>
       <p className="text-sm text-slate-600">
         {on ? (
           <>
-            <span className="font-medium text-emerald-700">Link is on.</span>{" "}
+            <span className="font-medium text-emerald-700">{t("cu_linkIsOn")}</span>{" "}
             {devices === null ? null : (
               <>
-                Signed in on {devices} device{devices === 1 ? "" : "s"} ·{" "}
+                {fillText(t(devices === 1 ? "cu_signedInOnOne" : "cu_signedInOnMany"), { n: String(devices) })}{" "}
               </>
             )}
-            {state.lastOpenedAt ? `Last opened ${formatDateTime(state.lastOpenedAt)}.` : "Not opened yet."}{" "}
-            <span className="text-slate-400">Your own looks don&apos;t count.</span>
+            {state.lastOpenedAt ? fillText(t("cu_lastOpened"), { when: formatDateTime(state.lastOpenedAt, undefined, lang) }) : t("cu_notOpenedYet")}{" "}
+            <span className="text-slate-400">{t("cu_ownLooksDontCount")}</span>
           </>
         ) : (
           <>
-            <span className="font-medium text-red-700">Link is off.</span> It opens to &ldquo;This link was turned
-            off.&rdquo; Nothing else shows.
+            <span className="font-medium text-red-700">{t("cu_linkIsOff")}</span> {t("cu_opensToOff")}
           </>
         )}
       </p>
       {!hasEmail && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
           <p className="flex items-start gap-1.5 font-medium">
-            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> No email on file: they can&apos;t sign in.
+            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {t("cu_noEmailCantSignIn")}
           </p>
           <p className="mt-1 text-amber-800">
-            Their page emails a 6-digit code to open it on a new phone or computer. Add their email and they can.
+            {t("cu_codeExplainer")}
           </p>
           {addEmailDoor ? <div className="mt-2">{addEmailDoor}</div> : null}
         </div>
       )}
       <div className="flex flex-wrap gap-2">
-        <Button variant="outline" onClick={preview} disabled={pending} title="Open it exactly as the customer sees it">
-          <ExternalLink className="h-4 w-4" /> See What They See
+        <Button variant="outline" onClick={preview} disabled={pending} title={t("cu_seeTitle")}>
+          <ExternalLink className="h-4 w-4" /> {t("cu_btn_seeWhatTheySee")}
         </Button>
         <Button
           variant="outline"
           onClick={copyIt}
           disabled={pending || !on}
-          title={on ? "Copy their link" : "Turn the link on first"}
+          title={on ? t("cu_copyTitle") : t("cu_turnOnFirst")}
         >
-          <Copy className="h-4 w-4" /> Copy The Link
+          <Copy className="h-4 w-4" /> {t("cu_btn_copyTheLink")}
         </Button>
         <Button
           variant="outline"
           onClick={emailIt}
           disabled={pending || !hasEmail || !on}
-          title={!hasEmail ? "Add an email to this customer first" : on ? "Email them the link to that page" : "Turn the link on first"}
+          title={!hasEmail ? t("cu_addEmailFirst") : on ? t("cu_emailTitle") : t("cu_turnOnFirst")}
         >
-          <Mail className="h-4 w-4" /> Email It To Them
+          <Mail className="h-4 w-4" /> {t("cu_btn_emailItToThem")}
         </Button>
         <Button
           variant="outline"
@@ -214,35 +217,35 @@ export function PortalLinkButton({
             setConfirmNew(true);
           }}
           disabled={pending}
-          title="Replace the link. The one they have stops working."
+          title={t("cu_newLinkTitle")}
         >
-          <RefreshCw className="h-4 w-4" /> New Link
+          <RefreshCw className="h-4 w-4" /> {t("cu_btn_newLink")}
         </Button>
         <Button
           variant="outline"
           onClick={toggle}
           disabled={pending}
-          title={on ? "Their link stops working until you turn it back on" : "Their same link works again"}
+          title={on ? t("cu_turnOffTitle") : t("cu_turnOnTitle")}
         >
-          {on ? <PowerOff className="h-4 w-4" /> : <Power className="h-4 w-4" />} {on ? "Turn Off" : "Turn On"}
+          {on ? <PowerOff className="h-4 w-4" /> : <Power className="h-4 w-4" />} {on ? t("cu_btn_turnOff") : t("cu_btn_turnOn")}
         </Button>
         <Button
           variant="outline"
           onClick={signOutAll}
           disabled={pending || !devices}
-          title={devices ? "Every device signed in to their page will need a new code" : "No device is signed in"}
+          title={devices ? t("cu_signOutTitle") : t("cu_noDeviceSignedIn")}
         >
-          <LogOut className="h-4 w-4" /> Sign Out All Devices
+          <LogOut className="h-4 w-4" /> {t("cu_btn_signOutAllDevices")}
         </Button>
       </div>
-      {pending && <p className="text-xs text-slate-500">Working…</p>}
+      {pending && <p className="text-xs text-slate-500">{t("cu_working")}</p>}
       {msg && <p className="text-xs text-slate-600">{msg}</p>}
       {error && !confirmNew && <p className="text-xs text-red-700">{error}</p>}
 
       <Modal
         open={confirmNew}
         onClose={() => setConfirmNew(false)}
-        title={`Make a New Link for ${customerName}?`}
+        title={confirmTitle}
         size="sm"
         footer={
           <ModalActions
@@ -250,16 +253,13 @@ export function PortalLinkButton({
             onSave={rotate}
             saving={pending}
             destructive
-            saveLabel="Make New Link"
+            saveLabel={t("cu_btn_makeNewLink")}
           />
         }
       >
         <div className="space-y-3 text-sm text-slate-700">
-          <p>
-            The link {customerName} has now stops working at once, and every device signed in to it is signed out.
-            Anyone who opens it sees &ldquo;This link was turned off.&rdquo;
-          </p>
-          <p>The new link works right away. Send it with Copy The Link or Email It To Them.</p>
+          <p>{fillText(t("cu_newLinkBody"), { name: customerName })}</p>
+          <p>{t("cu_newLinkWorks")}</p>
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-red-700">{error}</div>}
         </div>
       </Modal>

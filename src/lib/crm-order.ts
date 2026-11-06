@@ -1,4 +1,6 @@
 import type { SortDir, SortOption, SortSpec } from "@/lib/sort-filter";
+import type { Lang } from "@/lib/locale";
+import { say, type Words } from "@/lib/lang-words";
 
 /**
  * CONTACTS ORDER (Andrew: "Sorting ABCD or otherwise", filed on /crm). The customer list had no
@@ -22,6 +24,22 @@ export const CRM_SORT_OPTIONS: SortOption[] = [
   { key: "company", label: "Company" },
   { key: "recent", label: "Recently Added", kind: "date" },
 ];
+
+/** The catalog key each sort choice reads in another language (lib/words/customers, cu_lib_sort…). */
+const CRM_SORT_LABEL_KEY: Record<CrmSortKey, string> = {
+  name: "cu_lib_sortName",
+  company: "cu_lib_sortCompany",
+  recent: "cu_lib_sortRecent",
+};
+
+/** A sort choice's words for the person reading (the Ventas-2 wave, cn-v1146): CRM_SORT_OPTIONS' English
+ *  by default, byte for byte; a Spanish caller's translator reads cu_lib_sort… (Title Case: a person
+ *  taps it). This lib imports no catalog. An unknown key reads as itself. */
+export function crmOrderLabel(key: string, lang: Lang = "en", words?: Words): string {
+  const en = CRM_SORT_OPTIONS.find((o) => o.key === key)?.label;
+  if (en === undefined || !isCrmSortKey(key)) return String(key ?? "");
+  return say(lang, words, CRM_SORT_LABEL_KEY[key], en);
+}
 
 /** The direction a key means when nobody has said otherwise: names read A→Z, "recent" means
  *  newest first. Picking a key from the bar lands on this; the toggle flips it. */

@@ -13,7 +13,9 @@ import { convertInquiry, deleteInquiry, markInquiryContacted, setInquiryStatus, 
 import { useToast, type ToastAction } from "@/components/toast";
 import { formatDateTime, formatDate } from "@/lib/utils";
 import type { Inquiry } from "@/lib/types";
-import { LEAD_BUCKETS } from "@/lib/lead-triage";
+import { leadBucketWords } from "@/lib/lead-triage";
+import { useLang } from "@/components/lang-provider";
+import { translator, fillText } from "@/lib/i18n";
 import { leadNextStep, monthDay, type LeadBucketLetter, type LeadVisitsAnswer } from "@/lib/leads/next-step";
 import { IntakeFiles } from "./intake-files";
 import { PlanBriefPanel } from "./plan-brief-panel";
@@ -27,6 +29,9 @@ const PANEL_BTN =
   "inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50";
 
 type Toast = (message: string, kind?: "success" | "error" | "info", action?: ToastAction) => void;
+/** The reader's words (lib/i18n translator); English when a caller hands none. */
+type Words = (key: string) => string;
+const ENGLISH: Words = translator("en");
 
 /**
  * MARK LOST, WITH UNDO (W2-07). No confirm: the Undo is the safety, and it puts back the status the
@@ -35,20 +40,21 @@ type Toast = (message: string, kind?: "success" | "error" | "info", action?: Toa
  */
 export async function markLeadLost(
   lead: { id: string; name: string; status: string },
-  deps: { setStatus: (id: string, status: string) => Promise<{ ok: boolean; error?: string }>; toast: Toast; refresh: () => void },
+  deps: { setStatus: (id: string, status: string) => Promise<{ ok: boolean; error?: string }>; toast: Toast; refresh: () => void; t?: Words },
 ): Promise<void> {
+  const t = deps.t ?? ENGLISH;
   const was = lead.status;
   const res = await deps.setStatus(lead.id, "lost");
   if (!res?.ok) {
-    deps.toast(res?.error ?? "Couldn't mark it lost — try again.", "error");
+    deps.toast(res?.error ?? t("ld_couldntMarkLost"), "error");
     return;
   }
-  deps.toast(`Marked ${lead.name} Lost`, "success", {
-    label: "Undo",
+  deps.toast(fillText(t("ld_markedLost"), { name: lead.name }), "success", {
+    label: t("ld_btn_undo"),
     onClick: () => {
       void (async () => {
         const back = await deps.setStatus(lead.id, was);
-        deps.toast(back.ok ? "Put back." : (back.error ?? "Couldn't put it back."), back.ok ? "success" : "error");
+        deps.toast(back.ok ? t("ld_putBack") : (back.error ?? t("ld_couldntPutBack")), back.ok ? "success" : "error");
         deps.refresh();
       })();
     },
@@ -71,17 +77,19 @@ export async function saveLeadAsContact(
     toast: Toast;
     open: (href: string) => void;
     refresh: () => void;
+    t?: Words;
   },
 ): Promise<void> {
+  const t = deps.t ?? ENGLISH;
   const res = await deps.convert(lead.id);
   if (!res.ok || !res.id) {
-    deps.toast(res.error ?? "Couldn't make a contact from this lead.", "error");
+    deps.toast(res.error ?? t("ld_couldntMakeContact"), "error");
     return;
   }
   const id = res.id;
   const card = res.contact;
-  deps.toast(card?.existing ? `Linked To ${card.name}` : `Saved ${card?.name || lead.name} As A Contact`, "success", {
-    label: "Open",
+  deps.toast(card?.existing ? fillText(t("ld_linkedTo"), { name: card.name }) : fillText(t("ld_savedAsContact"), { name: card?.name || lead.name }), "success", {
+    label: t("ld_btn_open"),
     onClick: () => deps.open(`/crm/${id}`),
   });
   deps.refresh();
@@ -118,6 +126,8 @@ export function InquiryRow({
   /** The Track Referrals switch: on, the ⋯ panel says who referred them. */
   referralsOn?: boolean;
 }) {
+  const lang = useLang();
+  const t = translator(lang);
   const rowRef = useRef<HTMLLIElement>(null);
   const [flash, setFlash] = useState(false);
   // Option B (approved by Erik AND Andrew off the layout mock): two lines per lead, the one-tap
@@ -131,8 +141,8 @@ export function InquiryRow({
     if (!focused || !rowRef.current) { setFlash(false); return; }
     rowRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
     setFlash(true);
-    const t = setTimeout(() => setFlash(false), 2200);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setFlash(false), 2200);
+    return () => clearTimeout(timer);
   }, [focused]);
 
   /* ONE NEXT-STEP CHIP (W2-07) in place of up to nine badges (status, inspection counts, bucket,
@@ -152,6 +162,8 @@ export function InquiryRow({
     visits,
     todayYmd,
     { estimatesOn: estimateDoor, tz },
+    lang,
+    t,
   );
 
   // Street first, then the town — the two parts he actually reads. Comma-joined and trimmed so a
@@ -176,7 +188,7 @@ export function InquiryRow({
             href={`/crm/${inquiry.customer_id}`}
             onClick={(e) => e.stopPropagation()}
             className="inline-flex min-h-11 items-center font-semibold text-slate-900 hover:text-brand hover:underline"
-            title="Open this contact"
+            title={t("ld_openThisContact")}
           >
             {inquiry.name}
           </Link>
@@ -196,11 +208,11 @@ export function InquiryRow({
         )}
         <span className="inline-flex items-center gap-1.5">
           {step.web && (
-            <span role="img" aria-label="From Your Website" title="From Your Website" className="inline-flex text-slate-400">
+            <span role="img" aria-label={t("ld_fromYourWebsite")} title={t("ld_fromYourWebsite")} className="inline-flex text-slate-400">
               <Globe className="h-3.5 w-3.5" />
             </span>
           )}
-          <Badge tone={step.tone} title={step.bucket ? LEAD_BUCKETS[step.bucket].blurb : undefined} className="gap-1.5">
+          <Badge tone={step.tone} title={step.bucket ? leadBucketWords(step.bucket, lang, t).blurb : undefined} className="gap-1.5">
             {step.bucket && <span aria-hidden className={`inline-block h-2 w-2 rounded-full ${BUCKET_DOT[step.bucket]}`} />}
             {step.label}
           </Badge>
@@ -212,14 +224,14 @@ export function InquiryRow({
             <Badge
               tone="slate"
               className="normal-case"
-              title={inquiry.intake?.reason ?? "The website's triage score — bigger, readier and easier to reach scores higher."}
+              title={inquiry.intake?.reason ?? t("ld_triageScore")}
             >
-              Priority {Number(inquiry.priority)}
+              {fillText(t("ld_priority"), { n: String(Number(inquiry.priority)) })}
             </Badge>
           )}
         </span>
-        <span className="ml-auto whitespace-nowrap font-mono text-xs tabular-nums text-slate-400" title={`Added ${formatDateTime(inquiry.created_at)}`}>
-          {formatDateTime(inquiry.created_at)}
+        <span className="ml-auto whitespace-nowrap font-mono text-xs tabular-nums text-slate-400" title={fillText(t("ld_added"), { when: formatDateTime(inquiry.created_at, undefined, lang) })}>
+          {formatDateTime(inquiry.created_at, undefined, lang)}
         </span>
       </div>
 
@@ -235,23 +247,23 @@ export function InquiryRow({
             rel="noreferrer"
             onClick={(e) => e.stopPropagation()}
             className="flex min-h-11 items-center gap-1 text-sm font-medium text-slate-600 hover:text-brand hover:underline"
-            title="Open in Maps"
+            title={t("ld_openInMaps")}
           >
             <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
             {addressLine}
           </a>
         )}
-        {inquiry.last_contacted_at && <span>contacted {formatDate(inquiry.last_contacted_at)}</span>}
+        {inquiry.last_contacted_at && <span>{fillText(t("ld_contactedOn"), { date: formatDate(inquiry.last_contacted_at, undefined, lang) })}</span>}
         {inquiry.intake?.reason && <span className="hidden text-slate-400 md:inline">{inquiry.intake.reason}</span>}
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
-            aria-label={open ? "Hide details" : "Show details — message, files, follow-up, contact"}
+            aria-label={open ? t("ld_hideDetails") : t("ld_showDetails")}
             className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-slate-200 px-2 text-xs font-semibold text-slate-500 hover:bg-slate-50"
           >
-            {open ? "Less" : "⋯"}
+            {open ? t("ld_btn_less") : "⋯"}
           </button>
         </span>
       </div>
@@ -262,7 +274,7 @@ export function InquiryRow({
           it became). ── */}
       {inquiry.converted_at ? (
         <p className="text-center text-xs text-slate-400">
-          Already converted — its estimate or job carries the work now.
+          {t("ld_alreadyConverted")}
         </p>
       ) : (
         <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} customers={customers} workKind={(inquiry as { work_kind?: string | null }).work_kind ?? null} businessPhone={businessPhone} estimateDoor={estimateDoor} />
@@ -294,6 +306,8 @@ export function LeadDetails({
   todayYmd: string;
   referralsOn?: boolean;
 }) {
+  const lang = useLang();
+  const t = translator(lang);
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -308,8 +322,8 @@ export function LeadDetails({
     if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || v < todayYmd || v === (inquiry.next_follow_up_at ?? "").slice(0, 10)) return;
     start(async () => {
       const res = await snoozeInquiry(inquiry.id, v);
-      if (!res.ok) { toast(res.error ?? "Couldn't save that day — try again.", "error"); return; }
-      toast(`Follow up on ${monthDay(v)}.`, "success");
+      if (!res.ok) { toast(res.error ?? t("ld_couldntSaveDay"), "error"); return; }
+      toast(fillText(t("ld_followUpOn"), { day: monthDay(v, lang) }), "success");
       router.refresh();
     });
   }
@@ -317,8 +331,8 @@ export function LeadDetails({
   function markContacted() {
     start(async () => {
       const res = await markInquiryContacted(inquiry.id, followUp || null);
-      if (!res?.ok) { toast(res?.error ?? "Couldn't mark it contacted — try again.", "error"); return; }
-      toast("Marked Contacted", "success");
+      if (!res?.ok) { toast(res?.error ?? t("ld_couldntMarkContacted"), "error"); return; }
+      toast(t("ld_markedContacted"), "success");
       router.refresh();
     });
   }
@@ -327,7 +341,7 @@ export function LeadDetails({
     <div className="mt-1 space-y-3 rounded-lg bg-slate-50/70 p-3">
       {inquiry.message && <p className="whitespace-pre-wrap text-sm text-slate-600">{inquiry.message}</p>}
       {/* Who sent them, with Track Referrals on: a line in here, never a badge on the row. */}
-      {referralsOn && referrer && <p className="text-xs text-slate-500">Referred By {referrer}</p>}
+      {referralsOn && referrer && <p className="text-xs text-slate-500">{fillText(t("ld_referredBy"), { name: referrer })}</p>}
       <IntakeFiles inquiryId={inquiry.id} paths={intakePaths(inquiry.intake)} />
       <PlanBriefPanel inquiryId={inquiry.id} intake={inquiry.intake} />
       <div className="flex flex-wrap items-end gap-3">
@@ -336,7 +350,7 @@ export function LeadDetails({
             call, carried untouched to the schedule (the rail renders this SAME component), through
             placement, onto the calendar, into the job. Stated once. */}
         <div>
-          <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">The work</label>
+          <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">{t("ld_theWork")}</label>
           <WorkShapeControls
             workKind={(inquiry as { work_kind?: string | null }).work_kind ?? null}
             plannedMinutes={(inquiry as { planned_minutes?: number | null }).planned_minutes ?? null}
@@ -344,7 +358,7 @@ export function LeadDetails({
             onPatch={(patch) =>
               start(async () => {
                 const r = await sizeLead(inquiry.id, patch);
-                if (!r.ok) toast(r.error ?? "Couldn't save that.", "error");
+                if (!r.ok) toast(r.error ?? t("ld_couldntSaveThat"), "error");
                 else router.refresh();
               })
             }
@@ -354,7 +368,7 @@ export function LeadDetails({
           <>
             <div>
               <label htmlFor={`follow-${inquiry.id}`} className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">
-                Follow Up
+                {t("ld_followUp")}
               </label>
               <Input
                 id={`follow-${inquiry.id}`}
@@ -366,7 +380,7 @@ export function LeadDetails({
               />
             </div>
             <button type="button" disabled={pending} onClick={markContacted} className={PANEL_BTN}>
-              Mark Contacted
+              {t("ld_btn_markContacted")}
             </button>
             {inquiry.status !== "lost" && (
               <button
@@ -376,20 +390,20 @@ export function LeadDetails({
                   start(() =>
                     markLeadLost(
                       { id: inquiry.id, name: inquiry.name, status: inquiry.status },
-                      { setStatus: setInquiryStatus, toast, refresh: () => router.refresh() },
+                      { setStatus: setInquiryStatus, toast, refresh: () => router.refresh(), t },
                     ),
                   )
                 }
                 className={PANEL_BTN}
               >
-                Mark Lost
+                {t("ld_btn_markLost")}
               </button>
             )}
           </>
         )}
       </div>
       {!converted && /^\d{4}-\d{2}-\d{2}$/.test(followUp) && followUp < todayYmd && (
-        <p className="text-xs text-amber-700">That day has passed. Pick today or later to save it.</p>
+        <p className="text-xs text-amber-700">{t("ld_dayPassed")}</p>
       )}
       <div className="flex flex-wrap items-center gap-3">
         {/* A contact is made HERE, by name, never by tapping the lead's name. Only a lead with no card
@@ -407,13 +421,14 @@ export function LeadDetails({
                     toast,
                     open: (href) => router.push(href),
                     refresh: () => router.refresh(),
+                    t,
                   },
                 ),
               )
             }
             className={PANEL_BTN}
           >
-            <UserPlus className="h-4 w-4 shrink-0" /> Save As Contact
+            <UserPlus className="h-4 w-4 shrink-0" /> {t("ld_btn_saveAsContact")}
           </button>
         )}
         <InquiryModal inquiry={inquiry} mode="edit" />
@@ -428,22 +443,20 @@ export function LeadDetails({
           onClick={() => {
             // A CONVERTED lead is an estimate's provenance (audit 7): deleting it severs the
             // estimate's only link back to the person. Say so before the click.
-            if (!confirm(inquiry.converted_at
-              ? `Delete "${inquiry.name}" completely? An estimate came from this lead — deleting cuts that estimate's link to the person, cancels any un-confirmed booking links, and removes the lead's uploaded files and any inspection that has no field notes or photos. Mark it Lost instead unless it was junk.`
-              : `Delete "${inquiry.name}" completely? A lead that said no should be marked Lost instead — delete keeps nothing: its uploaded files and any inspection without field notes or photos go with it.`)) return;
+            if (!confirm(fillText(t(inquiry.converted_at ? "ld_confirmDeleteConverted" : "ld_confirmDelete"), { name: inquiry.name }))) return;
             start(async () => {
               const r = await deleteInquiry(inquiry.id);
               if (!r.ok) {
-                toast(r.error ?? "Couldn't delete that.", "error");
+                toast(r.error ?? t("ld_couldntDeleteThat"), "error");
                 return;
               }
-              toast("Lead deleted.", "success");
+              toast(t("ld_leadDeleted"), "success");
               router.refresh();
             });
           }}
           className="ml-auto inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-medium text-rose-600 hover:bg-rose-50"
         >
-          Delete Lead
+          {t("ld_btn_deleteLead")}
         </button>
       </div>
     </div>

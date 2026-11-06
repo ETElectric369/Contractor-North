@@ -34,6 +34,9 @@ vi.mock("@/app/(app)/appointments/actions", () => ({ createInspectionNow: vi.fn(
 import { InquiryRow, LeadDetails, markLeadLost, saveLeadAsContact } from "./inquiry-row";
 import { InquiryFields, inquiryFormValue, moreOptionsFilled } from "./inquiry-fields";
 import type { Inquiry } from "@/lib/types";
+import { words as leadWords } from "@/lib/words/leads";
+
+const en = leadWords.en;
 
 const TODAY = "2026-09-28";
 const lead = (over: Partial<Inquiry> = {}): Inquiry =>
@@ -229,8 +232,13 @@ describe("D. New Lead in seven", () => {
 
   it("the modal says New Lead / Edit Lead and keeps its saves", () => {
     const modal = readFileSync(join(process.cwd(), "src/app/(app)/leads/inquiry-modal.tsx"), "utf8");
-    expect(modal).toContain('title={editing ? "Edit Lead" : "New Lead"}');
-    expect(modal).toContain('saveLabel={editing ? "Save Changes" : "Create Lead"}');
+    // The words live in lib/words/leads (cn-v1146); the English is unchanged.
+    expect(modal).toContain('title={editing ? t("ld_btn_editLead") : t("ld_btn_newLead")}');
+    expect(modal).toContain('saveLabel={editing ? t("ld_btn_saveChanges") : t("ld_btn_createLead")}');
+    expect(en.ld_btn_editLead).toBe("Edit Lead");
+    expect(en.ld_btn_newLead).toBe("New Lead");
+    expect(en.ld_btn_saveChanges).toBe("Save Changes");
+    expect(en.ld_btn_createLead).toBe("Create Lead");
   });
 });
 
@@ -253,8 +261,10 @@ describe("E. residential or commercial is worked out, never asked", () => {
 describe("F. the page's words", () => {
   it("the tiles are Open Leads and Follow-Ups Due", () => {
     const page = readFileSync(join(process.cwd(), "src/app/(app)/leads/page.tsx"), "utf8");
-    expect(page).toContain('label="Open Leads"');
-    expect(page).toContain('label="Follow-Ups Due"');
+    expect(page).toContain('label={t("ld_btn_openLeads")}');
+    expect(page).toContain('label={t("ld_btn_followUpsDue")}');
+    expect(en.ld_btn_openLeads).toBe("Open Leads");
+    expect(en.ld_btn_followUpsDue).toBe("Follow-Ups Due");
     // The visits read carries each visit's day (still leaving cancelled out).
     expect(page).toContain('.select("inquiry_id, status, starts_at, type")');
     expect(page).toContain('.neq("status", "cancelled")');

@@ -10,6 +10,7 @@ import { FEATURES } from "@/lib/features";
 import { PILE_DEFS } from "@/lib/action-items/piles";
 import { inspectionDbWords } from "@/lib/inspection/db-refusal";
 import { words as nav } from "@/lib/words/nav";
+import { words as inspectionsWords } from "@/lib/words/inspections";
 
 /**
  * ONE WORD FOR THE SITE VISIT, AND IT IS THE STORED ONE: INSPECTION.
@@ -62,7 +63,9 @@ describe("the site visit is an Inspection", () => {
     const page = read("src/app/(app)/inspections/page.tsx");
     expect(page).toContain('title={t("nv_page_inspections")}');
     expect(nav.en.nv_page_inspections).toBe("Inspections");
-    expect(page).toContain('buttonLabel="Book An Inspection"');
+    // The button's words come from lib/words/inspections since cn-v1146; the catalog pins the English.
+    expect(page).toContain('buttonLabel={t("ip_btn_bookAnInspection")}');
+    expect(inspectionsWords.en.ip_btn_bookAnInspection).toBe("Book An Inspection");
     expect(FEATURES.find((f) => f.key === "leads")?.label).toBe("Leads & Inspections");
     expect(PILE_DEFS.inspections_to_write_up).toMatchObject({ label: "Inspections To Write Up", listLabel: "See All Inspections" });
   });
@@ -481,7 +484,9 @@ describe("the old word cannot come back", () => {
 
   it("the five surfaces the owner was reading now all say Inspection", () => {
     // The bucket and the page that disagreed, the dock row above them, and the piles that feed them.
-    expect(read("src/app/(app)/inspections/page.tsx")).toContain("No open inspections");
+    // The page reads its empty state from lib/words/inspections (cn-v1146); the word is pinned in the catalog.
+    expect(read("src/app/(app)/inspections/page.tsx")).toContain('t("ip_noOpenInspections")');
+    expect(inspectionsWords.en.ip_noOpenInspections).toBe("No open inspections");
     expect(read("src/lib/dock.ts")).toContain('label: "Inspections"');
     // Settings' sheet — the SECOND sense, the questions carried on the visit.
     expect(read("src/app/(app)/settings/page.tsx")).toContain("These are the questions your inspection asks on site");

@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Label, Select } from "@/components/ui/input";
 import { mergeCustomers } from "../actions";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 
 /** "Merge into…" — folds THIS (duplicate) customer into another. All of this
  *  customer's jobs, estimates, invoices, links, credits, and inquiries move to
@@ -19,6 +21,7 @@ export function MergeCustomerButton({
   customer: { id: string; name: string };
   others: { id: string; name: string }[];
 }) {
+  const t = translator(useLang());
   const [open, setOpen] = useState(false);
   const [targetId, setTargetId] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -28,22 +31,18 @@ export function MergeCustomerButton({
   function onMerge() {
     setError(null);
     if (!targetId) {
-      setError("Pick a customer to merge into.");
+      setError(t("cu_pickToMerge"));
       return;
     }
     const target = others.find((o) => o.id === targetId);
     if (
-      !confirm(
-        `Merge "${customer.name}" into "${target?.name ?? "the selected customer"}"? ` +
-          `All of ${customer.name}'s jobs, estimates, invoices, links, credits, and inquiries ` +
-          `move over, then ${customer.name} is permanently deleted. This can't be undone.`,
-      )
+      !confirm(fillText(t("cu_mergeConfirm"), { name: customer.name, target: target?.name ?? t("cu_theSelectedCustomer") }))
     )
       return;
     start(async () => {
       const res = await mergeCustomers(customer.id, targetId);
       if (!res.ok) {
-        setError(res.error ?? "Something went wrong.");
+        setError(res.error ?? t("cu_somethingWrong"));
         return;
       }
       setOpen(false);
@@ -54,24 +53,27 @@ export function MergeCustomerButton({
   }
 
   if (others.length === 0) return null;
+  // The sheet's heading, a name in the middle ("Merge {name} into…" — today's English).
+  const mergeTitle = fillText(t("cu_mergeTitle"), { name: customer.name });
+  const [beforeWho, afterWho = ""] = fillText(t("cu_mergeExplainer"), { name: customer.name }).split("{who}");
 
   return (
     <>
       <Button variant="outline" onClick={() => setOpen(true)}>
-        <GitMerge className="h-4 w-4" /> This Is A Duplicate…
+        <GitMerge className="h-4 w-4" /> {t("cu_btn_thisIsADuplicate")}
       </Button>
 
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title={`Merge ${customer.name} into…`}
+        title={mergeTitle}
         footer={
           <ModalActions
             onCancel={() => setOpen(false)}
             onSave={onMerge}
             saving={pending}
             destructive
-            saveLabel="Merge & Delete"
+            saveLabel={t("cu_btn_mergeDelete")}
           />
         }
       >
@@ -80,18 +82,18 @@ export function MergeCustomerButton({
             <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
           )}
           <p className="text-sm text-slate-500">
-            Use this to fold a duplicate into the real record. Everything attached to{" "}
-            <span className="font-medium text-slate-700">{customer.name}</span> moves to the
-            customer you pick, then {customer.name} is deleted.
+            {beforeWho}
+            <span className="font-medium text-slate-700">{customer.name}</span>
+            {afterWho}
           </p>
           <div>
-            <Label htmlFor="merge_target">Merge into customer</Label>
+            <Label htmlFor="merge_target">{t("cu_mergeInto")}</Label>
             <Select
               id="merge_target"
               value={targetId}
               onChange={(e) => setTargetId(e.target.value)}
             >
-              <option value="">— Select a customer —</option>
+              <option value="">{t("cu_optSelectCustomer")}</option>
               {others.map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.name}

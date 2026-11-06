@@ -7,12 +7,15 @@ import type { SortSpec } from "@/lib/sort-filter";
 import {
   CRM_DEFAULT_SORT,
   CRM_SORT_OPTIONS,
+  crmOrderLabel,
   formatCrmSort,
   isCrmSortKey,
   isDefaultCrmSort,
   naturalCrmDir,
   parseCrmSort,
 } from "@/lib/crm-order";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 
 /**
  * THE CONTACTS SORT CONTROL (Andrew: "Sorting ABCD or otherwise"). The URL is the truth — the
@@ -30,6 +33,10 @@ export function SortControl() {
   const searchParams = useSearchParams();
   const rawSort = searchParams.get("sort");
   const current = parseCrmSort(rawSort);
+  const lang = useLang();
+  const t = translator(lang);
+  // The choices in the reader's language (cu_lib_sort…); the keys are the URL's, unchanged.
+  const sortOptions = CRM_SORT_OPTIONS.map((o) => ({ ...o, label: crmOrderLabel(o.key, lang, t) }));
   const { prefs, update, loaded } = useSortFilter("crm", { sort: CRM_DEFAULT_SORT, group: null, chips: [] });
 
   const go = (spec: SortSpec, mode: "push" | "replace") => {
@@ -55,7 +62,7 @@ export function SortControl() {
 
   return (
     <SortFilterBar
-      sortOptions={CRM_SORT_OPTIONS}
+      sortOptions={sortOptions}
       prefs={{ sort: current, group: null, chips: [] }}
       className="shrink-0"
       onChange={(patch) => {

@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { translator } from "@/lib/i18n";
 import { carryFromCustomer, matchKnownCustomer, type KnownCustomer } from "./known-customer";
 
 const cust = (over: Partial<KnownCustomer> = {}): KnownCustomer => ({
@@ -86,5 +87,13 @@ describe("carryFromCustomer — fill the blanks, never overwrite", () => {
     expect(one.note).toMatch(/brought their phone across\.$/);
     const two = carryFromCustomer({ address: "a" }, cust({ company_name: null }));
     expect(two.note).toMatch(/phone and email across\.$/);
+  });
+
+  it("says the note in Spanish when the caller hands its words (cn-v1146); English with none", () => {
+    const es = carryFromCustomer({ address: "a" }, cust({ name: "Larkspur", company_name: null }), "es", translator("es"));
+    expect(es.note).toBe("Enlazado a Larkspur — de su tarjeta de contacto se trajo: teléfono y correo.");
+    const en = carryFromCustomer({ address: "a" }, cust({ name: "Larkspur", company_name: null }), "en", translator("en"));
+    expect(en.note).toBe("Linked to Larkspur — brought their phone and email across.");
+    expect(carryFromCustomer({ address: "a" }, cust({ name: "Larkspur", company_name: null })).note).toBe(en.note);
   });
 });

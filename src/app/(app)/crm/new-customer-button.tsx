@@ -11,10 +11,25 @@ import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { StateSelect } from "@/components/ui/state-select";
 import { parseVCards, type VCardContact } from "@/lib/vcard";
 import { createCustomer } from "./actions";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
+
+/** Words with one piece of markup inside: the words split at the slot, the piece between them. */
+function aroundSlot(words: string, slot: string, piece: React.ReactNode) {
+  const [before, after = ""] = words.split(slot);
+  return (
+    <>
+      {before}
+      {piece}
+      {after}
+    </>
+  );
+}
 
 const EMPTY = { name: "", company_name: "", email: "", phone: "", address: "" };
 
 export function NewCustomerButton() {
+  const t = translator(useLang());
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -86,7 +101,7 @@ export function NewCustomerButton() {
     setState(c.state ?? "");
     setZip(c.zip ?? "");
     setFormKey((k) => k + 1); // remount the fields so defaultValues pick up
-    setImportMsg(c.name ? `Filled in ${c.name} — review and save.` : null);
+    setImportMsg(c.name ? fillText(t("cu_filledIn"), { name: c.name }) : null);
   }
 
   async function importContact() {
@@ -127,7 +142,7 @@ export function NewCustomerButton() {
     reader.onload = () => {
       const rows = parseVCards(String(reader.result ?? ""));
       if (!rows.length) {
-        setImportMsg("Couldn't read a contact from that card. Make sure it's a .vcf you shared from Contacts.");
+        setImportMsg(t("cu_cantReadCard"));
         return;
       }
       applyContact(rows[0]);
@@ -140,7 +155,7 @@ export function NewCustomerButton() {
     startTransition(async () => {
       const res = await createCustomer(formData);
       if (!res.ok) {
-        setError(res.error ?? "Something went wrong.");
+        setError(res.error ?? t("cu_somethingWrong"));
         return;
       }
       setOpen(false);
@@ -151,7 +166,7 @@ export function NewCustomerButton() {
   return (
     <>
       <Button onClick={openFresh}>
-        <Plus className="h-4 w-4" /> New Customer
+        <Plus className="h-4 w-4" /> {t("cu_btn_newCustomer")}
       </Button>
 
       {/* autoComplete="on" declared on the FORM: Safari's contact matching keys off the form's
@@ -163,13 +178,13 @@ export function NewCustomerButton() {
         <Modal
           open={open}
           onClose={() => setOpen(false)}
-          title="New Customer"
+          title={t("cu_btn_newCustomer")}
           footer={
             <ModalActions
               onCancel={() => setOpen(false)}
               submit
               saving={pending}
-              saveLabel="Create Customer"
+              saveLabel={t("cu_btn_createCustomer")}
             />
           }
         >
@@ -190,19 +205,18 @@ export function NewCustomerButton() {
             <div className="flex flex-wrap items-center gap-2">
               {hasPicker && (
                 <Button type="button" size="sm" variant="outline" onClick={importContact}>
-                  <Contact className="h-4 w-4 shrink-0" /> Add From My Contacts
+                  <Contact className="h-4 w-4 shrink-0" /> {t("cu_btn_addFromMyContacts")}
                 </Button>
               )}
               <button type="button" onClick={() => fileRef.current?.click()} className="text-[11px] text-slate-400 underline-offset-2 hover:text-brand hover:underline">
-                Import A .vcf
+                {t("cu_importVcf")}
               </button>
               {importMsg && <span className="text-[11px] font-medium text-emerald-600">{importMsg}</span>}
             </div>
             {/* One line, no machinery — Erik reached the full card panel twice by typing, so the
                 gesture is real; it just needed saying once. */}
             <p className="text-[11px] leading-snug text-slate-400">
-              Tip: type the person&apos;s name and pick them when your browser offers the card —
-              then press <span className="font-medium text-slate-500">AutoFill</span> on the card itself.
+              {aroundSlot(t("cu_autofillTip"), "{autofill}", <span className="font-medium text-slate-500">{t("cu_autofill")}</span>)}
             </p>
             <input
               ref={fileRef}
@@ -219,40 +233,40 @@ export function NewCustomerButton() {
             )}
             <div key={formKey} className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
-                <Label htmlFor="name">Name *</Label>
-                <Input id="name" name="name" autoComplete="name" required placeholder="Customer or contact name" defaultValue={prefill.name} />
+                <Label htmlFor="name">{t("cu_nameRequired")}</Label>
+                <Input id="name" name="name" autoComplete="name" required placeholder={t("cu_namePlaceholder")} defaultValue={prefill.name} />
               </div>
               <div className="col-span-2">
-                <Label htmlFor="company_name">Company</Label>
-                <Input id="company_name" name="company_name" autoComplete="organization" placeholder="(optional)" defaultValue={prefill.company_name} />
+                <Label htmlFor="company_name">{t("cu_company")}</Label>
+                <Input id="company_name" name="company_name" autoComplete="organization" placeholder={t("cu_optional")} defaultValue={prefill.company_name} />
               </div>
               <div>
-                <Label htmlFor="type">Type</Label>
+                <Label htmlFor="type">{t("cu_type")}</Label>
                 <Select id="type" name="type" defaultValue="residential">
-                  <option value="residential">Residential</option>
-                  <option value="commercial">Commercial</option>
-                  <option value="industrial">Industrial</option>
-                  <option value="contractor">Contractor</option>
-                <option value="subcontractor">Subcontractor</option>
+                  <option value="residential">{t("cu_btn_typeResidential")}</option>
+                  <option value="commercial">{t("cu_btn_typeCommercial")}</option>
+                  <option value="industrial">{t("cu_btn_typeIndustrial")}</option>
+                  <option value="contractor">{t("cu_btn_typeContractor")}</option>
+                <option value="subcontractor">{t("cu_btn_typeSubcontractor")}</option>
                 </Select>
               </div>
               <div>
-                <Label htmlFor="status">Status</Label>
+                <Label htmlFor="status">{t("cu_status")}</Label>
                 <Select id="status" name="status" defaultValue="active">
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
+                  <option value="active">{t("cu_btn_statusActive")}</option>
+                  <option value="inactive">{t("cu_btn_statusInactive")}</option>
                 </Select>
               </div>
               <div>
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">{t("cu_email")}</Label>
                 <Input id="email" name="email" type="email" autoComplete="email" defaultValue={prefill.email} />
               </div>
               <div>
-                <Label htmlFor="phone">Phone</Label>
+                <Label htmlFor="phone">{t("cu_phone")}</Label>
                 <PhoneInput id="phone" name="phone" autoComplete="tel" defaultValue={prefill.phone} />
               </div>
               <div className="col-span-2">
-                <Label htmlFor="address">Address</Label>
+                <Label htmlFor="address">{t("cu_address")}</Label>
                 <AddressAutocomplete
                   id="address"
                   name="address"
@@ -266,21 +280,21 @@ export function NewCustomerButton() {
                 />
               </div>
               <div>
-                <Label htmlFor="city">City</Label>
+                <Label htmlFor="city">{t("cu_city")}</Label>
                 <Input id="city" name="city" autoComplete="address-level2" value={city} onChange={(e) => setCity(e.target.value)} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <Label htmlFor="state">State</Label>
+                  <Label htmlFor="state">{t("cu_state")}</Label>
                   <StateSelect id="state" name="state" value={state} onChange={setState} />
                 </div>
                 <div>
-                  <Label htmlFor="zip">Zip</Label>
+                  <Label htmlFor="zip">{t("cu_zip")}</Label>
                   <Input id="zip" name="zip" autoComplete="postal-code" value={zip} onChange={(e) => setZip(e.target.value)} />
                 </div>
               </div>
               <div className="col-span-2">
-                <Label htmlFor="notes">Notes</Label>
+                <Label htmlFor="notes">{t("cu_notes")}</Label>
                 <Textarea id="notes" name="notes" rows={2} />
               </div>
             </div>

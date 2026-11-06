@@ -11,8 +11,39 @@ import { sendEmail, renderReminderEmail, ownerBcc } from "@/lib/email";
 import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
 import { findDuplicateGroups, normPhone, type DupCustomer, type DupGroup } from "@/lib/crm/duplicates";
 import { visibleCustomerIdOrNull } from "@/lib/job-visibility";
+import { callerLang } from "@/lib/lang-of";
+import { translator } from "@/lib/i18n";
+import { fillSlots } from "@/lib/lang-words";
+import type { Lang } from "@/lib/locale";
 
 export type ActionResult = { ok: boolean; error?: string; id?: string };
+
+/**
+ * THE CALLER'S OWN WORDS (the Ventas-2 wave, cn-v1146). Every sentence this file hands a SCREEN — a
+ * refusal, the delete guard's count of a contact's records — comes from lib/words/customers-server
+ * (cu_srv_) in the caller's language: profiles.language through lib/lang-of callerLang, read ONCE per
+ * action call and only when an answer needs words (a save that says nothing pays no extra round trip);
+ * English when nobody is signed in or the read fails. The English is the catalog's, byte for byte what
+ * this file always said. What the tenant's CUSTOMER reads — the portal email's heading, message, button
+ * and subject (emailPortalLink) — stays English: it is not said to the caller.
+ *
+ * ONE READ PER CALL, KEYED ON THE CALL'S OWN CLIENT (quotes/actions' wordsOf, copied): requireStaff
+ * makes a fresh session client per call, so the memo is kept on that object (a WeakMap: it goes when
+ * the call does). Not exported: a "use server" file exports only async functions.
+ */
+type Said = { lang: () => Promise<Lang>; say: (key: string, vars?: Record<string, string | number>) => Promise<string> };
+const SAID = new WeakMap<object, Said>();
+function wordsOf(supabase: unknown, userId?: string | null): Said {
+  // The action's own entry (it hands the signed-in id) starts this call's memo; a helper (no id) reads it.
+  const memo = supabase && typeof supabase === "object" ? (supabase as object) : null;
+  const had = memo ? SAID.get(memo) : undefined;
+  if (had && userId === undefined) return had;
+  let read: Promise<Lang> | null = null;
+  const lang = () => (read ??= callerLang(supabase as Parameters<typeof callerLang>[0], userId));
+  const made: Said = { lang, say: async (key, vars) => fillSlots(translator(await lang())(key), vars) };
+  if (memo) SAID.set(memo, made);
+  return made;
+}
 
 /** Scan the whole contact book for LIKELY duplicates (shared phone / email / name), grouped so the
  *  office can review and fold each group into one record via the existing mergeCustomers. Read-only
@@ -72,8 +103,8 @@ export async function signOutPortalDevices(
   const { data, error } = await ctx.supabase.rpc("portal_sessions_end_all", { p_customer_id: customerId });
   if (error) return { ok: false, error: dbError(error) };
   const link = await readPortalLink(ctx.supabase, customerId);
-  if (!link) return { ok: false, error: "They were signed out, but the card couldn't be read back. Refresh the page." };
-  if (link.devices !== 0) return { ok: false, error: "That didn't take. Refresh the page and try again." };
+  if (!link) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("cu_srv_signedOutCardUnread") };
+  if (link.devices !== 0) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("cu_srv_didntTake") };
   revalidatePath(`/crm/${customerId}`);
   return { ok: true, ended: Number(data ?? 0), link };
 }
@@ -84,17 +115,21 @@ export async function emailPortalLink(customerId: string): Promise<ActionResult>
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
   const { data: c } = await supabase
     .from("customers")
     .select("name, email")
     .eq("id", customerId)
     .maybeSingle();
-  if (!c) return { ok: false, error: "Customer not found." };
-  if (!c.email) return { ok: false, error: "This customer has no email address." };
+  if (!c) return { ok: false, error: await ws.say("cu_srv_customerNotFound") };
+  if (!c.email) return { ok: false, error: await ws.say("cu_srv_noEmail") };
   const access = await readPortalLink(supabase, customerId);
-  if (!access) return { ok: false, error: "This customer has no link yet. Tap New Link first." };
+  if (!access) return { ok: false, error: await ws.say("cu_srv_noLinkYet") };
   // Never email a link that opens to "this link was turned off".
-  if (!access.enabled) return { ok: false, error: "Their link is turned off. Tap Turn On first." };
+  if (!access.enabled) return { ok: false, error: await ws.say("cu_srv_linkOff") };
+
+  // FROM HERE ON, THE CUSTOMER READS IT: the heading, the message, the button and the subject stay
+  // English whatever the caller reads (pinned by crm/customers-server-es.test.ts).
 
   const { data: org } = await supabase.from("organizations").select("name, phone, email, settings").maybeSingle();
   // The customer's portal, on the contractor's own domain — see orgDocUrl in lib/org-settings.
@@ -129,7 +164,7 @@ export async function rotatePortalLink(
   const { error } = await ctx.supabase.rpc("portal_link_rotate", { p_customer_id: customerId });
   if (error) return { ok: false, error: dbError(error) };
   const link = await readPortalLink(ctx.supabase, customerId);
-  if (!link) return { ok: false, error: "The new link was made but couldn't be read back. Refresh the page." };
+  if (!link) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("cu_srv_newLinkUnread") };
   revalidatePath(`/crm/${customerId}`);
   return { ok: true, link };
 }
@@ -149,7 +184,7 @@ export async function setPortalEnabled(
   if (error) return { ok: false, error: dbError(error) };
   const link = await readPortalLink(ctx.supabase, customerId);
   if (!link || link.enabled !== enabled) {
-    return { ok: false, error: "That didn't take. Refresh the page and try again." };
+    return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("cu_srv_didntTake") };
   }
   revalidatePath(`/crm/${customerId}`);
   return { ok: true, link };
@@ -162,13 +197,14 @@ export async function createCustomer(formData: FormData): Promise<ActionResult> 
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ws = wordsOf(supabase, user?.id ?? null);
+  if (!user) return { ok: false, error: await ws.say("cu_srv_notSignedIn") };
 
   const phone = orNull(formatPhone(String(formData.get("phone") ?? "")));
   // Fragment-first: a bare phone number is a valid customer — default the name to it.
   let name = String(formData.get("name") ?? "").trim();
   if (!name && phone) name = phone;
-  if (!name) return { ok: false, error: "Name is required." };
+  if (!name) return { ok: false, error: await ws.say("cu_srv_nameRequired") };
 
   const { data, error } = await supabase
     .from("customers")
@@ -193,7 +229,7 @@ export async function createCustomer(formData: FormData): Promise<ActionResult> 
     // Before migration 0087 adds the 'subcontractor' enum value, picking that type returns a raw
     // Postgres enum error — surface a clear nudge instead.
     if (/enum/i.test(error.message) && /subcontractor/i.test(error.message))
-      return { ok: false, error: "The Subcontractor type isn't available yet. Pick another type." };
+      return { ok: false, error: await ws.say("cu_srv_subTypeUnavailable") };
     return { ok: false, error: dbError(error) };
   }
 
@@ -209,7 +245,7 @@ export async function updateCustomer(
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const name = String(formData.get("name") ?? "").trim();
-  if (!name) return { ok: false, error: "Name is required." };
+  if (!name) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("cu_srv_nameRequired") };
 
   const { data, error } = await supabase
     .from("customers")
@@ -235,7 +271,7 @@ export async function updateCustomer(
   // drop their documents' copies so the next view/send re-renders (audit 7).
   if (!error) void bustCustomerPdfs(id);
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "That contact isn't available." };
+  if (!data?.length) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("cu_srv_contactUnavailable") };
 
   revalidatePath(`/crm/${id}`);
   revalidatePath("/crm");
@@ -257,9 +293,10 @@ export async function patchCustomer(
   const guard = await requireStaff();
   if ("error" in guard) return { ok: false, error: guard.error };
   const supabase = await createClient();
+  const ws = wordsOf(supabase, guard.userId);
   const upd: Record<string, unknown> = {};
   if (patch.type !== undefined) upd.type = patch.type; // lib/types CustomerType: residential | commercial | industrial | subcontractor | contractor
-  if (patch.name !== undefined) { const n = String(patch.name ?? "").trim(); if (!n) return { ok: false, error: "Name can't be empty." }; upd.name = n; }
+  if (patch.name !== undefined) { const n = String(patch.name ?? "").trim(); if (!n) return { ok: false, error: await ws.say("cu_srv_nameEmpty") }; upd.name = n; }
   if (patch.phone !== undefined) upd.phone = patch.phone == null ? null : orNull(formatPhone(String(patch.phone)));
   if (patch.email !== undefined) upd.email = emptyToNull(patch.email);
   if (patch.company_name !== undefined) upd.company_name = emptyToNull(patch.company_name);
@@ -268,12 +305,12 @@ export async function patchCustomer(
   if (patch.state !== undefined) upd.state = patch.state == null ? null : orNull(formatState(String(patch.state)));
   if (patch.zip !== undefined) upd.zip = patch.zip == null ? null : orNull(formatZip(String(patch.zip)));
   if (patch.notes !== undefined) upd.notes = emptyToNull(patch.notes);
-  if (Object.keys(upd).length === 0) return { ok: false, error: "Nothing to update." };
+  if (Object.keys(upd).length === 0) return { ok: false, error: await ws.say("cu_srv_nothingToUpdate") };
   // THE SILENT-WRITE LAW (audit v921): a zero-row update is a 204. Nort fixing the spelling on a
   // customer that had just been merged into another card reported "fixed" and wrote nothing.
   const { data, error } = await supabase.from("customers").update(upd).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "That contact isn't available." };
+  if (!data?.length) return { ok: false, error: await ws.say("cu_srv_contactUnavailable") };
   revalidatePath("/crm");
   return { ok: true };
 }
@@ -313,8 +350,8 @@ export async function bulkImportCustomers(rows: CustomerImportRow[]): Promise<Ac
       created_by: ctx.userId,
     }))
     .filter((r) => r.name);
-  if (!clean.length) return { ok: false, error: "No rows with a name to import." };
-  if (clean.length > 2000) return { ok: false, error: "Max 2,000 rows per import." };
+  if (!clean.length) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("cu_srv_noRowsToImport") };
+  if (clean.length > 2000) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("cu_srv_maxRows") };
 
   // Skip exact duplicates already in the book.
   const { data: existing } = await supabase.from("customers").select("name, phone");
@@ -348,20 +385,22 @@ export async function bulkImportCustomers(rows: CustomerImportRow[]): Promise<Ac
  * named in an explicit confirm rather than silently orphaned.
  */
 const CUSTOMER_CHILD_TABLES = [
-  { table: "jobs", label: "job", blocking: true },
-  { table: "quotes", label: "estimate", blocking: true },
-  { table: "invoices", label: "invoice", blocking: true },
-  { table: "job_contacts", label: "job link", blocking: true },
-  { table: "contracts", label: "contract", blocking: true },
-  { table: "customer_credits", label: "account credit", blocking: true },
-  { table: "inquiries", label: "inquiry", blocking: false },
-  { table: "documents", label: "document", blocking: false },
-  { table: "work_orders", label: "work order", blocking: false },
-  { table: "appointments", label: "appointment", blocking: false },
-  { table: "recurring_templates", label: "recurring template", blocking: false },
+  // `kind` names the count's words: cu_srv_child<kind>One / …Many (lib/words/customers-server).
+  { table: "jobs", kind: "Job", blocking: true },
+  { table: "quotes", kind: "Estimate", blocking: true },
+  { table: "invoices", kind: "Invoice", blocking: true },
+  { table: "job_contacts", kind: "JobLink", blocking: true },
+  { table: "contracts", kind: "Contract", blocking: true },
+  { table: "customer_credits", kind: "AccountCredit", blocking: true },
+  { table: "inquiries", kind: "Inquiry", blocking: false },
+  { table: "documents", kind: "Document", blocking: false },
+  { table: "work_orders", kind: "WorkOrder", blocking: false },
+  { table: "appointments", kind: "Appointment", blocking: false },
+  { table: "recurring_templates", kind: "RecurringTemplate", blocking: false },
 ] as const;
 
-const plural = (n: number, label: string) => `${n} ${label}${n === 1 ? "" : "s"}`;
+/** "2 jobs" / "1 job" in the caller's words: a count is its own sentence (…One / …Many). */
+const plural = (ws: Said, n: number, kind: string) => ws.say(`cu_srv_child${kind}${n === 1 ? "One" : "Many"}`, { n });
 
 /**
  * Delete a customer — refused while any history, money or CASCADE-linked record still
@@ -384,6 +423,7 @@ export async function deleteCustomer(
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
 
   const counts = await Promise.all(
     CUSTOMER_CHILD_TABLES.map(({ table }) =>
@@ -391,27 +431,22 @@ export async function deleteCustomer(
     ),
   );
 
-  const blocking: string[] = [];
-  const orphaning: string[] = [];
+  // The counts, kept as numbers; they become words only when a refusal says them (no language read
+  // on a delete that goes through).
+  const blocking: { n: number; kind: string }[] = [];
+  const orphaning: { n: number; kind: string }[] = [];
   CUSTOMER_CHILD_TABLES.forEach((child, i) => {
     const n = counts[i]?.count ?? 0;
     if (!n) return;
-    (child.blocking ? blocking : orphaning).push(plural(n, child.label));
+    (child.blocking ? blocking : orphaning).push({ n, kind: child.kind });
   });
+  const list = async (xs: { n: number; kind: string }[]) => (await Promise.all(xs.map((x) => plural(ws, x.n, x.kind)))).join(", ");
 
   if (blocking.length) {
-    return {
-      ok: false,
-      error:
-        `This contact has ${blocking.join(", ")}. Reassign those first, merge this record into the ` +
-        `one you're keeping, or mark the contact inactive instead of deleting it.`,
-    };
+    return { ok: false, error: await ws.say("cu_srv_hasBlocking", { list: await list(blocking) }) };
   }
   if (orphaning.length && !opts.confirmOrphans) {
-    return {
-      ok: false,
-      error: `Deleting this contact leaves ${orphaning.join(", ")} with no contact attached.`,
-    };
+    return { ok: false, error: await ws.say("cu_srv_leavesOrphans", { list: await list(orphaning) }) };
   }
 
   const { error } = await supabase.from("customers").delete().eq("id", id);
@@ -432,16 +467,17 @@ export async function mergeCustomers(
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
 
-  if (!sourceId || !targetId) return { ok: false, error: "Pick a customer to merge into." };
-  if (sourceId === targetId) return { ok: false, error: "Can't merge a customer into itself." };
+  if (!sourceId || !targetId) return { ok: false, error: await ws.say("cu_srv_pickMergeTarget") };
+  if (sourceId === targetId) return { ok: false, error: await ws.say("cu_srv_mergeIntoItself") };
 
   // Confirm BOTH belong to the caller's org (visibleCustomerIdOrNull is RLS-scoped, so a
   // row from another org resolves to nothing → treated as not found).
   if (!(await visibleCustomerIdOrNull(supabase, sourceId)))
-    return { ok: false, error: "Source customer not found." };
+    return { ok: false, error: await ws.say("cu_srv_sourceNotFound") };
   if (!(await visibleCustomerIdOrNull(supabase, targetId)))
-    return { ok: false, error: "Target customer not found." };
+    return { ok: false, error: await ws.say("cu_srv_targetNotFound") };
 
   // job_contacts has a unique (job_id, customer_id, role) — re-pointing source→target
   // would collide where the target is already linked to the same job/role. Drop those
@@ -473,7 +509,7 @@ export async function mergeCustomers(
       .from(table)
       .update({ customer_id: targetId })
       .eq("customer_id", sourceId);
-    if (error) return { ok: false, error: `Couldn't move ${table}: ${error.message}` };
+    if (error) return { ok: false, error: await ws.say("cu_srv_couldntMove", { table, error: error.message }) };
   }
 
   // Source is now unreferenced — delete it.

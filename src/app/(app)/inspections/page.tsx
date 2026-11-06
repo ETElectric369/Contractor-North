@@ -8,7 +8,9 @@ import { formatDateTimeTz } from "@/lib/tz";
 import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { translator } from "@/lib/i18n";
+import { fillSlots } from "@/lib/lang-words";
 import { currentLangFor } from "@/lib/current-lang";
+import type { Lang } from "@/lib/locale";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -49,7 +51,9 @@ export default async function InspectionsPage({
     .eq("id", user?.id ?? "")
     .maybeSingle();
   if (!me || !isStaffRole(me.role)) redirect("/planner");
-  const t = translator(await currentLangFor(user?.id));
+  // The reader's language, read ONCE (current-lang caches per request) and handed to every row.
+  const lang = await currentLangFor(user?.id);
+  const t = translator(lang);
 
   const [{ data: apptData }, { data: quoteLinks }, { data: org }, pickers] = await Promise.all([
     supabase
@@ -118,7 +122,7 @@ export default async function InspectionsPage({
       customers={pickers.custOpts}
       staff={pickers.staffOpts}
       defaultType="inspection"
-      buttonLabel="Book An Inspection"
+      buttonLabel={t("ip_btn_bookAnInspection")}
     />
   );
 
@@ -133,10 +137,10 @@ export default async function InspectionsPage({
       {/* Open work is the default view; settled paperwork files away (estimates pattern). */}
       <div className="mb-4 flex gap-2">
         <Link href="/inspections" className={pill(!showCompleted)}>
-          Open
+          {t("ip_btn_open")}
         </Link>
         <Link href="/inspections?view=completed" className={pill(showCompleted)}>
-          Completed
+          {t("ip_btn_completed")}
         </Link>
       </div>
 
@@ -144,8 +148,8 @@ export default async function InspectionsPage({
         filed.length === 0 ? (
           <EmptyState
             icon={ClipboardCheck}
-            title="Nothing filed away yet"
-            description="Inspections land here once they're written up into an estimate (or called off)."
+            title={t("ip_nothingFiledTitle")}
+            description={t("ip_nothingFiledDesc")}
           />
         ) : (
           // A CANCELLED VISIT IS NOT COMPLETED WORK. Both land in `filed` (correctly — they are
@@ -154,27 +158,27 @@ export default async function InspectionsPage({
           // rows, two honest headings.
           <>
             {filed.some((r) => r.status !== "cancelled") && (
-              <Section title="Completed & written up" rows={filed.filter((r) => r.status !== "cancelled")} tz={tz} />
+              <Section title={t("ip_completedWrittenUp")} rows={filed.filter((r) => r.status !== "cancelled")} tz={tz} lang={lang} t={t} />
             )}
             {filed.some((r) => r.status === "cancelled") && (
-              <Section title="Cancelled" rows={filed.filter((r) => r.status === "cancelled")} tz={tz} />
+              <Section title={t("ip_cancelled")} rows={filed.filter((r) => r.status === "cancelled")} tz={tz} lang={lang} t={t} />
             )}
           </>
         )
       ) : toWriteUp.length === 0 && upcoming.length === 0 ? (
         <EmptyState
           icon={ClipboardCheck}
-          title="No open inspections"
-          description={leadsOn ? "Start one from a lead, book one, or tap Start An Inspection when you're already there." : "Nothing open right now."}
+          title={t("ip_noOpenInspections")}
+          description={leadsOn ? t("ip_emptyDescLeadsOn") : t("ip_emptyDescLeadsOff")}
         >
           {leadsOn && <NewInspectionButton schedule={scheduleInspection} />}
         </EmptyState>
       ) : (
         <div className="space-y-6">
           {toWriteUp.length > 0 && (
-            <Section title={`To write up (${toWriteUp.length})`} rows={toWriteUp} tz={tz} writeUp estimateDoor={estimateDoor} />
+            <Section title={fillSlots(t("ip_toWriteUp"), { n: toWriteUp.length })} rows={toWriteUp} tz={tz} lang={lang} t={t} writeUp estimateDoor={estimateDoor} />
           )}
-          {upcoming.length > 0 && <Section title="Upcoming & proposed" rows={upcoming} tz={tz} />}
+          {upcoming.length > 0 && <Section title={t("ip_upcomingProposed")} rows={upcoming} tz={tz} lang={lang} t={t} />}
         </div>
       )}
     </div>
@@ -185,12 +189,16 @@ function Section({
   title,
   rows,
   tz,
+  lang,
+  t,
   writeUp = false,
   estimateDoor = true,
 }: {
   title: string;
   rows: any[];
   tz: string;
+  lang: Lang;
+  t: (key: string) => string;
   writeUp?: boolean;
   estimateDoor?: boolean;
 }) {
@@ -200,7 +208,7 @@ function Section({
       <Card>
         <ul className="divide-y divide-slate-100">
           {rows.map((a) => (
-            <InspectionRow key={a.id} a={a} tz={tz} writeUp={writeUp} estimateDoor={estimateDoor} />
+            <InspectionRow key={a.id} a={a} tz={tz} lang={lang} t={t} writeUp={writeUp} estimateDoor={estimateDoor} />
           ))}
         </ul>
       </Card>
@@ -208,7 +216,21 @@ function Section({
   );
 }
 
-function InspectionRow({ a, tz, writeUp, estimateDoor }: { a: any; tz: string; writeUp: boolean; estimateDoor: boolean }) {
+function InspectionRow({
+  a,
+  tz,
+  lang,
+  t,
+  writeUp,
+  estimateDoor,
+}: {
+  a: any;
+  tz: string;
+  lang: Lang;
+  t: (key: string) => string;
+  writeUp: boolean;
+  estimateDoor: boolean;
+}) {
   const who = a.customers?.name ?? a.inquiries?.name ?? null;
   // NEXT-STEP: the capture prefills the estimator scope; the inquiry keeps the lead threading
   // (quotes/new also recovers it from the capture appointment when absent).
@@ -224,14 +246,14 @@ function InspectionRow({ a, tz, writeUp, estimateDoor }: { a: any; tz: string; w
             {/* ONE rule for the tags (lib/inspections inspectionRowTags) — this row draws the open
                 piles AND the filed pile, and a tag written inline here rode into the wrong one: a
                 green "Done" pill on every row of "To write up" (8592392b). No tag is written here. */}
-            {inspectionRowTags(a, writeUp).map((t) => (
-              <Badge key={t.label} tone={t.tone}>
-                {t.label}
+            {inspectionRowTags(a, writeUp, lang, t).map((tag) => (
+              <Badge key={tag.label} tone={tag.tone}>
+                {tag.label}
               </Badge>
             ))}
           </div>
           <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-sm text-slate-500">
-            {a.starts_at ? <span>{formatDateTimeTz(a.starts_at, tz)}</span> : <span>Waiting For A Day</span>}
+            {a.starts_at ? <span>{formatDateTimeTz(a.starts_at, tz, lang)}</span> : <span>{t("ip_waitingForADay")}</span>}
             {who && <span>· {who}</span>}
             {a.location && (
               <span className="inline-flex items-center gap-0.5">
@@ -244,7 +266,7 @@ function InspectionRow({ a, tz, writeUp, estimateDoor }: { a: any; tz: string; w
       {writeUp && estimateDoor && (
         <Link href={estimateHref} className="shrink-0">
           <Button>
-            <FileText className="h-4 w-4" /> Create Estimate
+            <FileText className="h-4 w-4" /> {t("ip_btn_createEstimate")}
           </Button>
         </Link>
       )}

@@ -134,10 +134,10 @@ export default async function InquiriesPage({
               due; tap "Open Leads" (or it again) and everything is back. State lives in the URL, so
               the lens survives a refresh and can be sent to somebody. Both count open leads only. */}
           <Link href="/leads" aria-current={!dueOnly ? "true" : undefined} className={!dueOnly ? "rounded-xl ring-2 ring-brand" : ""}>
-            <StatTile label="Open Leads" value={inquiries.length} />
+            <StatTile label={t("ld_btn_openLeads")} value={inquiries.length} />
           </Link>
           <Link href="/leads?due=1" aria-current={dueOnly ? "true" : undefined} className={dueOnly ? "rounded-xl ring-2 ring-brand" : ""}>
-            <StatTile label="Follow-Ups Due" value={dueToday} tone={dueToday > 0 ? "warning" : "default"} />
+            <StatTile label={t("ld_btn_followUpsDue")} value={dueToday} tone={dueToday > 0 ? "warning" : "default"} />
           </Link>
         </FactsGrid>
       )}
@@ -148,11 +148,11 @@ export default async function InquiriesPage({
         // is always on screen, including over this empty state.
         <EmptyState
           icon={UserPlus}
-          title="No open leads"
+          title={t("ld_noOpenLeads")}
           description={
             leadsOn
-              ? "Web submissions and manually-added leads show up here to follow up and convert — or add one with New Lead above."
-              : "Nothing open right now."
+              ? t("ld_emptyDesc")
+              : t("ld_nothingOpen")
           }
         />
       ) : (

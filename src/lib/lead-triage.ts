@@ -6,6 +6,8 @@
  * priority score so the hot/ready/big jobs surface first. The rules live HERE (server-side)
  * so a client can't game its way to an instant big-ticket number or a false priority.
  */
+import type { Lang } from "@/lib/locale";
+import { say, type Words } from "@/lib/lang-words";
 
 /** The scope the customer picked. 'unsure' (or a combination) signals "needs help" → consult. */
 export type ProjectType =
@@ -54,6 +56,27 @@ export const LEAD_BUCKETS: Record<LeadBucket, { label: string; blurb: string }> 
   B: { label: "Measure & quote", blurb: "No plans, but a sketch and/or real dimensions." },
   C: { label: "Design consult", blurb: "Needs a design conversation before any number." },
 };
+
+/** A project type's words for the person reading (the Ventas-2 wave, cn-v1146). PROJECT_TYPES stays the
+ *  English constant the public configurator, the inbound-lead route and site chat read; this is the
+ *  office's door: English, the default, is the constant's label byte for byte, a Spanish caller's
+ *  translator reads lib/words/leads' ld_lib_type_… (this lib imports no catalog). An unknown value
+ *  reads as itself. */
+export function projectTypeLabel(value: string, lang: Lang = "en", words?: Words): string {
+  const en = PROJECT_TYPES.find((p) => p.value === value)?.label;
+  if (en === undefined) return String(value ?? "");
+  return say(lang, words, `ld_lib_type_${value}`, en);
+}
+
+/** A readiness bucket's label and blurb for the person reading (cn-v1146): LEAD_BUCKETS' English by
+ *  default, byte for byte; ld_lib_bucket{A,B,C}_label / _blurb for a Spanish caller's translator. */
+export function leadBucketWords(bucket: LeadBucket, lang: Lang = "en", words?: Words): { label: string; blurb: string } {
+  const en = LEAD_BUCKETS[bucket];
+  return {
+    label: say(lang, words, `ld_lib_bucket${bucket}_label`, en.label),
+    blurb: say(lang, words, `ld_lib_bucket${bucket}_blurb`, en.blurb),
+  };
+}
 
 /** Default job size (configured total) at or above which a job needs a human site
  *  inspection before any firm price. Owner-tunable via org settings. */

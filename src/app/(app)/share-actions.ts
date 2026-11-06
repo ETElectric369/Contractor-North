@@ -4,6 +4,31 @@ import QRCode from "qrcode";
 import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings, orgPublicBaseUrl } from "@/lib/org-settings";
 import { orgTrade } from "@/lib/org-trade";
+import { callerLang } from "@/lib/lang-of";
+import { translator } from "@/lib/i18n";
+import { fillSlots } from "@/lib/lang-words";
+import type { Lang } from "@/lib/locale";
+
+/**
+ * THE CALLER'S OWN WORDS (the Ventas-2 wave, cn-v1146): a refusal this file hands a screen comes from
+ * lib/words/customers-server (cu_srv_) in the caller's language — profiles.language through lib/lang-of
+ * callerLang, read once per call and only when a refusal needs words; English when nobody is signed in
+ * or the read fails, byte for byte what it always said. quotes/actions' wordsOf, copied; not exported
+ * (a "use server" file exports only async functions).
+ */
+type Said = { lang: () => Promise<Lang>; say: (key: string, vars?: Record<string, string | number>) => Promise<string> };
+const SAID = new WeakMap<object, Said>();
+function wordsOf(supabase: unknown, userId?: string | null): Said {
+  // The action's own entry (it hands the signed-in id) starts this call's memo; a helper (no id) reads it.
+  const memo = supabase && typeof supabase === "object" ? (supabase as object) : null;
+  const had = memo ? SAID.get(memo) : undefined;
+  if (had && userId === undefined) return had;
+  let read: Promise<Lang> | null = null;
+  const lang = () => (read ??= callerLang(supabase as Parameters<typeof callerLang>[0], userId));
+  const made: Said = { lang, say: async (key, vars) => fillSlots(translator(await lang())(key), vars) };
+  if (memo) SAID.set(memo, made);
+  return made;
+}
 
 /**
  * The signed-in user's personal "request an estimate" share link + QR.
@@ -30,10 +55,11 @@ export async function getShareLink(): Promise<{
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { url: "", qr: "", error: "Not signed in." };
+  const ws = wordsOf(supabase, user?.id ?? null);
+  if (!user) return { url: "", qr: "", error: await ws.say("cu_srv_notSignedIn") };
   const { data: prof } = await supabase.from("profiles").select("org_id").eq("id", user.id).maybeSingle();
   const orgId = (prof as { org_id?: string } | null)?.org_id;
-  if (!orgId) return { url: "", qr: "", error: "No company on this account." };
+  if (!orgId) return { url: "", qr: "", error: await ws.say("cu_srv_noCompany") };
 
   const { data: org } = await supabase
     .from("organizations")

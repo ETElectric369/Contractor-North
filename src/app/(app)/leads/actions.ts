@@ -35,6 +35,10 @@ import { hasCaptureData } from "@/lib/inspections";
 import { briefNote, carriedNote, carryForInquiry } from "@/lib/inquiries/carry-intake-answers";
 import { runPlanBrief } from "@/lib/plan-brief-run";
 import { rateLimited } from "@/lib/rate-limit";
+import { callerLang } from "@/lib/lang-of";
+import { translator } from "@/lib/i18n";
+import { fillSlots } from "@/lib/lang-words";
+import type { Lang } from "@/lib/locale";
 
 export type Result = {
   ok: boolean;
@@ -52,6 +56,34 @@ export type Result = {
    *  already had them (linked to it) or a new card was made, so the toast says which (W2-07). */
   contact?: { id: string; name: string; existing: boolean };
 };
+
+/**
+ * THE CALLER'S OWN WORDS (the Ventas-2 wave, cn-v1146). Every sentence this file hands a SCREEN — a
+ * refusal, a note, a batch's per-lead failure, the ride-along line — comes from lib/words/leads-server
+ * (ld_srv_) in the caller's language: profiles.language through lib/lang-of callerLang, read ONCE per
+ * action call and only when an answer needs words (a save that says nothing pays no extra round trip);
+ * English when nobody is signed in or the read fails. The English is the catalog's, byte for byte what
+ * this file always said. What is STORED (a lead's default name, an estimate's title and notes, a job's
+ * name, a customer card's notes) stays English: a record, not a sentence said to the caller.
+ * setInquiryStatus' list is the guard's own words for a status no door sends (allow-listed, English).
+ *
+ * ONE READ PER CALL, KEYED ON THE CALL'S OWN CLIENT (quotes/actions' wordsOf, copied): requireStaff
+ * makes a fresh session client per call, so the memo is kept on that object (a WeakMap: it goes when
+ * the call does). Not exported: a "use server" file exports only async functions.
+ */
+type Said = { lang: () => Promise<Lang>; say: (key: string, vars?: Record<string, string | number>) => Promise<string> };
+const SAID = new WeakMap<object, Said>();
+function wordsOf(supabase: unknown, userId?: string | null): Said {
+  const memo = supabase && typeof supabase === "object" ? (supabase as object) : null;
+  const had = memo ? SAID.get(memo) : undefined;
+  // The action's own entry (it hands the signed-in id) starts this call's memo; a helper (no id) reads it.
+  if (had && userId === undefined) return had;
+  let read: Promise<Lang> | null = null;
+  const lang = () => (read ??= callerLang(supabase as Parameters<typeof callerLang>[0], userId));
+  const made: Said = { lang, say: async (key, vars) => fillSlots(translator(await lang())(key), vars) };
+  if (memo) SAID.set(memo, made);
+  return made;
+}
 
 function orNull(s: string): string | null {
   const t = s.trim();
@@ -129,6 +161,7 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
 
   const fields = inquiryFields(formData);
   // A sent type wins (Nort's inquiry.create); otherwise the Company box decides (inferredLeadType),
@@ -138,7 +171,7 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
   // default the name instead of blocking the capture.
   let name = String(formData.get("name") ?? "").trim();
   if (!name && (fields.phone || fields.message)) name = fields.phone ?? "Unknown caller";
-  if (!name) return { ok: false, error: "Add a name, phone, or note to save the lead." };
+  if (!name) return { ok: false, error: await ws.say("ld_srv_addNameToSave") };
 
   // A NEW LEAD IS A LEAD, NOT A BOOKING.
   //
@@ -180,9 +213,10 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
     const m = matchKnownCustomer(name, (known ?? []) as KnownCustomer[]);
     if (m.kind === "one") {
       linkedCustomerId = m.customer.id;
-      const c = carryFromCustomer(fields as never, m.customer);
+      const lang = await ws.lang();
+      const c = carryFromCustomer(fields as never, m.customer, lang, translator(lang));
       carried = c.patch as Record<string, string>;
-      link_note = c.note || `Linked to ${m.customer.name ?? "an existing customer"}.`;
+      link_note = c.note || (m.customer.name != null ? await ws.say("ld_srv_linkedTo", { name: m.customer.name }) : await ws.say("ld_srv_linkedToExisting"));
     } else if (m.kind === "ambiguous") {
       // Deliberately unlinked — but say so, or he silently gets a duplicate he never notices.
       //
@@ -191,7 +225,7 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
       // ever sets inquiries.customer_id by hand, so it named a door that isn't there. What IS
       // true: a phone or an email is a strong key, and findMatchingCustomerId links on it before
       // it ever considers a name — so the fix the office can actually perform is to type one.
-      link_note = `You have ${m.count} customers named "${name}" — a name alone can't pick between them, so this lead isn't linked to either. Add their phone or email and converting it will find the right one.`;
+      link_note = await ws.say("ld_srv_sameNameMany", { count: m.count, name });
     }
   } catch {
     // Never let the convenience break the capture. Fragment-first: the lead saves regardless.
@@ -231,11 +265,12 @@ export async function updateInquiry(id: string, formData: FormData): Promise<Res
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
   const fields = inquiryFields(formData);
   // Fragment-first: same defaulting as create — a phone-only lead stays editable.
   let name = String(formData.get("name") ?? "").trim();
   if (!name && (fields.phone || fields.message)) name = fields.phone ?? "Unknown caller";
-  if (!name) return { ok: false, error: "Add a name, phone, or note to save the lead." };
+  if (!name) return { ok: false, error: await ws.say("ld_srv_addNameToSave") };
 
   // THE SILENT-WRITE LAW (audit v921): a zero-row update is a 204, not an error — a deleted or
   // merged-away lead edited from a stale tab used to answer "Saved".
@@ -245,7 +280,7 @@ export async function updateInquiry(id: string, formData: FormData): Promise<Res
     .eq("id", id)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "That lead isn't available." };
+  if (!data?.length) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadUnavailable") };
 
   // THE TYPE FOLLOWS THE COMPANY BOX, written apart, and only UPWARDS (nextLeadTypeOnEdit): the
   // stored type is read first, so an edit can add Commercial or fill in a blank without ever
@@ -265,12 +300,12 @@ export async function updateInquiry(id: string, formData: FormData): Promise<Res
       .eq("id", id)
       .or("type.is.null,type.neq.industrial")
       .select("id");
-    if (typeErr) return { ok: false, error: `The lead saved, but its residential or commercial type didn't: ${dbError(typeErr)}` };
+    if (typeErr) return { ok: false, error: await ws.say("ld_srv_typeDidntSave", { error: dbError(typeErr) }) };
     // NOTHING SILENT. Filling in a blank needs no announcement; changing an answer that was
     // already there does, because that answer is what the customer card gets minted from.
     if (storedType) {
       revalidatePath("/leads");
-      return { ok: true, note: `Saved. This lead is now ${nextType === "commercial" ? "Commercial" : "Residential"}, because of its Company.` };
+      return { ok: true, note: await ws.say(nextType === "commercial" ? "ld_srv_nowCommercial" : "ld_srv_nowResidential") };
     }
   }
 
@@ -312,7 +347,7 @@ export async function markInquiryContacted(id: string, nextFollowUp?: string | n
   // stale My Day tab on a lead that's since been deleted used to toast "Marked contacted".
   const { data: hit, error } = await supabase.from("inquiries").update(patch).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!hit?.length) return { ok: false, error: "That lead isn't available." };
+  if (!hit?.length) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadUnavailable") };
   revalidatePath("/leads");
   // My Day's "Needs action" inbox lists open leads — mark-contacted from THERE (Alexa
   // 2026-07-20: "checking the box resets") needs the planner to re-fetch too, else the
@@ -331,15 +366,21 @@ export async function snoozeInquiry(id: string, date: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const day = checkComeBackDay(todayStrInTz(await orgTimezone(supabase)), date);
-  if (!day.ok) return { ok: false, error: day.error };
+  const today = todayStrInTz(await orgTimezone(supabase));
+  const day = checkComeBackDay(today, date);
+  if (!day.ok) {
+    // The refusal in the caller's words: the language is read only when the day is refused.
+    const lang = await wordsOf(supabase, ctx.userId).lang();
+    const said = checkComeBackDay(today, date, lang, translator(lang));
+    return { ok: false, error: said.ok ? day.error : said.error };
+  }
   const { data, error } = await supabase
     .from("inquiries")
     .update({ next_follow_up_at: day.day, updated_at: new Date().toISOString() })
     .eq("id", id)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "That lead isn't available." };
+  if (!data?.length) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadUnavailable") };
   revalidatePath("/leads");
   revalidatePath("/planner");
   return { ok: true };
@@ -367,7 +408,7 @@ export async function setInquiryStatus(id: string, status: string): Promise<Resu
   if (status === "won") {
     const customerId = await customerForInquiry(supabase, id, ctx.userId);
     if (!customerId)
-      return { ok: false, error: "Couldn't mark this lead won — it isn't available, or its contact card couldn't be created." };
+      return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_wonFailed") };
     revalidatePath("/leads");
     revalidatePath("/crm");
     revalidatePath("/planner");
@@ -381,7 +422,7 @@ export async function setInquiryStatus(id: string, status: string): Promise<Resu
     .eq("id", id)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "That lead isn't available." };
+  if (!data?.length) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadUnavailable") };
   revalidatePath("/leads");
   revalidatePath("/planner"); // My Day shows inquiry counts — keep it in sync
   return { ok: true };
@@ -394,7 +435,7 @@ export async function deleteInquiry(id: string): Promise<Result> {
   // Read the lead FIRST (RLS-scoped — proves it's this caller's own): its file paths and org id
   // are needed for the cleanup below, and they're unreadable after the row goes.
   const { data: inq } = await supabase.from("inquiries").select("id, org_id, intake").eq("id", id).maybeSingle();
-  if (!inq) return { ok: false, error: "Lead not found." };
+  if (!inq) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadNotFound") };
   // "Delete keeps nothing" has to include the lead's OUTSTANDING BOOKING LINKS (audit 7): a
   // deleted spam lead's /pick/<token> stayed live, and the recipient could still confirm a
   // "Site inspection" onto the org's real calendar. Cancel this lead's un-scheduled proposals
@@ -439,7 +480,7 @@ export async function deleteInquiry(id: string): Promise<Result> {
   const filePaths = intakePaths((inq as { intake?: unknown }).intake).filter((p) => isOwnIntakePath(orgId, p));
   const { data: gone, error } = await supabase.from("inquiries").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!gone?.length) return { ok: false, error: "That lead isn't available." };
+  if (!gone?.length) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadUnavailable") };
   if (filePaths.length) {
     await createServiceClient()
       .storage.from(INTAKE_BUCKET)
@@ -498,7 +539,7 @@ export async function convertInquiry(
   const supabase = ctx.supabase;
 
   const { data: inq } = await supabase.from("inquiries").select("*").eq("id", id).maybeSingle();
-  if (!inq) return { ok: false, error: "Lead not found." };
+  if (!inq) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadNotFound") };
 
   // Idempotency: a lead that's already been converted (customer/quote/estimate/job all stamp
   // converted_at) must not be re-converted, or a SECOND customer + estimate/job would be created.
@@ -517,7 +558,7 @@ export async function convertInquiry(
     };
   }
   if (inq.converted_at && target !== "inspection" && target !== "customer") {
-    return { ok: false, error: "This lead was already converted — open its customer or estimate instead." };
+    return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_alreadyConverted") };
   }
 
   // INSPECTION — the pre-sale nerve, parallel to estimate. Books a site inspection onto the
@@ -592,11 +633,11 @@ export async function convertInquiry(
       const conv = await convertInquiry(id, "job", {});
       const jobId = conv.ok ? /^\/jobs\/(.+)$/.exec(conv.redirect ?? "")?.[1] : undefined;
       if (!conv.ok || !jobId) {
-        return conv.ok ? { ok: false, error: "Couldn't turn this into a job." } : conv;
+        return conv.ok ? { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_couldntMakeJob") } : conv;
       }
       const placed = await placeJobOnDay(jobId, opts.startDate, opts.startTime);
       if (!placed.ok) {
-        return { ok: false, error: placed.error ?? "The job was created but didn't land on the day — place it from the board." };
+        return { ok: false, error: placed.error ?? (await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_jobDidntLand")) };
       }
       return { ok: true, redirect: `/jobs/${jobId}` };
     }
@@ -606,7 +647,7 @@ export async function convertInquiry(
     // landing the inspection at 2 AM Pacific).
     const startDate = opts.startDate || ymdAddDays(todayStrInTz(tz), 2);
     const startsAtIso = tzDateTimeUtc(startDate, /^\d{2}:\d{2}$/.test(opts.startTime ?? "") ? opts.startTime! : "09:00", tz);
-    if (!startsAtIso) return { ok: false, error: "Pick a valid day for the inspection." };
+    if (!startsAtIso) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_pickValidDay") };
     const carry = await carryForInquiry(supabase, inq);
     const kindChosen = workKind({ kind: "lead", workKind: (inq as { work_kind?: string | null }).work_kind });
 
@@ -701,7 +742,7 @@ export async function convertInquiry(
     // ESTIMATES OFF (the switch board, 0352): no new estimate from a lead, from the row's button
     // (hidden) or from Nort's inquiry.convert. Said in words; the lead is left exactly as it was.
     if (!featureOn(orgSettings.features, "estimates"))
-      return { ok: false, error: "Estimates are off for this company. The owner can turn them on in Settings, Features." };
+      return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_estimatesOff") };
     const lines = estimateLinesFromIntake(inq.intake);
     if (lines.length) {
       // Lead arrived with a priced estimate (Tahoe Deck configurator) → seed a real draft and open it.
@@ -904,10 +945,10 @@ export async function convertInquiry(
       const { error: cleanupErr } = await supabase.from("jobs").delete().eq("id", mintedJobId);
       if (cleanupErr) {
         // NOTHING SILENT: a leftover twin job is worse unnamed than named.
-        return { ok: false, error: `This lead was already converted, and the duplicate job it minted couldn't be removed — delete job ${mintedJobId} by hand.` };
+        return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_duplicateJobLeft", { id: mintedJobId }) };
       }
     }
-    return { ok: false, error: "This lead was already converted — open its customer or estimate instead." };
+    return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_alreadyConverted") };
   }
 
   revalidatePath("/leads");
@@ -946,9 +987,9 @@ export async function refreshPlanBrief(id: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
   const { data: inq } = await ctx.supabase.from("inquiries").select("id, org_id").eq("id", id).maybeSingle();
-  if (!inq) return { ok: false, error: "Lead not found." };
+  if (!inq) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadNotFound") };
   if (await rateLimited(`plan-brief-manual:${ctx.userId}`, 10, 900, { failClosed: true })) {
-    return { ok: false, error: "A lot of readings in a row — give it a few minutes." };
+    return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_tooManyReadings") };
   }
   const r = await runPlanBrief(String((inq as { org_id?: string }).org_id ?? ""), id);
   revalidatePath("/leads");
@@ -963,22 +1004,23 @@ export async function intakeFileUrl(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
 
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   // Authorize through the caller's own RLS-scoped read, then trust only what it returned.
   const { data: inq } = await ctx.supabase.from("inquiries").select("id, org_id, intake").eq("id", inquiryId).maybeSingle();
-  if (!inq) return { ok: false, error: "Not found." };
+  if (!inq) return { ok: false, error: await ws.say("ld_srv_notFound") };
   const orgId = String((inq as { org_id?: string }).org_id ?? "");
-  if (!orgId) return { ok: false, error: "Not found." };
-  if (!isOwnIntakePath(orgId, path)) return { ok: false, error: "Not found." };
+  if (!orgId) return { ok: false, error: await ws.say("ld_srv_notFound") };
+  if (!isOwnIntakePath(orgId, path)) return { ok: false, error: await ws.say("ld_srv_notFound") };
 
   // And the path must be one this lead actually carries — not merely one shaped like it.
   const answers = ((inq as { intake?: { intake_answers?: Record<string, unknown> } }).intake?.intake_answers ?? {}) as Record<string, unknown>;
   const known = Object.values(answers).some((v) => Array.isArray(v) && v.includes(path));
-  if (!known) return { ok: false, error: "Not found." };
+  if (!known) return { ok: false, error: await ws.say("ld_srv_notFound") };
 
   const { data, error } = await createServiceClient()
     .storage.from(INTAKE_BUCKET)
     .createSignedUrl(path, 600);
-  if (error || !data?.signedUrl) return { ok: false, error: "Couldn't open that file." };
+  if (error || !data?.signedUrl) return { ok: false, error: await ws.say("ld_srv_couldntOpenFile") };
   return { ok: true, url: data.signedUrl };
 }
 
@@ -1011,9 +1053,10 @@ export async function scheduleLeadsOnDay(
 ): Promise<{ ok: boolean; error?: string; booked: number; failures: { id: string; error: string }[] }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error, booked: 0, failures: [] };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
   const ids = [...new Set(leadIds.filter(Boolean))];
-  if (!ids.length) return { ok: false, error: "Pick at least one lead.", booked: 0, failures: [] };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, error: "Pick a day.", booked: 0, failures: [] };
+  if (!ids.length) return { ok: false, error: await ws.say("ld_srv_pickOneLead"), booked: 0, failures: [] };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, error: await ws.say("ld_srv_pickADay"), booked: 0, failures: [] };
 
   /* ── ONE VISIT PER LEAD, ON THIS PATH ──────────────────────────────────────────────────────
      convertInquiry's inspection branch is deliberately exempt from the already-converted guard —
@@ -1060,14 +1103,14 @@ export async function scheduleLeadsOnDay(
   // the sizes this is used at (a day is a handful of stops, not a hundred).
   for (let i = 0; i < ids.length; i++) {
     if (alreadyBooked.has(ids[i])) {
-      failures.push({ id: ids[i], error: "This one already has a visit booked — move that one instead." });
+      failures.push({ id: ids[i], error: await ws.say("ld_srv_alreadyBooked") });
       continue;
     }
     // The job/service fork lives INSIDE convertInquiry's firm-booking branch now — one fork,
     // every door (this rail, the lead modal's "Book it") behaves identically.
     const res = await convertInquiry(ids[i], "inspection", { startDate: date, startTime: times[i] });
     if (res.ok) booked++;
-    else failures.push({ id: ids[i], error: res.error ?? "Couldn't book this one." });
+    else failures.push({ id: ids[i], error: res.error ?? (await ws.say("ld_srv_couldntBook")) });
   }
   revalidatePath("/leads");
   revalidatePath("/schedule");
@@ -1097,12 +1140,12 @@ export async function sizeLead(
     const k = String(patch.workKind ?? "").trim();
     // Against the ONE list (lib/schedule/work-shape), not a copy of it. The copy that used to live
     // here is what refused "Phone call" the hour it was added.
-    if (k && !isWorkKind(k) && k !== "other") return { ok: false, error: "That isn't a kind of work." };
+    if (k && !isWorkKind(k) && k !== "other") return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_notAKind") };
     clean.work_kind = k || null; // "" clears it back to "not sure yet"
   }
   if (patch.plannedMinutes !== undefined) {
     const m = Number(patch.plannedMinutes) || 0;
-    if (m < 0 || m > 60 * 24 * 30) return { ok: false, error: "That duration isn't sensible." };
+    if (m < 0 || m > 60 * 24 * 30) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_durationOff") };
     clean.planned_minutes = m > 0 ? m : null; // 0 means "not sure yet", never a zero-length job
   }
   if (!Object.keys(clean).length) return { ok: true };
@@ -1110,7 +1153,7 @@ export async function sizeLead(
   // THE SILENT-WRITE LAW: a zero-row update is a 204, not an error.
   const { data, error } = await ctx.supabase.from("inquiries").update(clean).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "That lead isn't available." };
+  if (!data?.length) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadUnavailable") };
   revalidatePath("/leads");
   revalidatePath("/schedule");
   return { ok: true };
@@ -1144,14 +1187,14 @@ export async function setLeadContact(
   const email = String(patch.email ?? "").trim();
   if (phone) clean.phone = phone;
   if (email) {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "That email doesn't look right." };
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_emailLooksWrong") };
     clean.email = email;
   }
   if (!Object.keys(clean).length) return { ok: true };
   clean.updated_at = new Date().toISOString();
   const { data, error } = await ctx.supabase.from("inquiries").update(clean).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "That lead isn't available." };
+  if (!data?.length) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadUnavailable") };
   revalidatePath("/leads");
   revalidatePath("/schedule");
   return { ok: true };
@@ -1190,7 +1233,7 @@ export async function suggestVisitSlots(
     .select("id, city, planned_minutes")
     .eq("id", inquiryId)
     .maybeSingle();
-  if (!inq) return { ok: false, slots: [], error: "Lead not found." };
+  if (!inq) return { ok: false, slots: [], error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadNotFound") };
   const leadTown = String((inq as { city?: string | null }).city ?? "").trim().toLowerCase();
   const minutes = Number((inq as { planned_minutes?: number | null }).planned_minutes ?? 0) || 90;
 
@@ -1242,9 +1285,7 @@ export async function suggestVisitSlots(
   return {
     ok: true,
     slots,
-    note: matched
-      ? "These ride along with visits already booked near them."
-      : "These ride along with days that already have visits booked.",
+    note: await wordsOf(ctx.supabase, ctx.userId).say(matched ? "ld_srv_rideAlongNear" : "ld_srv_rideAlongDays"),
   };
 }
 

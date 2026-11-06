@@ -45,6 +45,29 @@ export function estimateStatusLabel(status: string, lang: Lang = "en", words?: W
  *  from this list. */
 export const INQUIRY_STATUSES = ["new", "contacted", "quoted", "won", "lost"] as const;
 
+/** A lead's status as a person reads it (the Ventas-2 wave, cn-v1146), shaped exactly like
+ *  estimateStatusLabel above: English, the default, is the raw value byte for byte ("new"), so a caller
+ *  that passes nothing reads what it always did; a Spanish reader gets lib/words/leads' ld_status_… word
+ *  ("nuevo") through the caller's translator. No dictionary import (lib/catalog-free-libs.test.ts). An
+ *  unknown or retired value reads as itself in both languages. */
+export function inquiryStatusLabel(status: string, lang: Lang = "en", words?: Words): string {
+  const raw = String(status ?? "");
+  if (lang !== "es" || !words) return raw;
+  return (INQUIRY_STATUSES as readonly string[]).includes(raw) ? words(`ld_status_${raw}`) : raw;
+}
+
+/** A customer's status values (lib/types CustomerStatus: customers.status). */
+const CUSTOMER_STATUSES: readonly string[] = ["lead", "active", "inactive"];
+
+/** A customer's status as a person reads it (cn-v1146), the same shape: English is the raw value byte
+ *  for byte ("lead"); Spanish is lib/words/customers' cu_status_… word ("prospecto") through the
+ *  caller's translator; an unknown value reads as itself. */
+export function customerStatusLabel(status: string, lang: Lang = "en", words?: Words): string {
+  const raw = String(status ?? "");
+  if (lang !== "es" || !words) return raw;
+  return CUSTOMER_STATUSES.includes(raw) ? words(`cu_status_${raw}`) : raw;
+}
+
 /** Appointment statuses — mirrors the 0052 check constraint, so a bad value gets the
  *  spine-style message instead of a raw Postgres constraint error. */
 export const APPOINTMENT_STATUSES = ["scheduled", "proposed", "completed", "cancelled"] as const;

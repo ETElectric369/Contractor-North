@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { customerColumns, customerTypesDiffer } from "./columns";
+import { dict } from "@/lib/i18n";
 import type { Customer, CustomerType } from "@/lib/types";
 
 /**
@@ -73,7 +74,7 @@ describe("the page reads the ends of the type list beside the list, ignoring the
     expect(page).toContain('supabase.from("customers").select("type").order("type", { ascending }).limit(1)');
     expect(page).toContain("await Promise.all([query, typeEnd(true), typeEnd(false)])");
     expect(page).toContain("const mixed = customerTypesDiffer(lo, hi);");
-    expect(page).toContain("columns={customerColumns(mixed)}");
+    expect(page).toContain("columns={customerColumns(mixed, lang, t)}"); // the reader's language for the status badge (cn-v1146)
     // The two reads carry no search filter and no chosen order: only the list query does.
     const typeEnd = page.slice(page.indexOf("const typeEnd"), page.indexOf("const [{ data }, lo, hi]"));
     expect(typeEnd).not.toContain(".or(");
@@ -82,8 +83,11 @@ describe("the page reads the ends of the type list beside the list, ignoring the
 
   it("the Type field stays in New Customer and Edit Customer, with Contractor in both", () => {
     for (const f of ["new-customer-button.tsx", "[id]/edit-customer-button.tsx"]) {
-      expect(src(f), f).toContain('<option value="contractor">Contractor</option>');
+      // The option's words moved to the catalog (cn-v1146): the key, whose English is still Contractor.
+      expect(src(f), f).toContain('<option value="contractor">{t("cu_btn_typeContractor")}</option>');
     }
+    expect(dict("en").cu_btn_typeContractor).toBe("Contractor");
+    expect(dict("es").cu_btn_typeContractor).toBe("Contratista");
     // 'contractor' has been in the enum since 0151, and in the type now.
     const t: CustomerType = "contractor";
     expect(t).toBe("contractor");

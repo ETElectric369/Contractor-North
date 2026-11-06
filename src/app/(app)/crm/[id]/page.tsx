@@ -10,8 +10,8 @@ import { NavLink } from "@/components/nav-link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
-import { estimateStatusLabel } from "@/lib/statuses";
-import { translator } from "@/lib/i18n";
+import { customerStatusLabel, estimateStatusLabel } from "@/lib/statuses";
+import { fillText, translator } from "@/lib/i18n";
 import { currentLangFor } from "@/lib/current-lang";
 import { RowList } from "@/components/ui/row-list";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,7 @@ import { toJobOptions, toStaffOptions, listActiveTechs, readUsualBillingKind, un
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
 import { deleteCustomer } from "../actions";
+import { customerTypeWord } from "../columns";
 import type { Customer, Job, Quote } from "@/lib/types";
 import { countOpen, isOpenInvoice, isOpenJob, isOpenQuote } from "@/lib/open-counts";
 
@@ -174,14 +175,14 @@ export default async function CustomerDetailPage({
     .filter((x: any) => x.disposition === "refund")
     .reduce((s: number, x: any) => s + Number(x.amount), 0);
 
-  const empty = (label: string) => (
-    <p className="px-1 py-6 text-center text-sm text-slate-400">No {label} yet.</p>
+  const empty = (key: string) => (
+    <p className="px-1 py-6 text-center text-sm text-slate-400">{t(key)}</p>
   );
 
   const tabs = [
     {
       id: "details",
-      label: "Details",
+      label: t("cu_btn_tabDetails"),
       content: (
         <Card>
           <CardContent className="space-y-3 py-5 text-sm">
@@ -212,7 +213,7 @@ export default async function CustomerDetailPage({
               <div className="border-t border-slate-100 pt-3 text-slate-500">{c.notes}</div>
             )}
             {!c.email && !c.phone && !c.address && !c.notes && (
-              <p className="text-slate-400">{viewerIsStaff ? "No contact details yet — use Edit to add them." : "No contact details yet."}</p>
+              <p className="text-slate-400">{viewerIsStaff ? t("cu_noDetailsStaff") : t("cu_noDetails")}</p>
             )}
             {/* Maintenance verbs live WITH the details they maintain (moved out of
                 the header impulse row): Edit, and — staff-only, heavy-confirm — Merge,
@@ -236,7 +237,7 @@ export default async function CustomerDetailPage({
                   initial={portal}
                   hasEmail={!!c.email?.trim()}
                   addEmailDoor={
-                    <EditCustomerButton customer={c} pricingLevels={(pricingLevels ?? []) as any} label="Add Their Email" />
+                    <EditCustomerButton customer={c} pricingLevels={(pricingLevels ?? []) as any} label={t("cu_btn_addTheirEmail")} />
                   }
                 />
               </div>
@@ -247,7 +248,7 @@ export default async function CustomerDetailPage({
     },
     {
       id: "jobs",
-      label: "Jobs",
+      label: t("cu_btn_tabJobs"),
       // Jobs still in flight (Erik, 2026-09-27: "all badges only show whats open"), never how many
       // this customer has ever had; the linked ones (as a sub / contact) count the same way.
       count: countOpen([...((jobs ?? []) as { status?: string | null }[]), ...(linkedJobs as { status?: string | null }[])], (j) => isOpenJob(j.status)),
@@ -258,22 +259,22 @@ export default async function CustomerDetailPage({
               key: j.id,
               label: j.name,
               sub: j.job_number,
-              badge: { tone: statusTone(j.status), text: jobStatusLabel(j.status) },
+              badge: { tone: statusTone(j.status), text: jobStatusLabel(j.status, lang, t) },
               href: `/jobs/${j.id}`,
             }))}
-            empty={(!jobs || jobs.length === 0) && linkedJobs.length === 0 ? empty("jobs") : null}
+            empty={(!jobs || jobs.length === 0) && linkedJobs.length === 0 ? empty("cu_noJobsYet") : null}
           />
           {linkedJobs.length > 0 && (
             <>
               <div className="border-t border-slate-100 bg-slate-50 px-5 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Linked to (as a sub / contact)
+                {t("cu_linkedTo")}
               </div>
               <RowList
                 items={linkedJobs.map((j: any) => ({
                   key: j.linkId,
                   label: j.name,
                   sub: `${j.job_number} · ${j.role}`,
-                  badge: { tone: statusTone(j.status), text: jobStatusLabel(String(j.status)) },
+                  badge: { tone: statusTone(j.status), text: jobStatusLabel(String(j.status), lang, t) },
                   href: `/jobs/${j.id}`,
                 }))}
               />
@@ -284,7 +285,7 @@ export default async function CustomerDetailPage({
     },
     {
       id: "quotes",
-      label: "Estimates",
+      label: t("cu_btn_tabEstimates"),
       // A draft to send, or sent and waiting on the customer.
       count: countOpen((quotes ?? []) as { status?: string | null }[], (q) => isOpenQuote(q.status)),
       content: (
@@ -296,21 +297,21 @@ export default async function CustomerDetailPage({
               label: (
                 <>
                   {q.quote_number}
-                  {isFixedPrice(q) && <span className={FIXED_PILL_CLASS}>Fixed</span>}
+                  {isFixedPrice(q) && <span className={FIXED_PILL_CLASS}>{t("cu_fixed")}</span>}
                 </>
               ),
-              value: formatCurrency(q.total),
+              value: formatCurrency(q.total, lang),
               badge: { tone: statusTone(q.status), text: estimateStatusLabel(q.status, lang, t) },
               href: `/quotes/${q.id}`,
             }))}
-            empty={empty("estimates")}
+            empty={empty("cu_noEstimatesYet")}
           />
         </Card>
       ),
     },
     {
       id: "invoices",
-      label: "Invoices",
+      label: t("cu_btn_tabInvoices"),
       // Still owed: a draft not sent, or sent with a balance.
       count: countOpen((invoices ?? []) as any[], isOpenInvoice),
       content: (
@@ -329,7 +330,7 @@ export default async function CustomerDetailPage({
                 href: `/billing/${iv.id}`,
               };
             })}
-            empty={empty("invoices")}
+            empty={empty("cu_noInvoicesYet")}
           />
         </Card>
       ),
@@ -338,7 +339,7 @@ export default async function CustomerDetailPage({
 
   return (
     <div className="mx-auto max-w-4xl">
-      <BackLink fallback="/crm" fallbackLabel="Back to Customers" />
+      <BackLink fallback="/crm" fallbackLabel={t("cu_btn_backToCustomers")} backLabel={t("sh_back")} />
 
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
@@ -348,11 +349,11 @@ export default async function CustomerDetailPage({
                 same thing on the one page where it is most prominent was its own small confusion.
                 And it is now TRUE: 0228 promotes a customer to active the moment they get a job,
                 an accepted estimate or an invoice, so this can no longer say "lead" about somebody
-                who has paid you (Lorraine Lim, $8,706, read "Inquiry" until tonight). */}
-            <Badge tone={statusTone(c.status)}>{c.status === "lead" ? "lead" : c.status}</Badge>
+                who has paid you (one customer, $8,706, read "Inquiry" until tonight). */}
+            <Badge tone={statusTone(c.status)}>{customerStatusLabel(c.status, lang, t)}</Badge>
           </div>
           {c.company_name && <p className="mt-1 text-sm text-slate-500">{c.company_name}</p>}
-          <Badge tone="slate" className="mt-2">{c.type}</Badge>
+          <Badge tone="slate" className="mt-2">{customerTypeWord(c.type, lang, t)}</Badge>
         </div>
         {/* The impulse row: the gloves-on customer verbs (Call / New job / New
             estimate) plus the ⋯ Actions seek door, LAST — New invoice + Delete
@@ -364,7 +365,7 @@ export default async function CustomerDetailPage({
               href={`tel:${c.phone}`}
               className="btn-gloss inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-[rgb(var(--glass-ink))] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[rgb(var(--glass-ink))]/90"
             >
-              <Phone className="h-4 w-4 shrink-0" /> Call
+              <Phone className="h-4 w-4 shrink-0" /> {t("cu_btn_call")}
             </a>
           )}
           {/* New Job, Appointment and New Estimate all save through requireStaff: a tech gets Call. */}
@@ -402,7 +403,7 @@ export default async function CustomerDetailPage({
               {featureOn(sw.features, "estimates") && (
                 <Link href={`/quotes/new?customer=${c.id}`}>
                   <Button>
-                    <Plus className="h-4 w-4" /> New Estimate
+                    <Plus className="h-4 w-4" /> {t("cu_btn_newEstimate")}
                   </Button>
                 </Link>
               )}
@@ -416,13 +417,10 @@ export default async function CustomerDetailPage({
                 // orphans, so the user has actually seen it before agreeing. Programmatic
                 // callers omit the flag and get the itemized refusal instead.
                 run: deleteCustomer.bind(null, c.id, { confirmOrphans: true }),
-                confirm:
-                  `Delete ${c.name}? Only possible when nothing important still points at them — ` +
-                  `jobs, estimates, invoices, contracts, account credits, or a link to a job as a ` +
-                  `sub/supplier all block it. Appointments, documents, work orders and inquiries ` +
-                  `survive but lose their contact.`,
+                confirm: fillText(t("cu_deleteConfirm"), { name: c.name }),
               },
               c.id, // → New invoice opens with this customer preset
+              { newInvoice: t("cu_btn_newInvoice"), deleteCustomer: t("cu_btn_deleteCustomer") },
             )}
             isStaff={viewerIsStaff}
           />
@@ -433,14 +431,14 @@ export default async function CustomerDetailPage({
         <div className="mb-4 flex flex-wrap gap-3">
           {accountCredit > 0 && (
             <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-2.5">
-              <div className="text-xs font-medium text-green-700">Account credit</div>
-              <div className="text-xl font-bold text-green-900">{formatCurrency(accountCredit)}</div>
+              <div className="text-xs font-medium text-green-700">{t("cu_accountCredit")}</div>
+              <div className="text-xl font-bold text-green-900">{formatCurrency(accountCredit, lang)}</div>
             </div>
           )}
           {refundPending > 0 && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5">
-              <div className="text-xs font-medium text-amber-700">Refund pending (accounting)</div>
-              <div className="text-xl font-bold text-amber-900">{formatCurrency(refundPending)}</div>
+              <div className="text-xs font-medium text-amber-700">{t("cu_refundPending")}</div>
+              <div className="text-xl font-bold text-amber-900">{formatCurrency(refundPending, lang)}</div>
             </div>
           )}
         </div>

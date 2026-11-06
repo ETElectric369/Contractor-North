@@ -8,6 +8,8 @@ import { extOf, intakePaths } from "@/lib/playbook/uploads";
 import { parsePlanBrief } from "@/lib/plan-brief";
 import { refreshPlanBrief } from "./actions";
 import { openLeadInspection } from "../appointments/actions";
+import { useLang } from "@/components/lang-provider";
+import { translator, fillText } from "@/lib/i18n";
 
 /**
  * THE PRELIMINARY REPORT ON THE LEAD — the state of a plan reading, and its result.
@@ -26,6 +28,7 @@ export function PlanBriefPanel({ inquiryId, intake }: { inquiryId: string; intak
   const [pending, start] = useTransition();
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
 
   const brief = parsePlanBrief(intake);
   const hasPdf = intakePaths(intake).some((p) => extOf(p) === "pdf");
@@ -34,8 +37,8 @@ export function PlanBriefPanel({ inquiryId, intake }: { inquiryId: string; intak
   const run = () =>
     start(async () => {
       const r = await refreshPlanBrief(inquiryId);
-      if (!r.ok) toast(r.error ?? "Couldn't read the plans.", "error");
-      else toast("Preliminary report ready.", "success");
+      if (!r.ok) toast(r.error ?? t("ld_couldntReadPlans"), "error");
+      else toast(t("ld_reportReady"), "success");
       router.refresh();
     });
 
@@ -47,7 +50,7 @@ export function PlanBriefPanel({ inquiryId, intake }: { inquiryId: string; intak
       className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
     >
       {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSearch className="h-3.5 w-3.5" />}
-      {pending ? "Reading The Plans…" : label}
+      {pending ? t("ld_btn_readingThePlans") : label}
     </button>
   );
 
@@ -55,13 +58,12 @@ export function PlanBriefPanel({ inquiryId, intake }: { inquiryId: string; intak
   const stalePending =
     brief?.status === "pending" && (!brief.at || Date.now() - new Date(brief.at).getTime() > 5 * 60 * 1000);
 
-  if (!brief) return <div>{runButton("Read The Plans")}</div>;
+  if (!brief) return <div>{runButton(t("ld_btn_readThePlans"))}</div>;
 
   if (brief.status === "pending" && !stalePending) {
     return (
       <p className="inline-flex items-center gap-1.5 text-xs text-slate-500">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Reading the plans — the preliminary report will be here in a
-        minute.
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("ld_readingPlansWait")}
       </p>
     );
   }
@@ -70,37 +72,41 @@ export function PlanBriefPanel({ inquiryId, intake }: { inquiryId: string; intak
     return (
       <div className="space-y-1.5">
         <p className="text-xs text-amber-700">
-          {stalePending ? "The plan reading didn't finish." : (brief.error ?? "The plans couldn't be read.")}
+          {stalePending ? t("ld_planReadingUnfinished") : (brief.error ?? t("ld_plansCouldntBeRead"))}
         </p>
-        {runButton("Try Again")}
+        {runButton(t("ld_btn_tryAgain"))}
       </div>
     );
   }
 
+  // How many inspection answers the reading seeded, said after the door's own words (" (3 answers ready)").
+  const answerCount = Object.keys(brief.answers ?? {}).length;
+  const answersReady = answerCount ? ` ${fillText(t(answerCount === 1 ? "ld_answersReadyOne" : "ld_answersReadyMany"), { n: String(answerCount) })}` : "";
+
   return (
     <div className="space-y-1.5 rounded-lg border border-slate-200 bg-white/70 p-2.5">
       <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-        Preliminary report — from the plans
+        {t("ld_reportFromPlans")}
       </p>
       {brief.summary && <p className="text-sm text-slate-700">{brief.summary}</p>}
       {!!brief.scope_included?.length && (
         <p className="text-xs text-slate-600">
-          <span className="font-semibold">Includes:</span> {brief.scope_included.join(" · ")}
+          <span className="font-semibold">{t("ld_includes")}</span> {brief.scope_included.join(" · ")}
         </p>
       )}
       {!!brief.scope_excluded?.length && (
         <p className="text-xs text-slate-600">
-          <span className="font-semibold">Excludes:</span> {brief.scope_excluded.join(" · ")}
+          <span className="font-semibold">{t("ld_excludes")}</span> {brief.scope_excluded.join(" · ")}
         </p>
       )}
       {!!brief.cautions?.length && (
         <p className="text-xs text-amber-700">
-          <span className="font-semibold">Verify on site:</span> {brief.cautions.join(" · ")}
+          <span className="font-semibold">{t("ld_verifyOnSite")}</span> {brief.cautions.join(" · ")}
         </p>
       )}
       {!!brief.skipped.length && (
         <p className="text-xs text-slate-400">
-          Not read: {brief.skipped.map((s) => `${s.name} (${s.reason})`).join("; ")}
+          {t("ld_notRead")} {brief.skipped.map((s) => `${s.name} (${s.reason})`).join("; ")}
         </p>
       )}
       {/* THE DOOR (Erik: "open the inspector right there with the data all filled in"). Opens the
@@ -114,7 +120,7 @@ export function PlanBriefPanel({ inquiryId, intake }: { inquiryId: string; intak
             start(async () => {
               const r = await openLeadInspection(inquiryId);
               if (!r.ok || !r.id) {
-                toast(r.error ?? "Couldn't open the inspection.", "error");
+                toast(r.error ?? t("ld_couldntOpenInspection"), "error");
                 return;
               }
               router.push(`/appointments/${r.id}`);
@@ -123,10 +129,10 @@ export function PlanBriefPanel({ inquiryId, intake }: { inquiryId: string; intak
           className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-sky-600 px-3 text-xs font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
         >
           {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ClipboardCheck className="h-3.5 w-3.5" />}
-          Open The Inspection
-          {!!Object.keys(brief.answers ?? {}).length && ` (${Object.keys(brief.answers ?? {}).length} answers ready)`}
+          {t("ld_btn_openTheInspection")}
+          {answersReady}
         </button>
-        {runButton("Read Again")}
+        {runButton(t("ld_btn_readAgain"))}
       </div>
     </div>
   );

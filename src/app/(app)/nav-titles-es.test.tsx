@@ -86,13 +86,16 @@ describe("every Sales and Money page reads its title and line through the map", 
       if (p.noId) {
         // No id in scope: the no-id door, one getUser then the cached row (billing resolves its user only inside a later Promise.all).
         expect(src).toContain('import { currentLang } from "@/lib/current-lang";');
-        expect(src).toContain("const t = translator(await currentLang());");
+        // The one read, either straight into the translator or, where the page hands the language on (crm: the
+        // status badge's customerStatusLabel, cn-v1146), as `lang` first.
+        expect(src).toMatch(/const t = translator\(await currentLang\(\)\);|const lang = await currentLang\(\);\s+const t = translator\(lang\);/);
         expect(src).not.toContain("currentLangFor(");
         if (p.slug !== "billing") expect(src).not.toContain("auth.getUser()");
       } else {
         // The page's own session read hands its id over: one cached profile row, no second getUser.
         expect(src).toContain('import { currentLangFor } from "@/lib/current-lang";');
-        expect(src).toMatch(/const t = translator\(await currentLangFor\((user\?\.id|userId)\)\);/);
+        // Straight into the translator, or (inspections: the row tags and dates, cn-v1146) as `lang` first.
+        expect(src).toMatch(/const t = translator\(await currentLangFor\((user\?\.id|userId)\)\);|const lang = await currentLangFor\((user\?\.id|userId)\);\s+const t = translator\(lang\);/);
         expect(src).not.toContain("currentLang()");
         expect(src.search(/auth\.getUser\(\)|await requireStaff\(\)/)).toBeLessThan(src.indexOf("await currentLangFor("));
       }

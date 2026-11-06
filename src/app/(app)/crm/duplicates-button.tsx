@@ -9,6 +9,8 @@ import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { findDuplicateContacts, mergeCustomers } from "./actions";
 import type { DupGroup } from "@/lib/crm/duplicates";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 
 /**
  * "Find duplicates" — scans the whole contact book (findDuplicateContacts) for likely-same records
@@ -21,9 +23,28 @@ import type { DupGroup } from "@/lib/crm/duplicates";
  */
 const groupId = (g: DupGroup) => g.members[0].id;
 
+/** Words with one piece of markup inside: the words split at the slot, the piece between them. */
+function aroundSlot(words: string, slot: string, piece: React.ReactNode) {
+  const [before, after = ""] = words.split(slot);
+  return (
+    <>
+      {before}
+      {piece}
+      {after}
+    </>
+  );
+}
+
 export function DuplicatesButton() {
   const router = useRouter();
   const toast = useToast();
+  const t = translator(useLang());
+  /** "phone + email" in the reader's language: each reason the scan found (lib/crm/duplicates), its own word. */
+  const reasonWords = (reason: string) =>
+    reason
+      .split(" + ")
+      .map((r) => (["phone", "email", "name", "similar"].includes(r) ? t(`cu_reason_${r}`) : r))
+      .join(" + ");
   const [open, setOpen] = useState(false);
   const [loading, startLoad] = useTransition();
   const [groups, setGroups] = useState<DupGroup[] | null>(null);
@@ -36,7 +57,7 @@ export function DuplicatesButton() {
     setKeepers({});
     startLoad(async () => {
       const res = await findDuplicateContacts();
-      if (!res.ok) { toast(res.error ?? "Couldn't scan contacts."); setOpen(false); return; }
+      if (!res.ok) { toast(res.error ?? t("cu_cantScan")); setOpen(false); return; }
       setGroups(res.groups ?? []);
     });
   }
@@ -50,9 +71,9 @@ export function DuplicatesButton() {
     try {
       for (const o of others) {
         const res = await mergeCustomers(o.id, keeperId);
-        if (!res.ok) { toast(res.error ?? "Merge failed."); return; }
+        if (!res.ok) { toast(res.error ?? t("cu_mergeFailed")); return; }
       }
-      toast(`Merged ${others.length} duplicate${others.length === 1 ? "" : "s"} in.`);
+      toast(fillText(t(others.length === 1 ? "cu_mergedOne" : "cu_mergedMany"), { n: String(others.length) }));
       setGroups((gs) => (gs ?? []).filter((x) => groupId(x) !== gid));
       router.refresh();
     } finally {
@@ -63,22 +84,26 @@ export function DuplicatesButton() {
   return (
     <>
       <Button variant="outline" onClick={scan}>
-        <CopyCheck className="h-4 w-4" /> Find Duplicates
+        <CopyCheck className="h-4 w-4" /> {t("cu_btn_findDuplicates")}
       </Button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Find & Merge Duplicate Contacts">
+      <Modal open={open} onClose={() => setOpen(false)} title={t("cu_findMergeTitle")}>
         {loading || groups === null ? (
           <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-400">
-            <Loader2 className="h-4 w-4 animate-spin" /> Scanning your contact book…
+            <Loader2 className="h-4 w-4 animate-spin" /> {t("cu_scanning")}
           </div>
         ) : groups.length === 0 ? (
           <p className="py-10 text-center text-sm text-slate-500">
-            No likely duplicates found — your contact book looks clean. 🎉
+            {t("cu_noDupes")}
           </p>
         ) : (
           <div className="space-y-4">
             <p className="text-sm text-slate-500">
-              {groups.length} possible duplicate group{groups.length === 1 ? "" : "s"}. Pick the record to <strong>keep</strong> — everything attached to the others (jobs, quotes, invoices) moves to it, then the extras are deleted.
+              {aroundSlot(
+                fillText(t(groups.length === 1 ? "cu_dupeGroupsOne" : "cu_dupeGroupsMany"), { n: String(groups.length) }),
+                "{keep}",
+                <strong>{t("cu_keep")}</strong>,
+              )}
             </p>
             {groups.map((g) => {
               const gid = groupId(g);
@@ -88,11 +113,11 @@ export function DuplicatesButton() {
               return (
                 <div key={gid} className="rounded-lg border border-slate-200 p-3">
                   <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-semibold text-slate-800">{g.members.length} records</span>
-                    <Badge tone={nameOnly ? "red" : "amber"}>matched by {g.reason}</Badge>
+                    <span className="text-sm font-semibold text-slate-800">{fillText(t("cu_records"), { n: String(g.members.length) })}</span>
+                    <Badge tone={nameOnly ? "red" : "amber"}>{fillText(t("cu_matchedBy"), { reason: reasonWords(g.reason) })}</Badge>
                     {nameOnly && (
                       <span className="inline-flex items-center gap-1 text-xs font-medium text-red-600">
-                        <AlertTriangle className="h-3.5 w-3.5" /> same name only — verify these are the same person before merging
+                        <AlertTriangle className="h-3.5 w-3.5" /> {t("cu_sameNameOnly")}
                       </span>
                     )}
                   </div>
@@ -107,21 +132,21 @@ export function DuplicatesButton() {
                           className="mt-0.5"
                         />
                         <span className="min-w-0 flex-1">
-                          <span className="font-medium text-slate-900">{m.name || "(no name)"}</span>
+                          <span className="font-medium text-slate-900">{m.name || t("cu_noName")}</span>
                           {m.company_name ? <span className="text-slate-400"> · {m.company_name}</span> : null}
                           <span className="block text-xs text-slate-500">
-                            {[m.email, m.phone].filter(Boolean).join(" · ") || "no contact info"}
-                            {m.created_at ? ` · added ${m.created_at.slice(0, 10)}` : ""}
+                            {[m.email, m.phone].filter(Boolean).join(" · ") || t("cu_noContactInfo")}
+                            {m.created_at ? fillText(t("cu_addedOn"), { date: m.created_at.slice(0, 10) }) : ""}
                           </span>
                         </span>
-                        {keeperId === m.id && <span className="text-xs font-semibold text-brand">keep</span>}
+                        {keeperId === m.id && <span className="text-xs font-semibold text-brand">{t("cu_keep")}</span>}
                       </label>
                     ))}
                   </div>
                   <div className="mt-2 flex justify-end">
                     <Button size="sm" onClick={() => mergeGroup(g)} disabled={busy}>
                       {mergingId === gid ? <Loader2 className="h-4 w-4 animate-spin" /> : <Merge className="h-4 w-4" />}
-                      Merge {g.members.length - 1} Into Kept
+                      {fillText(t("cu_btn_mergeIntoKept"), { n: String(g.members.length - 1) })}
                     </Button>
                   </div>
                 </div>

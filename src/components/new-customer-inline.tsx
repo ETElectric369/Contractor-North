@@ -6,6 +6,8 @@ import { Plus, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createCustomer } from "@/app/(app)/crm/actions";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 
 /**
  * "+ NEW CUSTOMER", RIGHT WHERE THE PICKER IS — one control, every surface.
@@ -42,7 +44,7 @@ export function NewCustomerInline({
   onCreated,
   className,
   initialName = "",
-  label = "New Customer",
+  label,
 }: {
   /** Called with the new row so the host can select/attach it immediately — creating without
    *  attaching is the same dead end one step later. */
@@ -50,9 +52,11 @@ export function NewCustomerInline({
   className?: string;
   /** What was typed where nothing matched (/billing's New Invoice): the name box starts with it. */
   initialName?: string;
-  /** The closed button's words ("New Customer 'Tess Zane'"). */
+  /** The closed button's words ("New Customer 'Tess Zane'"); New Customer in the reader's language
+   *  when none is named (every picker that makes one reads it: this reads the language itself). */
   label?: string;
 }) {
+  const t = translator(useLang());
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(initialName);
   const [phone, setPhone] = useState("");
@@ -69,7 +73,7 @@ export function NewCustomerInline({
         }}
         className={`inline-flex min-h-11 items-center gap-1 text-sm font-medium text-brand underline-offset-2 hover:underline ${className ?? ""}`}
       >
-        <Plus className="h-3.5 w-3.5" /> {label}
+        <Plus className="h-3.5 w-3.5" /> {label ?? t("cu_btn_newCustomer")}
       </button>
     );
 
@@ -81,8 +85,8 @@ export function NewCustomerInline({
             with no autocomplete/name/type, the browser has to GUESS which box is a phone, and it
             guesses inconsistently. Declared, the offer is reliable — no plugin, nothing to pay
             for; it's built into Safari (Settings → AutoFill → "info from my contacts"). */}
-        <Input name="name" autoComplete="name" placeholder="Name *" value={name} onChange={(e) => setName(e.target.value)} className="h-11" autoFocus />
-        <Input name="phone" type="tel" autoComplete="tel" placeholder="Phone" value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} inputMode="tel" className="h-11" />
+        <Input name="name" autoComplete="name" placeholder={t("cu_nameRequired")} value={name} onChange={(e) => setName(e.target.value)} className="h-11" autoFocus />
+        <Input name="phone" type="tel" autoComplete="tel" placeholder={t("cu_phone")} value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} inputMode="tel" className="h-11" />
       </div>
       {err && <p className="text-sm text-rose-600">{err}</p>}
       <div className="flex flex-wrap items-center gap-2">
@@ -97,7 +101,7 @@ export function NewCustomerInline({
               fd.set("name", name.trim());
               if (phone.trim()) fd.set("phone", phone.trim());
               const r = await createCustomer(fd);
-              if (!r.ok || !r.id) return setErr(r.error ?? "Couldn't save the customer.");
+              if (!r.ok || !r.id) return setErr(r.error ?? t("cu_couldntSaveCustomer"));
               await onCreated({ id: r.id, name: name.trim() || phone.trim() });
               setOpen(false);
               setName("");
@@ -107,17 +111,17 @@ export function NewCustomerInline({
         >
           {pending ? (
             <>
-              <Loader2 className="h-4 w-4 animate-spin" /> Saving…
+              <Loader2 className="h-4 w-4 animate-spin" /> {t("cu_btn_saving")}
             </>
           ) : (
-            "Save Customer"
+            t("cu_btn_saveCustomer")
           )}
         </Button>
         <button type="button" onClick={() => setOpen(false)} className="inline-flex min-h-11 items-center px-2 text-sm text-slate-500 hover:underline">
-          Cancel
+          {t("cu_btn_cancel")}
         </button>
       </div>
-      <p className="text-xs text-slate-400">Email and address go in later, on their contact page.</p>
+      <p className="text-xs text-slate-400">{t("cu_emailLater")}</p>
     </div>
   );
 }

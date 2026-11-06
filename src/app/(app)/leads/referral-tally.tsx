@@ -4,6 +4,9 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils";
+import { inquiryStatusLabel } from "@/lib/statuses";
+import { translator } from "@/lib/i18n";
+import { currentLangFor } from "@/lib/current-lang";
 
 /** The referral tally ("Brian at the bar") — commission is a lookup, not a memory.
  *  Staff-only server component: one row per referrer with leads referred, how many
@@ -45,6 +48,8 @@ export async function ReferralTally() {
     .eq("id", user?.id ?? "")
     .maybeSingle();
   if (!me || !isStaffRole(me.role)) return null;
+  const lang = await currentLangFor(user?.id);
+  const t = translator(lang);
 
   // ALL referred leads — the open-leads list above filters converted/lost out,
   // so this card is the only place a converted referral keeps its credit visible.
@@ -76,7 +81,7 @@ export async function ReferralTally() {
   // of their leads converted into the same customer.
   const byReferrer = new Map<string, { name: string; leads: ReferredLead[] }>();
   for (const l of referred) {
-    const row = byReferrer.get(l.referred_by) ?? { name: l.referrer?.full_name ?? "Unknown", leads: [] };
+    const row = byReferrer.get(l.referred_by) ?? { name: l.referrer?.full_name ?? t("ld_refUnknown"), leads: [] };
     row.leads.push(l);
     byReferrer.set(l.referred_by, row);
   }
@@ -94,16 +99,16 @@ export async function ReferralTally() {
   return (
     <Card className="mb-4">
       <CardHeader className="pb-2">
-        <CardTitle>Referral tally</CardTitle>
-        <CardDescription>Who&apos;s sending work in — commission is a lookup, not a memory.</CardDescription>
+        <CardTitle>{t("ld_refTitle")}</CardTitle>
+        <CardDescription>{t("ld_refDesc")}</CardDescription>
       </CardHeader>
       <CardContent className="px-0 pb-3">
         <div className="flex items-center gap-2 px-5 pb-1 text-[10px] uppercase tracking-wide text-slate-400">
           <span className="w-3.5 shrink-0" />
-          <span className="min-w-0 flex-1">Referrer</span>
-          <span className="w-12 shrink-0 text-right">Leads</span>
-          <span className="w-10 shrink-0 text-right">Won</span>
-          <span className="w-24 shrink-0 text-right">Won value</span>
+          <span className="min-w-0 flex-1">{t("ld_refColReferrer")}</span>
+          <span className="w-12 shrink-0 text-right">{t("ld_refColLeads")}</span>
+          <span className="w-10 shrink-0 text-right">{t("ld_refColWon")}</span>
+          <span className="w-24 shrink-0 text-right">{t("ld_refColWonValue")}</span>
         </div>
         <div className="divide-y divide-slate-100">
           {rows.map((r) => (
@@ -114,17 +119,17 @@ export async function ReferralTally() {
                 <span className="w-12 shrink-0 text-right text-sm tabular-nums text-slate-600">{r.leads.length}</span>
                 <span className="w-10 shrink-0 text-right text-sm tabular-nums text-slate-600">{r.converted}</span>
                 <span className="w-24 shrink-0 text-right text-sm font-semibold tabular-nums text-slate-900">
-                  {r.value > 0 ? formatCurrency(r.value) : "—"}
+                  {r.value > 0 ? formatCurrency(r.value, lang) : "—"}
                 </span>
               </summary>
               <ul className="pb-2">
                 {r.leads.map((l) => (
                   <li key={l.id} className="flex items-center gap-2 py-1 pl-11 pr-5">
                     <span className="min-w-0 flex-1 truncate text-xs text-slate-600">{l.name}</span>
-                    <Badge tone={statusTone[l.status] ?? "slate"}>{l.status}</Badge>
+                    <Badge tone={statusTone[l.status] ?? "slate"}>{inquiryStatusLabel(l.status, lang, t)}</Badge>
                     <span className="w-24 shrink-0 text-right text-xs tabular-nums text-slate-500">
                       {l.customer_id && (valueByCustomer.get(l.customer_id) ?? 0) > 0
-                        ? formatCurrency(valueByCustomer.get(l.customer_id))
+                        ? formatCurrency(valueByCustomer.get(l.customer_id), lang)
                         : "—"}
                     </span>
                   </li>
@@ -134,8 +139,8 @@ export async function ReferralTally() {
           ))}
         </div>
         <p className="px-5 pt-2 text-[11px] text-slate-400">
-          Won value = accepted quote totals for the customer a lead converted into.
-          {anyUnlinked && " Some converted leads have no accepted quote yet, so they count but carry no value."}
+          {t("ld_refFoot")}
+          {anyUnlinked && ` ${t("ld_refFootUnlinked")}`}
         </p>
       </CardContent>
     </Card>

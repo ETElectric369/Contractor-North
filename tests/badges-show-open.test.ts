@@ -189,7 +189,8 @@ describe("every tab count in the app is an open count", () => {
 describe("the open Inspections pile wears no Done pill", () => {
   it("every tag on a row comes from the one rule — the page writes none itself", () => {
     const page = read("app/(app)/inspections/page.tsx");
-    expect(page).toContain("{inspectionRowTags(a, writeUp).map((t) => (");
+    // The one rule, handed the reader's language and translator since cn-v1146 (the tags' words only).
+    expect(page).toContain("{inspectionRowTags(a, writeUp, lang, t).map((tag) => (");
     // One <Badge> on the page, and it is the mapped one. A tag written inline here is the bug.
     expect([...page.matchAll(/<Badge\b/g)].length).toBe(1);
     expect(page).not.toMatch(/<Badge[^>]*tone="/);

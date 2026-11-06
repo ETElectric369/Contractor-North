@@ -8,6 +8,8 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Label, Select } from "@/components/ui/input";
 import { bulkImportCustomers, type CustomerImportRow } from "./actions";
 import { parseCSV } from "@/lib/csv";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 
 /** Parse vCards (iPhone/iCloud contact exports) into import rows. */
 function parseVCF(text: string): CustomerImportRow[] {
@@ -36,16 +38,17 @@ function parseVCF(text: string): CustomerImportRow[] {
     .filter((r) => r.name);
 }
 
+// `label` is the column map's word in the reader's language (lib/words/customers cu_…).
 const FIELDS: { key: keyof CustomerImportRow; label: string; match: RegExp }[] = [
-  { key: "name", label: "Name *", match: /^name$|full.?name|contact|first/i },
-  { key: "company_name", label: "Company", match: /company|business|organization/i },
-  { key: "email", label: "Email", match: /e-?mail/i },
-  { key: "phone", label: "Phone", match: /phone|mobile|cell|tel/i },
-  { key: "address", label: "Address", match: /address|street/i },
-  { key: "city", label: "City", match: /city|town/i },
-  { key: "state", label: "State", match: /state|province/i },
-  { key: "zip", label: "Zip", match: /zip|postal/i },
-  { key: "notes", label: "Notes", match: /note|comment|memo/i },
+  { key: "name", label: "cu_nameRequired", match: /^name$|full.?name|contact|first/i },
+  { key: "company_name", label: "cu_company", match: /company|business|organization/i },
+  { key: "email", label: "cu_email", match: /e-?mail/i },
+  { key: "phone", label: "cu_phone", match: /phone|mobile|cell|tel/i },
+  { key: "address", label: "cu_address", match: /address|street/i },
+  { key: "city", label: "cu_city", match: /city|town/i },
+  { key: "state", label: "cu_state", match: /state|province/i },
+  { key: "zip", label: "cu_zip", match: /zip|postal/i },
+  { key: "notes", label: "cu_notes", match: /note|comment|memo/i },
 ];
 
 /** Import for the customer book. `csv` mode (Settings) takes a CSV with column
@@ -62,6 +65,10 @@ type PickedContact = {
 
 export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; label?: string }) {
   const router = useRouter();
+  const t = translator(useLang());
+  /** "Imported 3 contacts (1 duplicates skipped)." — the count's pair, the skipped tail when any. */
+  const counted = (one: string, many: string, n: number, tailKey: string, tail?: number) =>
+    fillText(t(n === 1 ? one : many), { n: String(n), skipped: tail ? ` ${fillText(t(tailKey), { n: String(tail) })}` : "" });
   const fileRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [headers, setHeaders] = useState<string[]>([]);
@@ -75,8 +82,8 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
       const res = await bulkImportCustomers(rows);
       setMsg(
         res.ok
-          ? `Imported ${res.imported} contact${res.imported === 1 ? "" : "s"}${res.skipped ? ` (${res.skipped} duplicates skipped)` : ""}.`
-          : res.error ?? "Import failed.",
+          ? counted("cu_importedContactsOne", "cu_importedContactsMany", res.imported ?? 0, "cu_dupesSkipped", res.skipped)
+          : res.error ?? t("cu_importFailed"),
       );
       setOpen(true);
       router.refresh();
@@ -95,7 +102,7 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
       if (/^BEGIN:VCARD/im.test(text) || f.name.toLowerCase().endsWith(".vcf")) {
         const rows = parseVCF(text);
         if (!rows.length) {
-          setMsg("No contacts found in that vCard file.");
+          setMsg(t("cu_noContactsInVcard"));
           setOpen(true);
           return;
         }
@@ -105,13 +112,13 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
       }
 
       if (!csv) {
-        setMsg("That looks like a CSV — import spreadsheets from Settings → Company. Here, pick a single contact (.vcf).");
+        setMsg(t("cu_csvGoToSettings"));
         setOpen(true);
         return;
       }
       const rows = parseCSV(text);
       if (rows.length < 2) {
-        setMsg("That CSV needs a header row plus at least one data row.");
+        setMsg(t("cu_csvNeedsRows"));
         setOpen(true);
         return;
       }
@@ -175,17 +182,17 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
           };
         })
         .filter((r) => r.name || r.phone);
-      if (!rows.length) { setMsg("Those contacts had no name or number to import."); return; }
+      if (!rows.length) { setMsg(t("cu_pickedNoName")); return; }
       const res = await bulkImportCustomers(rows);
-      if (!res.ok) return setMsg(res.error ?? "Import failed.");
-      setMsg(`Added ${res.imported} from your contacts${res.skipped ? ` (${res.skipped} already in the book)` : ""}.`);
+      if (!res.ok) return setMsg(res.error ?? t("cu_importFailed"));
+      setMsg(fillText(t("cu_addedFromContacts"), { n: String(res.imported), skipped: res.skipped ? ` ${fillText(t("cu_alreadyInBook"), { n: String(res.skipped) })}` : "" }));
       router.refresh();
     });
   }
 
   function runImport() {
     if (mapping.name === undefined) {
-      setMsg("Map the Name column first.");
+      setMsg(t("cu_mapNameFirst"));
       return;
     }
     setMsg(null);
@@ -205,8 +212,8 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
         };
       });
       const res = await bulkImportCustomers(rows);
-      if (!res.ok) return setMsg(res.error ?? "Import failed.");
-      setMsg(`Imported ${res.imported} customer${res.imported === 1 ? "" : "s"}${res.skipped ? ` (${res.skipped} duplicates skipped)` : ""}.`);
+      if (!res.ok) return setMsg(res.error ?? t("cu_importFailed"));
+      setMsg(counted("cu_importedCustomersOne", "cu_importedCustomersMany", res.imported ?? 0, "cu_dupesSkipped", res.skipped));
       router.refresh();
     });
   }
@@ -218,22 +225,20 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
             to a small secondary. On desktop the CSV door stays primary, as it should. */}
         {hasPicker && (
           <Button onClick={pickFromPhone} disabled={pending}>
-            <BookUser className="h-4 w-4" /> {pending ? "Adding…" : "Add From Contacts"}
+            <BookUser className="h-4 w-4" /> {pending ? t("cu_btn_adding") : t("cu_btn_addFromContacts")}
           </Button>
         )}
         <Button
           variant="outline"
           size={hasPicker ? "sm" : "md"}
           onClick={() => fileRef.current?.click()}
-          title={!csv ? "iPhone: open a contact → Share Contact → Save to Files, then pick it here" : undefined}
+          title={!csv ? t("cu_iphoneVcfTitle") : undefined}
         >
-          <Upload className="h-4 w-4" /> {label ?? (csv ? "Import Customers" : "Import A Contact")}
+          <Upload className="h-4 w-4" /> {label ?? (csv ? t("cu_btn_importCustomers") : t("cu_btn_importAContact"))}
         </Button>
         {!csv && (
           <span className="text-[11px] text-slate-400">
-            iPhone: open a contact → Share → Save to Files, then pick the .vcf here. For one
-            person it&apos;s quicker to hit New Customer and tap the name field — your phone offers
-            your contacts there and fills the whole card.
+            {t("cu_iphoneVcfHint")}
           </span>
         )}
       </span>
@@ -248,20 +253,20 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title={csv ? "Import Customers" : "Import A Contact"}
+        title={csv ? t("cu_btn_importCustomers") : t("cu_btn_importAContact")}
         footer={
           headers.length > 0 ? (
             <ModalActions
               onCancel={() => setOpen(false)}
               onSave={runImport}
               saving={pending}
-              saveLabel={`Import ${dataRows.length} Rows`}
+              saveLabel={fillText(t("cu_btn_importRows"), { n: String(dataRows.length) })}
             />
           ) : msg ? (
             // A VCF import (or any info/error message) clears the headers, so the
             // mapping footer is gone — without this the result modal had only an X
             // and looked broken ("import does not work"). Give it a clear Done.
-            <ModalActions onCancel={() => setOpen(false)} onSave={() => setOpen(false)} saveLabel="Done" hideCancel />
+            <ModalActions onCancel={() => setOpen(false)} onSave={() => setOpen(false)} saveLabel={t("cu_btn_done")} hideCancel />
           ) : undefined
         }
       >
@@ -270,12 +275,12 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
           {headers.length > 0 && (
             <>
               <p className="text-sm text-slate-500">
-                {dataRows.length} rows found. Match your CSV columns (auto-guessed — fix any that are wrong):
+                {fillText(t("cu_rowsFound"), { n: String(dataRows.length) })}
               </p>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {FIELDS.map((f) => (
                   <div key={f.key}>
-                    <Label>{f.label}</Label>
+                    <Label>{t(f.label)}</Label>
                     <Select
                       value={mapping[f.key] ?? ""}
                       onChange={(e) =>
@@ -287,9 +292,9 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
                         })
                       }
                     >
-                      <option value="">— skip —</option>
+                      <option value="">{t("cu_optSkip")}</option>
                       {headers.map((h, i) => (
-                        <option key={i} value={i}>{h || `Column ${i + 1}`}</option>
+                        <option key={i} value={i}>{h || fillText(t("cu_btn_column"), { n: String(i + 1) })}</option>
                       ))}
                     </Select>
                   </div>

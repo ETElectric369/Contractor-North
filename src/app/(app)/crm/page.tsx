@@ -2,6 +2,8 @@ import { Users, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { translator } from "@/lib/i18n";
+import { localeOf } from "@/lib/locale";
+import { fillSlots } from "@/lib/lang-words";
 import { currentLang } from "@/lib/current-lang";
 import { Card } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/data-table";
@@ -27,7 +29,8 @@ export default async function CrmPage({
 }) {
   const { q, sort } = await searchParams;
   const supabase = await createClient();
-  const t = translator(await currentLang());
+  const lang = await currentLang();
+  const t = translator(lang);
 
   // Andrew: "Sorting ABCD or otherwise." ?sort= drives the query (A→Z by name when absent); the
   // bar next to the search box writes it. Name is the tie-break under any other column so a
@@ -71,7 +74,7 @@ export default async function CrmPage({
           <NewCustomerButton />
           {/* Bulk import (CSV/vCard) — the deliberate, infrequent SEEK door for the whole
               customer book, moved here from Settings > Company (import belongs to Customers). */}
-          <ImportCustomersButton csv label="Import" />
+          <ImportCustomersButton csv label={t("cu_btn_import")} />
           <DuplicatesButton />
         </div>
       </PageHeader>
@@ -83,7 +86,7 @@ export default async function CrmPage({
             <Input
               name="q"
               defaultValue={q}
-              placeholder="Search customers…"
+              placeholder={t("cu_searchCustomers")}
               className="pl-9"
             />
             {/* A GET submit rebuilds the URL from the form alone — carry the chosen order across
@@ -98,18 +101,18 @@ export default async function CrmPage({
         // NOTHING SILENT: past this many contacts the list is cut, and the cut end is the end of
         // whatever order you picked. Say so, and name the way through it.
         <p className="mb-3 text-sm text-amber-700">
-          Showing the first {CRM_PAGE_LIMIT.toLocaleString()} customers — search to narrow the list.
+          {fillSlots(t("cu_showingFirst"), { n: CRM_PAGE_LIMIT.toLocaleString(localeOf(lang)) })}
         </p>
       )}
 
       {customers.length === 0 ? (
         <EmptyState
           icon={Users}
-          title={q ? "No matches" : "No customers yet"}
+          title={q ? t("cu_noMatches") : t("cu_noCustomersYet")}
           description={
             q
-              ? "Try a different search."
-              : "Add your first customer to get started."
+              ? t("cu_tryDifferentSearch")
+              : t("cu_addFirstCustomer")
           }
         >
           {!q && <NewCustomerButton />}
@@ -120,7 +123,7 @@ export default async function CrmPage({
             rows={customers}
             rowKey={(c) => c.id}
             rowHref={(c) => `/crm/${c.id}`}
-            columns={customerColumns(mixed)}
+            columns={customerColumns(mixed, lang, t)}
           />
         </Card>
       )}

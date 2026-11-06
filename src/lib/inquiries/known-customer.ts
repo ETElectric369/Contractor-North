@@ -1,3 +1,6 @@
+import type { Lang } from "@/lib/locale";
+import { say, type Words } from "@/lib/lang-words";
+
 /**
  * THE APP ALREADY KNOWS THIS PERSON.
  *
@@ -93,6 +96,8 @@ export type Carried = {
 export function carryFromCustomer(
   lead: Partial<Record<CarriedField, string | null | undefined>>,
   customer: KnownCustomer,
+  lang: Lang = "en",
+  words?: Words,
 ): Carried {
   const has = (v: unknown) => String(v ?? "").trim() !== "";
   const leadNamedAPlace = has(lead.address) || has(lead.city) || has(lead.state) || has(lead.zip);
@@ -105,11 +110,14 @@ export function carryFromCustomer(
     if (v) patch[f] = v;
   }
 
-  const moved = (Object.keys(patch) as CarriedField[]).map((f) => LABEL[f]);
+  // The note is said to the office in its reader's language (ld_srv_lib_, English inline as the default).
+  const moved = (Object.keys(patch) as CarriedField[]).map((f) => say(lang, words, `ld_srv_lib_field_${f}`, LABEL[f]));
   if (!moved.length) return { patch, note: "" };
-  const list = moved.length === 1 ? moved[0] : `${moved.slice(0, -1).join(", ")} and ${moved[moved.length - 1]}`;
+  const and = say(lang, words, "ld_srv_lib_and", " and ");
+  const list = moved.length === 1 ? moved[0] : `${moved.slice(0, -1).join(", ")}${and}${moved[moved.length - 1]}`;
+  const name = customer.name ?? say(lang, words, "ld_srv_lib_anExistingCustomer", "an existing customer");
   return {
     patch,
-    note: `Linked to ${customer.name ?? "an existing customer"} — brought their ${list} across.`,
+    note: say(lang, words, "ld_srv_lib_carriedFrom", `Linked to ${name} — brought their ${list} across.`, { name, list }),
   };
 }

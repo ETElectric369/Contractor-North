@@ -11,6 +11,8 @@ import { InquiryFields, inquiryFormValue } from "./inquiry-fields";
 import { createInquiry, updateInquiry, deleteInquiry } from "./actions";
 import type { Inquiry } from "@/lib/types";
 import { createParamClaim } from "@/lib/param-claim";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 
 // The leads page mounts the "new" button TWICE (header + empty state); only the
 // FIRST mounted instance may answer ?new=1 or two modals would stack.
@@ -28,6 +30,7 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const toast = useToast();
+  const t = translator(useLang());
   const editing = mode === "edit" && !!inquiry;
 
   const [form, setForm] = useState(() => inquiryFormValue(inquiry));
@@ -74,7 +77,7 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
 
   function openModal() {
     setConfirmDel(false);
-    if (draft.restored && dirty) toast("Draft restored — pick up where you left off", "info");
+    if (draft.restored && dirty) toast(t("ld_draftRestored"), "info");
     setOpen(true);
   }
 
@@ -92,13 +95,13 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
     // Fragment-first: ANY of name / phone / message makes a valid lead (the
     // missed-call case is a bare phone number) — only a fully empty form blocks.
     if (!form.name.trim() && !form.phone.trim() && !form.message.trim()) {
-      setError("Add a name, phone number, or note to save this lead.");
+      setError(t("ld_addSomethingToSave"));
       return;
     }
     start(async () => {
       const res = editing ? await updateInquiry(inquiry!.id, formData) : await createInquiry(formData);
       if (!res.ok) {
-        setError(res.error ?? "Something went wrong.");
+        setError(res.error ?? t("ld_somethingWrong"));
         return;
       }
       // NOTHING SILENT. When the lead recognised an existing customer and pulled their phone or
@@ -125,11 +128,11 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
     <>
       {editing ? (
         <Button variant="outline" onClick={openModal}>
-          <Pencil className="h-4 w-4" /> Edit
+          <Pencil className="h-4 w-4" /> {t("ld_btn_edit")}
         </Button>
       ) : (
         <Button onClick={openModal}>
-          <Plus className="h-4 w-4" /> New Lead
+          <Plus className="h-4 w-4" /> {t("ld_btn_newLead")}
         </Button>
       )}
 
@@ -137,14 +140,14 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
         <Modal
           open={open}
           onClose={discard}
-          title={editing ? "Edit Lead" : "New Lead"}
+          title={editing ? t("ld_btn_editLead") : t("ld_btn_newLead")}
           dirty={dirty}
           footer={
             <ModalActions
               onCancel={discard}
               submit
               saving={pending}
-              saveLabel={editing ? "Save Changes" : "Create Lead"}
+              saveLabel={editing ? t("ld_btn_saveChanges") : t("ld_btn_createLead")}
               // Delete lives on the EDIT lead (Alexa 2026-07-20: "how to delete leads?" —
               // the action existed but had no button). Two-tap confirm so a stray tap can't
               // drop a lead; deleteInquiry revalidates /leads + /planner.
@@ -158,14 +161,14 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
                       if (!confirmDel) { setConfirmDel(true); return; }
                       start(async () => {
                         const res = await deleteInquiry(inquiry!.id);
-                        if (!res.ok) { setError(res.error ?? "Couldn't delete."); setConfirmDel(false); return; }
-                        toast("Lead deleted.", "success");
+                        if (!res.ok) { setError(res.error ?? t("ld_couldntDelete")); setConfirmDel(false); return; }
+                        toast(t("ld_leadDeleted"), "success");
                         setOpen(false);
                         router.refresh();
                       });
                     }}
                   >
-                    <Trash2 className="h-4 w-4" /> {confirmDel ? "Tap To Confirm" : "Delete Lead"}
+                    <Trash2 className="h-4 w-4" /> {confirmDel ? t("ld_btn_tapToConfirm") : t("ld_btn_deleteLead")}
                   </Button>
                 ) : undefined
               }

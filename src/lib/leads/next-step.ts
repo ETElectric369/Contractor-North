@@ -27,7 +27,9 @@
  */
 import { isWebSource } from "@/lib/inquiries/sources";
 import { todayStrInTz } from "@/lib/tz";
-import { KIND_LABEL, workKind } from "@/lib/schedule/work-shape";
+import { KIND_LABEL, kindLabel, workKind } from "@/lib/schedule/work-shape";
+import { localeOf, type Lang } from "@/lib/locale";
+import { say, type Words } from "@/lib/lang-words";
 
 export type LeadStepInput = {
   status: string | null;
@@ -59,6 +61,12 @@ export type LeadVisitsAnswer = LeadVisits | typeof VISITS_UNREAD | null;
  *  step, because every next step left depends on what is booked (Erik: nothing silent). */
 export const VISITS_UNREAD_LABEL = "Visits Didn't Load";
 
+/** VISITS_UNREAD_LABEL for the person reading (the Ventas-2 wave, cn-v1146): the constant byte for byte
+ *  by default; lib/words/leads' ld_lib_stepVisitsUnread for a Spanish caller's translator. */
+export function visitsUnreadLabel(lang: Lang = "en", words?: Words): string {
+  return say(lang, words, "ld_lib_stepVisitsUnread", VISITS_UNREAD_LABEL);
+}
+
 export type LeadStepTone = "slate" | "amber" | "blue" | "green" | "indigo";
 export type LeadBucketLetter = "A" | "B" | "C";
 
@@ -77,9 +85,9 @@ const ymdOf = (v: string | null | undefined): string | null => {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
 };
 
-const words = (ymd: string, weekday: boolean): string => {
+const dayWords = (ymd: string, weekday: boolean, lang?: Lang): string => {
   const [y, m, d] = ymd.split("-").map(Number);
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(localeOf(lang), {
     timeZone: "UTC",
     ...(weekday ? { weekday: "short" as const } : {}),
     month: "short",
@@ -89,10 +97,11 @@ const words = (ymd: string, weekday: boolean): string => {
     .replace(",", "");
 };
 
-/** "Sep 20": a follow-up day. */
-export const monthDay = (ymd: string): string => words(ymd, false);
+/** "Sep 20": a follow-up day (in the reader's locale when handed a language — lib/locale localeOf;
+ *  English, the default, byte for byte). */
+export const monthDay = (ymd: string, lang?: Lang): string => dayWords(ymd, false, lang);
 /** "Tue Oct 1": a visit's day. */
-export const weekdayMonthDay = (ymd: string): string => words(ymd, true);
+export const weekdayMonthDay = (ymd: string, lang?: Lang): string => dayWords(ymd, true, lang);
 
 /**
  * What a booked visit is called on the chip: the site visit is an Inspection; the rest say their own
@@ -104,15 +113,16 @@ export const weekdayMonthDay = (ymd: string): string => words(ymd, true);
  * how the app came to disagree with itself: My Day printed one word while the planner, the calendar
  * and the job page printed another, and Erik read both on 2026-10-03.
  */
-function visitWord(type: string | null | undefined): string {
+function visitWord(type: string | null | undefined, lang: Lang = "en", words?: Words): string {
   const kind = workKind({ kind: "appointment", type: type || "inspection" });
   switch (kind) {
     case "office":
-      return "Meeting";
+      return say(lang, words, "ld_lib_stepMeeting", "Meeting");
     case "other":
-      return "Visit";
+      return say(lang, words, "ld_lib_stepVisit", "Visit");
     default:
-      return KIND_LABEL[kind];
+      // KIND_LABEL's word in English (kindLabel's default is it byte for byte); the agenda's in Spanish.
+      return lang === "es" && words ? kindLabel(kind, lang, words) : KIND_LABEL[kind];
   }
 }
 
@@ -123,15 +133,26 @@ export function leadNextStep(
   visits: LeadVisitsAnswer,
   todayYmd: string,
   opts: { estimatesOn: boolean; tz: string },
+  /** The reader's language and translator (the Ventas-2 wave, cn-v1146): English, the default, is every
+   *  label byte for byte; a Spanish caller's translator reads lib/words/leads' ld_lib_step…. Tone,
+   *  bucket and web never change with the language. */
+  lang: Lang = "en",
+  words?: Words,
 ): LeadStep {
   const web = isWebSource(input.source);
+  const w = (key: string, en: string, vars?: Record<string, string | number>) => say(lang, words, key, en, vars);
 
   // 1-2: settled. Nothing to prefix, nothing still needed.
   if (input.converted_at) {
     const estimate = input.converted_to === "quote" || input.converted_to === "estimate";
-    return { label: estimate ? "Became An Estimate" : "Became A Job", tone: "slate", bucket: null, web };
+    return {
+      label: estimate ? w("ld_lib_stepBecameEstimate", "Became An Estimate") : w("ld_lib_stepBecameJob", "Became A Job"),
+      tone: "slate",
+      bucket: null,
+      web,
+    };
   }
-  if (input.status === "lost") return { label: "Lost", tone: "slate", bucket: null, web };
+  if (input.status === "lost") return { label: w("ld_lib_stepLost", "Lost"), tone: "slate", bucket: null, web };
 
   const follow = ymdOf(input.next_follow_up_at);
   // NOT READ IS NOT ZERO. The read's three-state answer stops here: a lead whose visits nobody could
@@ -143,30 +164,36 @@ export function leadNextStep(
 
   let step: { label: string; tone: LeadStepTone };
   if (follow && follow < todayYmd) {
-    step = { label: `Call Back · ${monthDay(follow)}`, tone: "amber" };
+    step = { label: w("ld_lib_stepCallBack", `Call Back · ${monthDay(follow)}`, { day: monthDay(follow, lang) }), tone: "amber" };
   } else if (unread) {
     // Every rule left — a visit booked, a visit walked, and the three that only hold while NOTHING is
     // booked — is an answer about visits. So the chip says the one thing that is true: it doesn't know.
-    step = { label: VISITS_UNREAD_LABEL, tone: "amber" };
+    step = { label: visitsUnreadLabel(lang, words), tone: "amber" };
   } else if (upcoming > 0) {
     const day = read?.nextAt ? todayStrInTz(opts.tz, new Date(read.nextAt)) : null;
-    step = { label: `${visitWord(read?.nextType)} · ${day ? weekdayMonthDay(day) : "No Day Yet"}`, tone: "blue" };
+    step = {
+      label: `${visitWord(read?.nextType, lang, words)} · ${day ? weekdayMonthDay(day, lang) : w("ld_lib_stepNoDayYet", "No Day Yet")}`,
+      tone: "blue",
+    };
   } else if (done > 0) {
-    step = { label: opts.estimatesOn ? "Walked · Estimate Next" : "Walked", tone: "green" };
+    step = {
+      label: opts.estimatesOn ? w("ld_lib_stepWalkedEstimateNext", "Walked · Estimate Next") : w("ld_lib_stepWalked", "Walked"),
+      tone: "green",
+    };
   } else if (follow) {
-    step = { label: `Call Back · ${monthDay(follow)}`, tone: "slate" };
+    step = { label: w("ld_lib_stepCallBack", `Call Back · ${monthDay(follow)}`, { day: monthDay(follow, lang) }), tone: "slate" };
   } else if (input.status === "contacted") {
-    step = { label: "Contacted", tone: "slate" };
+    step = { label: w("ld_lib_stepContacted", "Contacted"), tone: "slate" };
   } else if (input.status === "quoted") {
-    step = { label: "Quoted", tone: "indigo" };
+    step = { label: w("ld_lib_stepQuoted", "Quoted"), tone: "indigo" };
   } else {
-    step = { label: "New · Call Them", tone: "blue" };
+    step = { label: w("ld_lib_stepNewCallThem", "New · Call Them"), tone: "blue" };
   }
 
   const bucket = BUCKETS.includes(String(input.lead_bucket ?? "")) ? (input.lead_bucket as LeadBucketLetter) : null;
   // "Needs A Visit" is the same claim the other way round: it says nothing is booked, which is exactly
   // what nobody could read. An unread board says neither.
   const needsVisit = !unread && !!input.site_inspection_required && upcoming === 0 && done === 0;
-  const label = [bucket, step.label, needsVisit ? "Needs A Visit" : null].filter(Boolean).join(" · ");
+  const label = [bucket, step.label, needsVisit ? w("ld_lib_stepNeedsVisit", "Needs A Visit") : null].filter(Boolean).join(" · ");
   return { label, tone: step.tone, bucket, web };
 }

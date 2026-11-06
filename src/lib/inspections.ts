@@ -14,6 +14,8 @@
  * The tags a row wears live here too (inspectionRowTags), for the same reason: one rule, one place.
  */
 import { appointmentTypeLabel } from "@/lib/statuses";
+import type { Lang } from "@/lib/locale";
+import { say, type Words } from "@/lib/lang-words";
 
 export interface InspectionBucketRow {
   id: string;
@@ -71,15 +73,19 @@ export function inspectionRowTags(
   row: { type?: string | null; status: string; capture?: unknown },
   /** The row is in "To write up", the one pile where a visit with no field notes is worth saying. */
   writeUp = false,
+  /** The reader's language and translator (the Ventas-2 wave, cn-v1146): English, the default, is the
+   *  tags' words byte for byte; a Spanish caller's translator reads lib/words/inspections' ip_lib_…. */
+  lang: Lang = "en",
+  words?: Words,
 ): InspectionRowTag[] {
   const tags: InspectionRowTag[] = [];
   // The CITY'S inspection on a permit (type final_inspection) is a different animal from the site
   // visit before a price (type inspection), and this list
   // holds both (ESTIMATE_VISIT_TYPES), so the row says which one it is.
-  if (row.type === "final_inspection") tags.push({ tone: "indigo", label: appointmentTypeLabel(row.type) });
-  if (row.status === "proposed") tags.push({ tone: "amber", label: "pending pick" });
-  if (row.status === "cancelled") tags.push({ tone: "slate", label: "cancelled" });
-  if (writeUp && !hasCaptureData(row.capture)) tags.push({ tone: "slate", label: "no field notes" });
+  if (row.type === "final_inspection") tags.push({ tone: "indigo", label: appointmentTypeLabel(row.type, lang, words) });
+  if (row.status === "proposed") tags.push({ tone: "amber", label: say(lang, words, "ip_lib_pendingPick", "pending pick") });
+  if (row.status === "cancelled") tags.push({ tone: "slate", label: say(lang, words, "ip_lib_cancelled", "cancelled") });
+  if (writeUp && !hasCaptureData(row.capture)) tags.push({ tone: "slate", label: say(lang, words, "ip_lib_noFieldNotes", "no field notes") });
   return tags;
 }
 

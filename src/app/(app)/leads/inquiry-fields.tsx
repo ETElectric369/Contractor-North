@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { KIND_LABEL, kindOptions } from "@/lib/schedule/work-shape";
+import { kindLabel, kindOptions } from "@/lib/schedule/work-shape";
+import { useLang } from "@/components/lang-provider";
+import { translator } from "@/lib/i18n";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { StateSelect } from "@/components/ui/state-select";
@@ -66,11 +68,11 @@ export function moreOptionsFilled(v: InquiryFormValue): boolean {
   return [v.company_name, v.email, v.notes].some((x) => String(x ?? "").trim()) || typedTown;
 }
 
-/** The closed row's summary: what's filled in, else what's inside. */
-export function moreOptionsSummary(v: InquiryFormValue): string {
+/** The closed row's summary: what's filled in, else what's inside (in the reader's words; English by default). */
+export function moreOptionsSummary(v: InquiryFormValue, t: (key: string) => string = translator("en")): string {
   const typedTown = v.town_picked ? "" : formatCityStateZip(v.city, v.state, v.zip);
-  const filled = [v.company_name, v.email, typedTown, v.notes.trim() ? "Notes" : ""].map((x) => String(x ?? "").trim()).filter(Boolean);
-  return filled.length ? filled.join(" · ") : "Company · Email";
+  const filled = [v.company_name, v.email, typedTown, v.notes.trim() ? t("ld_notes") : ""].map((x) => String(x ?? "").trim()).filter(Boolean);
+  return filled.length ? filled.join(" · ") : t("ld_companyEmail");
 }
 
 /**
@@ -97,6 +99,8 @@ export function InquiryFields({
   value: InquiryFormValue;
   onChange: (patch: Partial<InquiryFormValue>) => void;
 }) {
+  const lang = useLang();
+  const t = translator(lang);
   const [moreOpen, setMoreOpen] = useState(() => moreOptionsFilled(value));
   const pickedTown = value.town_picked ? formatCityStateZip(value.city, value.state, value.zip) : "";
   const needsTown = !value.town_picked && !!value.address.trim() && !value.city.trim();
@@ -106,11 +110,11 @@ export function InquiryFields({
       <div>
         {/* Fragment-first: a bare phone or note is a valid lead — name alone is no longer required
             (the modal checks for ANY of name/phone/message). */}
-        <Label htmlFor="name">Name</Label>
-        <Input id="name" name="name" autoComplete="name" value={value.name} onChange={(e) => onChange({ name: e.target.value })} placeholder="Contact name (phone or note alone works)" />
+        <Label htmlFor="name">{t("ld_name")}</Label>
+        <Input id="name" name="name" autoComplete="name" value={value.name} onChange={(e) => onChange({ name: e.target.value })} placeholder={t("ld_namePlaceholder")} />
       </div>
       <div>
-        <Label htmlFor="phone">Phone</Label>
+        <Label htmlFor="phone">{t("ld_phone")}</Label>
         {/* PhoneInput self-formats (uncontrolled); onInput mirrors the text out. */}
         <PhoneInput
           id="phone"
@@ -121,7 +125,7 @@ export function InquiryFields({
         />
       </div>
       <div>
-        <Label htmlFor="address">Address</Label>
+        <Label htmlFor="address">{t("ld_address")}</Label>
         <AddressAutocomplete
           id="address"
           name="address"
@@ -145,13 +149,13 @@ export function InquiryFields({
             onClick={() => setMoreOpen(true)}
             className="mt-1 inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline"
           >
-            Add The Town
+            {t("ld_btn_addTheTown")}
           </button>
         )}
       </div>
       <div>
-        <Label htmlFor="message">What They Need</Label>
-        <Textarea id="message" name="message" rows={2} value={value.message} onChange={(e) => onChange({ message: e.target.value })} placeholder="The work, the scope, how they found you…" />
+        <Label htmlFor="message">{t("ld_whatTheyNeed")}</Label>
+        <Textarea id="message" name="message" rows={2} value={value.message} onChange={(e) => onChange({ message: e.target.value })} placeholder={t("ld_whatTheyNeedPlaceholder")} />
       </div>
       {/* WHAT IT IS and HOW LONG — side by side, because they are one thought. Durations are a
           dropdown of the shapes a contractor actually books rather than a free number: "Half day"
@@ -159,28 +163,28 @@ export function InquiryFields({
           default — an honest blank beats a made-up number that later reads as a decision. */}
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <Label htmlFor="work_kind">What Kind Of Work</Label>
+          <Label htmlFor="work_kind">{t("ld_whatKindOfWork")}</Label>
           <Select id="work_kind" name="work_kind" value={value.work_kind} onChange={(e) => onChange({ work_kind: e.target.value })}>
-            <option value="">Not Sure Yet</option>
+            <option value="">{t("ld_btn_notSureYet")}</option>
             {/* The five a person picks (W2-06), plus this lead's own old kind (Quote, Office) when it
                 carries one, so an edit never silently re-tags it. */}
             {kindOptions(value.work_kind).map((k) => (
-              <option key={k} value={k}>{KIND_LABEL[k]}</option>
+              <option key={k} value={k}>{kindLabel(k, lang, t)}</option>
             ))}
           </Select>
         </div>
         <div>
-          <Label htmlFor="planned_minutes">How Long</Label>
+          <Label htmlFor="planned_minutes">{t("ld_howLong")}</Label>
           <Select id="planned_minutes" name="planned_minutes" value={value.planned_minutes} onChange={(e) => onChange({ planned_minutes: e.target.value })}>
-            <option value="">Not Sure Yet</option>
-            <option value="30">30 Minutes</option>
-            <option value="60">1 Hour</option>
-            <option value="120">2 Hours</option>
-            <option value="240">Half Day (4h)</option>
-            <option value="480">Full Day</option>
-            <option value="960">2 Days</option>
-            <option value="1440">3 Days</option>
-            <option value="2400">A Week (5 Days)</option>
+            <option value="">{t("ld_btn_notSureYet")}</option>
+            <option value="30">{t("ld_btn_min30")}</option>
+            <option value="60">{t("ld_btn_hour1")}</option>
+            <option value="120">{t("ld_btn_hours2")}</option>
+            <option value="240">{t("ld_btn_halfDay4h")}</option>
+            <option value="480">{t("ld_btn_fullDay")}</option>
+            <option value="960">{t("ld_btn_days2")}</option>
+            <option value="1440">{t("ld_btn_days3")}</option>
+            <option value="2400">{t("ld_btn_aWeek5Days")}</option>
           </Select>
         </div>
       </div>
@@ -194,40 +198,40 @@ export function InquiryFields({
           onClick={() => setMoreOpen((v) => !v)}
           className="flex min-h-11 w-full items-center justify-between gap-3 px-3 text-left text-sm font-medium text-slate-700"
         >
-          <span>More Options</span>
+          <span>{t("ld_btn_moreOptions")}</span>
           <span className="flex min-w-0 items-center gap-1.5 text-xs font-normal text-slate-500">
-            <span className="truncate">{moreOptionsSummary(value)}</span>
+            <span className="truncate">{moreOptionsSummary(value, t)}</span>
             <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${moreOpen ? "rotate-180" : ""}`} />
           </span>
         </button>
         {moreOpen && (
           <div className="space-y-3 border-t border-slate-100 px-3 pb-3 pt-2">
             <div>
-              <Label htmlFor="company_name">Company</Label>
-              <Input autoComplete="organization" id="company_name" value={value.company_name} onChange={(e) => onChange({ company_name: e.target.value })} placeholder="(optional)" />
+              <Label htmlFor="company_name">{t("ld_company")}</Label>
+              <Input autoComplete="organization" id="company_name" value={value.company_name} onChange={(e) => onChange({ company_name: e.target.value })} placeholder={t("ld_optional")} />
             </div>
             <div>
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t("ld_email")}</Label>
               <Input id="email" type="email" autoComplete="email" value={value.email} onChange={(e) => onChange({ email: e.target.value })} />
             </div>
             {!value.town_picked && (
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <Label htmlFor="city">City</Label>
+                  <Label htmlFor="city">{t("ld_city")}</Label>
                   <Input id="city" value={value.city} onChange={(e) => onChange({ city: e.target.value })} />
                 </div>
                 <div>
-                  <Label htmlFor="state">State</Label>
+                  <Label htmlFor="state">{t("ld_state")}</Label>
                   <StateSelect id="state" value={value.state} onChange={(state) => onChange({ state })} />
                 </div>
                 <div>
-                  <Label htmlFor="zip">Zip</Label>
+                  <Label htmlFor="zip">{t("ld_zip")}</Label>
                   <Input id="zip" value={value.zip} onChange={(e) => onChange({ zip: e.target.value })} />
                 </div>
               </div>
             )}
             <div>
-              <Label htmlFor="notes">Internal Notes</Label>
+              <Label htmlFor="notes">{t("ld_internalNotes")}</Label>
               <Textarea id="notes" rows={2} value={value.notes} onChange={(e) => onChange({ notes: e.target.value })} />
             </div>
           </div>
