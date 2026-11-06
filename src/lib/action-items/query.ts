@@ -102,7 +102,7 @@ const QUOTE_QUIET_DAYS = 7;
 // passed) is urgent regardless of age — the offer is about to die on the vine.
 const QUOTE_EXPIRY_SOON_DAYS = 5;
 
-/** How many jobs the Jobs Needing A Day read looks at (newest first); more says "N+". */
+/** How many jobs the Jobs Needing a Day read looks at (newest first); more says "N+". */
 const JOBS_DAY_READ_CAP = 200;
 /** Ids per request when a read names many records: no request's address grows too long. */
 const ID_CHUNK = 80;
@@ -642,7 +642,7 @@ async function buildActionItems(ctx: {
     // (North's own bug reports are not read here: they are Bug Watch's, with its own count on the
     // avatar row. Wave 1, NY-list: a company's Needs You never carries them.)
     // ── The end-of-day money-leak sweep feeders (staff only) ──
-    // Every open clock, whatever its age; also who is ON a job right now (Jobs Needing A Day).
+    // Every open clock, whatever its age; also who is ON a job right now (Jobs Needing a Day).
     // profile_id: the row's door reads "Clock Out" on the viewer's own clock, his name on anyone else's.
     isStaff
       ? supabase
@@ -729,7 +729,7 @@ async function buildActionItems(ctx: {
   // A JOB WHOSE BILLING SAYS THE WORK IS OVER: a standard invoice or the final draw. A deposit or a
   // progress draw (invoice_kind deposit/progress, 0063) is the opposite: money collected for work
   // still ahead, so a deck builder's $10,000 deposit on a to_be_scheduled job must keep asking for
-  // a day. Jobs Needing A Day reads this set (the won estimate asks quoteSettled, which applies the
+  // a day. Jobs Needing a Day reads this set (the won estimate asks quoteSettled, which applies the
   // same kind rule with the bill's day); the inspections and the deploy window's done reads keep
   // billedJobs, where any real invoice settles them.
   const finishedBilledJobs = new Set(
@@ -738,7 +738,7 @@ async function buildActionItems(ctx: {
   const clockedInJobIds = new Set(((openTimeR.data ?? []) as any[]).map((e) => e.job_id).filter(Boolean) as string[]);
 
   // ── IS THIS ESTIMATE SETTLED? ONE RULE (quoteSettled, 2026-11-04). The three estimate rows (Won,
-  // Needs A Day; No Answer Yet; Estimates Not Sent) and the unsigned contract each ask it, never an
+  // Needs a Day; No Answer Yet; Estimates Not Sent) and the unsigned contract each ask it, never an
   // inline billed-jobs check of their own. What it reads: the job (joined on each read), the job's
   // live invoices (billedRows, with their day and kind), the invoices that NAME the estimate
   // (invoices.quote_id) and the estimate's revisions (0391 revises_quote_id), the last two read here
@@ -795,7 +795,7 @@ async function buildActionItems(ctx: {
   };
 
   // ── THE WIN: an accepted estimate whose job still has no date. Urgency 2, money stream → the top,
-  // so a "yes" can never again slip by unseen. Its Pick A Day puts the day on the JOB.
+  // so a "yes" can never again slip by unseen. Its Pick a Day puts the day on the JOB.
   const wonJobIds = new Set<string>();
   {
     for (const a of (acceptedR.data ?? []) as any[]) {
@@ -821,7 +821,7 @@ async function buildActionItems(ctx: {
         urgency: 2,
         done: false,
         href: a.job_id ? `/jobs/${a.job_id}` : `/quotes/${a.id}`,
-        // Pick A Day only when there is a job to put the day on; ⋯ Already Invoiced and Lost always
+        // Pick a Day only when there is a job to put the day on; ⋯ Already Invoiced and Lost always
         // (an estimate with no job is the one no rule can settle: a person says which it is).
         affordances: a.job_id ? ["schedule", ...AFFORDANCES.quote_accepted] : AFFORDANCES.quote_accepted,
         targetId: a.job_id ?? null,
@@ -831,10 +831,10 @@ async function buildActionItems(ctx: {
     }
     // THE PILE COUNTS THE WINS READ HERE, never "N+" off the read's exact count: that count is every
     // accepted estimate the company ever had (accepted is a final state), so past 50 of them one new
-    // win read "Won, Needs A Day · 1+", a pile of one opening a list of old, long-scheduled wins. A
+    // win read "Won, Needs a Day · 1+", a pile of one opening a list of old, long-scheduled wins. A
     // win past the newest 50 whose job still has no day isn't lost: accepting materializes its job,
     // and jobsNeedingADay skips only the wins read here (wonJobIds), so that job is on Needs You as
-    // Jobs Needing A Day.
+    // Jobs Needing a Day.
     counts.won_needs_a_day = {};
   }
 
@@ -900,7 +900,7 @@ async function buildActionItems(ctx: {
     const row = waitingRow({
       id: q.id,
       kind: "inquiry",
-      title: leadsOn ? name : `Request From ${name}`,
+      title: leadsOn ? name : `Request from ${name}`,
       why: q.status === "new" ? "Snoozed" : "Follow Up",
       backOn: q.next_follow_up_at,
       href: `/leads?focus=${q.id}`,
@@ -962,8 +962,8 @@ async function buildActionItems(ctx: {
         id: o.id,
         kind: "organize",
         paper: bank ? "bank" : tray ? "tray" : "organize",
-        chip: bank ? "Bank Download" : tray ? "Paper To Sort" : note ? "Note To Review" : "To File",
-        title: bank ? "Bank Download To Sort" : String(o.title ?? "").trim() || (ORGANIZE_LABEL[o.kind] ?? "To file"),
+        chip: bank ? "Bank Download" : tray ? "Paper to Sort" : note ? "Note to Review" : "To File",
+        title: bank ? "Bank Download to Sort" : String(o.title ?? "").trim() || (ORGANIZE_LABEL[o.kind] ?? "To file"),
         subtitle: null,
         who: null,
         when: null,
@@ -1130,7 +1130,7 @@ async function buildActionItems(ctx: {
   // ── THE SECOND WAVE: every read that needs a first-wave answer, side by side. ──
   const worked = rollupWorkedJobs((recentTimeR.data ?? []) as any[], todayStr);
   const workedIds = isStaff ? [...worked.keys()].slice(0, 30) : [];
-  // Jobs Needing A Day, before the visits read: the ones nothing else puts a day ahead of.
+  // Jobs Needing a Day, before the visits read: the ones nothing else puts a day ahead of.
   const needDayPre = jobsNeedingADay({
     jobs: (jobsR.data ?? []) as NeedDayJob[],
     todayStr,
@@ -1220,7 +1220,7 @@ async function buildActionItems(ctx: {
     // (costedJobIds, the one rule the 6 PM push uses too).
     workedIds.length ? supabase.from("invoices").select(COSTED_INVOICE_COLUMNS).in("job_id", workedIds).limit(200) : empty,
     workedIds.length ? supabase.from("jobs").select("id, job_number, name, status, scheduled_start").in("id", workedIds) : empty,
-    // Receipts Not On A Bill: the ties that account for those papers (a bill, a supplier's
+    // Receipts Not on a Bill: the ties that account for those papers (a bill, a supplier's
     // document, petty cash), by document or by file, in chunks side by side.
     receiptDocs.length
       ? Promise.all(
@@ -1398,7 +1398,7 @@ async function buildActionItems(ctx: {
   // that fixes it; nothing infers hours, dollars, or clock-out times.
 
   // 1) STRAY TIME — an open clock from a past day, one row per clock. A past-day close with no job
-  // is NOT a row here: it rides in the Hours On No Job rollup below, which never drops it.
+  // is NOT a row here: it rides in the Hours on No Job rollup below, which never drops it.
   const strayFindings = detectStrayTime(
     [...((openTimeR.data ?? []) as any[]), ...((recentTimeR.data ?? []) as any[])],
     todayStr,
@@ -1547,7 +1547,7 @@ async function buildActionItems(ctx: {
     items.push({
       id: "needday-unread",
       kind: "job_to_schedule",
-      title: "Jobs Needing A Day · Couldn't Check",
+      title: "Jobs Needing a Day · Couldn't Check",
       subtitle: "Couldn't read which jobs have nothing ahead of them just now. Open Schedule to see them.",
       who: null,
       when: null,
@@ -1672,7 +1672,7 @@ async function buildActionItems(ctx: {
   }
 
   // 6) RECEIPTS NOT ON A BILL — a receipt or bill on a job that nothing accounts for (a crew photo
-  // from Snap Or Note, a snap whose read failed), by lib/job-photos' own rule. A failed read claims
+  // from Snap or Note, a snap whose read failed), by lib/job-photos' own rule. A failed read claims
   // nothing: one "Couldn't Check" line instead of a row per paper.
   if (isStaff && receiptsR) {
     const loose = receiptsR.error || tiesR.error ? null : receiptsNotOnABill(receiptDocs, (tiesR.data ?? []) as PaperTie[]);
@@ -1701,7 +1701,7 @@ async function buildActionItems(ctx: {
           since: dayOf(d.created_at),
           urgency: 1,
           done: false,
-          // The job's Costs tab, where Record As Cost is.
+          // The job's Costs tab, where Record as Cost is.
           href: `/jobs/${d.job_id}?tab=costs`,
           affordances: AFFORDANCES.receipt_unbilled,
         });
@@ -1723,7 +1723,7 @@ async function buildActionItems(ctx: {
       items.push({
         id: `stockshort-${r.id}`, // synthetic (kind-prefixed): open-only, settled on Shop Stock
         kind: "stock_short",
-        title: `${q} ${it?.unit ?? ""} Of ${it?.name ?? "An Item"} Taken Past Stock`.replace(/\s+/g, " "),
+        title: `${q} ${it?.unit ?? ""} of ${it?.name ?? "An Item"} Taken Past Stock`.replace(/\s+/g, " "),
         // Counting can't settle a short (a count has no roll; settle_short walks rolls): name the two
         // ways that work (SHORT_FIX, the bell's own words).
         subtitle: `${who} took them for ${jb ? jobWords(jb) : "a job"} on ${formatDateShort(r.created_at, tz || undefined)}. ${SHORT_FIX}`,
@@ -1759,7 +1759,7 @@ async function buildActionItems(ctx: {
       id: `credit-${c.invoiceId}`,
       kind: "supplier_paper",
       title: `${c.supplier} ${c.invoiceNumber} · ${formatCurrency(c.total)}`,
-      why: "Waiting On A Credit",
+      why: "Waiting on a Credit",
       backOn: c.waitingCredit.back,
       href: "/bills#needs-you",
     });

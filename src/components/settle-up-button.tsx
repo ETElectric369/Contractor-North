@@ -38,7 +38,7 @@ import {
  * guard, ensureInvoice, settleUp at the doorstep, venmoQrFor writing nothing). Top to bottom:
  *
  *   1. the card, only where the company takes cards: Tap to Pay FIRST - primary, full width, on the
- *      first paint, never greyed (Apple 5.1/5.2/5.3) - then Show Card QR / Text The Pay Link, which
+ *      first paint, never greyed (Apple 5.1/5.2/5.3) - then Show Card QR / Text the Pay Link, which
  *      watches until the webhook writes the payment;
  *   2. "Or They Paid Another Way": the amount, the company's non-card methods, Date Paid and Note,
  *      saved with Record It (Venmo keeps Show Venmo QR);
@@ -175,7 +175,7 @@ export function customerReceiptWords(
   };
 }
 
-/** The pay-link text (Text The Pay Link): "Invoice 1042 — $150.00. Pay by card here: …". */
+/** The pay-link text (Text the Pay Link): "Invoice 1042 — $150.00. Pay by card here: …". */
 export function customerPayLinkText(invoiceNumber: string | null | undefined, amount: number, url: string): string {
   return fillText(customer_t("su_payLinkSms"), { inv: invoiceNumber ? fillText(customer_t("su_invoiceDash"), { n: invoiceNumber }) : "", amount: money(amount), url });
 }
@@ -311,7 +311,7 @@ function busyLine(label: string, p: TapProgress | null, t: Words): { title: stri
  *                         reads "balance $0.00" and lands on the receipt. A customer with no
  *                         number is said so in one line, and the door becomes Text From This
  *                         Phone.
- *   Text From This Phone  this phone's Messages, body = one line (business, invoice, amount,
+ *   Text from This Phone  this phone's Messages, body = one line (business, invoice, amount,
  *                         outcome, date) + the link. Same honesty as Text the Link: it goes from
  *                         THIS number.
  *   Email Receipt         emailInvoice — the business's own email service sends the invoice.
@@ -324,7 +324,7 @@ function busyLine(label: string, p: TapProgress | null, t: Words): { title: stri
  *                         On a declined tap that same QR would open Stripe Checkout — a pay
  *                         door, not a receipt — so it is not offered.
  *
- * DECLINED gets Text From This Phone and Share, NOT the service doors: textInvoice and
+ * DECLINED gets Text from This Phone and Share, NOT the service doors: textInvoice and
  * emailInvoice (deliverInvoiceEmail under it) take an invoice id and nothing else — no message,
  * no note — so through them the customer would get "Invoice 1042, balance $150.00. View/pay:",
  * a bill with no word that their card was refused and nothing charged. Only the two doors that
@@ -347,7 +347,7 @@ function ReceiptRow({
   qr?: string;
   toast: (m: string, k?: "success" | "error" | "info") => void;
   /** Can the business text (smsReadiness(org).ready, from the page)? false: the row leads with
-   *  Text From This Phone and never offers Text Receipt, which could only refuse. */
+   *  Text from This Phone and never offers Text Receipt, which could only refuse. */
   textReady?: boolean;
 }) {
   const lang = useLang();
@@ -1348,7 +1348,7 @@ function useCardDoor(
       <div className="flex items-center gap-2 text-xs text-slate-400">
         <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("su_waitingForPayment")}
       </div>
-      {/* Text The Pay Link opens THIS phone's messages, not the business line — same honesty the
+      {/* Text the Pay Link opens THIS phone's messages, not the business line — same honesty the
           lead-texting doors carry. */}
       <p className="max-w-64 text-center text-[11px] text-slate-400">
         {t("su_payLinkNote")}
@@ -1568,7 +1568,7 @@ function useOtherWay(
         </div>
         {/* THE OPTIONAL QR, in the body at full width: a 44px target for a customer standing
             right there. Away from an invoice it mints and sends the bill first (settleUp at the
-            doorstep), so it says so, the way the card panel's Send The Bill & Show Card QR does. */}
+            doorstep), so it says so, the way the card panel's Send the Bill & Show Card QR does. */}
         {key === "venmo" && props.venmoConfigured !== false && (
           <Button type="button" variant="outline" className="w-full" onClick={showVenmoQr} disabled={pending || qrPending}>
             {qrPending ? (

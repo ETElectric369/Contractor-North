@@ -89,7 +89,7 @@ describe("the word lights the kits", () => {
     expect(scopeWord(FREE, {})).toBeNull();
     expect(scopeWord({ needs: [] }, { scope: "x" })).toBeNull();
     expect(scopeTitle("panel swap")).toBe("Panel Swap");
-    expect(offerLabel("deck", 7)).toBe("Add The Deck Tasks (7)");
+    expect(offerLabel("deck", 7)).toBe("Add the Deck Tasks (7)");
   });
   it("the picker groups by scope — the visit's first, Other Kits last — and stays flat when no kit has one", () => {
     const g = groupedKits(KITS, "remodel")!;
@@ -99,7 +99,7 @@ describe("the word lights the kits", () => {
     expect(groupedKits(KITS, null)!.map((x) => x.label)).toEqual(["Deck", "Re-model", "Remodel", "Other Kits"]);
     expect(groupedKits([{ id: "x", name: "X", category: null }], "deck")).toBeNull();
   });
-  it("the category rides the task-kit read and the money-stripped copy, and Remember As A Kit files it", () => {
+  it("the category rides the task-kit read and the money-stripped copy, and Remember as a Kit files it", () => {
     expect(taskKitSelectRungs("category").every((r) => r.includes("category"))).toBe(true);
     // the Inspector's page asks for it through the rung door (the shared column list is unchanged)
     expect(readFileSync("src/app/(app)/appointments/[id]/page.tsx", "utf8")).toContain('.order("name"), "category")');

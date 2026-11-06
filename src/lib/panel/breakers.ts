@@ -7,7 +7,7 @@
  * WHAT COUNTS AS HAVE: only what came on a ticket for this job (breakers_bought_for_job, 0334). The
  * materials list and the shop shelf are SHOWN beside it and never added in: J-011's list still
  * carries "20a twin breaker" x8 unticked, and those are the same eight Q2020s the ticket brought.
- * Counting both would say sixteen. So the list says "On The List, Not Bought Yet" and, when a ticket
+ * Counting both would say sixteen. So the list says "On the List, Not Bought Yet" and, when a ticket
  * already brought as many, says that too; a person ticks the list.
  *
  * AN UNREADABLE LINE counts as zero and is named ("Can't Read This Breaker"), in both views.
@@ -127,7 +127,7 @@ export type Order = {
   short: Shortfall;
   /** "Q220", or null when the family or the type doesn't give one plain part. */
   part: string | null;
-  /** What Add To Materials writes as the line's words: "Q220 2P 20A Breaker". */
+  /** What Add to Materials writes as the line's words: "Q220 2P 20A Breaker". */
   description: string;
   qty: number;
   /** The shelf or the unticked list already has one: said beside the order, never instead of it. */
@@ -200,7 +200,7 @@ export function breakerCard(input: {
   const orders: Order[] = check.short.map((s) => {
     const part = partFor({ poles: s.poles, amps: s.amps, kind: s.kind }, brand);
     const alsoOn = [
-      ...listed.groups.filter((g) => covers(g, s)).map((g) => `On The List, Not Bought Yet: ${qtyWords(g.qty)} x ${groupLabel(g)}`),
+      ...listed.groups.filter((g) => covers(g, s)).map((g) => `On the List, Not Bought Yet: ${qtyWords(g.qty)} x ${groupLabel(g)}`),
       ...shelf.groups.filter((g) => covers(g, s)).map((g) => `In Stock: ${qtyWords(g.qty)} x ${groupLabel(g)}`),
     ];
     return { short: s, part, description: `${part ? `${part} ` : ""}${sizeWords(s.poles, s.amps, s.kind)} Breaker`, qty: s.count, alsoOn };
@@ -291,7 +291,7 @@ const andWords = (xs: string[]) => (xs.length < 2 ? (xs[0] ?? "") : `${xs.slice(
 export type BreakerSay = {
   /** No kept new circuit yet: what to do first. Nothing else is said then. */
   nothing: string | null;
-  /** "Short one 2P 20A (Bath Floor Heat)", and what Add To Materials writes for it: the orders the
+  /** "Short one 2P 20A (Bath Floor Heat)", and what Add to Materials writes for it: the orders the
    *  materials list doesn't already carry. No orders = every one of them is on the list already. */
   short: { text: string; orders: Order[] } | null;
   /** "2 bought breakers not placed yet", and the group Place Them opens first. */
@@ -336,7 +336,7 @@ export function breakerSay(card: BreakerCard, circuits: (Counted & Pick<JobCircu
     return { nothing, short: null, unplaced: null, ok: null, partial: null, notes };
   }
 
-  const onList = (o: Order) => o.alsoOn.some((w) => w.startsWith("On The List"));
+  const onList = (o: Order) => o.alsoOn.some((w) => w.startsWith("On the List"));
   let short: BreakerSay["short"] = null;
   if (card.check.short.length) {
     const items = card.check.short.map((s) => {

@@ -10,7 +10,7 @@ import { SettingsSubnav } from "./settings-subnav";
 import { LangProvider } from "@/components/lang-provider";
 import { SETTINGS_CLUSTER_KEYS, roleLabel, settingsClusterLabel } from "@/lib/settings-words";
 import { dict, translator } from "@/lib/i18n";
-import { esTitleCase } from "../../../../tests/es-function-words";
+import { esTitleCase } from "../../../../tests/title-case-words";
 
 /**
  * THE SETTINGS SIDE-TAB IN THE PERSON'S LANGUAGE (cn-v1139): the group is Settings → Ajustes

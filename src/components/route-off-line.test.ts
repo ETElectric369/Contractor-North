@@ -37,11 +37,11 @@ describe("RouteOffLine", () => {
     expect(html).toContain(">Turn On<");
   });
 
-  it("a PO opened by link with Purchase Orders off, seen by the office: Ask The Owner, no button", () => {
+  it("a PO opened by link with Purchase Orders off, seen by the office: Ask the Owner, no button", () => {
     pathname = "/purchasing/abc123";
     const html = render(off("purchase_orders"), false);
     expect(html).toContain("Purchase Orders");
-    expect(html).toContain("Ask The Owner");
+    expect(html).toContain("Ask the Owner");
     expect(html).not.toContain("<button");
   });
 

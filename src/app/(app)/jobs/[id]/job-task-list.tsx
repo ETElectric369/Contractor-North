@@ -289,7 +289,7 @@ function Thumb({ photo, label, onOpen }: { photo: TaskPhoto; label: string; onOp
 
 /**
  * THE ADD LINE: type the words, Add. Photo (after 0358) takes a picture first, files it on the job's
- * Photos tab, then asks "What needs doing?" (Make It A Task). No date, no priority, no person.
+ * Photos tab, then asks "What needs doing?" (Make It a Task). No date, no priority, no person.
  */
 function AddTaskLine({ jobId, orgId, photoDoor, bordered }: { jobId: string; orgId: string; photoDoor: boolean; bordered: boolean }) {
   const router = useRouter();

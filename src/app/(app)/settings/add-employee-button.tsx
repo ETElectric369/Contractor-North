@@ -75,7 +75,7 @@ export function AddEmployeeButton({ configured }: { configured: boolean }) {
       <Modal
         open={open}
         onClose={reset}
-        title="Add An Employee (No Email Invite)"
+        title="Add an Employee (No Email Invite)"
         footer={
           done ? undefined : (
             <ModalActions

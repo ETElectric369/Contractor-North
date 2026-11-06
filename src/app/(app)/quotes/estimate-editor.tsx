@@ -143,7 +143,7 @@ export interface EditorCatalog {
   /** The org's TASK kits (0386) with their lines: a line built from one says which, and its units
    *  box re-derives the kit for another count (W4). */
   taskKits: TaskKit[];
-  /** The company's Kits switch (0352): off hides Remember As A Kit and the kit chips. */
+  /** The company's Kits switch (0352): off hides Remember as a Kit and the kit chips. */
   kitsOn: boolean;
   taxRates: TaxRateLite[];
   /** The org's active people (profile_pay: id, name, bill rate), for a labor row's Who select. */
@@ -163,7 +163,7 @@ export interface EditorCatalog {
   measured?: { sqft?: number | null; linearFt?: number | null; byKey?: Record<string, number | null> | null };
   /** The linked lead's own plan PDFs (intake uploads) — one-tap take-off, no re-upload — and whose. */
   leadPlans?: { leadId: string; files: { path: string; name: string }[] };
-  /** The visit's scope word, for Remember As A Kit's "under" box (null = no visit, or no scope). */
+  /** The visit's scope word, for Remember as a Kit's "under" box (null = no visit, or no scope). */
   scopeWord?: string | null;
   /** Texting is set up (EmailButton's Text door). */
   textReady: boolean;
@@ -1370,7 +1370,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                                         }}
                                         priceItems={priceItems}
                                         pricing={pricing}
-                                        // The line Add A Task just made takes the cursor, once.
+                                        // The line Add a Task just made takes the cursor, once.
                                         autoFocus={focusKey === it.key}
                                         onFocus={() => {
                                           if (focusKey === it.key) setFocusKey(null);

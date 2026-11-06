@@ -1,8 +1,8 @@
 /**
  * PAY CED BY THE TENTH, AND WHAT IT SAVES (Erik, 2026-09-26: "go for all 3").
  *
- * "Pay CED $5,174.62 By Oct 10 · Saves $35.50 on 7 invoices." CED prints a prompt-pay discount on
- * every invoice and /bills already works it out ("Discount Still On The Table"). This brings that
+ * "Pay CED $5,174.62 by Oct 10 · Saves $35.50 on 7 invoices." CED prints a prompt-pay discount on
+ * every invoice and /bills already works it out ("Discount Still on the Table"). This brings that
  * one decision to My Day while the discount is still alive: the same figures, read by the same
  * functions, so the line on My Day and the card on /bills can never name two different numbers.
  *
@@ -11,7 +11,7 @@
  *   payBy   claimableDiscounts(documents).nextDeadline: the soonest live discount deadline.
  *   saves   claimableDiscounts(documents).dueOnNext: ONLY the discount that rides on payBy, with a
  *           discount on an invoice a credit memo reversed left out, exactly as /bills leaves it.
- *           Never the whole "Discount Still On The Table" against the soonest date: an October
+ *           Never the whole "Discount Still on the Table" against the soonest date: an October
  *           invoice's Nov 10 discount is not lost on Oct 10, and /bills refuses to say it is
  *           (discountDeadlineSentence). That later slice gets its own line when its turn comes.
  *
@@ -61,7 +61,7 @@
  * account, and gone on its own: the BADGE INVARIANT (action-items/types.ts).
  *
  * Only for an account ON ACCOUNT under model B (the supplier's own documents): the /bills
- * discount card only offers Record A Payment there, and a line whose door opens nothing is a dead
+ * discount card only offers Record a Payment there, and a line whose door opens nothing is a dead
  * door. Pure; the My Day loader (supplier-papers.ts) hands it rows it already read.
  */
 

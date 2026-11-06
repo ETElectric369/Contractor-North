@@ -203,7 +203,7 @@ describe("snapContext: who is asking, and a tech's jobs as labels only", () => {
       name: "Sam",
     };
     const lost = await snapContext();
-    expect(lost).toMatchObject({ ok: true, staff: false, jobs: [], jobsError: "Couldn't load the jobs just now. Check your signal and open Snap Or Note again." });
+    expect(lost).toMatchObject({ ok: true, staff: false, jobs: [], jobsError: "Couldn't load the jobs just now. Check your signal and open Snap or Note again." });
   });
 
   it("no seat, no door: the refusal is said", async () => {

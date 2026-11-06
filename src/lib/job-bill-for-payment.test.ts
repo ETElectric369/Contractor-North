@@ -45,19 +45,19 @@ describe("Finish Job names the work that is not on a bill (Tess J-002)", () => {
 
   it("before the press", () => {
     expect(finishWouldLeaveOffBill(tess)).toBe(
-      "Not billed yet: 19.5 h ($2,437.50). Finishing marks the job complete and does not bill it. To bill it first: the job's New Invoice → This Is The Last Bill.",
+      "Not billed yet: 19.5 h ($2,437.50). Finishing marks the job complete and does not bill it. To bill it first: the job's New Invoice → This Is the Last Bill.",
     );
   });
 
   it("after the press", () => {
     expect(finishedWithWorkOffBill(tess)).toBe(
-      "19.5 h ($2,437.50) of work on this job is not on a bill yet. Finishing didn't bill it - bill it with the job's New Invoice → This Is The Last Bill.",
+      "19.5 h ($2,437.50) of work on this job is not on a bill yet. Finishing didn't bill it - bill it with the job's New Invoice → This Is the Last Bill.",
     );
   });
 
   it("the words name the job's New Invoice and the last-bill choice, never a tab or the Progress Payment button that is gone (W1-24)", () => {
     for (const s of [finishWouldLeaveOffBill(tess), finishedWithWorkOffBill(tess)]) {
-      expect(s).toContain("the job's New Invoice → This Is The Last Bill");
+      expect(s).toContain("the job's New Invoice → This Is the Last Bill");
       expect(s).not.toMatch(/Progress Payment|Invoices tab|Actual T&M/);
     }
   });

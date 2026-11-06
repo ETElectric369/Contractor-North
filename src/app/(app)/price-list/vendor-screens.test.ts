@@ -80,7 +80,7 @@ describe("clicking an item opens its vendors", () => {
 
   it("marks one Default and offers Make Default on the other, plus the item's own price back", () => {
     expect(count(html, "Make Default")).toBe(1);
-    expect(html).toContain("Use The Item’s Price");
+    expect(html).toContain("Use the Item’s Price");
   });
 
   it("Add Vendor is right there, Archive is on every live vendor, and the archived one is behind Show", () => {
@@ -96,7 +96,7 @@ describe("clicking an item opens its vendors", () => {
    * matching letters.
    */
   it("Add Vendor's Vendor box is a select that lists the vendors, with Someone New (Type It) at the end", () => {
-    expect(html).toContain("Pick One Of Your Vendors");
+    expect(html).toContain("Pick One of Your Vendors");
     expect(html).toContain('<option value="Andersen">Andersen</option>');
     expect(html).toContain('<option value="Pella">Pella</option>');
     // Milgard is already on the item (no label), so it is not offered twice.

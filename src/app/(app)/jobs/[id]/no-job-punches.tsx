@@ -14,7 +14,7 @@ import { putShiftOnJob, takeShiftOffJob } from "../../timeclock/actions";
  * day in again. Brian's own 9/11 punch had been in the book all along, 10:31 AM to 6:57 PM on no
  * job, and this tab never showed it. Now it lists the shifts on no job that this job's crew
  * (assigned, or with hours on it) clocked from the day before its first day to two days after its
- * last, each with Put This On <job>: the same door and guards as Add Entry's (office only; a shift
+ * last, each with Put This on <job>: the same door and guards as Add Entry's (office only; a shift
  * with no job and no invoice billing it; only the job changes, the clock times stay; Undo takes it
  * back off). Nothing listed, nothing shown.
  *
@@ -38,7 +38,7 @@ export type NearPunches = { punches: NearPunch[]; capped: boolean };
 /** How many show before Show All. */
 export const NEAR_SHOWN = 5;
 
-/** Where the rest are: Timecards' Hours On No Job (the same place Needs You's line opens). */
+/** Where the rest are: Timecards' Hours on No Job (the same place Needs You's line opens). */
 export const NEAR_REST_HREF = "/timecards#no-job";
 
 const dayOf = (iso: string, tz: string) =>
@@ -56,7 +56,7 @@ export function nearPunchLine(p: NearPunch, tz: string): string {
 function RestOnTimecards() {
   return (
     <Link href={NEAR_REST_HREF} className="inline-flex min-h-[44px] items-center font-medium text-amber-900 underline">
-      Hours On No Job, On Timecards
+      Hours on No Job, on Timecards
     </Link>
   );
 }
@@ -108,7 +108,7 @@ export function NoJobPunchesList({
   const shown = showAll ? punches : punches.slice(0, NEAR_SHOWN);
   return (
     <div className="border-b border-amber-200 bg-amber-50/70 px-5 py-3 text-sm" data-testid="no-job-punches">
-      <p className="font-medium text-amber-900">Punches With No Job</p>
+      <p className="font-medium text-amber-900">Punches with No Job</p>
       <p className="text-xs text-amber-800">
         This job&rsquo;s crew clocked these around its days with no job on them. If one is this work, put it here instead of
         adding the hours again.
@@ -127,7 +127,7 @@ export function NoJobPunchesList({
               onClick={() => onPut(p)}
               disabled={!!busyId}
             >
-              {busyId === p.id ? "Putting…" : `Put This On ${jobLabel}`}
+              {busyId === p.id ? "Putting…" : `Put This on ${jobLabel}`}
             </Button>
             {errors[p.id] && (
               <p className="w-full text-xs text-red-600" role="alert">
@@ -151,7 +151,7 @@ export function NoJobPunchesList({
   );
 }
 
-/** The list, wired to Put This On <job> (putShiftOnJob) with its Undo. */
+/** The list, wired to Put This on <job> (putShiftOnJob) with its Undo. */
 export function NoJobPunches({
   jobId,
   jobLabel,

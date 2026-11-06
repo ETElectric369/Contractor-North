@@ -242,7 +242,7 @@ export type SheetWhere = { moment: WhichJobMoment; from?: MoveFrom };
  * At the ask the punch really is on no job, and saying so is the truth. On a MOVE it is on the job
  * the app chose, so "still on no job" is the clock telling a lie about where the hours are: the man
  * reads it, stops worrying, and 2h19m keeps billing the wrong customer. Worse, a punch that already
- * carries a job is not in Hours On No Job, so "the office will put it on its job" promises a prompt
+ * carries a job is not in Hours on No Job, so "the office will put it on its job" promises a prompt
  * the office will never see.
  */
 export function punchStillOn(where: SheetWhere, lang?: Lang | null): string {
@@ -251,7 +251,7 @@ export function punchStillOn(where: SheetWhere, lang?: Lang | null): string {
 }
 
 /** The sheet's line when its OWN job list didn't load. Same law: at the ask the office picks it up
- *  from Hours On No Job; on a move the punch has a job, so the line says where it still is and names
+ *  from Hours on No Job; on a move the punch has a job, so the line says where it still is and names
  *  the door that can still move it. */
 export function jobsDidntLoadSentence(where: SheetWhere, lang?: Lang | null): string {
   const t = translator(lang);

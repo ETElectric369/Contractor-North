@@ -270,7 +270,7 @@ describe("the still-owed rule is written in exactly one place", () => {
   /**
    * ── ONE NUMBER FOR ONE PILE: THE DOOR AND THE SECTION IT LANDS ON ────────────────────────────
    *
-   * /bills' Suppliers card draws "$X On N Bills With No Supplier Account · File It" out of
+   * /bills' Suppliers card draws "$X On N Bills with No Supplier Account · File It" out of
    * `notOnAnAccount`, and links to the section on /reconcile that answers it. That section used to
    * count its own rows: "1 Bill" at the door, thirty-one rows underneath. So the section is HANDED
    * that same object and may not total the pile itself.

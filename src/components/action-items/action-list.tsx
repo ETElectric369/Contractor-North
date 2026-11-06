@@ -71,7 +71,7 @@ type Run = (item: ActionItem, verb: Affordance, payload?: DispatchPayload, opts?
 type RunOpts = {
   /** A pile's child: acting on it drops it (the pile counts down in place), it never sinks. */
   child?: boolean;
-  /** Sent from a sheet (⋯, a Snooze or Still Waiting picker, Assign, a confirm, Pick A Day): the
+  /** Sent from a sheet (⋯, a Snooze or Still Waiting picker, Assign, a confirm, Pick a Day): the
    *  sheet lives inside its row, and it says the refusal. */
   sheet?: boolean;
 };
@@ -106,7 +106,7 @@ export function keepInFlight(hidden: Set<string>, inFlight: Set<string>): Set<st
  * IT (the build sorts once: money, leads, today, other; then urgency; then oldest first), only
  * sinking the rows ticked done here.
  *
- * ONE NAMED BUTTON PER ROW, AND ⋯ (Wave 1, W1-13). Each row says its verb ("Send It", "Pick A Day",
+ * ONE NAMED BUTTON PER ROW, AND ⋯ (Wave 1, W1-13). Each row says its verb ("Send It", "Pick a Day",
  * "Close Out") and keeps only what is real for it behind lane 1a's ⋯: a Snooze that picks a day,
  * Assign, and its honest ending behind a confirm. The row table is row-buttons.ts, so this list and
  * anything else that names a row's doors read one table. Tapping the row opens it.

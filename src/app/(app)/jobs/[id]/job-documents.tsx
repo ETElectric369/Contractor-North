@@ -17,8 +17,8 @@ import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
 import { deleteDocument, linkReceiptToBill, updateDocument } from "../actions";
 
-/** A Receipt or a Bill: what Record As Cost reads into a job cost (lib/job-photos, the same rule
- *  that decides which papers can be "Not On A Bill Yet"). */
+/** A Receipt or a Bill: what Record as Cost reads into a job cost (lib/job-photos, the same rule
+ *  that decides which papers can be "Not on a Bill Yet"). */
 const COSTABLE = isCostableCategory;
 
 /** The pencil's choices: what a filed paper can be re-filed as. */
@@ -64,14 +64,14 @@ const NOTE_COLOR: Record<ReceiptTone, string> = {
 
 /**
  * THE JOB'S FILED LIST (plans, permits, every receipt). No uploader of its own (W1-23: one way to
- * add a cost): papers come in at the top of the Costs tab (Snap The Bill, or its ⋯ Upload), which
+ * add a cost): papers come in at the top of the Costs tab (Snap the Bill, or its ⋯ Upload), which
  * run THE receipt pipeline (lib/receipt-capture) and file every paper here, read or not. This card
- * says what each paper became: which bill it made, or that it is on no bill yet, with Record As Cost
+ * says what each paper became: which bill it made, or that it is on no bill yet, with Record as Cost
  * as the retry, the pencil (re-file it as a Plan, a Permit, a Photo) and the trash.
  *
  * PLANS LIVE ON THE CUSTOMER PAGE TAB (2026-09-25). A line always links to that tab's Add Plans Or
  * Drawings (?plans=add) while the office has it (the Customer Portal switch on); with the portal off,
- * the empty line says a plan goes in through ⋯ → File A Paper (Not A Cost), which files it as a Plan
+ * the empty line says a plan goes in through ⋯ → File a Paper (Not a Cost), which files it as a Plan
  * and never reads it as a receipt. Office only: the Customer Page tab is not a tech's, so a tech is
  * never pointed at it.
  *
@@ -79,13 +79,13 @@ const NOTE_COLOR: Record<ReceiptTone, string> = {
  * with the job's papers; what the Photos tab holds (`photoTabIds`) folds under them, still here for
  * the pencil (a receipt snapped as a Photo is re-filed from this list) and the trash. A paper that
  * made a bill on this job says which (`billOf`); a receipt or bill on no bill at all (`looseIds`)
- * says so beside its Record As Cost, and the fold's line counts those and starts open while there
+ * says so beside its Record as Cost, and the fold's line counts those and starts open while there
  * are any, so an unrecorded receipt is never folded out of sight.
  *
  * A LOOSE RECEIPT CAN SAY "IT IS THAT BILL" (d1ff7c5a). A bill typed by hand with the receipt
  * uploaded separately, or a paper the reader answered "already on the books" for, left the receipt
  * "Not on a bill yet" beside the very bill it made, and the only doors were another paid read or a
- * second bill. Every such row now carries Already On A Bill: <the job's live bills> + Tie It, and
+ * second bill. Every such row now carries Already on a Bill: <the job's live bills> + Tie It, and
  * the reader's "already on the books" answer carries Same Purchase: It's That Bill when that bill is
  * on this job. Both write the one missing tie (linkReceiptToBill), and a refusal is said on the row.
  */
@@ -107,7 +107,7 @@ export function JobDocuments({
   jobId: string;
   docs: Doc[];
   /** 0326: which papers are on the customer's page (null before 0326, or for a tech: no control).
-   *  A plan, permit or other job paper gets Show On Portal, which opens the Customer Page tab's
+   *  A plan, permit or other job paper gets Show on Portal, which opens the Customer Page tab's
    *  sheet for it; a receipt, bill or invoice never does. */
   portalPapers?: Record<string, "shown" | "replaced"> | null;
   /** The viewer is office staff and the Customer Portal is on, so the Customer Page tab (and its
@@ -120,13 +120,13 @@ export function JobDocuments({
   /** Document id → the bill on this job it made, in words ("the CED bill #8802-1106969"). */
   billOf?: Record<string, string> | null;
   /** Receipts and bills tied to no bill at all (never an Invoice: nothing reads one into a bill, so
-   *  its flag would have no Record As Cost). null = not known (the ties weren't read): nothing is
+   *  its flag would have no Record as Cost). null = not known (the ties weren't read): nothing is
    *  claimed, and Record as Cost stays on every receipt, as before. */
   looseIds?: readonly string[] | null;
   /** Said when the ties couldn't be read (the bills then draw no Receipt door): the fold starts open
    *  so it is seen. */
   tieNote?: string | null;
-  /** The job's live bills, for a loose receipt's Already On A Bill → Tie It (the office only; a
+  /** The job's live bills, for a loose receipt's Already on a Bill → Tie It (the office only; a
    *  tech is handed none, and no loose rows either). Empty or null: no tie door is drawn. */
   bills?: BillChoice[] | null;
 }) {
@@ -153,7 +153,7 @@ export function JobDocuments({
   // Per-document "recorded as a job cost" status, keyed by document id.
   const [billing, setBilling] = useState<string | null>(null);
   const [billMsg, setBillMsg] = useState<Record<string, BillNote>>({});
-  // Which bill a loose receipt's Already On A Bill picker points at, per document (the first
+  // Which bill a loose receipt's Already on a Bill picker points at, per document (the first
   // live bill until a person picks another).
   const [tiePick, setTiePick] = useState<Record<string, string>>({});
   const billChoices = bills ?? [];
@@ -167,7 +167,7 @@ export function JobDocuments({
     });
 
   // Convert an already-filed receipt/bill into a job cost on demand — the retry for anything
-  // the read at Snap The Bill or Upload refused.
+  // the read at Snap the Bill or Upload refused.
   async function recordCost(d: Doc, differentPurchase = false) {
     setBilling(d.id);
     note(d.id, null);

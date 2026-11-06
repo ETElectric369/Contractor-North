@@ -16,7 +16,7 @@ import { STATEMENT_FACTS } from "./statement-facts";
  * merge proposals, the one question the matcher will not answer, the loose spellings and the ticket
  * filed to two jobs — because they are literally derived from each other: what is "loose" is what no
  * proposal and no question already speaks for. The fifth (an import picker) was DELETED, because it
- * was a second copy of Snap Or Note.
+ * was a second copy of Snap or Note.
  *
  * A move like that is exactly how a door the office uses goes missing without anybody noticing. So
  * this renders THE PAGE ITSELF — the server component, with a fake database answering in live shapes
@@ -206,12 +206,12 @@ const count = countDoors;
  * "exactly one home" means for a door that repeats per row.
  */
 const HOMES: { door: string | RegExp; was: string; home: string; times?: number }[] = [
-  { door: /^Accept And (File Them There|Make The Account)$/, was: "/bills More: Supplier Names That Look Like One Account", home: "supplier-names" },
-  { door: "Not The Same", was: "/bills More: Supplier Names That Look Like One Account", home: "supplier-names" },
-  { door: "Join Them Onto One Account", was: "/bills More: Same Supplier, Or Two?", home: "same-supplier-or-two" },
-  { door: "Keep Them Separate", was: "/bills More: Same Supplier, Or Two?", home: "same-supplier-or-two" },
+  { door: /^Accept and (File Them There|Make the Account)$/, was: "/bills More: Supplier Names That Look Like One Account", home: "supplier-names" },
+  { door: "Not the Same", was: "/bills More: Supplier Names That Look Like One Account", home: "supplier-names" },
+  { door: "Join Them onto One Account", was: "/bills More: Same Supplier, or Two?", home: "same-supplier-or-two" },
+  { door: "Keep Them Separate", was: "/bills More: Same Supplier, or Two?", home: "same-supplier-or-two" },
   { door: "Give It Its Own Account", was: "/bills More: Supplier Names Not On An Account Yet", home: "not-on-an-account" },
-  { door: /^Keep It On /, was: "/bills More: The Same Ticket On Two Jobs", home: "same-ticket-two-jobs", times: 2 },
+  { door: /^Keep It on /, was: "/bills More: The Same Ticket on Two Jobs", home: "same-ticket-two-jobs", times: 2 },
 ];
 
 describe("the doors that moved off Bills each have exactly one home here", () => {
@@ -236,7 +236,7 @@ describe("the doors that moved off Bills each have exactly one home here", () =>
    * that controls a system rather than one that fills in dots.
    */
   it("carries no paper-intake door of its own", () => {
-    for (const gone of ["Choose Supplier PDFs", "Snap Or Note", "Add By Hand", "Paste Text Instead", "Import Documents"]) {
+    for (const gone of ["Choose Supplier PDFs", "Snap or Note", "Add by Hand", "Paste Text Instead", "Import Documents"]) {
       expect(count(doors(html), gone), gone).toBe(0);
     }
   });
@@ -261,7 +261,7 @@ describe("the page reads; it does not re-rule", () => {
     // TEXT TO VISUAL: two bars, scaled against the bigger pile, not two paragraphs.
     expect((gap.match(/rounded-full/g) ?? []).length).toBeGreaterThanOrEqual(4);
     // Its one door is a LINK to the screen that owns those figures. No form, no button.
-    expect(count(doors(gap), /^Open Northside Wholesale Supply On Bills$/)).toBe(1);
+    expect(count(doors(gap), /^Open Northside Wholesale Supply on Bills$/)).toBe(1);
     expect(gap).toContain('href="/bills#supplier-invoices-acct-north"');
     expect(gap).not.toContain("<button");
     expect(gap).not.toContain("<form");
@@ -281,14 +281,14 @@ describe("the page reads; it does not re-rule", () => {
    * of the line on Money: "this should be in reconcile too i imagine"), and it moved off /analytics
    * rather than being copied: one door. It DOES carry the Apply, since 2026-10-03: answering a statement
    * IS the reconciliation, and this page still owns no record — every write goes through the server
-   * action the card always called, and the same card is drawn in the Organize tray and on Snap Or Note's
+   * action the card always called, and the same card is drawn in the Organize tray and on Snap or Note's
    * own sheet, so no screen is the only door to it. (This docblock used to say the opposite, which is the
    * sentence a maintainer would have cited to move the cards back.) With nothing waiting there is no
    * Apply on the page, because there is nothing to apply.
    */
   it("takes a statement in, answers it here, and shows no Apply while nothing is waiting", () => {
-    expect(count(doors(html), "Drop A Bank Or Supplier Statement")).toBe(1);
-    expect(text(html)).toContain("Bring In A Statement");
+    expect(count(doors(html), "Drop a Bank or Supplier Statement")).toBe(1);
+    expect(text(html)).toContain("Bring In a Statement");
     // ANSWERED WHERE IT IS DROPPED SINCE 2026-10-03. Erik: "so it still doesnt make sense to me that
     // all this reconcile stuff is on the bills page." This used to say "answered on its own card under
     // Needs You on Bills", and sending him to another page to finish what he had just started is the
@@ -369,7 +369,7 @@ describe("the page reads; it does not re-rule", () => {
       expect(card, moved).not.toContain(moved);
     expect(STATEMENT_FACTS.join(" ")).toContain("Every line either matches a paper you already have or asks you what it was for, and nothing is written until you press Apply.");
     // THE ICON IS A 44px TARGET, KEYBOARD REACHABLE, AND HAS A NAME A SCREEN READER CAN SAY.
-    const icon = /<button[^>]*aria-label="How A Statement Is Read"[^>]*>/.exec(sectionOf(html, "bring-in-a-statement"))?.[0];
+    const icon = /<button[^>]*aria-label="How a Statement Is Read"[^>]*>/.exec(sectionOf(html, "bring-in-a-statement"))?.[0];
     expect(icon, "the info icon").toBeTruthy();
     expect(icon).toMatch(/\bh-11\b/);
     expect(icon).toMatch(/\bw-11\b/);
@@ -419,10 +419,10 @@ describe("the page reads; it does not re-rule", () => {
  * buttons: it is a safety test, and dropping it in a move would have been the quiet kind of loss.
  */
 describe("a one-tap write with no undo says so on screen", () => {
-  it("Not The Same and Keep Them Separate each carry their warning outside the Why? fold", () => {
+  it("Not the Same and Keep Them Separate each carry their warning outside the Why? fold", () => {
     const names = section("supplier-names");
     const maybe = section("same-supplier-or-two");
-    expect(text(names)).toContain("Not The Same Can't Be Undone Here");
+    expect(text(names)).toContain("Not the Same Can't Be Undone Here");
     expect(text(maybe)).toContain("Keeping Them Separate Can't Be Undone Here");
     for (const fold of html.match(/<div class="mb-2 space-y-1 leading-relaxed">[\s\S]*?<\/div>/g) ?? []) {
       expect(fold).not.toContain("Undone Here");
@@ -477,11 +477,11 @@ describe("who may bring a bank download in", () => {
     CURRENT = asOffice(false);
     try {
       const out = await render();
-      expect(count(doors(out), "Drop A Bank Or Supplier Statement")).toBe(0);
+      expect(count(doors(out), "Drop a Bank or Supplier Statement")).toBe(0);
       expect(out).not.toContain('type="file"');
       // NOT A DEAD END: no control that could only refuse, and the door that IS theirs is named.
       expect(text(out)).toContain("The owner brings in bank downloads");
-      expect(text(out)).toContain("Snap Or Note on Bills");
+      expect(text(out)).toContain("Snap or Note on Bills");
       // And no link off this page: a supplier's open list is answered right here now, whoever brings it in.
       expect(count(doors(out), "Open Bills")).toBe(0);
     } finally {
@@ -493,7 +493,7 @@ describe("who may bring a bank download in", () => {
     CURRENT = asOffice(true);
     try {
       const out = await render();
-      expect(count(doors(out), "Drop A Bank Or Supplier Statement")).toBe(1);
+      expect(count(doors(out), "Drop a Bank or Supplier Statement")).toBe(1);
       expect(text(out)).not.toContain("The owner brings in bank downloads");
     } finally {
       CURRENT = TABLES;
@@ -504,7 +504,7 @@ describe("who may bring a bank download in", () => {
     CURRENT = { ...TABLES, profiles: [{ id: "user-owner", org_id: ORG, role: "office", full_name: "An Office Hand" }], organizations: [] };
     try {
       const out = await render();
-      expect(count(doors(out), "Drop A Bank Or Supplier Statement")).toBe(0);
+      expect(count(doors(out), "Drop a Bank or Supplier Statement")).toBe(0);
     } finally {
       CURRENT = TABLES;
     }
@@ -522,7 +522,7 @@ describe("who may bring a bank download in", () => {
     CURRENT = { ...TABLES, profiles: [{ id: "user-owner", org_id: ORG, role: "owner", full_name: "A N Owner" }], organizations: [] };
     try {
       const out = await render();
-      expect(count(doors(out), "Drop A Bank Or Supplier Statement")).toBe(1);
+      expect(count(doors(out), "Drop a Bank or Supplier Statement")).toBe(1);
       expect(text(out)).not.toContain("The owner brings in bank downloads");
     } finally {
       CURRENT = TABLES;
@@ -552,8 +552,8 @@ describe("a new company sees words, not an error", () => {
       // is nothing on Bills to send him to.)
       // The info icon is a door with no words on it, so it reads as "" here; it is asserted by the name a
       // screen reader says, above. Everything else on a quiet page is the one intake.
-      expect(doors(fresh).filter(Boolean)).toEqual(["Drop A Bank Or Supplier Statement"]);
-      expect(fresh).toContain('aria-label="How A Statement Is Read"');
+      expect(doors(fresh).filter(Boolean)).toEqual(["Drop a Bank or Supplier Statement"]);
+      expect(fresh).toContain('aria-label="How a Statement Is Read"');
       expect(text(fresh)).toContain("drop it in below");
       expect(text(fresh)).not.toContain("Nothing for you to do here");
     } finally {
@@ -571,7 +571,7 @@ describe("a new company sees words, not an error", () => {
     try {
       const fresh = await render();
       expect(text(fresh)).not.toContain("$0.00");
-      expect(text(fresh)).toMatch(/\d+ Things To Sort Out/);
+      expect(text(fresh)).toMatch(/\d+ Things to Sort Out/);
       expect(fresh).not.toContain(`id="${RECONCILE_KINDS["supplier-gap"].anchor}"`);
       // The decisions are still all there.
       expect(countDoors(doors(fresh), "Give It Its Own Account")).toBeGreaterThanOrEqual(1);

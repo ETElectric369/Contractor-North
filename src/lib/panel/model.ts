@@ -534,7 +534,7 @@ export function labelKey(s: string | null | undefined): string {
 }
 
 /**
- * Where a suggestion came from, as its chip reads ("From E-017", "From The Panel Photo", "From The
+ * Where a suggestion came from, as its chip reads ("From E-017", "From the Panel Photo", "From The
  * Plans · E-1", "From Nort"), or null for a circuit a person typed.
  */
 export function sourceWords(c: Pick<JobCircuit, "source" | "source_row">): string | null {
@@ -542,15 +542,15 @@ export function sourceWords(c: Pick<JobCircuit, "source" | "source_row">): strin
   if (r?.quote_number) return `From ${r.quote_number}`;
   switch (c.source) {
     case "estimate":
-      return "From The Estimate";
+      return "From the Estimate";
     case "photo":
-      return "From The Panel Photo";
+      return "From the Panel Photo";
     case "plan":
-      return `From The Plans${r?.sheet ? ` · ${titleWords(r.sheet)}` : ""}`;
+      return `From the Plans${r?.sheet ? ` · ${titleWords(r.sheet)}` : ""}`;
     case "nort":
       return "From Nort";
     case "inspector":
-      return "From The Inspection";
+      return "From the Inspection";
     default:
       return null;
   }
@@ -714,7 +714,7 @@ export function breakerCheck(need: Need, have: HaveItem[], opts: { quadSpaceFree
           get: { part: q.part, outer: q.outer, inner: q.inner },
           covers: { poles: 2, amps: s.amps, kind: null },
           warning: q.trapWords ?? null,
-          words: `Or Swap One ${twin.label ?? `Twin 1P ${q.outer}A`} For A ${q.part}: the same two 1P ${q.outer}A plus the 2P ${q.inner}A, in a tandem space.`,
+          words: `Or Swap One ${twin.label ?? `Twin 1P ${q.outer}A`} for a ${q.part}: the same two 1P ${q.outer}A plus the 2P ${q.inner}A, in a tandem space.`,
           ifSpaceTakesQuad: unknownSpace,
         });
       }

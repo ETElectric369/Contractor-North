@@ -33,7 +33,7 @@ export type DeletingPiece = {
   /** The job the JOINED shift would keep: the first part's. Join Back's own rule (0320). */
   keepsJob: string;
   /**
-   * THE CLOCK ON THIS PIECE IS STILL RUNNING, so Join Back Into One Shift is not on the screen in
+   * THE CLOCK ON THIS PIECE IS STILL RUNNING, so Join Back into One Shift is not on the screen in
    * front of them: a running entry opens the clock-out sheet, which has Delete and no split tools, and
    * join_time_entries refuses a running shift outright ("Clock out first", 0322). Naming that button
    * anyway sent the office to cancel and hunt for a door that was not there. The way back is real —
@@ -50,7 +50,7 @@ export function deleteConfirmWords(piece: DeletingPiece | null): string {
       ? `Its time on ${piece.label} goes with it`
       : `The ${Math.round(piece.hours * 100) / 100} h on ${piece.label} go with it`;
   const back = piece.running
-    ? `To keep those hours, cancel and clock this shift out first — then Join Back Into One Shift is on it, and it makes the day one shift again, all of it on ${piece.keepsJob}.`
-    : `To keep those hours, cancel and tap Join Back Into One Shift — that makes it one shift again, all of it on ${piece.keepsJob}.`;
+    ? `To keep those hours, cancel and clock this shift out first — then Join Back into One Shift is on it, and it makes the day one shift again, all of it on ${piece.keepsJob}.`
+    : `To keep those hours, cancel and tap Join Back into One Shift — that makes it one shift again, all of it on ${piece.keepsJob}.`;
   return ["Delete this part of the split shift?", `${what}, and this can't be undone.`, back].join("\n\n");
 }

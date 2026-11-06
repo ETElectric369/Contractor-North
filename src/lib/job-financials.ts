@@ -98,7 +98,7 @@ export async function jobProgressFinancials(
  * at the price they were billed (billedWorkOnInvoices) and the work no invoice holds yet, priced as
  * the next bill would price it (unbilledWorkForJob). The one reader behind jobProgressFinancials
  * (the Progress Summary on the PDF, /i and the portal, and Nort's job numbers) and the job page's
- * Work To Date, so they cannot disagree. Throws on a failed read, never reports a half.
+ * Work to Date, so they cannot disagree. Throws on a failed read, never reports a half.
  */
 export async function tmWorkToDate(
   supabase: any,

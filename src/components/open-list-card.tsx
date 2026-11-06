@@ -155,7 +155,7 @@ export function OpenListCard({
                 disabled={working}
                 className="h-11"
               >
-                <option value="">Not In This List</option>
+                <option value="">Not in This List</option>
                 {Array.from({ length: n.width }, (_, i) => (
                   <option key={i} value={i}>
                     {columnName(i)}
@@ -167,7 +167,7 @@ export function OpenListCard({
         </div>
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => run("columns", () => pickOpenListColumns(itemId, cols))} disabled={working || !ready}>
-            {busy === "columns" ? <Loader2 className="animate-spin" /> : <Columns3 />} Read It With These Columns
+            {busy === "columns" ? <Loader2 className="animate-spin" /> : <Columns3 />} Read It with These Columns
           </Button>
           {notNow}
         </div>
@@ -182,7 +182,7 @@ export function OpenListCard({
         <p className="text-sm text-slate-700">Whose list is this? Nothing on it names one of your supplier accounts.</p>
         <div className="flex flex-wrap items-center gap-2">
           <Select value={accountPick} onChange={(e) => setAccountPick(e.target.value)} disabled={working} className="h-11 min-w-0 flex-1 sm:w-64 sm:flex-none" aria-label="Whose List">
-            <option value="">Pick A Supplier</option>
+            <option value="">Pick a Supplier</option>
             {view.accounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
@@ -227,7 +227,7 @@ export function OpenListCard({
       {needsSure && (
         <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 text-sm text-slate-800">
           <input type="checkbox" className="h-5 w-5 shrink-0" checked={sure} onChange={(e) => setSure(e.target.checked)} disabled={working} />
-          It&apos;s The Whole List: Mark {plan.close.length === 1 ? "1 Paper" : `${plan.close.length} Papers`} Paid
+          It&apos;s the Whole List: Mark {plan.close.length === 1 ? "1 Paper" : `${plan.close.length} Papers`} Paid
         </label>
       )}
       {plan.firstList && !plan.nothing && (
@@ -286,7 +286,7 @@ export function OpenListCard({
             </div>
           )}
           <Papers title="Left Open, List May Be Short" papers={plan.keepPartial} note="Not on the list, but the list's own figures say it is missing papers." />
-          <Papers title="Left Open, Dated After The List" papers={plan.keepNewer} note="The supplier may not have posted them yet." />
+          <Papers title="Left Open, Dated After the List" papers={plan.keepNewer} note="The supplier may not have posted them yet." />
           <Papers title="Left Open, No Date" papers={plan.keepUndated} note="Nothing shows they are older than the list." />
           {plan.conflicts.length > 0 && (
             <div>
@@ -300,7 +300,7 @@ export function OpenListCard({
           )}
           {plan.payments.length > 0 && (
             <div>
-              <p className="font-medium text-slate-800">Payments On The List ({plan.payments.length})</p>
+              <p className="font-medium text-slate-800">Payments on the List ({plan.payments.length})</p>
               <p className="text-xs text-slate-500">
                 Counted in the list&apos;s total and taken off the balance above; not papers, so nothing is added for them, and the Pay figure still counts the papers they will pay.
               </p>

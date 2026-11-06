@@ -7,7 +7,7 @@ import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
 
 /**
  * A VISIT CAN WAIT FOR A DAY (0368), where the rule lives: the database, with the office's own
- * session. The visit page's Clear The Date (unscheduleAppointment) writes starts_at = null, and 0042
+ * session. The visit page's Clear the Date (unscheduleAppointment) writes starts_at = null, and 0042
  * made the column NOT NULL, so on production every press failed (found 2026-09-27).
  *
  *   before 0368  the office's own write is refused with 23502, exactly the dead door (shown when this
@@ -36,7 +36,7 @@ d("a visit can wait for a day (0368)", () => {
   let c: pg.Client;
   let ready = false;
   let had = false;
-  /** Before 0368: the error code the office's Clear The Date got (null when the database already had it). */
+  /** Before 0368: the error code the office's Clear the Date got (null when the database already had it). */
   let refusedWith: string | null = null;
   let orgId = "";
   let ownerId = "";
@@ -108,7 +108,7 @@ d("a visit can wait for a day (0368)", () => {
       )
     ).rows[0]?.yes === true;
     if (!had) {
-      // THE DEAD DOOR, shown: the office's own Clear The Date, refused by 0042's NOT NULL. By hand,
+      // THE DEAD DOOR, shown: the office's own Clear the Date, refused by 0042's NOT NULL. By hand,
       // not through asPerson: after a refused statement the transaction takes nothing but the
       // rollback to the savepoint (which also undoes the SET LOCAL role and claims).
       const id = await visit("2026-10-05T16:00:00Z");
@@ -140,7 +140,7 @@ d("a visit can wait for a day (0368)", () => {
     }
   });
 
-  it("before 0368 the office's Clear The Date was refused with 23502 (the dead door); after it the column takes a missing start", async () => {
+  it("before 0368 the office's Clear the Date was refused with 23502 (the dead door); after it the column takes a missing start", async () => {
     if (!had) expect(refusedWith).toBe("23502");
     const nullable = (
       await c.query("select is_nullable from information_schema.columns where table_schema = 'public' and table_name = 'appointments' and column_name = 'starts_at'")
@@ -148,7 +148,7 @@ d("a visit can wait for a day (0368)", () => {
     expect(nullable).toBe("YES");
   });
 
-  it("Clear The Date lands (its id comes back), and the visit waits on the schedule's rail", async () => {
+  it("Clear the Date lands (its id comes back), and the visit waits on the schedule's rail", async () => {
     const id = await visit("2026-10-06T16:00:00Z");
     expect(await clearTheDate(id)).toEqual([{ id }]);
     const row = (await c.query("select starts_at, ends_at, status from public.appointments where id = $1", [id])).rows[0];

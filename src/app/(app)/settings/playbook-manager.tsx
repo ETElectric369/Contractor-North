@@ -604,7 +604,7 @@ export function PlaybookManager({
                             }}
                           >
                             <option value="free">Typed Freely — A Box</option>
-                            <option value="words">Picked From My Words — And A Box For The Rest</option>
+                            <option value="words">Picked from My Words — And a Box for the Rest</option>
                           </Select>
                         </div>
                       )}
@@ -735,7 +735,7 @@ export function PlaybookManager({
                             onClick={() => edit(i, { slot: { ...(n.slot as NeedSlot & { type: "select" }), options: [...(n.slot as { options: string[] }).options, ""] } })}
                             className="flex min-h-[40px] w-full items-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-3 text-sm text-slate-500 hover:bg-white"
                           >
-                            <Plus className="h-4 w-4" /> Add A Choice
+                            <Plus className="h-4 w-4" /> Add a Choice
                           </button>
 
                           {/* Erik: "you prompt me with options then a 'other' box i use often."
@@ -844,7 +844,7 @@ export function PlaybookManager({
                             onClick={() => edit(i, { when: [...(n.when ?? []), { key: earlier[earlier.length - 1].key, known: true }] })}
                             className="flex min-h-[40px] w-full items-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-3 text-sm text-slate-500 hover:bg-white"
                           >
-                            <Plus className="h-4 w-4" /> Add A Condition
+                            <Plus className="h-4 w-4" /> Add a Condition
                           </button>
                           {(n.when?.length ?? 0) > 1 && (
                             <p className="text-xs text-slate-500">All of them have to be true.</p>
@@ -884,7 +884,7 @@ export function PlaybookManager({
         onClick={add}
         className="flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 text-sm text-slate-500 hover:bg-slate-50"
       >
-        <Plus className="h-4 w-4" /> Add A Question
+        <Plus className="h-4 w-4" /> Add a Question
       </button>
 
       <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
@@ -916,7 +916,7 @@ export function PlaybookManager({
               run(() => clearPlaybook(form.id), "Back to the sheet.", true);
             }}
           >
-            <RotateCcw className="h-4 w-4" /> Back To The Plain Sheet
+            <RotateCcw className="h-4 w-4" /> Back to the Plain Sheet
           </Button>
         )}
 

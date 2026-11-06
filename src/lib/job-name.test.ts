@@ -193,7 +193,7 @@ const insertNames = (src: string) =>
 
 describe("every door that inserts a job names it with jobNameFrom", () => {
   const DOORS: { file: string; name: string }[] = [
-    { file: "src/app/(app)/appointments/actions.ts", name: "jobName" }, // createJobFromAppointment (Start The Job, Make Job)
+    { file: "src/app/(app)/appointments/actions.ts", name: "jobName" }, // createJobFromAppointment (Start the Job, Make Job)
     { file: "src/app/(app)/quotes/actions.ts", name: "jobName" }, // createJobFromQuote (office accepts)
     { file: "src/app/(app)/leads/actions.ts", name: "jobName" }, // convertInquiry → estimate / job
     { file: "src/app/(app)/jobs/actions.ts", name: "jobName" }, // importJobs
@@ -242,7 +242,7 @@ describe("every door that inserts a job names it with jobNameFrom", () => {
     );
   });
 
-  it("the visit page's Start The Job preview names the job the same way the door will", () => {
+  it("the visit page's Start the Job preview names the job the same way the door will", () => {
     const src = read("src/app/(app)/appointments/[id]/page.tsx");
     expect(src).toMatch(/previewJobName = jobNameFrom\(\{\s*sourceWords: a\.title,/);
     expect(src).toMatch(/street: visitStreetOf\(a\.location, a\),\s*unit: \(a as \{ unit\?: string \| null \}\)\.unit \?\? null,/);

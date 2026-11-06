@@ -5,6 +5,7 @@ import fs from "fs";
 import path from "path";
 import { PortalSignIn, PortalSignOut } from "./portal-sign-in";
 import type { PortalOrg } from "./portal-shell";
+import { titleCaseIn } from "../../../tests/title-case-words";
 
 /**
  * THE SIGN-IN SCREEN AS IT RENDERS (0331), on a 375px phone. A static render can't measure pixels,
@@ -46,7 +47,7 @@ describe("the sign-in screen at 375px", () => {
     expect(words).toContain("Your page with ET Electric");
     expect(words).toContain("For your privacy, we'll email a 6-digit code to r*******@comcast.net");
     expect(words).toContain("Send My Code");
-    expect(words).toContain("I Already Have A Code");
+    expect(words).toContain("I Already Have a Code");
     expect(html).not.toContain("redfinch");
     expect(html).not.toMatch(/comcast\.net"/); // never in an attribute (a mailto, a value)
   });
@@ -79,8 +80,8 @@ describe("the sign-in screen at 375px", () => {
   });
 
   it("buttons are Title Case", () => {
-    for (const label of ["Send My Code", "I Already Have A Code"]) {
-      for (const word of label.split(" ")) expect(word[0]).toBe(word[0].toUpperCase());
+    for (const label of ["Send My Code", "I Already Have a Code"]) {
+      expect(titleCaseIn(label, "en"), label).toBe(true);
     }
   });
 });
@@ -105,7 +106,7 @@ describe("a code already out (re-clicking the link from a text)", () => {
     expect(words).toContain("We emailed a code to r*******@comcast.net 3 minutes ago. Enter it below.");
     expect(html).toContain('id="portal-code"');
     expect(words).toContain("Open My Page");
-    expect(words).toContain("Send A New Code");
+    expect(words).toContain("Send a New Code");
     expect(words).not.toContain("Send My Code");
   });
 
@@ -136,10 +137,10 @@ describe("no email on file: no dead end", () => {
   });
 });
 
-describe("Sign Out On This Device", () => {
+describe("Sign Out on This Device", () => {
   it("is a 44px, Title Case button", () => {
     const html = renderToStaticMarkup(createElement(PortalSignOut, { signOut: async () => ({ ok: true }) }));
-    expect(text(html)).toContain("Sign Out On This Device");
+    expect(text(html)).toContain("Sign Out on This Device");
     expect(html).toContain("min-h-[44px]");
   });
 });

@@ -42,7 +42,7 @@ import LoginPage, { generateMetadata } from "./page";
 import { login, sendLoginCode, verifyLoginCode, requestPasswordReset } from "./actions";
 import { dict } from "@/lib/i18n";
 import { DEACTIVATED_MESSAGE } from "@/lib/deactivation-gate";
-import { titleCaseIn } from "../../../tests/es-function-words";
+import { titleCaseIn } from "../../../tests/title-case-words";
 
 const render = async (params: Record<string, string> = {}) => renderToStaticMarkup(await LoginPage({ searchParams: Promise.resolve(params) }));
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ");
@@ -110,7 +110,7 @@ describe("the page", () => {
     expect(t).toContain("Welcome back.");
     expect(t).toContain("The all-in-one platform for contractors");
     expect(t).toContain("Forgot Password?");
-    expect(t).toContain("Sign In With A Code Instead — No Password");
+    expect(t).toContain("Sign In with a Code Instead — No Password");
     expect(t).toContain("Need an account?");
     expect(text(await render({ mode: "code", sent: "1", email: "a@b.test" }))).toContain("Sent to a@b.test — enter the code, or just tap the sign-in link in the email. Check spam if it's not there.");
     expect((await generateMetadata()).title).toBe("Team login");

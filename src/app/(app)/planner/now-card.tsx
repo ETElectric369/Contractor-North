@@ -75,7 +75,7 @@ const TIMECLOCK_LINK = "inline-flex min-h-11 items-center text-sm font-medium te
  *     customer · address, then the job's doors and its tasks (`children`, rendered on the server:
  *     Navigate, Materials, Add Cost for the office, NowTasks), then the footer: the one opt-in lunch
  *     box, the Timeclock link and Clock Out;
- *   · on the clock on no job: the timer, "Which job are you on?" and ONE Pick The Job button, which
+ *   · on the clock on no job: the timer, "Which job are you on?" and ONE Pick the Job button, which
  *     opens the clock's own "Which Job Are You On?" sheet (the same list, the same write);
  *   · off the clock: Not Clocked In, a big Clock In (a job-less punch: the server resolves today's
  *     job; the queue-first offline path holds the press time) and the Timeclock link.
@@ -116,7 +116,7 @@ export function NowCard({
   const [held, setHeld] = useState(false);
   const [pending, start] = useTransition();
   // "Which Job Are You On?" — after a punch the clock couldn't put on a job (askAfterPunch), or from
-  // the card's Pick The Job. Lives here, above the open/closed branches, so the card flipping to
+  // the card's Pick the Job. Lives here, above the open/closed branches, so the card flipping to
   // "on the clock" (or back) underneath doesn't take the question with it.
   const [ask, setAsk] = useState<WhichJobAsk | null>(null);
   // THE APP CHOSE THE JOB AND SAYS SO (Erik, 2026-10-01: Brian's punch on ARR 56). One sentence

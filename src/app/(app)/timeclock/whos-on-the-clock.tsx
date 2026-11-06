@@ -64,7 +64,7 @@ export function WhosOnTheClock({
     <Card>
       <CardContent className="py-3">
         <div className="flex items-baseline justify-between gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Who&rsquo;s On The Clock</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Who&rsquo;s on the Clock</span>
           <span className="text-xs text-slate-500">
             {onClock.length} of {crew.length}
           </span>

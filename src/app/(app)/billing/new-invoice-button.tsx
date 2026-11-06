@@ -29,7 +29,7 @@ type Refusal = {
   billedOn?: { id: string; number: string } | null;
   /** Nothing new to bill on this job: a blank invoice for something else (a referral, a fee). */
   blankFor?: string | null;
-  /** The job bills its estimate in parts: its own New Invoice, Part Of The Estimate chosen. */
+  /** The job bills its estimate in parts: its own New Invoice, Part of the Estimate chosen. */
   partOf?: string | null;
   /** The job bills on its payment schedule: the job, where Request Next Payment is. */
   scheduleOf?: string | null;
@@ -275,17 +275,17 @@ export function NewInvoicePickBody({
             )}
             {refusal.blankFor && (
               <button type="button" onClick={() => onStartBlank(refusal.blankFor!)} disabled={pending} className={DOOR}>
-                Start A Blank One
+                Start a Blank One
               </button>
             )}
             {refusal.partOf && (
               <Link href={`/jobs/${refusal.partOf}?tab=invoices&invoice=part`} className={DOOR}>
-                Open The Job&apos;s New Invoice
+                Open the Job&apos;s New Invoice
               </Link>
             )}
             {refusal.scheduleOf && (
               <Link href={`/jobs/${refusal.scheduleOf}?tab=invoices`} className={DOOR}>
-                Open The Job
+                Open the Job
               </Link>
             )}
           </div>
@@ -293,7 +293,7 @@ export function NewInvoicePickBody({
       )}
 
       <div>
-        <Label htmlFor="inv-pick">Which Job Or Customer?</Label>
+        <Label htmlFor="inv-pick">Which Job or Customer?</Label>
         {pick ? (
           <div className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-brand bg-brand-light px-3 text-sm text-brand-dark">
             <span className="flex min-w-0 items-center gap-2">

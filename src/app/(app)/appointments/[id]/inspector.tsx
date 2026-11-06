@@ -119,7 +119,7 @@ function NumBox({
  * A tasks answer AS TYPED — the shape the tasks control edits, with nothing dropped and nothing
  * trimmed. Deliberately not coerceTasks at render: the coercer trims a name while he is still
  * typing it (the trailing space before the next word would vanish under his thumb) and drops a
- * card or a part row the moment it is empty, which would make Add A Task a door onto nothing. It
+ * card or a part row the moment it is empty, which would make Add a Task a door onto nothing. It
  * runs where the answer SAVES (coerceByPlaybook) and on the hear path, which is where an empty row
  * stops being a row. The stored answer has already been through it, so this only guards garbage.
  */
@@ -289,11 +289,11 @@ export function Inspector({
   initialOpenTaskId?: string | null;
   orgId: string;
   userId: string | null;
-  /** Where "Start The Estimate" goes — built by the page so the capture/lead ids ride along. null =
+  /** Where "Start the Estimate" goes — built by the page so the capture/lead ids ride along. null =
    *  Estimates is switched off (0352), and the button isn't drawn. */
   estimateHref: string | null;
   /** The estimate already written up from this visit (capture.quote_id), when one is: the door
-   *  reads Open The Estimate while it stands (live), Start The Estimate again once it is over. */
+   *  reads Open the Estimate while it stands (live), Start the Estimate again once it is over. */
   estimate?: { id: string; number: string | null; live: boolean } | null;
   /** appointments.location — the address, which is the fact that names everything downstream. */
   initialLocation: string;
@@ -306,9 +306,9 @@ export function Inspector({
   planBrief?: PlanBrief | null;
   /** WHO IS FILLING IT IN (0356, lib/inspection/inspection-access). "office": everything. "crewLead"
    *  (a crew lead on this visit): the answers, notes, measurements, materials and photos save, through
-   *  save_walkthrough_capture; no price, no price book, no Start The Estimate, no address or links, no
+   *  save_walkthrough_capture; no price, no price book, no Start the Estimate, no address or links, no
    *  sheet switch once one is saved, and photos are added, never taken off. "view" (anyone else): one
-   *  disabled fieldset, and the doors that would only fail (Take, Add, Save, Start The Estimate, Set Up
+   *  disabled fieldset, and the doors that would only fail (Take, Add, Save, Start the Estimate, Set Up
    *  My Questions) don't render. */
   access?: InspectionAccess;
   /** The line a "view" reader sees instead of the default (a crew lead before 0356 is applied). */
@@ -777,7 +777,7 @@ export function Inspector({
   // opposite: it guaranteed the pending write never happened. Nine hundred milliseconds is a long
   // time in the field, and the two ways out of this page both land inside it:
   //
-  //   · "Start The Estimate" sits six pixels from Save in the same sticky bar. Type "run 140 ft",
+  //   · "Start the Estimate" sits six pixels from Save in the same sticky bar. Type "run 140 ft",
   //     tap it, and the measurement is gone — on the page whose whole promise is that it saves
   //     itself, at the moment the number is about to be turned into money.
   //   · Backgrounding the PWA on iOS, which may never resume this page-life at all.
@@ -2585,7 +2585,7 @@ export function Inspector({
                     </button>
                   ) : is3d(p.path) ? (
                     /* A 3D FILE OPENS IN THE VIEWER (3D Scan's model, a dropped GLB): spin it here;
-                       Open In AR from inside it on an iPhone. */
+                       Open in AR from inside it on an iPhone. */
                     <TapTile readOnly={readOnly} onClick={() => p.url && setViewing3d(p)} className="relative flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
                       <Box className="h-6 w-6 shrink-0 text-slate-400" />
                       <span className="line-clamp-2 break-all text-[10px] leading-tight text-slate-500">{fileLabel(p.path)}</span>

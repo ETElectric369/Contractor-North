@@ -27,7 +27,7 @@ export const MAX_SCOPE_WORD = 60;
 /**
  * The scope as answered: a trimmed string, or null. A scope typed freely may be a whole paragraph
  * (answers.ts keeps it whole), but a paragraph is not a word: it offers no kit, and it is never
- * the category a kit files under — Remember As A Kit would store its first 60 characters, cut
+ * the category a kit files under — Remember as a Kit would store its first 60 characters, cut
  * mid-word, as the kit's scope. Null here leaves that box empty and ASKS for the word.
  */
 export function scopeWord(pb: Playbook | null | undefined, answers: Answers | null | undefined): string | null {
@@ -91,13 +91,13 @@ export function scopeTitle(word: string): string {
     .join(" ");
 }
 
-/** The one offer row above a task list: "Add The Deck Tasks (7)". The English is inline and the default;
+/** The one offer row above a task list: "Add the Deck Tasks (7)". The English is inline and the default;
  *  handed the reader's `lang` and translator (`words`, lib/i18n translator(lang)) it says the Inspector's
  *  catalog's words (lib/words/visit-inspector vi_btn_addTheScopeTasks) through lib/lang-words say — this
  *  file imports no catalog. The scope word is the company's own, as typed; the count rides in its parentheses. */
 export function offerLabel(word: string, count: number, lang?: string | null, words?: Words): string {
   const scope = scopeTitle(word);
-  return say(lang, words, "vi_btn_addTheScopeTasks", `Add The ${scope} Tasks (${count})`, { scope, count: `(${count})` });
+  return say(lang, words, "vi_btn_addTheScopeTasks", `Add the ${scope} Tasks (${count})`, { scope, count: `(${count})` });
 }
 
 /**

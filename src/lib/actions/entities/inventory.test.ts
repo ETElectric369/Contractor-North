@@ -62,7 +62,7 @@ describe("stock.take fills the card", () => {
     const d = r.data as any;
     expect(d.href).toBe(`/jobs/${JOB}?tab=materials&take=i-122&qty=60`);
     // Fill vs execute at a glance: nothing on the card reads as done.
-    expect(d.card).toMatchObject({ kind: "task", eyebrow: "not saved yet", title: "Tap To Take: 60 ft of 12/2 NM-B", href: d.href, next: "Open it and tap Take It to save it." });
+    expect(d.card).toMatchObject({ kind: "task", eyebrow: "not saved yet", title: "Tap to Take: 60 ft of 12/2 NM-B", href: d.href, next: "Open it and tap Take It to save it." });
     expect(d.card.scope).toBe("Not taken yet: tap above, then Take It. For Honeysuckle. In stock: 250 ft.");
     expect(`${d.card.eyebrow} ${d.card.title}`).not.toMatch(/\btook\b|recorded|on the job/i);
     expect(r.speak).toContain("Tap Take It to save it.");

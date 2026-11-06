@@ -85,7 +85,7 @@ describe("the Honeysuckle Breakers card", () => {
     });
     expect(c.check.ok).toBe(false);
     expect(c.orders[0].alsoOn).toEqual([
-      "On The List, Not Bought Yet: 1 x Q220 · 2P 20A",
+      "On the List, Not Bought Yet: 1 x Q220 · 2P 20A",
       "In Stock: 2 x Q220 · 2P 20A",
     ]);
   });

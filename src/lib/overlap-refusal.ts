@@ -1,7 +1,7 @@
 /**
  * THE OVERLAP TEST, ONE COPY. Lifted out of timeclock/actions.ts (a "use server" file, where every
  * export is a callable action) so a door outside the Timeclock that opens a shift in the past, the
- * visit page's Start The Job And Clock In, asks the very same question in the very same words.
+ * visit page's Start the Job and Clock In, asks the very same question in the very same words.
  */
 import { dbError } from "@/lib/db-error";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -55,7 +55,7 @@ type OverlapOpts = {
   ignoreOpen?: boolean;
   /**
    * ADD ENTRY ONLY: asked about a closed no-job clash, true when "Put that shift on the job" is a
-   * move the office can actually make (the form's Put This On door): no invoice bills that shift.
+   * move the office can actually make (the form's Put This on door): no invoice bills that shift.
    * Every other door (an edit, a copy, a start) and a billed shift keep "Edit that entry instead":
    * the put-on-job words there pointed at a door that does not exist.
    */
@@ -225,7 +225,7 @@ export async function findOverlap(
  *
  * THE WORDS FOLLOW THE READER (cn-v1144, skeptic #50): the English stays inline as the default, byte
  * for byte what it always said, so the Time Clock's clockIn and every test that hands no language read
- * the same; a caller with the reader's language in hand (the visit's Start The Job, start-job-actions)
+ * the same; a caller with the reader's language in hand (the visit's Start the Job, start-job-actions)
  * passes `lang` + its translator (`words`, lib/i18n translator(lang)) and the sentence is said from the
  * visit page's catalog (lib/words/visit-page, vp_clash…) through lib/lang-words say — this file imports
  * no catalog. A Spanish clock reads "11:00 a. m." (lib/utils formatTime, one spelling everywhere) and
@@ -237,7 +237,7 @@ export function clockInClashWords(
     startIso: string;
     tz: string;
     isStaff: boolean;
-    /** What the refused tap did not do: a punch records nothing; the visit's Start The Job starts nothing. */
+    /** What the refused tap did not do: a punch records nothing; the visit's Start the Job starts nothing. */
     nothing?: string;
   },
   lang: Lang | string | null = "en",

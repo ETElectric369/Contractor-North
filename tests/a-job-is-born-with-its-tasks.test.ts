@@ -29,7 +29,7 @@ import { translator } from "@/lib/i18n";
  * EVERY DOOR THAT MAKES A JOB FROM HIS TASKS BIRTHS THEM THE SAME WAY (W3, cn-v1075).
  *
  * Three doors make a job: the office's accept (createJobFromQuote), the customer's own Accept link
- * (accept_public_quote in SQL, finished by finishPublicAcceptance) and Start The Job on a visit
+ * (accept_public_quote in SQL, finished by finishPublicAcceptance) and Start the Job on a visit
  * (createJobFromAppointment). Each must call the ONE rule in lib/estimate/born-with-tasks, and the
  * two estimate doors must reach the one take-off and the one work order rule — so a job is the same
  * job whichever door it came through ([[two-doors-one-thing]]). These pins read the source: the
@@ -104,10 +104,10 @@ describe("the customer's own Accept link", () => {
   });
 });
 
-describe("Start The Job on a visit", () => {
+describe("Start the Job on a visit", () => {
   const fn = body(src("src/app/(app)/appointments/actions.ts"), "export async function createJobFromAppointment(");
   // THE ONE VISIT READ (cn-v1134): what the visit typed is read by lib/appointments/visit-work for this
-  // door and for Won · Pick The Job alike — the estimate seed's read of the sheet, the kits, the take-off.
+  // door and for Won · Pick the Job alike — the estimate seed's read of the sheet, the kits, the take-off.
   const rule = src("src/lib/appointments/visit-work.ts");
   it("reads the visit's tasks through the one visit read, the way the estimate seed does, and births them through the one rule", () => {
     expect(fn).toContain('const work = await visitWork(supabase, appointmentId, "job");');
@@ -258,7 +258,7 @@ const plant = (t: Record<string, Row[]> = tables()) => {
   s.sb = withAuth(s.db.sb);
 };
 
-describe("Won · Pick The Job carries the visit's work onto the job it links (cn-v1134)", () => {
+describe("Won · Pick the Job carries the visit's work onto the job it links (cn-v1134)", () => {
   beforeEach(() => plant());
 
   it("the tasks land keyed task:<id> with their own minutes, the parts are listed keyed, the job's planned_minutes is untouched, and the note counts what joined", async () => {
@@ -402,7 +402,7 @@ describe("Won · Pick The Job carries the visit's work onto the job it links (cn
     expect(picker).toContain('if (done.res.note) toast(done.res.note, "success");');
     expect(picker).toContain('if (done.res.warning) toast(done.res.warning, "info", undefined, { sticky: true });');
     expect(src("src/app/(app)/appointments/[id]/visit-ending.tsx")).toContain('openLabel={t("vp_btn_wonPickTheJob")}');
-    expect(translator("en")("vp_btn_wonPickTheJob")).toBe("Won · Pick The Job");
+    expect(translator("en")("vp_btn_wonPickTheJob")).toBe("Won · Pick the Job");
   });
 
   it("the one list writer keys a typed row on its capture id, so a second press lists nothing twice", () => {

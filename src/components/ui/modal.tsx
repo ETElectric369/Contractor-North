@@ -136,7 +136,7 @@ export function Modal({
    * entry and arms "Tap again to discard", so a second back is what actually discards. Back
    * behaves exactly like tapping the backdrop twice, which is the point — one rule, not two.
    *
-   * ONE BACK CLOSES ONE OVERLAY. A row's ⋯ sheet opens Move To Another Day or Edit Details above
+   * ONE BACK CLOSES ONE OVERLAY. A row's ⋯ sheet opens Move to Another Day or Edit Details above
    * itself; a Back (or an Escape) closes the one on top and leaves the sheet, and the Move sheet's
    * Cancel taking its own entry off is not a Back for the sheet under it. The order they opened in
    * decides, in overlay-history's stack.

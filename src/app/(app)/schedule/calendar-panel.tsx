@@ -145,7 +145,7 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
 
   /* HISTORY DRAWS TOO. A job whose date was cleared keeps its worked days as segments with no listed
      span, so the read above (on scheduled_start) never brings it; its worked day would vanish while
-     Clear The Date's note says it was kept on the calendar. Read those jobs by id (in reads of 200 ids:
+     Clear the Date's note says it was kept on the calendar. Read those jobs by id (in reads of 200 ids:
      a long list is a long URL; every one is read, none dropped): the segments place them on their
      worked days (drawn all day, the day drill reads "Worked day"). Fail-soft: a failed read draws what
      the first one brought. It runs beside the clocked-time read below, one round. */
@@ -233,7 +233,7 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
         canEdit={canEdit}
         // A day can keep its own hours (0370 applied): the tile's time is This Day's.
         perDayHours={perDayHours}
-        // Add To Schedule: an open spot (or a day's "+") opens the sheet with these jobs.
+        // Add to Schedule: an open spot (or a day's "+") opens the sheet with these jobs.
         addableJobs={(addableRows ?? []) as unknown as AddableJob[]}
         // Each day's crew rows (Everyone's Day), by day, and everyone the company ever had.
         dayRows={dayRowsByDay(crewRead.error ? [] : crewRead.rows)}

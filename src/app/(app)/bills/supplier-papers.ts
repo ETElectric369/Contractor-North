@@ -66,11 +66,11 @@ export const SUPPLIER_INVOICE_KINDS: SupplierInvoiceKind[] = ["invoice", "credit
 export const SUPPLIER_INVOICE_COLUMNS =
   "id, supplier_account_id, invoice_number, kind, invoice_date, due_date, job_name_raw, job_id, total, open_balance, closed, discount_amount, discount_by, source_file, jobs(name)";
 
-/** The same list with Waiting On A Credit's stamp (0346). Read first; see readSupplierDocuments. */
+/** The same list with Waiting on a Credit's stamp (0346). Read first; see readSupplierDocuments. */
 export const SUPPLIER_INVOICE_COLUMNS_WITH_WAIT = `${SUPPLIER_INVOICE_COLUMNS}, waiting_credit_since`;
 
-/** What Waiting On A Credit says before 0346 is applied, instead of failing. */
-export const WAIT_NEEDS_UPDATE = "Waiting On A Credit needs one database update. Nothing was changed; the bill is still here.";
+/** What Waiting on a Credit says before 0346 is applied, instead of failing. */
+export const WAIT_NEEDS_UPDATE = "Waiting on a Credit needs one database update. Nothing was changed; the bill is still here.";
 
 /** The one error a select naming a not-yet-applied 0346 column fails with, and nothing else. */
 export function isMissingWaitColumn(err: unknown): boolean {
@@ -348,7 +348,7 @@ export function reconcileJobsOf(rows: any[]): ReconcileJob[] {
   }));
 }
 
-/** What a card set needs to be drawn: the cards, and every job for Another Job / Pick A Job. */
+/** What a card set needs to be drawn: the cards, and every job for Another Job / Pick a Job. */
 export interface SupplierPaperFeed {
   cards: SupplierPaperCard[];
   jobs: PaperJob[];
@@ -462,11 +462,11 @@ export function cardJob(c: Pick<SupplierPaperCard, "state" | "onJob" | "suggesti
 /**
  * ALREADY BILLED ON THE CARDS (0357, Erik 2026-09-26: "on supplier bills on my day inside needs action
  * should also be a button for already charged"). A card whose paper names or guesses ONE job (the
- * job it sits on, or the matcher's clear guess) gets Already Billed On J-010, but only where the
+ * job it sits on, or the matcher's clear guess) gets Already Billed on J-010, but only where the
  * sheet it opens has a line to pick: the job's next New Invoice pulls its actuals and a bill that went
  * out could hold a charge (readAlreadyBilledReach, the same rule as the Costs tab and the sheet). A
  * card with chips, or nothing to go on, has no such door: the job is his to pick first, and the done
- * line then asks Already Billed On INV-x? itself. A lost read draws no door and is logged; every
+ * line then asks Already Billed on INV-x? itself. A lost read draws no door and is logged; every
  * other answer on the card is untouched. Staff only, like the cards.
  */
 export async function withAlreadyBilledDoors(supabase: any, orgId: string, feed: SupplierPaperFeed): Promise<SupplierPaperFeed> {
@@ -486,7 +486,7 @@ export function cardJobIds(feed: SupplierPaperFeed | null | undefined): string[]
   return [...new Set((feed?.cards ?? []).map((c) => cardJob(c)?.id).filter((x): x is string => !!x))];
 }
 
-/** Pure: each card whose one job can hold a charge gets Already Billed On that job. */
+/** Pure: each card whose one job can hold a charge gets Already Billed on that job. */
 export function cardsWithAlreadyBilled(feed: SupplierPaperFeed, reach: ReadonlyMap<string, { charge: boolean }>): SupplierPaperFeed {
   const cards = feed.cards.map((c) => {
     const job = cardJob(c);
@@ -501,11 +501,11 @@ export function cardsWithAlreadyBilled(feed: SupplierPaperFeed, reach: ReadonlyM
  *   covered       a bill already covers it (a Record link, or a bill carrying its number)
  *   taken_back    a credit memo took it back (reversedPurchaseIds, or the credit it waited for)
  *   on_card       a Needs You card (supplierPaperNeeds)
- *   waiting       set aside waiting on a credit, not back yet (its supplier's Waiting On A Credit fold)
- *   not_in_books  listed under its supplier's Not In Your Books, where Record To Shelf is
+ *   waiting       set aside waiting on a credit, not back yet (its supplier's Waiting on a Credit fold)
+ *   not_in_books  listed under its supplier's Not in Your Books, where Record to Shelf is
  *   before_books  from before his books began: counted there, never listed
  *
- * So a door elsewhere (Shop Stock's Record To Shelf) is offered only where the fold will hold the
+ * So a door elsewhere (Shop Stock's Record to Shelf) is offered only where the fold will hold the
  * paper, and otherwise says why in words. Invoices only; `rows` are supplierDocumentRows' rows.
  */
 export type SupplierPaperHome = "covered" | "taken_back" | "on_card" | "waiting" | "not_in_books" | "before_books";
@@ -667,7 +667,7 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
         mark,
       })
     : null;
-  // Already Billed On J-010 (0357) on the cards whose one job could hold it: one more breath, only
+  // Already Billed on J-010 (0357) on the cards whose one job could hold it: one more breath, only
   // when a card waits (and only for the jobs the cards name).
   const papers = feed && feed.cards.length ? await withAlreadyBilledDoors(supabase, orgId, feed) : feed;
   // The pay line reads only the documents' own money (open balance, discount, its date), none of

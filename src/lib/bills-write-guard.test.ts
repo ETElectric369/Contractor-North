@@ -36,7 +36,7 @@ const rel = (p: string) => p.slice(SRC.length + 1).split("\\").join("/");
 const MAY_WRITE_BILLS: Record<string, string> = {
   // THE THREE REAL COST WRITERS, and the three named in lib/bill-scope's TEETH note: each asks
   // jobCostRefusal and each decides the part of the job through scopeForWrite. The last one is
-  // Record It As A Bill on a supplier's card, which can put a credit memo on a job like the others.
+  // Record It as a Bill on a supplier's card, which can put a credit memo on a job like the others.
   "app/(app)/organize/paperwork-core.ts": "guarded",
   "app/(app)/jobs/actions.ts": "guarded",
   "app/(app)/bills/supplier-actions.ts": "guarded",
@@ -164,7 +164,7 @@ describe("one place decides which part of the job a cost is (item C1)", () => {
 
   /**
    * ITEMS C1-1 AND C1-4 (ONE DEFECT), and the one a shared helper could not have caught: the Add Cost
-   * sheet DREW the Part Of The Job control and its default save path simply did not hand the answer to
+   * sheet DREW the Part of the Job control and its default save path simply did not hand the answer to
    * the writer. `stated()` is the one object that sheet gives the receipt reader — "attestation beats
    * inference", the file's own rule — so every answer the sheet collects has to be in it, and the
    * reader may never be handed anything else. Add a save path or a question and this fails until the
@@ -193,11 +193,11 @@ describe("one place decides which part of the job a cost is (item C1)", () => {
   /**
    * ITEM C1-3: THE ONE CONTROL HAS NO SAY IN WHAT IT OFFERS. It worked its own list out — which kept a
    * part the estimate has lost (right) and so kept the reserved word "Uncategorized" too, a second
-   * spelling of "No Part Of The Job" sitting directly under it, in the one control whose stated purpose
+   * spelling of "No Part of the Job" sitting directly under it, in the one control whose stated purpose
    * is to stop a budget row splitting in two. Both decisions are lib/bill-scope's now, and the control
    * prints them.
    */
-  it("the Part Of The Job control takes both its chosen value and its options from lib/bill-scope", () => {
+  it("the Part of the Job control takes both its chosen value and its options from lib/bill-scope", () => {
     const src = readFileSync(join(SRC, "components/job-scope-picker.tsx"), "utf8");
     expect(src, "the control is choosing its own value again").toContain("scopeSelected(value)");
     expect(src, "the control is building its own option list again").toMatch(/scopeOptions\(scopes,\s*stored\)/);

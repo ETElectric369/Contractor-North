@@ -160,8 +160,8 @@ describe("createInvoiceForJob — the open draft is the door, whatever its kind"
     expect(res.ok).toBe(false);
     expect(res.billedOn).toEqual({ id: "dep-1", number: "INV-090" });
     // THE REFUSAL IS A DOOR (W1-24): named by the job's New Invoice, never a tab, and carried as
-    // `door` so the job's button opens its sheet on Part Of The Estimate and /billing links there.
-    expect(res.error).toMatch(/the job's New Invoice → Part Of The Estimate/);
+    // `door` so the job's button opens its sheet on Part of the Estimate and /billing links there.
+    expect(res.error).toMatch(/the job's New Invoice → Part of the Estimate/);
     expect(res.error).not.toMatch(/Progress Payment|Invoices tab/);
     expect(res.door).toBe("part-of-estimate");
   });
@@ -287,7 +287,7 @@ describe("the job's New Invoice routes like the server, case by case (W1-24)", (
     expect(newInvoiceRoute({ ...f, openDraft: { id: "inv-080", number: "INV-080", refreshable: false } }, "part").kind).toBe("draft");
   });
 
-  it("draws that bill actuals (Tess J-002, T&M): the sheet, and Bill The Work So Far is the card's own progress-payment door, the default", async () => {
+  it("draws that bill actuals (Tess J-002, T&M): the sheet, and Bill the Work So Far is the card's own progress-payment door, the default", async () => {
     const f = facts({ billingType: "tm", estimate: 17325, quotes: [{ status: "accepted", total: 17325 }], invoices: [{ status: "paid", invoice_kind: "deposit" }, { status: "paid", invoice_kind: "progress" }] });
     expect(f).toMatchObject({ drawBilled: true, billsActuals: true, wholeEstimate: null, scheduleActive: false });
     expect(newInvoiceRoute({ ...f, openDraft: null })).toEqual({ kind: "sheet" });
@@ -309,7 +309,7 @@ describe("the job's New Invoice routes like the server, case by case (W1-24)", (
     expect(state.drawDoor).toHaveBeenCalledWith(JOB, "progress");
   });
 
-  it("draws that are set parts of the estimate: the sheet offers Deposit and Part Of The Estimate only - never actuals behind a contract", async () => {
+  it("draws that are set parts of the estimate: the sheet offers Deposit and Part of the Estimate only - never actuals behind a contract", async () => {
     const f = facts({ billingType: "fixed", estimate: 20000, quotes: [{ status: "accepted", total: 20000 }], invoices: [{ status: "paid", invoice_kind: "deposit" }] });
     expect(f).toMatchObject({ drawBilled: true, billsActuals: false, wholeEstimate: null });
     expect(newInvoiceRoute({ ...f, openDraft: null })).toEqual({ kind: "sheet" });
@@ -341,7 +341,7 @@ describe("the job's New Invoice routes like the server, case by case (W1-24)", (
     expect(res.error).toMatch(/payment schedule/);
   });
 
-  it("no estimate and no draw (a service call): one tap, createInvoiceForJob exactly as before; Take A Deposit Instead opens the sheet on Deposit", async () => {
+  it("no estimate and no draw (a service call): one tap, createInvoiceForJob exactly as before; Take a Deposit Instead opens the sheet on Deposit", async () => {
     const f = facts({ billingType: "fixed", quotes: [{ status: "declined", total: 900 }] });
     expect(f).toMatchObject({ hasEstimate: false, drawBilled: false, billsActuals: true });
     expect(newInvoiceRoute({ ...f, openDraft: null })).toEqual({ kind: "direct" });
@@ -368,7 +368,7 @@ describe("the job's New Invoice routes like the server, case by case (W1-24)", (
     expect(createBlankInvoice).toHaveBeenCalledWith(expect.objectContaining({ job_id: JOB, tax_rate: 0 }));
   });
 
-  it("a fixed-price job with an estimate and nothing billed: Deposit, Part Of The Estimate, and The Whole Estimate at the figure New Invoice copies", async () => {
+  it("a fixed-price job with an estimate and nothing billed: Deposit, Part of the Estimate, and The Whole Estimate at the figure New Invoice copies", async () => {
     const quotes = [
       { status: "declined", total: 9000, created_at: "2026-09-02" },
       { status: "accepted", total: 12400, created_at: "2026-09-01" },
@@ -402,7 +402,7 @@ describe("the job's New Invoice routes like the server, case by case (W1-24)", (
     expect(createInvoiceFromQuote).toHaveBeenCalledWith("q-acc");
   });
 
-  it("fixed price, the estimate's invoice sent, no draws, a change order approved since: Bill The Change Orders is the door (never a typed-amount draw)", async () => {
+  it("fixed price, the estimate's invoice sent, no draws, a change order approved since: Bill the Change Orders is the door (never a typed-amount draw)", async () => {
     const quotes = [{ status: "accepted", total: 12400, created_at: "2026-09-01" }];
     const invoices = [{ status: "sent", invoice_kind: "standard" }];
     const changeOrders = [
@@ -420,7 +420,7 @@ describe("the job's New Invoice routes like the server, case by case (W1-24)", (
     expect(newInvoiceChoices({ ...f, billingType: "fixed", estimate: 12400, workDoor: null }).choices).toEqual(["deposit", "part"]);
     expect(estimateBilledInFullWords({ changesOffered: false, drawBilled: false, billingType: "fixed" })).toMatch(/change order/);
     expect(estimateBilledInFullWords({ changesOffered: false, drawBilled: false, billingType: "fixed" })).not.toMatch(/type an amount/);
-    expect(estimateBilledInFullWords({ changesOffered: true, drawBilled: false, billingType: "fixed" })).toMatch(/Bill The Change Orders/);
+    expect(estimateBilledInFullWords({ changesOffered: true, drawBilled: false, billingType: "fixed" })).toMatch(/Bill the Change Orders/);
     // A job already billed in draws bills its extra as one more part (the server refuses a standard bill there).
     expect(estimateBilledInFullWords({ changesOffered: false, drawBilled: true, billingType: "fixed" })).toMatch(/type an amount instead/);
     // Where the server would never bring change orders in, they aren't counted: a draw on the job, a
@@ -466,7 +466,7 @@ describe("the job's New Invoice routes like the server, case by case (W1-24)", (
   it("a job that bills its actuals whose unbilled work couldn't be read: the sheet says so, never a choice that silently isn't there", () => {
     const f = facts({ billingType: "tm", estimate: 17325, quotes: [{ status: "accepted", total: 17325 }] });
     expect(f.billsActuals).toBe(true);
-    // The page passes no figure when its read failed: no Bill The Work So Far…
+    // The page passes no figure when its read failed: no Bill the Work So Far…
     expect(newInvoiceChoices({ ...f, billingType: "tm", estimate: 17325, workDoor: workSoFarDoor(null, 0, false, formatCurrency) }).choices).toEqual(["deposit", "part"]);
     // …and the sheet says why, and how to get it back.
     expect(workSoFarNote({ billsActuals: true, unbilledRead: false, workDoor: null })).toBe(WORK_SO_FAR_UNREAD);

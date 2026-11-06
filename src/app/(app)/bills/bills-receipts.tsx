@@ -128,7 +128,7 @@ export function BillAlreadyBilledDoor({ bill, door }: { bill: Pick<BillRow, "id"
   if (door.kind === "open") return <AlreadyBilledButton jobId={door.jobId} target={{ kind: "bill", ids: [bill.id], what: door.what }} />;
   return (
     <>
-      <span className="text-xs font-medium text-slate-600">Billed By Hand On {door.invoiceNumber ?? "That Invoice"}</span>
+      <span className="text-xs font-medium text-slate-600">Billed by Hand on {door.invoiceNumber ?? "That Invoice"}</span>
       <NotBilledAfterAllButton jobId={door.jobId} lineId={door.lineId} ids={door.ids} what={door.what} />
     </>
   );
@@ -192,7 +192,7 @@ export function BillsReceipts({
    *  under the Off line. Shop Stock off: a receipt line isn't offered to stock. Absent = all on. */
   switches?: { features: FeatureMap; isOwner: boolean };
   /** ALREADY BILLED on a bill's own row (0357), by bill id (lib/already-billed billAlreadyBilledDoors):
-   *  Already Billed where its job's sheet could hold it, or Billed By Hand On INV-x with Not Billed
+   *  Already Billed where its job's sheet could hold it, or Billed by Hand on INV-x with Not Billed
    *  After All. A bill with no entry has neither. */
   alreadyBilled?: Record<string, BillAlreadyBilled>;
   /** The page read bills.corrects_bill_id (0381 is on the database): Correct This Bill is drawn. */
@@ -310,7 +310,7 @@ export function BillsReceipts({
     return (
       <li key={`bill-${b.id}`} className={underIt ? "border-l-4 border-slate-200 bg-slate-50/40 pl-4" : undefined}>
         {/* ONE ROW PER BILL; it opens to the bill's detail. `bill-<id>` is where the search box, a
-            supplier's Open In All Bills and the stock's Put The Rest In Stock land. */}
+            supplier's Open in All Bills and the stock's Put the Rest in Stock land. */}
         <details id={`bill-${b.id}`} className="scroll-mt-20">
           <summary className="flex min-h-11 cursor-pointer list-none items-center gap-3 px-3 py-2 text-sm hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
             <span className="min-w-0 flex-1">
@@ -363,7 +363,7 @@ export function BillsReceipts({
               <BillAlreadyBilledDoor bill={b} door={alreadyBilled[b.id]} />
               {b.job_id && (
                 <Link href={`/jobs/${b.job_id}`} className="flex min-h-11 items-center px-2 text-sm font-medium text-brand hover:underline">
-                  Open The Job
+                  Open the Job
                 </Link>
               )}
             </div>
@@ -468,7 +468,7 @@ export function BillsReceipts({
               {readFailed
                 ? " · Couldn't Read"
                 : unpaidCount
-                  ? ` · ${unpaidCount} Bought On Account ${formatCurrency(unpaidTotal)}`
+                  ? ` · ${unpaidCount} Bought on Account ${formatCurrency(unpaidTotal)}`
                   : " · All Squared Up"}
             </span>
           </span>
@@ -490,7 +490,7 @@ export function BillsReceipts({
           {poOn && (
             <details className="relative shrink-0">
               <summary
-                aria-label="More For All Bills"
+                aria-label="More for All Bills"
                 title="More"
                 className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 [&::-webkit-details-marker]:hidden"
               >
@@ -524,8 +524,8 @@ export function BillsReceipts({
               {keys
                 ? `Nothing in All Bills matches “${query.trim()}”.`
                 : poOn
-                  ? "No bills or purchase orders yet. Add a bill with Snap Or Note at the top of this page, or tap ⋯ here for New PO."
-                  : "No bills yet. Add one with Snap Or Note at the top of this page."}
+                  ? "No bills or purchase orders yet. Add a bill with Snap or Note at the top of this page, or tap ⋯ here for New PO."
+                  : "No bills yet. Add one with Snap or Note at the top of this page."}
             </p>
           ) : (
             <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">{rows}</ul>
@@ -672,7 +672,7 @@ function BillEditModal({
             <div className="col-span-2">
               <Label htmlFor="be-cat">Bucket</Label>
               <Select id="be-cat" className="h-11" value={billCategory} onChange={(e) => setBillCategory(e.target.value)}>
-                <option value="">Pick A Bucket</option>
+                <option value="">Pick a Bucket</option>
                 {BUSINESS_COST_BUCKETS.map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}

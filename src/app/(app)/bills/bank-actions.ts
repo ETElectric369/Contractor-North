@@ -10,7 +10,7 @@ import { OWNER_SORTS_BANK, viewerSortsBank } from "@/lib/bank-viewer";
 
 /**
  * A BANK DOWNLOAD'S BUTTONS (2026-09-27). There is no import button: the download arrives through
- * Snap Or Note, Organize or Reconcile's "Drop A Bank Or Supplier Statement" line (addOpenList recognises it)
+ * Snap or Note, Organize or Reconcile's "Drop a Bank or Supplier Statement" line (addOpenList recognises it)
  * and waits on Reconcile as one card (lib/paperwork answeredOnReconcile). These are that card's Apply and Undo. Staff only: a tech
  * never sees a bank line (0363 RLS), and requireStaff says no before anything is read.
  */

@@ -8,8 +8,8 @@
  * "too quiet gets things lost". So a hold is a reason AND a day (a week out unless someone picks
  * another), and there is no "no date": nothing goes quiet without the day it comes back.
  *
- * The chips (come-back-picker): Tomorrow, Mon (the Monday after today), In A Week (the default), or
- * Pick A Day. A picked day is today or later.
+ * The chips (come-back-picker): Tomorrow, Mon (the Monday after today), In a Week (the default), or
+ * Pick a Day. A picked day is today or later.
  */
 import type { Lang } from "@/lib/locale";
 import { localeOf } from "@/lib/locale";

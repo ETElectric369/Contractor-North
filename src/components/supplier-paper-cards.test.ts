@@ -32,7 +32,7 @@ import type { SupplierPaperCard } from "@/app/(app)/bills/supplier-reconcile";
 /**
  * THE CARD, AS ERIK READS IT (Bills plan, Wave A). What these pin is the law, not the styling:
  * the headline in his words, the suggestion as the first button and never a selected option, the
- * Fernhill chips with none first, Pick A Job when there is nothing to go on, and Title Case on
+ * Fernhill chips with none first, Pick a Job when there is nothing to go on, and Title Case on
  * every clickable.
  */
 
@@ -57,14 +57,14 @@ const render = (cards: SupplierPaperCard[]) =>
   renderToStaticMarkup(createElement(SupplierPaperCards, { feed: { cards, jobs: [J011] }, emptyLabel: "Nothing waiting." }));
 const allButtons = (html: string) =>
   Array.from(html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)).map((m) => m[1].replace(/&#x27;/g, "'"));
-/** The answers on a card: every button but What's On It and Waiting On A Credit (pinned on their own below). */
-const buttons = (html: string) => allButtons(html).filter((b) => !["Open Bill", "Waiting On A Credit", "Wait 30 More Days"].includes(b));
+/** The answers on a card: every button but What's On It and Waiting on a Credit (pinned on their own below). */
+const buttons = (html: string) => allButtons(html).filter((b) => !["Open Bill", "Waiting on a Credit", "Wait 30 More Days"].includes(b));
 
 describe("a supplier paper card", () => {
-  it("says it the way he asked: CED Sent A Bill · $301.81 · It Says 13897 HONEYSUCKLE", () => {
+  it("says it the way he asked: CED Sent a Bill · $301.81 · It Says 13897 HONEYSUCKLE", () => {
     const html = render([base]);
-    expect(html).toContain("CED Sent A Bill · $301.81 · It Says 13897 HONEYSUCKLE");
-    expect(buttons(html)).toEqual(["Put It On J-011", "Another Job", "Shop Stock", "Business Cost"]);
+    expect(html).toContain("CED Sent a Bill · $301.81 · It Says 13897 HONEYSUCKLE");
+    expect(buttons(html)).toEqual(["Put It on J-011", "Another Job", "Shop Stock", "Business Cost"]);
     // Suggested, never preselected: no picker is open and nothing anywhere is selected.
     expect(html).not.toContain("selected");
   });
@@ -84,18 +84,18 @@ describe("a supplier paper card", () => {
     const card = (f: Record<string, unknown>) => renderToStaticMarkup(createElement(SupplierPaperCards, { feed: f as any, emptyLabel: "Nothing waiting." }));
     expect(card(feed)).toBe(render([base]));
     const off = card({ ...feed, shopStock: false });
-    expect(buttons(off)).toEqual(["Put It On J-011", "Another Job", "Business Cost"]);
+    expect(buttons(off)).toEqual(["Put It on J-011", "Another Job", "Business Cost"]);
   });
 
-  it("says Pick A Job when there is nothing to go on", () => {
+  it("says Pick a Job when there is nothing to go on", () => {
     const html = render([{ ...base, said: null, verdict: "blank", suggestion: null }]);
-    expect(html).toContain("CED Sent A Bill · $301.81 · No Job Name On It");
-    expect(buttons(html)).toEqual(["Pick A Job", "Shop Stock", "Business Cost"]);
+    expect(html).toContain("CED Sent a Bill · $301.81 · No Job Name on It");
+    expect(buttons(html)).toEqual(["Pick a Job", "Shop Stock", "Business Cost"]);
   });
 
   it("a paper already on a job asks only for the record", () => {
     const html = render([{ ...base, state: "record", suggestion: null, onJob: { id: "j-050", label: "J-050", name: "3639 Sorrel Road", status: "complete" } }]);
-    expect(buttons(html)[0]).toBe("Record It On J-050");
+    expect(buttons(html)[0]).toBe("Record It on J-050");
   });
 
   it("offers the tie when a bill may already be this purchase, and says what the other buttons mean", () => {
@@ -136,8 +136,8 @@ describe("review of Wave A: the card at 60mph", () => {
     expect(none).not.toContain("The closest are first");
     const some = render([{ ...base, said: "561 FERNHILL", verdict: "weak", suggestion: null, because, closest: [fernhills[0]] }]);
     expect(some).toContain("The closest are first");
-    // Still never a button: Pick A Job opens the picker with them on top.
-    expect(buttons(some)).toEqual(["Pick A Job", "Shop Stock", "Business Cost"]);
+    // Still never a button: Pick a Job opens the picker with them on top.
+    expect(buttons(some)).toEqual(["Pick a Job", "Shop Stock", "Business Cost"]);
   });
 
   it("My Day draws one card and says how many more wait, with a way to all of them", () => {
@@ -145,7 +145,7 @@ describe("review of Wave A: the card at 60mph", () => {
     const html = renderToStaticMarkup(
       createElement(SupplierPaperCards, { feed: { cards, jobs: [J011] }, limit: 1, moreHref: "/bills#needs-you" }),
     );
-    expect(html.match(/Sent A Bill/g)?.length).toBe(1);
+    expect(html.match(/Sent a Bill/g)?.length).toBe(1);
     expect(html).toContain("See 2 More Supplier Bills");
     expect(html).toContain('href="/bills#needs-you"');
   });
@@ -178,7 +178,7 @@ describe("What's On It (Erik: 'i need to open the bill to see whats on it to be 
       expect(allButtons(html)[0]).toBe("Open Bill");
       expect(html).toContain('aria-expanded="false"');
       // Nothing is read until he asks.
-      expect(html).not.toContain("Opening The Bill");
+      expect(html).not.toContain("Opening the Bill");
     }
   });
 
@@ -207,14 +207,14 @@ describe("What's On It (Erik: 'i need to open the bill to see whats on it to be 
     expect(html).not.toContain("isn&#x27;t on any line");
     expect(html).not.toContain("changed since the page loaded");
     // No stored PDF: said, never a dead link.
-    expect(html).not.toContain("Open The PDF");
+    expect(html).not.toContain("Open the PDF");
     expect(html).toContain("only what was read from invoice_8802-1107139.pdf");
   });
 
-  it("an Open The PDF link when one is stored, and a gap between lines and total is said", () => {
+  it("an Open the PDF link when one is stored, and a gap between lines and total is said", () => {
     const html = view({ state: "ok", contents: { ...hazelnut, lines: hazelnut.lines.slice(1), offLines: 36, pdfUrl: "https://signed.example/a.pdf", pdfNote: null } });
     expect(html).toContain('href="https://signed.example/a.pdf"');
-    expect(html).toContain("Open The PDF");
+    expect(html).toContain("Open the PDF");
     expect(html).toContain("$36.00 of the total isn&#x27;t on any line.");
   });
 
@@ -225,7 +225,7 @@ describe("What's On It (Erik: 'i need to open the bill to see whats on it to be 
   });
 
   it("loading says so; a failed read says so with Try Again", () => {
-    expect(view({ state: "loading" })).toContain("Opening The Bill");
+    expect(view({ state: "loading" })).toContain("Opening the Bill");
     const failed = view({ state: "error", error: "The connection dropped before the lines came back." });
     expect(failed).toContain("It couldn&#x27;t read what&#x27;s on this paper.");
     expect(failed).toContain('role="alert"');
@@ -237,17 +237,17 @@ describe("What's On It (Erik: 'i need to open the bill to see whats on it to be 
   });
 });
 
-describe("Waiting On A Credit (Erik, 2026-09-26: the Hazelnut switch CED will credit back)", () => {
+describe("Waiting on a Credit (Erik, 2026-09-26: the Hazelnut switch CED will credit back)", () => {
   it("every card on a supplier account offers it after Open Bill and before the answers, Title Case", () => {
     const html = render([{ ...base, accountId: "acct-ced" }]);
-    expect(allButtons(html).slice(0, 3)).toEqual(["Open Bill", "Waiting On A Credit", "Put It On J-011"]);
+    expect(allButtons(html).slice(0, 3)).toEqual(["Open Bill", "Waiting on a Credit", "Put It on J-011"]);
     expect(html).not.toContain("Still no credit");
   });
 
   it("a card on no supplier account has no Wait door (a credit pairs on its account, and the fold lives there)", () => {
     const html = render([{ ...base, accountId: null }]);
-    expect(allButtons(html)).not.toContain("Waiting On A Credit");
-    expect(allButtons(html).slice(0, 2)).toEqual(["Open Bill", "Put It On J-011"]);
+    expect(allButtons(html)).not.toContain("Waiting on a Credit");
+    expect(allButtons(html).slice(0, 2)).toEqual(["Open Bill", "Put It on J-011"]);
   });
 
   it("a card that came back by itself says so, and offers another 30 days", () => {
@@ -261,7 +261,7 @@ describe("Waiting On A Credit (Erik, 2026-09-26: the Hazelnut switch CED will cr
     expect(html).toContain("Still no credit from CED after 30 days.");
     expect(allButtons(html).slice(0, 2)).toEqual(["Open Bill", "Wait 30 More Days"]);
     // The answers are all still there.
-    expect(buttons(html)).toEqual(["Put It On J-011", "Another Job", "Shop Stock", "Business Cost"]);
+    expect(buttons(html)).toEqual(["Put It on J-011", "Another Job", "Shop Stock", "Business Cost"]);
   });
 
   it("its done line carries Undo, and outlives the list like any other", () => {
@@ -284,11 +284,11 @@ describe("the done line's Already Billed question", () => {
   const undo = { invoiceId: "si-1", billId: "bill-1", jobSetTo: "j-010", jobBefore: null };
   const offer = { jobId: "j-010", billId: "bill-1", invoiceNumber: "INV-00023", what: "8802-1101475" };
 
-  it("asks Already Billed On INV-00023? beside Undo, 44px and Title Case", () => {
+  it("asks Already Billed on INV-00023? beside Undo, 44px and Title Case", () => {
     setSupplierPaperScopeForTest("t-ab", { done: { "si-1": { card: base, message: "8802-1101475 is a bill on J-010 now.", undo, alreadyBilled: offer } as never }, live: 0 });
     const trail = renderToStaticMarkup(createElement(SupplierPaperDoneTrail, { scope: "t-ab" }));
-    expect(allButtons(trail)).toEqual(["Undo", "Already Billed On INV-00023?"]);
-    const tag = Array.from(trail.matchAll(/<button[^>]*>Already Billed On INV-00023\?<\/button>/g))[0][0];
+    expect(allButtons(trail)).toEqual(["Undo", "Already Billed on INV-00023?"]);
+    const tag = Array.from(trail.matchAll(/<button[^>]*>Already Billed on INV-00023\?<\/button>/g))[0][0];
     expect(tag).toMatch(/\bh-11\b/);
   });
 
@@ -319,25 +319,25 @@ describe("the done line's Already Billed question", () => {
 /**
  * ALREADY BILLED ON THE CARD ITSELF (Erik, 2026-09-26: "on supplier bills on my day inside needs
  * action should also be a button for already charged"). A card whose paper names or guesses one job,
- * where a bill that went out on it could hold the paper, says Already Billed On J-010 beside the
- * answers. The tap files the paper there exactly as Put It On does, then opens the sheet on the bill
+ * where a bill that went out on it could hold the paper, says Already Billed on J-010 beside the
+ * answers. The tap files the paper there exactly as Put It on does, then opens the sheet on the bill
  * it wrote; closed unmarked, the paper stays filed and the done line says so.
  */
-describe("Already Billed On J-010 on the card", () => {
+describe("Already Billed on J-010 on the card", () => {
   const J010 = { id: "j-010", label: "J-010", name: "11301 Pinyon Sage", status: "complete" };
   const ps: SupplierPaperCard = { ...base, invoiceNumber: "8802-1101475", said: "11301 PINYON SAGE", suggestion: J010, alreadyBilledOn: J010 };
   const undo = { invoiceId: "si-1", billId: "bill-ps", jobSetTo: "j-010", jobBefore: null };
 
-  it("sits right after Put It On J-010, 44px and Title Case, and every other answer stays", () => {
+  it("sits right after Put It on J-010, 44px and Title Case, and every other answer stays", () => {
     const html = render([ps]);
-    expect(buttons(html)).toEqual(["Put It On J-010", "Already Billed On J-010", "Another Job", "Shop Stock", "Business Cost"]);
-    const tag = Array.from(html.matchAll(/<button[^>]*>Already Billed On J-010<\/button>/g))[0][0];
+    expect(buttons(html)).toEqual(["Put It on J-010", "Already Billed on J-010", "Another Job", "Shop Stock", "Business Cost"]);
+    const tag = Array.from(html.matchAll(/<button[^>]*>Already Billed on J-010<\/button>/g))[0][0];
     expect(tag).toMatch(/\bh-11\b/);
   });
 
-  it("a paper already on a job: Record It On J-010, then Already Billed On J-010", () => {
+  it("a paper already on a job: Record It on J-010, then Already Billed on J-010", () => {
     const html = render([{ ...ps, state: "record", suggestion: null, onJob: J010 }]);
-    expect(buttons(html).slice(0, 2)).toEqual(["Record It On J-010", "Already Billed On J-010"]);
+    expect(buttons(html).slice(0, 2)).toEqual(["Record It on J-010", "Already Billed on J-010"]);
   });
 
   it("the feed decides: only the card's ONE job (where it sits, or the clear guess), and only where a sent bill could hold it", () => {
@@ -413,7 +413,7 @@ describe("Already Billed On J-010 on the card", () => {
     setSupplierPaperScopeForTest("t-ab5", { done: { "si-1": after as never }, live: 0 });
     const trail = renderToStaticMarkup(createElement(SupplierPaperDoneTrail, { scope: "t-ab5" }));
     expect(trail).toContain("Reload the page to see.");
-    expect(allButtons(trail)).toEqual(["Already Billed On INV-00023?"]);
+    expect(allButtons(trail)).toEqual(["Already Billed on INV-00023?"]);
   });
 
   it("the done line after closing: its Undo, and the question to try again (Already Billed? when no invoice was named)", () => {

@@ -11,12 +11,12 @@ import { ACTIONS, GlobalQuickAdd, QuickAddMenu, STUCK_MS, plusOpens, quickAddAct
 import { ALL_ON, type FeatureMap } from "@/lib/features";
 import { LangProvider } from "@/components/lang-provider";
 import { dict, translator } from "@/lib/i18n";
-import { esTitleCase } from "../../tests/es-function-words";
+import { esTitleCase } from "../../tests/title-case-words";
 
 /**
- * THE + (W1-11: eight rows to six) AND THE SWITCH BOARD (0352). The office: Snap Or Note first, then
+ * THE + (W1-11: eight rows to six) AND THE SWITCH BOARD (0352). The office: Snap or Note first, then
  * New Lead, New Job, New Appointment, New Estimate, New Invoice; a switched-off feature's row goes.
- * The crew: the + is Snap Or Note itself, and no typed verb is his.
+ * The crew: the + is Snap or Note itself, and no typed verb is his.
  */
 const off = (...keys: (keyof FeatureMap)[]) => ({ ...ALL_ON, ...Object.fromEntries(keys.map((k) => [k, false])) }) as FeatureMap;
 const labels = (isStaff: boolean, f?: FeatureMap) => quickAddActions(isStaff, f).map((a) => a.label);
@@ -33,7 +33,7 @@ describe("quickAddActions", () => {
     expect(labels(true)).not.toContain("New Reminder");
   });
 
-  it("a tech gets no typed verb at all: his + is Snap Or Note", () => {
+  it("a tech gets no typed verb at all: his + is Snap or Note", () => {
     expect(labels(false)).toEqual([]);
     expect(labels(false, off("leads", "estimates"))).toEqual([]);
     expect(plusOpens(false)).toBe("snap-or-note");
@@ -47,29 +47,29 @@ describe("quickAddActions", () => {
 });
 
 describe("the + on screen", () => {
-  it("the office's menu: Snap Or Note is the first row, then the verbs, every row 44px", () => {
+  it("the office's menu: Snap or Note is the first row, then the verbs, every row 44px", () => {
     const html = renderToStaticMarkup(createElement(QuickAddMenu, { isStaff: true, onSnap: () => {}, onGo: () => {} }));
-    expect(rows(html)).toEqual(["Snap Or Note", "New Lead", "New Job", "New Appointment", "New Inspection", "New Estimate", "New Invoice"]);
+    expect(rows(html)).toEqual(["Snap or Note", "New Lead", "New Job", "New Appointment", "New Inspection", "New Estimate", "New Invoice"]);
     for (const b of html.match(/<button[^>]*>/g) ?? []) expect(b).toContain("min-h-11");
     // A switch that is off removes only its own row.
     const leadsOff = renderToStaticMarkup(createElement(QuickAddMenu, { isStaff: true, features: off("leads"), onSnap: () => {}, onGo: () => {} }));
-    expect(rows(leadsOff)).toEqual(["Snap Or Note", "New Job", "New Appointment", "New Estimate", "New Invoice"]);
+    expect(rows(leadsOff)).toEqual(["Snap or Note", "New Job", "New Appointment", "New Estimate", "New Invoice"]);
   });
 
   it("a tech's + opens the paper door itself (no one-row menu), and names it; the office's + is Quick Add; both 44px", () => {
     const tech = renderToStaticMarkup(createElement(GlobalQuickAdd, { isStaff: false }));
-    expect(tech).toMatch(/<button[^>]*aria-label="Snap Or Note"/);
+    expect(tech).toMatch(/<button[^>]*aria-label="Snap or Note"/);
     expect(tech).not.toContain('aria-haspopup="menu"');
     const office = renderToStaticMarkup(createElement(GlobalQuickAdd, { isStaff: true, placement: "topbar" }));
     expect(office).toMatch(/<button[^>]*aria-label="Quick Add"[^>]*aria-haspopup="menu"/);
     for (const html of [tech, office]) expect(html).toMatch(/<button[^>]*class="[^"]*\bh-11 w-11\b/);
   });
 
-  it("a Spanish-speaking tech (cn-v1138): his + is Foto o Nota; the office's menu keeps Snap Or Note in its words; English byte for byte as before", () => {
+  it("a Spanish-speaking tech (cn-v1138): his + is Foto o Nota; the office's menu keeps Snap or Note in its words; English byte for byte as before", () => {
     const es = (el: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(LangProvider, { lang: "es" } as Parameters<typeof LangProvider>[0], el));
     const tech = es(createElement(GlobalQuickAdd, { isStaff: false }));
     expect(tech).toMatch(/<button[^>]*aria-label="Foto o Nota"[^>]*title="Foto o Nota"/);
-    expect(tech).not.toContain("Snap Or Note");
+    expect(tech).not.toContain("Snap or Note");
     expect(rows(es(createElement(QuickAddMenu, { isStaff: true, onSnap: () => {}, onGo: () => {} })))[0]).toBe("Foto o Nota");
     expect(es(createElement(GlobalQuickAdd, { isStaff: true, placement: "topbar" }))).toMatch(/<button[^>]*aria-label="Agregar Rápido"/);
     const en = renderToStaticMarkup(createElement(LangProvider, { lang: "en" } as Parameters<typeof LangProvider>[0], createElement(GlobalQuickAdd, { isStaff: false })));
@@ -143,14 +143,14 @@ describe("the tap that did nothing, twice (triage 2026-09-27)", () => {
     expect(STUCK_MS).toBeGreaterThanOrEqual(5000);
   });
 
-  it("never a full reload while Snap Or Note is still sending files: the tap says so and waits", () => {
+  it("never a full reload while Snap or Note is still sending files: the tap says so and waits", () => {
     expect(quickAddGo({ online: true, lastFailed: true, stuck: false, label: "New Job", sending: 6 })).toEqual({
       way: "wait",
-      said: "Snap Or Note is still sending 6 files, and reloading now would stop them. Tap New Job again once they're in.",
+      said: "Snap or Note is still sending 6 files, and reloading now would stop them. Tap New Job again once they're in.",
     });
     expect(quickAddGo({ online: true, lastFailed: false, stuck: true, label: "New Job", sending: 1 })).toEqual({
       way: "wait",
-      said: "Snap Or Note is still sending 1 file, and reloading now would stop it. Tap New Job again once it's in.",
+      said: "Snap or Note is still sending 1 file, and reloading now would stop it. Tap New Job again once it's in.",
     });
     // Nothing sending: the full load that really retries. An ordinary tap is soft either way.
     expect(quickAddGo({ online: true, lastFailed: true, stuck: false, label: "New Job", sending: 0 })).toEqual({ way: "full" });

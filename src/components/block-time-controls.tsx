@@ -82,7 +82,7 @@ export function BlockTimeControls({
   /** Every refusal in words (null when a new try starts): a sheet closed before the words were read
    *  says them in a toast. */
   onRefusal?: (words: string | null) => void;
-  /** A form's draft (Add To Schedule): `save` only sets the form's hours and the form's own button
+  /** A form's draft (Add to Schedule): `save` only sets the form's hours and the form's own button
    *  writes, so nothing here says Saving… or Saved. */
   draft?: boolean;
 }) {

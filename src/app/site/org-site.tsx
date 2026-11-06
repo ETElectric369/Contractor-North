@@ -528,7 +528,7 @@ function PortfolioBand({ portfolio, brand, orgName, moreHref }: { portfolio: { u
       {moreHref && (
         <div className="mx-auto -mt-8 max-w-5xl px-4 pb-14">
           <Link href={moreHref} className="inline-flex items-center gap-1.5 font-semibold hover:underline" style={{ color: brand }}>
-            See The Full Portfolio <ArrowRight className="h-4 w-4" />
+            See the Full Portfolio <ArrowRight className="h-4 w-4" />
           </Link>
         </div>
       )}
@@ -544,7 +544,7 @@ function ReviewsBand({ reviews, brand, gbpUrl, appHostExt = false }: { reviews: 
         <h2 className="text-3xl font-extrabold tracking-tight">What our customers say</h2>
         {gbpUrl && (
           <a href={gbpUrl} {...(appHostExt ? {} : { target: "_blank", rel: "noopener" })} className="inline-flex items-center gap-1.5 text-sm font-semibold hover:underline" style={{ color: brand }}>
-            <Star className="h-4 w-4" fill={brand} /> Review Us On Google
+            <Star className="h-4 w-4" fill={brand} /> Review Us on Google
           </a>
         )}
       </div>
@@ -598,7 +598,7 @@ function ContactBand({ orgId, brand, hasEstimateDoor, pageHref }: { orgId: strin
       {pageHref && (
         <p className="mt-6 text-center">
           <Link href={pageHref} className="inline-flex items-center gap-1.5 text-sm font-semibold hover:underline" style={{ color: brand }}>
-            Visit The Contact Page <ArrowRight className="h-4 w-4" />
+            Visit the Contact Page <ArrowRight className="h-4 w-4" />
           </Link>
         </p>
       )}

@@ -81,11 +81,11 @@ describe("the For box: a typed name becomes the lead this visit is for", () => {
 
 describe("the picker offers it, pinned", () => {
   const picker = readFileSync("src/app/(app)/appointments/[id]/link-picker.tsx", "utf8");
-  it("offers Add As A New Lead for what was TYPED only (never the address seed), where a lead may be picked, and not for a name already in the rows", () => {
+  it("offers Add as a New Lead for what was TYPED only (never the address seed), where a lead may be picked, and not for a name already in the rows", () => {
     expect(picker).toContain('const offerLead = !searching && open && typed.length >= 2 && (!kinds || kinds.includes("lead")) && !rows.some((r) => r.name.trim().toLowerCase() === typed.toLowerCase());');
     expect(picker).toContain("const typed = q.replace(/\\s+/g, \" \").trim();");
     expect(picker).toContain('>{t("vp_btn_addAsANewLead")}<');
-    expect(translator("en")("vp_btn_addAsANewLead")).toBe("Add As A New Lead");
+    expect(translator("en")("vp_btn_addAsANewLead")).toBe("Add as a New Lead");
     expect(picker).toContain("linkAppointmentToNewLead(appointmentId, typed)");
     // Nothing silent: a refusal is shown where the tap was.
     expect(picker).toContain('<p role="alert" className="px-1 py-1 text-xs text-red-700">');
@@ -94,7 +94,7 @@ describe("the picker offers it, pinned", () => {
     expect(translator("en")("vp_nobodyByThatName")).toBe("Nobody by that name yet.");
     expect(translator("en")("vp_nothingMatchesYet")).toBe("Nothing matches yet — carry on, you can connect this later.");
   });
-  it("the ending card's Won · Pick The Job (jobs only) never offers a lead", () => {
+  it("the ending card's Won · Pick the Job (jobs only) never offers a lead", () => {
     expect(readFileSync("src/app/(app)/appointments/[id]/visit-ending.tsx", "utf8")).toContain('kinds={["job"]}');
   });
 });

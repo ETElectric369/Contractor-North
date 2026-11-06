@@ -26,10 +26,10 @@ describe("the office's two boxes", () => {
     expect(html).toContain("It prints on the customer&#x27;s invoice.");
   });
 
-  it("Notes, empty: one 44px Add A Note, with the line that says only the company sees them", () => {
+  it("Notes, empty: one 44px Add a Note, with the line that says only the company sees them", () => {
     const html = r({ jobId: "j1", field: "notes", value: null });
     expect(html).toContain(">Notes<");
-    expect(html).toMatch(/<button[^>]*h-11[^>]*>(?:<svg[\s\S]*?<\/svg>)?\s*Add A Note<\/button>/);
+    expect(html).toMatch(/<button[^>]*h-11[^>]*>(?:<svg[\s\S]*?<\/svg>)?\s*Add a Note<\/button>/);
     expect(html).not.toContain("<textarea");
     expect(html).toContain("Only your company sees these. Never on a customer&#x27;s paper.");
   });
@@ -39,7 +39,7 @@ describe("the office's two boxes", () => {
     expect(html).toContain("<textarea");
     expect(html).toContain("Gate code 4412");
     expect(html).toContain("Only your company sees these.");
-    expect(html).not.toContain("Add A Note");
+    expect(html).not.toContain("Add a Note");
   });
 });
 

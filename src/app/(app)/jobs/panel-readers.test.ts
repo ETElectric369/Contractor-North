@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * THE READERS' DOORS, PINNED (Panel plan, phase 4; honed in the panel-first wave). Read A Photo is
+ * THE READERS' DOORS, PINNED (Panel plan, phase 4; honed in the panel-first wave). Read a Photo is
  * the crew's and the office's — three reads per job per day for the crew, the office uncounted — and
  * what it reads LANDS IN ITS SPACES as suggestions (a line the panel already says is skipped; one
  * whose words differ is written in the same space; a re-read writes nothing). Read Circuits From
@@ -55,6 +55,7 @@ vi.mock("@/lib/rate-limit", () => ({
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { titleCaseIn } from "../../../../tests/title-case-words";
 import { applyLabelCheck, keepSuggestions, readPanelPhoto, readPlanCircuits, savePanel, undoTakeOff, type PanelPhoto } from "./panel-actions";
 import { PanelReaders, PhotoPicker, photoOrder } from "./[id]/job-panel-readers";
 import { PHOTO_CAP_WORDS, panelFacts } from "@/lib/panel/readers";
@@ -499,19 +500,19 @@ describe("the card: ONE button, one sentence", () => {
   const buttons = (html: string) =>
     [...html.matchAll(/<button[^>]*>[\s\S]*?<\/button>/g)].map((m) => ({ markup: m[0], text: m[0].replace(/<[^>]+>/g, "").replace(/&#x27;/g, "'").trim() }));
   const textOf = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ");
-  const titleCase = (label: string) => label.split(/\s+/).every((w) => !/^\p{L}/u.test(w) || /^\p{Lu}/u.test(w));
+  const titleCase = (label: string) => titleCaseIn(label, "en"); // the one judge (cn-v1148)
 
-  it("a tech sees one button, Read A Photo, and nothing else: no strip, no hints, no checks, no plans", () => {
+  it("a tech sees one button, Read a Photo, and nothing else: no strip, no hints, no checks, no plans", () => {
     const html = render();
-    expect(buttons(html).map((b) => b.text)).toEqual(["Read A Photo"]);
+    expect(buttons(html).map((b) => b.text)).toEqual(["Read a Photo"]);
     expect(html).not.toContain("<img");
     const t = textOf(html);
-    for (const gone of ["About The Panel", "Label Check", "Reads Left", "The inspection said", "Read Circuits From The Plans", "Snowbell E-sheets.pdf"]) expect(t).not.toContain(gone);
+    for (const gone of ["About the Panel", "Label Check", "Reads Left", "The inspection said", "Read Circuits from the Plans", "Snowbell E-sheets.pdf"]) expect(t).not.toContain(gone);
   });
 
   it("the office has the plans link at the bottom of the same card", () => {
     const html = render({ staff: true });
-    expect(buttons(html).map((b) => b.text)).toEqual(["Read A Photo", "Read Circuits From The Plans"]);
+    expect(buttons(html).map((b) => b.text)).toEqual(["Read a Photo", "Read Circuits from the Plans"]);
     for (const b of buttons(html)) expect(titleCase(b.text), b.text).toBe(true);
   });
 
@@ -519,11 +520,11 @@ describe("the card: ONE button, one sentence", () => {
     expect(textOf(render())).not.toContain(PHOTO_CAP_WORDS);
     const html = render({ photoReadsLeft: 0 });
     expect(textOf(html)).toContain("3 photo reads a day on this job — ask the office for more.");
-    expect(buttons(html).find((b) => b.text === "Read A Photo")!.markup).toContain('disabled=""');
+    expect(buttons(html).find((b) => b.text === "Read a Photo")!.markup).toContain('disabled=""');
     // The office isn't counted: no cap, the button on.
     const office = render({ staff: true, photoReadsLeft: 0 });
     expect(textOf(office)).not.toContain(PHOTO_CAP_WORDS);
-    expect(buttons(office).find((b) => b.text === "Read A Photo")!.markup).not.toContain('disabled=""');
+    expect(buttons(office).find((b) => b.text === "Read a Photo")!.markup).not.toContain('disabled=""');
   });
 
   it("the picker offers the panel's own photo FIRST, then the job's newest first, ONE at a time", () => {
@@ -538,7 +539,7 @@ describe("the card: ONE button, one sentence", () => {
     expect(textOf(html)).toContain("The panel's photo · catbird-door.jpg");
     expect(textOf(html)).toContain("1 of 3");
     const labels = buttons(html).map((b) => b.text);
-    expect(labels).toEqual(["", "Read This Photo", "Next Photo", "Take A New One"]);
+    expect(labels).toEqual(["", "Read This Photo", "Next Photo", "Take a New One"]);
     expect(buttons(html)[0].markup).toContain('aria-label="Close"');
     for (const l of labels) expect(titleCase(l), l).toBe(true);
     // The next one is the job's newest.
@@ -553,6 +554,6 @@ describe("the card: ONE button, one sentence", () => {
     const html = renderToStaticMarkup(
       createElement(PhotoPicker, { photos: [OWN], at: 0, panelPhotoId: null, onNext: () => {}, onRead: () => {}, onTake: () => {}, onClose: () => {} }),
     );
-    expect(buttons(html).map((b) => b.text)).toEqual(["", "Read This Photo", "Take A New One"]);
+    expect(buttons(html).map((b) => b.text)).toEqual(["", "Read This Photo", "Take a New One"]);
   });
 });

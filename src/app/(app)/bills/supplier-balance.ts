@@ -465,7 +465,7 @@ export function reversedInvoiceIds(invoices: InvoiceBalanceShape[]): Set<string>
  * expires. It came up the day the Record button was wired (review, 2026-09-19): the moment Erik
  * pays the September statement and CED marks 8802-1107230 and its credit memo closed, the pairing
  * above stops matching and the five light almond receptacles he SENT BACK reappear on "Purchases
- * Not In Your Books" with a job already on them and a live button offering to put $225.47 of
+ * Not in Your Books" with a job already on them and a live button offering to put $225.47 of
  * merchandise he does not have onto his customer's job.
  *
  * So this pairs on the TOTAL, which does not move, and within the closed and open sets separately
@@ -530,7 +530,7 @@ export function reversedPurchaseIds(invoices: PurchaseReversalShape[]): Set<stri
  * THE CREDIT HE WAS WAITING FOR HAS COME (audit v1018, class 6). ONE ACCOUNT'S documents in.
  *
  * reversedPurchaseIds pairs only inside the open set or inside the closed set, which is right for
- * a purchase nobody said anything about. It is wrong for one a person stamped Waiting On A Credit
+ * a purchase nobody said anything about. It is wrong for one a person stamped Waiting on a Credit
  * (0346), and the ordinary case is exactly the mixed one: he pays the September statement, CED
  * closes 8802-1107139 ($59.17), and the credit memo for -$59.17 lands open weeks later. The pair
  * never matched, so the bill came back 30 days on saying "Still no credit from CED" with the
@@ -545,7 +545,7 @@ export function reversedPurchaseIds(invoices: PurchaseReversalShape[]): Set<stri
  *
  * reversedPurchaseIds itself is unchanged (the Record button's own guard reads it). Every list
  * that asks "is this purchase taken back?" reads both: paperCards (Needs You, My Day, the waiting
- * fold) and invoicesNeedingBill (/bills Not In Your Books, the job's Costs tab).
+ * fold) and invoicesNeedingBill (/bills Not in Your Books, the job's Costs tab).
  */
 export function creditArrivedFor(
   invoices: (PurchaseReversalShape & { supplierAccountId?: string | null; waitingCreditSince?: string | null })[],
@@ -1155,7 +1155,7 @@ export type SupplierActionResult = {
   message?: string;
   /** recordPayment hands back the row it wrote, so Undo voids exactly that payment. */
   paymentId?: string;
-  /** Record It As A Bill hands back the bill it wrote, so Undo takes back exactly that bill. */
+  /** Record It as a Bill hands back the bill it wrote, so Undo takes back exactly that bill. */
   billId?: string;
   /**
    * fileSupplierPaper's Undo: the bill it wrote and the job the paper had before (null for none),
@@ -1164,7 +1164,7 @@ export type SupplierActionResult = {
   undo?: { invoiceId: string; billId: string; jobSetTo: string | null; jobBefore: string | null };
   /**
    * ALREADY BILLED (0357): after a paper is filed on a job that bills its actual costs, the bill most
-   * likely to have charged for it already ("Already Billed On INV-00023?"). Absent when no sent bill
+   * likely to have charged for it already ("Already Billed on INV-00023?"). Absent when no sent bill
    * on the job could hold it. Asking changes nothing; the sheet it opens is the Costs tab's own.
    */
   alreadyBilled?: { jobId: string; billId: string; invoiceNumber: string; what: string };

@@ -240,7 +240,7 @@ describe("a sheet opened over a turned screen brings it upright instead of landi
   });
 
   it("…and it does NOT depend on a field being focused, which is what left the sheet in the corner", () => {
-    // The sheets on the schedule (the tile sheet, Add To Schedule, Time Off) carry no autoFocus, so
+    // The sheets on the schedule (the tile sheet, Add to Schedule, Time Off) carry no autoFocus, so
     // `typing` was false and the screen stayed turned the whole time
     // the sheet was open. And where a field WAS focused, tapping Done on the keyboard turned the screen
     // back under an open sheet, mid-use.
@@ -552,7 +552,7 @@ describe("the content gets the swapped dimensions, and the element really wears 
   it("the two rules that ask the WINDOW instead of their container are told the box's own size", () => {
     // A media query inside the turned box is still answered by the window — 402 x 874, however the
     // phone is held. Below `lg` the schedule's rail stacks ABOVE the calendar, so without this,
-    // turning the phone to see the week lands on "Waiting For A Day"; and the week stack's 70dvh is
+    // turning the phone to see the week lands on "Waiting for a Day"; and the week stack's 70dvh is
     // 612px inside a 402px room, which makes the box scroll as well — two scrollers for one list.
     expect(CSS).toContain(".turn-face[data-held] .schedule-split > aside");
     const order = CSS.slice(CSS.indexOf(".turn-face[data-held] .schedule-split > aside"));
@@ -679,9 +679,9 @@ describe("the chrome itself is never transformed — only the faces of its contr
   });
 
   it("…and the number of marked controls is the number of controls in the top bar", () => {
-    // Six doors on the phone's bar: Back, Search Or Ask, Nort (two states, one button), +, the bell and
+    // Six doors on the phone's bar: Back, Search or Ask, Nort (two states, one button), +, the bell and
     // the account avatar. Five of them live in these four files; the sixth is Nort's other state.
-    expect(openingTagsWith(TOPBAR, "data-upright").length).toBe(4); // Back, Search, Stop Nort, Talk To Nort
+    expect(openingTagsWith(TOPBAR, "data-upright").length).toBe(4); // Back, Search, Stop Nort, Talk to Nort
     expect(openingTagsWith(QUICK_ADD, "data-upright").length).toBe(1);
     expect(openingTagsWith(BELL, "data-upright").length).toBe(1);
     expect(openingTagsWith(ACCOUNT, "data-upright").length).toBe(1);

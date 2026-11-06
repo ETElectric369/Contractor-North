@@ -16,7 +16,7 @@ export interface SampleItem {
   unit_price: number;
   line_total: number;
   import_source?: string | null;
-  /** A task line's breakdown (0386), so the studio shows what "Tasks With Labor And Parts" prints. */
+  /** A task line's breakdown (0386), so the studio shows what "Tasks with Labor and Parts" prints. */
   detail?: TaskDetail | null;
 }
 

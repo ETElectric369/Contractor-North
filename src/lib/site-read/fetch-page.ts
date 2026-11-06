@@ -7,7 +7,7 @@ import zlib from "node:zlib";
 import { blockedAddress, blockedHostname, parseIPv4 } from "./address-guard";
 
 /**
- * READ ONE PUBLIC WEB PAGE, SAFELY (Fill From Their Site, 2026-09-27).
+ * READ ONE PUBLIC WEB PAGE, SAFELY (Fill from Their Site, 2026-09-27).
  *
  * The address comes from a person's paste, so this is written as if it came from an attacker:
  *   - http and https only; no login in the address; ports 80, 443, 8080 and 8443 only.

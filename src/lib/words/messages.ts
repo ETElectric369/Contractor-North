@@ -30,11 +30,11 @@ export const words: WordCatalog = {
     nb_crewClockedInAtSince: "You've been clocked in at {label} since {since}",
     nb_crewOnClockSince: "You've been on the clock since {since}",
     nb_crewOnClockSinceAt: "You've been on the clock since {since} (at {label} since {switchAt})",
-    nb_stillOnClockTitle: "Still On The Clock?",
+    nb_stillOnClockTitle: "Still on the Clock?",
     nb_stillOnClockBody: "{crewLead}. Tap to set when you stopped.",
     nb_stillOnClockText: "{crewLead}, more than {hours} hours. Open Timeclock to set when you stopped.",
     // /api/timeclock/long-shift, the office (English today).
-    nb_officeStillTitle: "{first} Is Still On The Clock",
+    nb_officeStillTitle: "{first} Is Still on the Clock",
     nb_officeClockedIn: "Clocked in {since}, {hours} hours ago",
     nb_officeClockedInAt: "Clocked in {since} at {label}, {hours} hours ago",
     nb_officeOnClock: "On the clock since {since}, {hours} hours",

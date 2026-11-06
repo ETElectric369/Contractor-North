@@ -14,7 +14,7 @@ import { backWords, checkComeBackDay, offHoldWords, shortDay } from "@/lib/come-
 import { jobLabel, toStaffOptions, defaultJobName } from "@/lib/schedule-options";
 import { jobWords } from "@/lib/action-items/words";
 import { modalWords } from "@/components/ui/modal-words";
-import { esTitleCase } from "../../../tests/es-function-words";
+import { esTitleCase } from "../../../tests/title-case-words";
 
 /**
  * THE AGENDA'S LIBRARIES IN SPANISH (the agenda-in-Spanish wave's foundation). Each library keeps its

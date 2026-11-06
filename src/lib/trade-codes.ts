@@ -4,7 +4,7 @@
  * Before cn-v1135 this file held its own ten job-code lists, and lib/trade-code-packs held five more
  * that disagreed with them (TRBL here, TROUB there). The registry is the home now: ONE list per trade,
  * one spelling, seeded whole at sign-up (create_organization's `p_codes`, migration 0078) and offered
- * by "Import A Trade's Codes" in Settings. Nothing here is a second copy; a row that changes changes
+ * by "Import a Trade's Codes" in Settings. Nothing here is a second copy; a row that changes changes
  * in the registry, and this view follows.
  *
  * IMPORT RULE: lib/features imports TRADE_ORDER from HERE at runtime, and the registry imports only a

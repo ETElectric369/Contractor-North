@@ -66,7 +66,7 @@ describe("the family after its first entry is deleted", () => {
     const orphans = [{ ...mid, split_from: null }, { ...tail, split_from: null }];
     expect(orphans[0].clock_out).toBe(orphans[1].clock_in); // they touch to the second
     expect(splitFamilies(orphans).size).toBe(0);
-    // So no bracket on Timecards, no Move The Split, and no Join Back Into One Shift on either of them.
+    // So no bracket on Timecards, no Move the Split, and no Join Back into One Shift on either of them.
     expect(splitNeighbors(orphans, "mid")).toEqual({ prev: null, next: null });
     expect(splitNeighbors(orphans, "tail")).toEqual({ prev: null, next: null });
   });

@@ -59,11 +59,11 @@ export interface SupplierInvoiceActions {
   /**
    * RECORD TO SHELF (Shop Stock, Phase 2): the document goes in as a shelf ticket, not a job's,
    * each line counted onto the shelf by a person or marked Not Stock. `shelfLines` reads the lines
-   * the record will write, in its order; `recordToShelf` is Record It As A Bill with the answers.
+   * the record will write, in its order; `recordToShelf` is Record It as a Bill with the answers.
    */
   shelfLines?: (invoiceId: string) => Promise<{ ok: true; lines: ShelfCountLine[]; total: number } | { ok: false; error: string }>;
   recordToShelf?: (input: { invoiceId: string; differentPurchase?: boolean; toShelf: TicketLineChoice[] }) => Promise<SupplierActionResult>;
-  /** Waiting On A Credit's way back (0346): the bill is a Needs You card again. Absent: no button. */
+  /** Waiting on a Credit's way back (0346): the bill is a Needs You card again. Absent: no button. */
   stopWaitingOnCredit?: (invoiceId: string) => Promise<SupplierActionResult>;
 }
 
@@ -73,7 +73,7 @@ const LIST_LIMIT = 6;
 /** "$4.10 off"; a credit memo's negative discount comes back off the credit instead. */
 /**
  * THEIR PAPERS' NUMBER COUNTS EACH OPEN PAPER ONCE. A paper with no job and no bill (the one a
- * supplier booked to STOCK, or a $0.00 one) sits in both Invoices With No Job and Not Recorded Yet;
+ * supplier booked to STOCK, or a $0.00 one) sits in both Invoices with No Job and Not Recorded Yet;
  * it is still one paper, so the fold counts distinct papers, never the two lists added.
  */
 export function theirPapersCount(needJob: readonly { invoice: { id: string } }[], billRows: readonly { id: string }[]): number {
@@ -99,13 +99,13 @@ const KIND_TONE: Record<SupplierInvoiceKind, Tone> = {
  *  · THE DECISIONS HAPPEN ON NEEDS YOU. A paper waiting there (supplierPaperFeed, the same cards
  *    My Day shows) is not listed again here: one paper, one place to answer it. What is left in
  *    these lists is what the cards never carry - a credit memo with no job, a paper CED booked to
- *    STOCK (Record To Shelf), a $0.00 line - so every door this card had still has one home.
+ *    STOCK (Record to Shelf), a $0.00 line - so every door this card had still has one home.
  *  · EACH LIST IS ONE LINE until he opens it: its name, its count, its money.
- *  · TWO LISTS STAY IN VIEW (W1-33): Waiting On A Credit and What <Supplier> Has Open, with
- *    Discount Still On The Table while a discount is live. Where This Comes From, Invoices With No
+ *  · TWO LISTS STAY IN VIEW (W1-33): Waiting on a Credit and What <Supplier> Has Open, with
+ *    Discount Still on the Table while a discount is live. Where This Comes From, Invoices With No
  *    Job and Not Recorded Yet go inside one closed "Their Papers (N)", N counting only open papers.
  *  · THE BALANCE IS SAID ONCE, on the supplier's line above.
- *  · THE DISCOUNT'S "Record A Payment" IS GONE: the supplier's own Record A Payment sits right
+ *  · THE DISCOUNT'S "Record a Payment" IS GONE: the supplier's own Record a Payment sits right
  *    above these lists, and two doors to one payment sheet is one too many.
  *
  * Every judgement still comes out of supplier-reconcile.ts, which is pure and tested.
@@ -119,7 +119,7 @@ export function SupplierPaperLists({
   waitingOnCredit = [],
   actions,
 }: {
-  /** The supplier account: names the Not Recorded Yet fold, so Shop Stock's Record To Shelf door
+  /** The supplier account: names the Not Recorded Yet fold, so Shop Stock's Record to Shelf door
    *  (shelf-plan waitingForShelf) lands on it. */
   accountId: string;
   /** What he calls them: "CED Truckee". Used in every sentence, so it is never "the supplier". */
@@ -149,7 +149,7 @@ export function SupplierPaperLists({
   const [showAll, setShowAll] = useState<Record<string, boolean>>({});
   /** The action key of the last refusal, so the row that caused it can say so itself. */
   const [failedAt, setFailedAt] = useState<string | null>(null);
-  /** Record To Shelf's sheet: the document's lines, read from the server, each counted by a person. */
+  /** Record to Shelf's sheet: the document's lines, read from the server, each counted by a person. */
   const [shelfSheet, setShelfSheet] = useState<{
     invoiceId: string;
     number: string;
@@ -208,7 +208,7 @@ export function SupplierPaperLists({
   );
   const billRows = useMemo(() => needBill.rows.filter((r) => !setAside.has(r.id)), [needBill, setAside]);
   const billRowsTotal = r2(billRows.reduce((s, r) => s + (Number(r.total) || 0), 0));
-  /** Their Papers' number: only open papers (Invoices With No Job, Not Recorded Yet), each once. */
+  /** Their Papers' number: only open papers (Invoices with No Job, Not Recorded Yet), each once. */
   const theirPapersOpen = theirPapersCount(needJob, billRows);
   const claimable = useMemo(() => claimableDiscounts(invoices, today), [invoices, today]);
   const missed = useMemo(() => missedDiscounts(invoices, today), [invoices, today]);
@@ -248,8 +248,8 @@ export function SupplierPaperLists({
         className="mt-2 min-h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-600 active:bg-slate-50"
       >
         {showAll[key]
-          ? `Show Fewer (${LIST_LIMIT} Of ${total})`
-          : `Show The Other ${hidden}, ${verb} ${formatCurrency(hiddenTotal)}`}
+          ? `Show Fewer (${LIST_LIMIT} of ${total})`
+          : `Show the Other ${hidden}, ${verb} ${formatCurrency(hiddenTotal)}`}
       </button>
     );
   }
@@ -276,7 +276,7 @@ export function SupplierPaperLists({
       {waiting.length > 0 && (
         <Fold
           id={`supplier-waiting-credit-${accountId}`}
-          summary={listLabel("Waiting On A Credit", waiting.length, formatCurrency(r2(waiting.reduce((s, c) => s + c.total, 0))))}
+          summary={listLabel("Waiting on a Credit", waiting.length, formatCurrency(r2(waiting.reduce((s, c) => s + c.total, 0))))}
         >
           <WhyFold>
             <p>
@@ -322,14 +322,14 @@ export function SupplierPaperLists({
       )}
 
       {/* ── THE DISCOUNT: a date, a number, what missing it costs. Paying is the account's own
-             Record A Payment, just above: one door to the payment sheet. ── */}
+             Record a Payment, just above: one door to the payment sheet. ── */}
       {(claimable.total > 0.005 || missed.total > 0.005 || interest.charged > 0.005) && (
         <Fold
           summary={
             // THE FIGURE IS SAID ONCE: the green sentence on the supplier's own line, just above,
             // already says how much comes off and by when. This line is the list's name and count.
             claimable.total > 0.005 ? (
-              listLabel("Discount Still On The Table", claimable.rows.length)
+              listLabel("Discount Still on the Table", claimable.rows.length)
             ) : (
               <span className="text-sm font-semibold text-slate-900">The Discount You Are Missing</span>
             )
@@ -379,7 +379,7 @@ export function SupplierPaperLists({
           <>
             {docsOnCards > 0 && (
               <a href="#needs-you" className="flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
-                {docsOnCards} Of These {docsOnCards === 1 ? "Is" : "Are"} Waiting Under Needs You
+                {docsOnCards} of These {docsOnCards === 1 ? "Is" : "Are"} Waiting Under Needs You
               </a>
             )}
             {docRows.length > 0 && (
@@ -435,7 +435,7 @@ export function SupplierPaperLists({
 
       {/* ── THEIR PAPERS (W1-33): the reference and the two lists he works through now and then,
              in one closed fold under the lists that stay in view. A nested <details>, never a menu,
-             so a link into it (#supplier-not-in-books-<id>, Shop Stock's Record To Shelf door) still
+             so a link into it (#supplier-not-in-books-<id>, Shop Stock's Record to Shelf door) still
              opens every fold around it (FoldOpener). N counts only open papers: Invoices With No
              Job and Not Recorded Yet. Where This Comes From is reference, never counted. ── */}
       <Fold
@@ -468,7 +468,7 @@ export function SupplierPaperLists({
       </WhyFold>
       {/* ── INVOICES WITH NO JOB, not on a card: a credit memo, a STOCK paper, a $0.00 one. ── */}
       {needJob.length > 0 && (
-        <Fold summary={listLabel("Invoices With No Job", needJob.length, formatCurrency(needJobTotals.total))}>
+        <Fold summary={listLabel("Invoices with No Job", needJob.length, formatCurrency(needJobTotals.total))}>
           <WhyFold>
             <p>
               Buying no job is carrying yet. {accountName} wrote a job name on each one, and nothing is picked for you.
@@ -515,7 +515,7 @@ export function SupplierPaperLists({
                             onChange={(e) => setPicked((p) => ({ ...p, [invoice.id]: e.target.value }))}
                           >
                             {/* NEVER PRESELECTED, on every row, including the ones the matcher is sure about. */}
-                            <option value="">— Pick The Job —</option>
+                            <option value="">— Pick the Job —</option>
                             {match.ranked.map(({ job }) => (
                               <option key={job.id} value={job.id}>
                                 {jobPickerLabel(job)}
@@ -533,7 +533,7 @@ export function SupplierPaperLists({
                               )
                             }
                           >
-                            {busy === `job:${invoice.id}` ? "Filing It…" : "File It On This Job"}
+                            {busy === `job:${invoice.id}` ? "Filing It…" : "File It on This Job"}
                           </Button>
                         </>
                       ) : (
@@ -557,7 +557,7 @@ export function SupplierPaperLists({
         </Fold>
       )}
 
-      {/* ── NOT RECORDED YET (was Not In Your Books), not on a card: mostly what a supplier booked to STOCK. ── */}
+      {/* ── NOT RECORDED YET (was Not in Your Books), not on a card: mostly what a supplier booked to STOCK. ── */}
       {billRows.length > 0 && (
         <Fold
           id={`supplier-not-in-books-${accountId}`}
@@ -566,7 +566,7 @@ export function SupplierPaperLists({
           <WhyFold>
             <p>
               Bought at {accountName} with no bill anywhere in here, so no job is carrying the cost. Shop stock goes
-              in with Record To Stock; a purchase with a job goes in with Record It As A Bill.
+              in with Record to Stock; a purchase with a job goes in with Record It as a Bill.
             </p>
           </WhyFold>
           <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
@@ -658,7 +658,7 @@ export function SupplierPaperLists({
                         disabled={pending}
                         onClick={() => openShelf(invoice.id, invoice.invoiceNumber, true)}
                       >
-                        {busy === `shelf:${invoice.id}` ? "Reading Its Lines…" : "Different Purchase: Record To Stock"}
+                        {busy === `shelf:${invoice.id}` ? "Reading Its Lines…" : "Different Purchase: Record to Stock"}
                       </Button>
                     )}
                   </div>
@@ -672,7 +672,7 @@ export function SupplierPaperLists({
                       <p className="text-xs text-sky-800">{accountName} wrote &ldquo;{invoice.jobNameRaw!.trim()}&rdquo; on it: this reads like shop stock.</p>
                     )}
                     <Button variant="outline" className="h-11 w-full" disabled={pending} onClick={() => openShelf(invoice.id, invoice.invoiceNumber, false)}>
-                      {busy === `shelf:${invoice.id}` ? "Reading Its Lines…" : "Record To Stock"}
+                      {busy === `shelf:${invoice.id}` ? "Reading Its Lines…" : "Record to Stock"}
                     </Button>
                   </div>
                 )}
@@ -689,7 +689,7 @@ export function SupplierPaperLists({
                       )
                     }
                   >
-                    {busy === `bill:${invoice.id}` ? "Recording It…" : "Record It As A Bill"}
+                    {busy === `bill:${invoice.id}` ? "Recording It…" : "Record It as a Bill"}
                   </Button>
                 )}
                 {failedAt === `bill:${invoice.id}` && error && (
@@ -707,10 +707,10 @@ export function SupplierPaperLists({
 
       {shelfSheet && actions.recordToShelf && (
         <ShelfTicketSheet
-          title={`Record ${shelfSheet.number} To Stock`}
+          title={`Record ${shelfSheet.number} to Stock`}
           lines={shelfSheet.lines}
           total={shelfSheet.total}
-          fileLabel="Record To Stock"
+          fileLabel="Record to Stock"
           onClose={() => setShelfSheet(null)}
           onFile={async (choices) => {
             const res = await actions.recordToShelf!({

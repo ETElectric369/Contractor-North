@@ -5,7 +5,7 @@ import { translator } from "@/lib/i18n";
 import { words as shell } from "@/lib/words/shell";
 import { ALL_ON, FEATURE_KEYS, type FeatureMap } from "@/lib/features";
 import { helpRows } from "@/lib/onboarding/help-rows";
-import { esTitleCase } from "./es-function-words";
+import { esTitleCase } from "./title-case-words";
 
 /**
  * THE HONESTY LINE IS TRUE (cn-v1139, E3). sh_spanishCovers promises the dock, the + menu, search, the
@@ -14,12 +14,12 @@ import { esTitleCase } from "./es-function-words";
  * dock's half a checked claim: every dock the shell can draw — a staff seat's, a
  * tech's, the lapsed company's — is resolved under es the way every renderer resolves it (lib/dock
  * visibleDock → lib/dock-words dockLabel / dockTileLabel: the rail, the phone bar, the section strip
- * and sheet, the avatar menu's rows, Search Or Ask), under every switch, and NO English word may
+ * and sheet, the avatar menu's rows, Search or Ask), under every switch, and NO English word may
  * remain on a tile, a row or a header: each label under es differs from its English, equals no
  * English dock word, and shares no word with the English map. The only words allowed to stand are a
  * proper noun (North, Nort, OSHA, QuickBooks, LiDAR, AR) and a word the shell catalog declares the
  * same in both languages on purpose (sameInBoth: "Plan" is the Spanish word too). The help rows
- * (Search Or Ask's with Nort on, the account menu's Help with Nort off) resolve in es by the same rule.
+ * (Search or Ask's with Nort on, the account menu's Help with Nort off) resolve in es by the same rule.
  */
 const PROPER_NOUNS = ["North", "Nort", "OSHA", "QuickBooks", "LiDAR", "AR"];
 const SAME_BY_DECLARATION = shell.sameInBoth.map((k) => shell.en[k]);
@@ -145,7 +145,7 @@ describe("the help rows resolve in es", () => {
   const en = translator("en");
   const DONE = { full_name: "Pat Lee", trade: "Electrical", city: "Truckee", service_area: "Tahoe", labor_rate: 120 };
 
-  it("Search Or Ask's rows (Nort on) and the account menu's Help rows (Nort off): every label and every sentence of their own differs from the English and holds no English glue", () => {
+  it("Search or Ask's rows (Nort on) and the account menu's Help rows (Nort off): every label and every sentence of their own differs from the English and holds no English glue", () => {
     const cases = [
       { onboarded: false, setup: {} },
       { onboarded: true, setup: { ...DONE, service_area: null, labor_rate: null } },

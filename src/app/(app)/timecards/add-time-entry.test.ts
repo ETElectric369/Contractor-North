@@ -137,9 +137,9 @@ describe("Who opens on the viewer by name", () => {
 });
 
 describe("the Job on Timecards: always somebody's choice", () => {
-  it("starts on Pick The Job, lists the open jobs by name (codes on) and ends on Company Time", () => {
+  it("starts on Pick the Job, lists the open jobs by name (codes on) and ends on Company Time", () => {
     expect(optionsOf(form({ jobCodesEnabled: true }), "ate-job")).toEqual([
-      ["", "Pick The Job"],
+      ["", "Pick the Job"],
       ["j28", "41 Larkspur"],
       ["j11", "13897 Honeysuckle"],
       [COMPANY_TIME, "Company Time (Not Billed)"],
@@ -157,7 +157,7 @@ describe("the Job on Timecards: always somebody's choice", () => {
     const opts = optionsOf(form({ companyTimeCode: null }), "ate-job");
     expect(opts.at(-1)).toEqual([NO_JOB, "No Job"]);
     const s = src("./add-time-entry.tsx");
-    expect(s).toMatch(/\{!companyTimeCode && jobValue === NO_JOB && \(\s*<p[^>]*>It waits under Hours On No Job until someone picks one\.<\/p>/);
+    expect(s).toMatch(/\{!companyTimeCode && jobValue === NO_JOB && \(\s*<p[^>]*>It waits under Hours on No Job until someone picks one\.<\/p>/);
   });
 
   it("says where older jobs went, and keeps + New Job under the list", () => {
@@ -185,7 +185,7 @@ describe("the schedule starts the Job field, and never overrules a pick", () => 
   const answer = (over: Record<string, unknown> = {}) =>
     ({ ok: true, name: "Brian Taylor", tz: TZ, shifts: [], forJob: null, scheduledJob: { id: "j28", label: "41 Larkspur" }, offThatDay: false, ...over }) as any;
 
-  it("untouched: the scheduled job; nothing scheduled, marked off, or unreadable: Pick The Job", () => {
+  it("untouched: the scheduled job; nothing scheduled, marked off, or unreadable: Pick the Job", () => {
     expect(preselectFrom(answer(), false)).toBe("j28");
     expect(preselectFrom(answer({ scheduledJob: null }), false)).toBe("");
     expect(preselectFrom(answer({ offThatDay: true, scheduledJob: null }), false)).toBe("");
@@ -209,7 +209,7 @@ describe("the schedule starts the Job field, and never overrules a pick", () => 
     expect(s.indexOf("<SameDayShifts")).toBeLessThan(s.indexOf('htmlFor="ate-day"'));
   });
 
-  it("a new person or day takes the last answer's 'On The Schedule That Day' heading away at once, and a pick of that job keeps its name", () => {
+  it("a new person or day takes the last answer's 'On the Schedule That Day' heading away at once, and a pick of that job keeps its name", () => {
     const s = src("./add-time-entry.tsx");
     // Both the Who and the Day go through whoOrDayChanged, which clears the heading before the re-ask.
     expect((s.match(/whoOrDayChanged\(\);/g) ?? []).length).toBeGreaterThanOrEqual(2);
@@ -224,7 +224,7 @@ describe("the schedule starts the Job field, and never overrules a pick", () => 
 
   it("the scheduled job leads the list under its own heading", () => {
     const s = src("./add-time-entry.tsx");
-    expect(s).toContain('<optgroup label="On The Schedule That Day">');
+    expect(s).toContain('<optgroup label="On the Schedule That Day">');
   });
 });
 
@@ -234,7 +234,7 @@ describe("the job's own page: the job is said, not picked", () => {
     expect(html).toContain("Job · 41 Larkspur");
     expect(html).not.toContain('id="ate-job"');
     expect(html).not.toContain("Older job?");
-    expect(html).not.toContain("Pick The Job");
+    expect(html).not.toContain("Pick the Job");
   });
 
   it("Save names the job it was on", () => {
@@ -253,14 +253,14 @@ describe("Day, Start, End", () => {
     }
   });
 
-  it("Ends The Next Day is asked only when End is at or before Start", () => {
+  it("Ends the Next Day is asked only when End is at or before Start", () => {
     expect(endsBeforeStart("08:00", "16:00")).toBe(false);
     expect(endsBeforeStart("22:00", "06:00")).toBe(true);
     expect(endsBeforeStart("08:00", "08:00")).toBe(true);
-    expect(form()).not.toContain("Ends The Next Day");
+    expect(form()).not.toContain("Ends the Next Day");
     const s = src("./add-time-entry.tsx");
     expect(s).toMatch(/\{crossing && \(\s*<div className="space-y-1">\s*<p className="text-xs text-slate-600">Ends before it starts\.<\/p>/);
-    expect(s).toContain("<span>Ends The Next Day</span>");
+    expect(s).toContain("<span>Ends the Next Day</span>");
     // Ticked, the end is the next day; unticked, the end date IS the Day, so a flipped time is refused.
     expect(s).toContain("const span = buildShiftSpan(day, startT, endT, endsNextDay ? nextDay(day) : day);");
     expect(s).toContain('if (clockOut <= clockIn) return setError("End must be after start.");');

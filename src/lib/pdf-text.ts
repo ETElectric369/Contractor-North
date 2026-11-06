@@ -77,7 +77,7 @@ export type PdfTextResult = { ok: true; text: string; pages: number } | { ok: fa
  * so there is one sentence for it and not two that drift apart.
  */
 export function noTextSaid(name: string): string {
-  return `${name} had no text in it. It is probably a scan; put it in through Snap Or Note and it will be read as a picture.`;
+  return `${name} had no text in it. It is probably a scan; put it in through Snap or Note and it will be read as a picture.`;
 }
 
 /**

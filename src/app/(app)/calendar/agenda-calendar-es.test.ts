@@ -95,7 +95,7 @@ describe("the tile's sheet in Spanish", () => {
     expect(t).toContain("Todo el trabajo, cada día.");
     expect(html).toContain('aria-label="Hora de inicio"');
     expect(html).toContain('aria-label="2 horas"');
-    expect(t).not.toMatch(/Clear The Date|Open The Job|Full Day|Start time/);
+    expect(t).not.toMatch(/Clear the Date|Open the Job|Full Day|Start time/);
   });
 
   it("a job's day kept as its own: This Day in one sentence, its date in es-US", () => {
@@ -191,7 +191,7 @@ describe("the day drill's card, the grid, the chips, the map, the ⋯ and Move T
     expect(more).toContain('title="Más"');
     expect(es(createElement(MoveToDay, { onPick: () => {} }))).toContain('aria-label="Mover a un Día"');
     // The one intended English change of the visit-page wave: the trigger's words are a clickable's.
-    expect(renderToStaticMarkup(createElement(MoveToDay, { onPick: () => {} }))).toContain('aria-label="Move To A Day"');
+    expect(renderToStaticMarkup(createElement(MoveToDay, { onPick: () => {} }))).toContain('aria-label="Move to a Day"');
   });
 
   it("the map, before its key is set, says so in Spanish", () => {
@@ -245,7 +245,7 @@ describe("the calendar in Spanish", () => {
     // The header names the day with its year; the grid's column names it short.
     expect(t).toMatch(/jueves, 5 (de )?nov\.? (de )?2026/);
     expect(t).toMatch(/jue, 5 (de )?nov\.? (de )?2026/);
-    expect(t).not.toMatch(/Nothing booked|Scheduled jobs|Appointments|Add To Schedule/);
+    expect(t).not.toMatch(/Nothing booked|Scheduled jobs|Appointments|Add to Schedule/);
   });
 
   it("the week: its span in Spanish, the day columns es-US", () => {

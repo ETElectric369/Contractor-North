@@ -148,7 +148,7 @@ export const words: WordCatalog = {
     nt_voiceUnavailable: "Voice isn't available right now. Type it instead.",
     nt_badUpload: "Bad upload.",
     // lib/voice-failure: what the panel's status line says when a voice turn cannot start.
-    nt_tryAgainLine: "Tap Talk To Nort to try again, or type below.",
+    nt_tryAgainLine: "Tap Talk to Nort to try again, or type below.",
     nt_noVoiceLine: "Voice isn't available here. Type below.",
     // components/tell-nort: the Just Tell Nort panel (the visit-page-in-Spanish wave). The door's default label
     // (every surface today passes its own), the Nort-off twin, the box, the hint line, its doors and what it says back.

@@ -25,7 +25,7 @@ import { readStatementScan } from "@/app/(app)/bills/statement-scan-actions";
  * no figures says so on the card. A PDF that is ONE paper is still not turned away into nowhere: the
  * refusal names the + button, which reads a paper.
  *
- * It is the same door as Snap Or Note (addOpenList reads a bank's columns as a bank download and
+ * It is the same door as Snap or Note (addOpenList reads a bank's columns as a bank download and
  * anything else as a supplier's open list); the file is read on this device and only its rows go to
  * the server, which keeps the last 4 of an account and never a long number. It then waits ON THIS
  * PAGE as one card, directly under this line, and nothing is written until a person presses Apply.
@@ -140,7 +140,7 @@ export function BankDropLine() {
         className="flex min-h-11 w-full items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-white px-4 text-left text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-60"
       >
         {busy ? <Loader2 className="h-4 w-4 shrink-0 animate-spin text-brand" /> : <Landmark className="h-4 w-4 shrink-0 text-brand" />}
-        Drop A Bank Or Supplier Statement
+        Drop a Bank or Supplier Statement
       </button>
       {said && (
         <p className={`mt-2 flex items-start gap-2 text-sm ${said.ok ? "text-slate-700" : "text-red-700"}`} role={said.ok ? "status" : "alert"}>

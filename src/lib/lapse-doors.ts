@@ -137,7 +137,7 @@ export function planStateLine(
   if (state.reason === "trial") {
     if (state.daysLeft == null) return null;
     if (state.daysLeft === 0) return "Trial Ends Today";
-    return `Trial Ends In ${state.daysLeft} ${state.daysLeft === 1 ? "Day" : "Days"}`;
+    return `Trial Ends in ${state.daysLeft} ${state.daysLeft === 1 ? "Day" : "Days"}`;
   }
   if (state.reason === "grace") {
     const n = state.daysLeft ?? 0;

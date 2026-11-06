@@ -87,7 +87,7 @@ const SWIPES: [string, number, string][] = [
   ["HARDWARE BARN 455", 92.6, "Receipt"],
   ["Hardware Barn Northgate", 204.15, "Receipt"],
   ["Timber & Tool Depot", 87.99, "Receipt"],
-  ["Timber And Tool Depot #3", 143.2, "Receipt"],
+  ["Timber and Tool Depot #3", 143.2, "Receipt"],
   ["Pegwood Builders Market", 76.44, "Receipt"],
   ["Autoline Parts Cavendish", 119.88, "Auto"],
   ["AUTOLINE PARTS HOLLIS", 64.3, "Auto"],
@@ -210,7 +210,7 @@ describe("a settled register purchase is not a disagreement", () => {
     expect(pile(his)).toContain(OPEN_SPELLING);
     expect(pile(his)).toContain("$147.92");
     // And the lead is one thing, not thirty-two.
-    expect(textOf(sectionOf(his, "reconcile-lead"))).toContain("1 Thing To Sort Out");
+    expect(textOf(sectionOf(his, "reconcile-lead"))).toContain("1 Thing to Sort Out");
   });
 
   it("names not one of the thirty-two settled spellings anywhere on the page", async () => {
@@ -223,14 +223,14 @@ describe("a settled register purchase is not a disagreement", () => {
    * TWO SETTLED SPELLINGS OF ONE COMPANY ARE NOT A QUESTION EITHER. The suggestion piles are slices
    * of the same pile, so the open test has to reach all three or the page just moves the stockpile
    * from one heading to the next: his book had a pair of settled counter receipts the fuzzy matcher
-   * had an opinion about, and they were drawn as "Same Supplier, Or Two?" above the loose list.
+   * had an opinion about, and they were drawn as "Same Supplier, or Two?" above the loose list.
    */
   it("asks nothing about two settled spellings of one company", async () => {
     CURRENT = {
       ...BASE,
       bills: [
         swipe("tt-1", "Timber & Tool Depot", 87.99, "Receipt"),
-        swipe("tt-2", "Timber And Tool Depot #3", 143.2, "Receipt"),
+        swipe("tt-2", "Timber and Tool Depot #3", 143.2, "Receipt"),
       ],
     };
     const html = await render();
@@ -257,7 +257,7 @@ describe("a settled register purchase is not a disagreement", () => {
 /**
  * ── ONE NUMBER FOR ONE PILE ──────────────────────────────────────────────────────────────────────
  *
- * /bills' Suppliers card draws "$X On N Bills With No Supplier Account · File It" out of
+ * /bills' Suppliers card draws "$X On N Bills with No Supplier Account · File It" out of
  * `notOnAnAccount` and links to this section's anchor. The section counted its OWN rows, so the door
  * said "$147.92 On 1 Bill" and the page it landed on showed thirty-one rows and the same $147.92 —
  * two readings of one pile with nothing on either page reconciling them.
@@ -267,7 +267,7 @@ describe("the door's figure and the section's figure are the same figure", () =>
     CURRENT = HIS_BOOK;
     const words = pile(await render());
     // ONE paper, $147.92 — exactly what the File It door on /bills quotes off `notOnAnAccount`.
-    expect(words).toContain("Papers Not On A Supplier Account Yet (1)");
+    expect(words).toContain("Papers Not on a Supplier Account Yet (1)");
     expect(words).toContain("$147.92 Still Open");
   });
 
@@ -281,11 +281,11 @@ describe("the door's figure and the section's figure are the same figure", () =>
     CURRENT = { ...BASE, bills: [bill("b-nameless", { supplier: "", amount: 312.75 })] };
     const html = await render();
     const words = pile(html);
-    expect(words).toContain("Papers Not On A Supplier Account Yet (1)");
-    expect(words).toContain("No Supplier Name On The Paper");
+    expect(words).toContain("Papers Not on a Supplier Account Yet (1)");
+    expect(words).toContain("No Supplier Name on the Paper");
     expect(words).toContain("$312.75");
     // Its door is All Bills, not a search box: there is no name to type into one (see the door test).
-    expect(countDoors(doorsIn(sectionOf(html, ANCHOR)), "Find It In All Bills")).toBe(1);
+    expect(countDoors(doorsIn(sectionOf(html, ANCHOR)), "Find It in All Bills")).toBe(1);
   });
 
   /**
@@ -324,7 +324,7 @@ describe("the door's figure and the section's figure are the same figure", () =>
     };
     const words = pile(await render());
     // Three papers in the pile, one row: the other two are the merge proposal above.
-    expect(words).toContain("Papers Not On A Supplier Account Yet (3)");
+    expect(words).toContain("Papers Not on a Supplier Account Yet (3)");
     expect(words).toContain("2 of them are in a question above");
   });
 
@@ -343,7 +343,7 @@ describe("the door's figure and the section's figure are the same figure", () =>
     const words = pile(html);
     expect(words).toContain(RECONCILE_KINDS["not-on-an-account"].heading);
     expect(words).toContain("already in a question above");
-    expect(countDoors(doorsIn(sectionOf(html, ANCHOR)), "Go To The Question")).toBe(1);
+    expect(countDoors(doorsIn(sectionOf(html, ANCHOR)), "Go to the Question")).toBe(1);
     // And the question really is on the page to go to.
     expect(html).toContain(`id="${RECONCILE_KINDS["supplier-names"].anchor}"`);
   });
@@ -363,7 +363,7 @@ describe("it asks what the expense is, and only when that is unclear", () => {
     const html = await render();
     const words = pile(html);
     expect(words).toContain("Filed as Receipt");
-    expect(countDoors(doorsIn(sectionOf(html, ANCHOR)), "Say What The Expense Is")).toBe(0);
+    expect(countDoors(doorsIn(sectionOf(html, ANCHOR)), "Say What the Expense Is")).toBe(0);
     expect(words).not.toContain("no expense category");
   });
 
@@ -371,7 +371,7 @@ describe("it asks what the expense is, and only when that is unclear", () => {
     CURRENT = { ...BASE, bills: [bill("b-blank", { supplier: "Larkspur Trade Counter", amount: 61.4, category: null })] };
     const html = await render();
     expect(pile(html)).toContain("no expense category on it yet");
-    expect(countDoors(doorsIn(sectionOf(html, ANCHOR)), "Say What The Expense Is")).toBe(1);
+    expect(countDoors(doorsIn(sectionOf(html, ANCHOR)), "Say What the Expense Is")).toBe(1);
   });
 
   /** GIVING A SUPPLIER AN ACCOUNT IS STILL POSSIBLE — a real on-account supplier needs it. It is
@@ -413,7 +413,7 @@ describe("it asks what the expense is, and only when that is unclear", () => {
     };
     const html = await render();
     const words = pile(html);
-    expect(countDoors(doorsIn(sectionOf(html, ANCHOR)), "Say What The Expense Is")).toBe(0);
+    expect(countDoors(doorsIn(sectionOf(html, ANCHOR)), "Say What the Expense Is")).toBe(0);
     expect(words, "its bucket cannot be set off a job, so this is not a question").not.toContain("no expense category");
     expect(words).toContain("On a job");
     // And the footer does not count it as the one thing worth answering, because it is not one.
@@ -443,7 +443,7 @@ describe("it asks what the expense is, and only when that is unclear", () => {
     expect(hrefs, "an empty search box is not a destination").not.toContain("/bills#bills-search");
     // There is no name to type, so it lands on the list the paper is actually in.
     expect(hrefs).toContain("/bills#all-bills");
-    expect(countDoors(doorsIn(section), "Find It In All Bills")).toBe(1);
+    expect(countDoors(doorsIn(section), "Find It in All Bills")).toBe(1);
   });
 
   /** AND THE BOX REALLY ARRIVES WITH THE WORDS IN IT. A door is only a door if the far side opens. */
@@ -461,7 +461,7 @@ describe("it asks what the expense is, and only when that is unclear", () => {
       }),
     );
     expect(html).toContain('value="Larkspur Trade Counter"');
-    expect(textOf(html)).toContain("1 In All Bills matches");
+    expect(textOf(html)).toContain("1 in All Bills matches");
   });
 });
 

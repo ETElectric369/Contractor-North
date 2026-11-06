@@ -399,7 +399,7 @@ describe("Look Up: every field sourced, every lookup on the ledger, nothing save
   });
 });
 
-describe("Read A Photo Or Scan: only a real picture or a real PDF is ever sent", () => {
+describe("Read a Photo Or Scan: only a real picture or a real PDF is ever sent", () => {
   const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
   const PDF = new TextEncoder().encode("%PDF-1.7\n1 0 obj\n");
   const form = (bytes: Uint8Array, name: string, type: string) => {
@@ -574,7 +574,7 @@ describe("the screens say it in Title Case and state the price before the tap", 
   const src = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), "utf8");
   it("the new clickables", () => {
     const all = src("./vendor-import.tsx") + src("./vendor-choices.tsx") + src("./vendors-manager.tsx");
-    for (const label of ["Look Up", "Look Up Contact Info For ${nextBatch}", "Look Up Contact Info", "Stop", "Use This One", "None Of These", "Leave Blank", "Read With Nort", "Show Choices Again", "View On Map", "Found On"]) {
+    for (const label of ["Look Up", "Look Up Contact Info for ${nextBatch}", "Look Up Contact Info", "Stop", "Use This One", "None of These", "Leave Blank", "Read with Nort", "Show Choices Again", "View on Map", "Found On"]) {
       expect(all).toContain(label);
     }
     expect(all).not.toMatch(/>\s*(Look up|Use this one|None of these|Leave blank|Read with Nort)\s*</);

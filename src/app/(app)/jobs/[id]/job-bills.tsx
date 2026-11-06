@@ -178,7 +178,7 @@ export function JobBills({
     if (hand)
       return (
         <>
-          <span className="text-xs font-medium text-slate-600">Billed By Hand On {hand.invoiceNumber ?? "That Invoice"}</span>
+          <span className="text-xs font-medium text-slate-600">Billed by Hand on {hand.invoiceNumber ?? "That Invoice"}</span>
           <NotBilledAfterAllButton jobId={jobId} lineId={hand.lineId} ids={hand.ids} what={hand.what} />
         </>
       );
@@ -189,7 +189,7 @@ export function JobBills({
    *  Account with the deed on its face, Edit, Delete that asks first), each 44px, wrapping under it
    *  on a phone. THE BILL OPENS (ea2b7172): a bill's detail (its lines, the receipt-billing card) lives
    *  only inside /bills's own fold (#bill-<id>), and this row had no way there, so the supplier line
-   *  and an Open The Bill door both land on it, the way a PO row lands on its page. */
+   *  and an Open the Bill door both land on it, the way a PO row lands on its page. */
   const billRow = (b: Bill, why: string | undefined, pile: Pile, underIt = false) => (
     <li key={b.id} className={underIt ? "border-l-4 border-slate-200 bg-slate-50/40 py-2.5 pl-6 pr-4 text-sm" : "px-4 py-2.5 text-sm"}>
       <Link href={`/bills#bill-${b.id}`} className="flex min-h-11 items-center gap-3 rounded-md hover:bg-slate-50">
@@ -214,7 +214,7 @@ export function JobBills({
         <BillPaperDoors papers={papers?.[b.id]} />
         <BillRowDoors bill={b} jobId={jobId} onEdit={() => setEditBill(b)} correct={correctable(b)} follows={followsOf(b.id)} />
         <Link href={`/bills#bill-${b.id}`} className="flex min-h-11 items-center px-2 text-sm font-medium text-brand hover:underline">
-          Open The Bill
+          Open the Bill
         </Link>
         {abDoors(b.id, pile)}
       </div>
@@ -262,11 +262,11 @@ export function JobBills({
     );
   };
 
-  /** "Billed By Hand On INV-059: 6h 30m · Not Billed After All": hours a person marked. */
+  /** "Billed by Hand on INV-059: 6h 30m · Not Billed After All": hours a person marked. */
   const hoursRow = (h: JobBilledHours[number]) => (
     <div key={h.lineId} className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
       <span>
-        Billed By Hand On {h.invoiceNumber ?? "That Invoice"}: {formatDuration(h.hours)}
+        Billed by Hand on {h.invoiceNumber ?? "That Invoice"}: {formatDuration(h.hours)}
       </span>
       <NotBilledAfterAllButton jobId={jobId} lineId={h.lineId} ids={h.ids} what={h.what} />
     </div>
@@ -362,7 +362,7 @@ export function JobBills({
 
           {groups.nothing.length > 0 && (
             <div className="mt-5">
-              <div className="mb-2 text-sm font-semibold text-slate-900">Nothing To Bill</div>
+              <div className="mb-2 text-sm font-semibold text-slate-900">Nothing to Bill</div>
               {rowsOf(
                 groups.nothing.map((n) => n.id),
                 (id) => nothingToBillWhy(groups.nothing.find((n) => n.id === id)!.why),
@@ -404,7 +404,7 @@ function JobBillEditModal({
   follows = null,
 }: {
   bill: Bill;
-  /** The job this tab is on — what the Part Of The Job control reads its options from (item C1). */
+  /** The job this tab is on — what the Part of the Job control reads its options from (item C1). */
   jobId: string;
   pos?: JobPo[];
   onClose: () => void;
@@ -515,7 +515,7 @@ function JobBillEditModal({
             <div className="col-span-2">
               <Label htmlFor="be-po">Pays purchase order</Label>
               <Select id="be-po" value={poId} onChange={(e) => setPoId(e.target.value)}>
-                <option value="">Not A PO — A Separate Cost</option>
+                <option value="">Not a PO — A Separate Cost</option>
                 {poOptions.map((p) => (
                   <option key={p.id} value={p.id}>
                     {poLabel(p)}

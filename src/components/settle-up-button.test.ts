@@ -235,7 +235,7 @@ describe("Or They Paid Another Way (Record Payment's machine) records Venmo like
   it("says the QR sends the bill when it does, and never reads Saving over a read", () => {
     expect(BODY).toContain('props.source === "invoice" ? t("su_btn_showVenmoQr") : t("su_btn_sendBillShowVenmoQr")');
     expect(en("su_btn_showVenmoQr")).toBe("Show Venmo QR");
-    expect(en("su_btn_sendBillShowVenmoQr")).toBe("Send The Bill & Show Venmo QR");
+    expect(en("su_btn_sendBillShowVenmoQr")).toBe("Send the Bill & Show Venmo QR");
     const qr = BODY.slice(BODY.indexOf("function showVenmoQr()"), BODY.indexOf("function venmoPaid()"));
     expect(qr).toContain("startQr(");
     expect(qr).not.toMatch(/\bstart\(/);
@@ -323,7 +323,7 @@ describe("the one Get Paid sheet", () => {
   it("the job hub and the visit keep SettleUpButton, and it opens the same sheet", () => {
     const out = renderToStaticMarkup(createElement(SettleUpButton as any, { source: "job", id: "j-1", compact: true, cardEnabled: true, methods: ["Cash"] }));
     expect(out).toContain('data-modal="Get Paid"');
-    expect(out).toContain("Send The Bill &amp; Show Card QR");
+    expect(out).toContain("Send the Bill &amp; Show Card QR");
     expect(SRC).toMatch(/export function SettleUpButton\(props: Mode & \{/);
     expect(SRC).toContain('return <GetPaidButton {...(rest as Mode & Omit<typeof rest, "source">)} trigger={compact ? "outline" : "primary"} />;');
   });

@@ -43,8 +43,8 @@ export type DirectoryPanel = {
   circuits: DirectoryCircuit[];
 };
 
-/** Every circuit map Save As Circuit Map files ends with this (the job's folder, "<time>-Circuit_Map.pdf"),
- *  so Read Circuits From The Plans can leave the app's own printout out of its list. */
+/** Every circuit map Save as Circuit Map files ends with this (the job's folder, "<time>-Circuit_Map.pdf"),
+ *  so Read Circuits from the Plans can leave the app's own printout out of its list. */
 export const CIRCUIT_MAP_FILE_SUFFIX = "-Circuit_Map.pdf";
 
 const KINDS: readonly CircuitKind[] = ["standard", "afci", "gfci", "dual_function", "spd"];

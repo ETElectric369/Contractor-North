@@ -134,7 +134,7 @@ describe("the Reminders view in Spanish", () => {
     expect(s).toContain('placeholder="Agregar un Recordatorio…"');
     expect(s).toMatch(/<button[^>]*>(?:(?!<\/button>)[\s\S])*Agregar<\/button>/);
     const e = en(createElement(NewReminderBox));
-    expect(e).toContain('placeholder="Add A Reminder…"');
+    expect(e).toContain('placeholder="Add a Reminder…"');
     expect(e).toMatch(/Add<\/button>/);
   });
 
@@ -155,9 +155,9 @@ describe("the Reminders view in Spanish", () => {
     expect(e).toContain("Due Sep 20, 2026");
     expect(e).toContain(">High<");
     expect(e).toContain(">Office<");
-    expect(e).toContain("Carried From Monday");
+    expect(e).toContain("Carried from Monday");
     expect(e).toContain('title="Unpin"');
-    expect(en(createElement(TaskRow, { ...props, t: { ...REMINDER, focus_date: null } }))).toContain('title="Pin To Top (Carries Until You Unpin It)"');
+    expect(en(createElement(TaskRow, { ...props, t: { ...REMINDER, focus_date: null } }))).toContain('title="Pin to Top (Carries Until You Unpin It)"');
   });
 
   it("the edit sheet: Editar Recordatorio, Guardar Cambios, the labels, Quien lo Hizo, the priorities", () => {

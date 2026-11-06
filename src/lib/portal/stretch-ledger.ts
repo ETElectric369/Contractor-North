@@ -129,7 +129,7 @@ export type SplitLine = { group: LineGroup; label: string; amount: number };
  * Labor and Materials apart, then every other group that has a line, in LINE_GROUP_ORDER. At a
  * stretch and the job, Labor and Materials are listed even at $0.00, so the two lines Erik asked
  * for are there, but ONLY when every dollar at that level is known to be what it says: when some
- * of it is Other, From The Estimate, Contract Payments or Change Orders (money that may hold labor
+ * of it is Other, From the Estimate, Contract Payments or Change Orders (money that may hold labor
  * or materials the rule cannot see; a discount does not), a $0.00 would tell the customer there was no labor or no
  * materials when there was (J-053's $450 service call read "Labor $0.00 · Materials $0.00"), so
  * only the groups that have a line are listed, as a day always does. The amounts add up to that
@@ -419,7 +419,7 @@ export function buildJobLedger(input: LedgerInput): JobLedger {
     if (gap !== 0) {
       work.push({
         date: invDay(inv),
-        item: { description: `Adjustment On ${num ?? "The Bill"}`, quantity: 1, unit: null, unitPriceCents: gap, cents: gap, kind: "adjustment", group: "other", invoiceNumber: num, datedBy: "bill" },
+        item: { description: `Adjustment on ${num ?? "The Bill"}`, quantity: 1, unit: null, unitPriceCents: gap, cents: gap, kind: "adjustment", group: "other", invoiceNumber: num, datedBy: "bill" },
       });
     }
   }

@@ -8,7 +8,7 @@ import { tableReadsAsList } from "@/lib/pdf-table";
 import { SCAN_MAX_BYTES } from "@/lib/statement-scan";
 
 /**
- * A LIST FILE, READ IN THE BROWSER (2026-09-26; bank downloads 2026-09-27). Snap Or Note and
+ * A LIST FILE, READ IN THE BROWSER (2026-09-26; bank downloads 2026-09-27). Snap or Note and
  * Organize take a supplier's open-list download or a bank's account download exactly where they
  * take any other paper; this turns the file into rows of cells, and the server decides what the
  * rows are (a bank download: bank-download.ts; a supplier's list: supplier-open-list.ts). Reading
@@ -131,7 +131,7 @@ function namedPdf(file: { name?: string; type?: string }): boolean {
   return /\.pdf$/i.test(String(file?.name ?? "")) || String(file?.type ?? "").toLowerCase() === "application/pdf";
 }
 
-/** A statement PDF is pages, not a line of CSV: the same 15 MB cap Snap Or Note gives a paper. */
+/** A statement PDF is pages, not a line of CSV: the same 15 MB cap Snap or Note gives a paper. */
 const STATEMENT_MAX = 15 * 1024 * 1024;
 
 /**

@@ -72,7 +72,7 @@ export const DEAD_JOB_STATUS = "cancelled";
  * so the visits are written down the day the permit is pulled — long before anyone is on site, and a
  * final cannot be called until the work is done. So a permit whose next visit is merely listed, or
  * booked for a day still ahead, is NOT this job's nag yet, and above all it must not hide the job from
- * Jobs Needing A Day, which is the only door that asks for its day.
+ * Jobs Needing a Day, which is the only door that asks for its day.
  *
  * A day that has GONE BY, or a visit that did not pass, means somebody has already been: that is real
  * whatever the job's status says, so those still count.
@@ -128,7 +128,7 @@ export interface PermitInspectionFeed {
   now: Omit<ActionItem, "stream">[];
   /** Rows for the Waiting fold, each with the day it comes back. */
   waiting: WaitingItem[];
-  /** Every job whose permit still wants an inspection: Jobs Needing A Day asks it for no date. */
+  /** Every job whose permit still wants an inspection: Jobs Needing a Day asks it for no date. */
   awaitingJobIds: Set<string>;
 }
 
@@ -160,7 +160,7 @@ export function permitInspectionItems(input: {
     // Its visits still read on its own card, where the person who wants them looks. Without this, a
     // permit finished last year with an open row left on it — 0378's backfill carries the old inline
     // inspection forward as row one — nags on Needs You forever, and the job it hangs on silently
-    // drops off Jobs Needing A Day. The feeder's own badge rule is the same one: show only what is OPEN.
+    // drops off Jobs Needing a Day. The feeder's own badge rule is the same one: show only what is OPEN.
     if (!isOpenPermit(p.status ?? null)) continue;
 
     const rows = byPermit.get(String(p.id)) ?? [];

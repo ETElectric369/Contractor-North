@@ -35,14 +35,14 @@ export function NewInspectionButton({
   /** Lead context: links the inspection to this inquiry (provenance + capture → estimate threading). */
   inquiryId?: string;
   /** Override the button's word. The lead row uses a bare "Inspection" so the three verbs read as
-   *  one set (Inspection · Schedule · Estimate); everywhere else keeps "Start An Inspection",
+   *  one set (Inspection · Schedule · Estimate); everywhere else keeps "Start an Inspection",
    *  where "Start" is doing real work distinguishing it from booking one. */
   label?: string;
   /** The hover line: what the one tap does, where the bare word leaves it out. */
   title?: string;
   /** The icon's own classes: the lead row drops it on a phone so its three verbs fit one line. */
   iconClassName?: string;
-  /** Render only the one-tap "Start An Inspection" button (the lead row already has schedule options). */
+  /** Render only the one-tap "Start an Inspection" button (the lead row already has schedule options). */
   nowOnly?: boolean;
   /** Custom schedule-mode affordance (the existing flow); defaults to the schedule page's create door. */
   schedule?: ReactNode;

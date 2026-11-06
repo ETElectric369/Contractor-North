@@ -60,7 +60,7 @@ export function pinCarriedFrom(focusDate: string | null | undefined, todayStr: s
  *
  * The status gate is the whole reason this exists. Checking a Reminder off does not clear its
  * focus_date (nothing does, on purpose: un-checking it restores the pin it had), so a chip gated on
- * the DATE alone stood under a struck-through title — "Carried From Yesterday" about work already
+ * the DATE alone stood under a struck-through title — "Carried from Yesterday" about work already
  * finished, in /tasks' Done fold and under a just-checked row on My Day. The pin GLYPH was already
  * gated on status at both doors; the chip was not. Now both surfaces ask this one function, so there
  * is one gate to get right instead of two to keep in step.

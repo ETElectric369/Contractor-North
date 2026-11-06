@@ -332,7 +332,7 @@ export type AiGate = { ok: true } | { ok: false; why: string; reason: "lapsed" |
  * `opts.state`: a caller that already read the company's standing (Nort's chat route reads the
  * billing columns with the org) hands it over, so the read is never made twice. `opts.lapsedWords`
  * / `opts.ceilingWords`: a door's own sentence where the generic one would mislead — the public
- * site chat speaks to a stranger, the panel reader names Add A Circuit. The answer is one shape
+ * site chat speaks to a stranger, the panel reader names Add a Circuit. The answer is one shape
  * for every door: ok, or `why` in words with the reason; the door returns `why` in its own
  * envelope (an action's error field, a route's JSON, a chat turn). Fails OPEN the way both halves
  * do: a failed read never locks a contractor out mid-job.

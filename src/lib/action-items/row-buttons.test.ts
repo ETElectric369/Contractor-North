@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { AFFORDANCES, KIND_STREAM, type ActionItem, type ActionKind } from "./types";
 import { allDoors, doorVerb, rowButtons, type RowDoor } from "./row-buttons";
+import { titleCaseIn } from "../../../tests/title-case-words";
 
 /**
  * ONE NAMED BUTTON PER ROW, AND ⋯ (Wave 1, W1-13): the row table. Each row says its verb; ⋯ holds
@@ -27,17 +28,17 @@ describe("the table", () => {
   it("each kind's one named button", () => {
     const cases: [ActionItem, string | null][] = [
       [row("supplier_pay", { payee: "Metro Supply" }), "Pay Metro Supply"],
-      [row("time_stray", { chip: "On No Job" }), "Put On A Job"],
-      [row("time_stray", { chip: "Clock Left Running" }), "Fix The Clock"],
+      [row("time_stray", { chip: "On No Job" }), "Put on a Job"],
+      [row("time_stray", { chip: "Clock Left Running" }), "Fix the Clock"],
       [row("visit_unbilled"), "Bill It"],
       [row("visit_unbilled", { chip: "Billed, Not Paid" }), "Get Paid"],
       [row("quote_draft", { send: { kind: "quote", id: "q1", number: "E-012", customerName: "Dana", amount: 1200, lineCount: 4, openHref: "/quotes/q1" } }), "Send It"],
       [row("quote_awaiting"), "Still Waiting"],
-      [row("quote_accepted", { affordances: ["schedule", "open"], targetId: "job-1" }), "Pick A Day"],
+      [row("quote_accepted", { affordances: ["schedule", "open"], targetId: "job-1" }), "Pick a Day"],
       [row("inquiry"), "Called"],
       [row("appointment"), "Close Out"],
       [row("inspection_writeup"), "Write It Up"],
-      [row("job_to_schedule"), "Pick A Day"],
+      [row("job_to_schedule"), "Pick a Day"],
       [row("materials_needed", { openToBuy: 6 }), "Buy Materials · 6 Open"],
       [row("job_unbilled_work"), "Add Costs"],
       [row("job_on_hold"), "Snooze"],
@@ -77,10 +78,10 @@ describe("the table", () => {
     for (const d of rowButtons(row("job_to_schedule"), staff).more.filter((x) => x.label !== "Assign")) expect(d.act.type).toBe("confirm");
   });
 
-  it("the doors where the app can't know (2026-11-04): Already Invoiced, Lost on a win, Won It, Signed On Paper", () => {
+  it("the doors where the app can't know (2026-11-04): Already Invoiced, Lost on a win, Won It, Signed on Paper", () => {
     // A win with no job (the live case: nothing can settle it): its two doors behind ⋯.
     const win = row("quote_accepted", { alreadyInvoiced: { kind: "quote", id: "q1" } });
-    expect(rowButtons(win, staff).primary?.label).toBe("Pick A Day");
+    expect(rowButtons(win, staff).primary?.label).toBe("Pick a Day");
     expect(labels(rowButtons(win, staff).more)).toEqual(["Already Invoiced", "Lost"]);
     expect(rowButtons(win, staff).more[0].act).toEqual({ type: "alreadyInvoiced", target: { kind: "quote", id: "q1" } });
     expect(rowButtons(win, staff).more[1].act).toMatchObject({ type: "confirm", verb: "dismiss" });
@@ -91,9 +92,9 @@ describe("the table", () => {
     const done = row("visit_unbilled", { alreadyInvoiced: { kind: "job", id: "j1" } });
     expect(labels(rowButtons(done, staff).more)).toEqual(["Already Invoiced", "Cancel"]);
     expect(labels(rowButtons(done, { leadsOn: true, isStaff: false }).more)).toEqual(["Cancel"]);
-    // An unsigned contract: Signed On Paper behind a confirm.
+    // An unsigned contract: Signed on Paper behind a confirm.
     const c = rowButtons(row("contract_unsigned"), staff);
-    expect(labels(c.more)).toEqual(["Signed On Paper"]);
+    expect(labels(c.more)).toEqual(["Signed on Paper"]);
     expect(c.more[0].act).toMatchObject({ type: "confirm", verb: "do" });
   });
 
@@ -130,7 +131,7 @@ describe("the table", () => {
     const pile = row("quote_draft", {
       id: "pile:estimates_not_sent",
       affordances: ["open"],
-      pile: { name: "estimates_not_sent", label: "Estimates Not Sent", count: 6, capped: false, listHref: "/quotes?status=draft", listLabel: "See All On Estimates", verb: "Send It" },
+      pile: { name: "estimates_not_sent", label: "Estimates Not Sent", count: 6, capped: false, listHref: "/quotes?status=draft", listLabel: "See All on Estimates", verb: "Send It" },
       children: [row("quote_draft"), row("quote_draft")],
     });
     const b = rowButtons(pile, staff);
@@ -144,7 +145,7 @@ describe("the table", () => {
     const pile = row("appointment", {
       id: "pile:visits_to_close_out",
       affordances: ["open"],
-      pile: { name: "visits_to_close_out", label: "Visits To Close Out", count: 2, capped: false, listHref: null, listLabel: null, verb: "Close Out" },
+      pile: { name: "visits_to_close_out", label: "Visits to Close Out", count: 2, capped: false, listHref: null, listLabel: null, verb: "Close Out" },
       children: [visit(), visit()],
     });
     expect(rowButtons(pile, { leadsOn: true, isStaff: false })).toEqual({ primary: null, also: null, more: [] });
@@ -173,7 +174,7 @@ describe("the laws", () => {
         expect(d.label).not.toMatch(/dismiss|delete/i);
         if (d.act.type === "confirm") expect(`${d.act.title} ${d.act.body} ${d.act.button}`).not.toMatch(/dismiss|delete/i);
         expect(d.label, d.label).toMatch(/^[A-Z0-9]/);
-        for (const w of d.label.replace(/…/g, "").split(/[\s·]+/).filter(Boolean)) expect(w, d.label).toMatch(/^[A-Z0-9$]/);
+        expect(titleCaseIn(d.label.replace(/…/g, "").trim(), "en"), d.label).toBe(true);
       }
   });
 
@@ -193,10 +194,10 @@ describe("the laws", () => {
 
 
 describe("an inspection to write up can be OPENED, not only written up or called lost (cn-v1071)", () => {
-  it("⋯ holds Open The Visit (its own page, where the attach door marks it won) ahead of Lost", () => {
+  it("⋯ holds Open the Visit (its own page, where the attach door marks it won) ahead of Lost", () => {
     const b = rowButtons(row("inspection_writeup", { id: "appt-9" }), { leadsOn: true, isStaff: true });
     expect(b.primary?.label).toBe("Write It Up");
-    expect(b.more.map((d) => d.label)).toEqual(["Open The Visit", "Lost"]);
+    expect(b.more.map((d) => d.label)).toEqual(["Open the Visit", "Lost"]);
     expect(b.more[0].act).toEqual({ type: "open", href: "/appointments/appt-9" });
   });
 });

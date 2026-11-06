@@ -617,7 +617,7 @@ d("0357: Already Billed", () => {
     expect(after.total).toBe(before.total);
     expect(after.line_total).toBe("110.00");
     // 3. Once a sent invoice bills the receipt, the shelf refuses the rest of it (0328): the order
-    //    matters, which is why the sheet asks "Did J-010 Use All Of It?" before it marks.
+    //    matters, which is why the sheet asks "Did J-010 Use All of It?" before it marks.
     const shelvePlates = () =>
       c.query("select public.shelve_bill_lines($1, $2::jsonb, '[]'::jsonb)", [
         receipt,

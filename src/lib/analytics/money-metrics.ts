@@ -49,7 +49,7 @@ export type ArAging = { buckets: ArBuckets; outstanding: number; openCount: numb
  */
 const OPEN_EXCLUDED = ["paid", "void", "draft"];
 /** THE lateness buckets (not late, 1-30, 31-60, over 60 days late): this aging and the Invoices
- *  page's Owed To You bar (billing-pipeline's owedByLateness) cut the same days the same way. */
+ *  page's Owed to You bar (billing-pipeline's owedByLateness) cut the same days the same way. */
 export const arBucketOf = (days: number): keyof ArBuckets => (days <= 0 ? "current" : days <= 30 ? "d30" : days <= 60 ? "d60" : "d90");
 
 /**
@@ -98,7 +98,7 @@ export const JOB_BILLING_STATUS_LABEL: Record<JobBillingStatus, string> = {
   to_be_invoiced: "To Be Invoiced",
   pending: "Pending",
   partial: "Partial",
-  paid_in_full: "Paid In Full",
+  paid_in_full: "Paid in Full",
 };
 
 /** The invoice fields the tag needs — amount_paid is THE rolled-up payments figure

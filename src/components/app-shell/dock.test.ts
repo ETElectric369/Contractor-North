@@ -109,8 +109,8 @@ describe("the dock's tiles", () => {
   });
 
   /**
-   * LAPSED (skeptic #43, S1): on an open door the dock draws the Plan tile alone — Pick A Plan,
-   * Settings, Download For Your Accountant — for the owner and for a tech alike, whatever the
+   * LAPSED (skeptic #43, S1): on an open door the dock draws the Plan tile alone — Pick a Plan,
+   * Settings, Download for Your Accountant — for the owner and for a tech alike, whatever the
    * switches; a soft navigation can reach no page the wall turns a hard load away from.
    */
   it("lapsed: one tile, Plan, whose rows are the three open doors; nothing else — not even the logo's /planner — for anyone", () => {
@@ -121,7 +121,7 @@ describe("the dock's tiles", () => {
       const hrefs = [...new Set([...html.matchAll(/<a href="([^"]+)"/g)].map((m) => m[1]))].sort();
       // The export door (cn-v1138) is Settings' door with its own words: /settings?tab=getpaid.
       expect(hrefs, role).toEqual(["/analytics/accountant", "/settings", "/settings?tab=getpaid", "/subscribe"]);
-      expect(html).toContain("Download For Your Accountant");
+      expect(html).toContain("Download for Your Accountant");
       expect(html).toContain("Download Everything");
       expect(html).toMatch(/<a href="\/subscribe"[^>]*aria-label="Home"/);
       expect(html).not.toContain("/jobs");

@@ -112,7 +112,7 @@ describe("a switched-off feature's tab", () => {
     const t = byId(arrangeJobTabs(TABS, false, { features: off("permits", "panel_map"), isOwner: false }));
     for (const id of ["permits", "panel"]) {
       const out = html(t[id].content);
-      expect(out).toContain(" · Off · Ask The Owner");
+      expect(out).toContain(" · Off · Ask the Owner");
       expect(out).not.toContain("<button");
     }
   });

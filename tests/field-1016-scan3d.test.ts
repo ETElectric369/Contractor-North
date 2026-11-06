@@ -153,7 +153,7 @@ describe("the file comes over in pieces; the shell's copy goes only once the upl
   });
 });
 
-describe("Open In AR: the page stages the bytes it drew and the shell opens Quick Look", () => {
+describe("Open in AR: the page stages the bytes it drew and the shell opens Quick Look", () => {
   afterEach(() => {
     shellOn = false;
   });
@@ -184,7 +184,7 @@ describe("Open In AR: the page stages the bytes it drew and the shell opens Quic
   });
   it("no shell, no door; with the staging doors the bytes go over in 2 MB pieces, then Quick Look opens the staged file", async () => {
     expect(arPreviewPresent()).toBe(false);
-    expect(await openInAr(new Uint8Array(10), "a.usdz")).toEqual({ ok: false, refused: "Open In AR needs the North app on an iPhone." });
+    expect(await openInAr(new Uint8Array(10), "a.usdz")).toEqual({ ok: false, refused: "Open in AR needs the North app on an iPhone." });
     const st = staging();
     const off = shell({ Scan: st.plugin });
     try {
@@ -455,7 +455,7 @@ describe("the wiring, pinned", () => {
     expect(translator("en")("vi_btn_scan3d")).toBe("3D Scan"); // … and its English is byte for byte what it said
     expect(insp).toContain("!readOnly && (canMeasure || scanOn.model) ? (");
     // The old doors are gone from the page too (Erik 2026-10-16); no plan drawing, no site rows.
-    for (const gone of ["scanInto(", "scanNative", "scanLanding", "planImageFile", "Scan The Site", "Scan The Room", "Scan In 3D"]) expect(insp).not.toContain(gone);
+    for (const gone of ["scanInto(", "scanNative", "scanLanding", "planImageFile", "Scan the Site", "Scan the Room", "Scan in 3D"]) expect(insp).not.toContain(gone);
     const fn = insp.slice(insp.indexOf("async function scan3dInto("), insp.indexOf("/** A COPY of the visit's file"));
     expect(fn).toContain("const r = await scan3dNative(Date.now(), lang, t);"); // (cn-v1144: the reader's language rides along)
     // (cn-v1123: a kept model whose file is already up sends nothing, only the row is saved again)
@@ -473,14 +473,14 @@ describe("the wiring, pinned", () => {
     expect(insp).toContain("{viewing3d?.url && <ModelViewer url={viewing3d.url} name={fileLabel(viewing3d.path)} onClose={() => setViewing3d(null)} />}");
     expect((insp.match(/accept="image\/\*,application\/pdf,\.usdz,\.glb"/g) ?? []).length).toBe(2);
     const portal = read("src/components/portal/portal-documents.tsx");
-    expect(portal).toContain("<span>View In 3D</span>");
+    expect(portal).toContain("<span>View in 3D</span>");
     expect(portal).toContain('const spins = d.format === "model" && modelKind(d.url) !== null;');
     expect(portal).toContain("{spinning && spins && <ModelViewer url={d.url} name={d.title} onClose={() => setSpinning(false)} />}");
     expect(read("src/app/(app)/jobs/[id]/job-portal-papers.tsx")).toContain('export const PLAN_ACCEPT = "image/*,application/pdf,.usdz,.glb";');
     const viewer = read("src/components/model-viewer.tsx");
     expect(viewer).toContain('await import("three/examples/jsm/loaders/USDLoader.js")');
     expect(viewer).toContain('await import("three/examples/jsm/loaders/GLTFLoader.js")');
-    // In the shell, Open In AR is the Quick Look door; in Safari on an iPhone the rel="ar" link; nowhere else.
+    // In the shell, Open in AR is the Quick Look door; in Safari on an iPhone the rel="ar" link; nowhere else.
     expect(viewer).toContain('{kind === "usdz" && inShell ? (');
     expect(viewer).toContain('onClick={() => void openAr()}');
     expect(viewer).toContain('<a rel="ar" href={url}');

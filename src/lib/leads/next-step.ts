@@ -6,7 +6,7 @@
  * Nine facts, and not one of them said what to do next. Now one chip does, read off the same facts,
  * the first rule that matches winning:
  *
- *   1. it became something (converted_at): Became An Estimate / Became A Job     slate  (a ?focus= row)
+ *   1. it became something (converted_at): Became an Estimate / Became a Job     slate  (a ?focus= row)
  *   2. it said no (status lost): Lost                                           slate
  *   3. a follow-up day has passed: Call Back · Sep 20                            amber
  *   4. a visit is booked: Inspection · Tue Oct 1 (its earliest, on the
@@ -18,7 +18,7 @@
  *   9. otherwise: New · Call Them                                                blue
  *
  * Only when a lead carries a bucket (a configurator's lead, any company's) does its letter lead the
- * chip ("A · New · Call Them", with the bucket's colored dot); "· Needs A Visit" follows when a site
+ * chip ("A · New · Call Them", with the bucket's colored dot); "· Needs a Visit" follows when a site
  * visit is required and nothing is booked; a website lead gets the one Globe (lib/inquiries/sources).
  *
  * It takes its OWN small input (LeadStepInput), never lib/types' Inquiry, whose source union knows
@@ -146,7 +146,7 @@ export function leadNextStep(
   if (input.converted_at) {
     const estimate = input.converted_to === "quote" || input.converted_to === "estimate";
     return {
-      label: estimate ? w("ld_lib_stepBecameEstimate", "Became An Estimate") : w("ld_lib_stepBecameJob", "Became A Job"),
+      label: estimate ? w("ld_lib_stepBecameEstimate", "Became an Estimate") : w("ld_lib_stepBecameJob", "Became a Job"),
       tone: "slate",
       bucket: null,
       web,
@@ -191,9 +191,9 @@ export function leadNextStep(
   }
 
   const bucket = BUCKETS.includes(String(input.lead_bucket ?? "")) ? (input.lead_bucket as LeadBucketLetter) : null;
-  // "Needs A Visit" is the same claim the other way round: it says nothing is booked, which is exactly
+  // "Needs a Visit" is the same claim the other way round: it says nothing is booked, which is exactly
   // what nobody could read. An unread board says neither.
   const needsVisit = !unread && !!input.site_inspection_required && upcoming === 0 && done === 0;
-  const label = [bucket, step.label, needsVisit ? w("ld_lib_stepNeedsVisit", "Needs A Visit") : null].filter(Boolean).join(" · ");
+  const label = [bucket, step.label, needsVisit ? w("ld_lib_stepNeedsVisit", "Needs a Visit") : null].filter(Boolean).join(" · ");
   return { label, tone: step.tone, bucket, web };
 }

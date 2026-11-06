@@ -1,7 +1,7 @@
 /**
  * A .ZIP FILE, WITH NOTHING ADDED TO THE APP (the accountant download, 2026-09-27).
  *
- * The accountant's spreadsheet is a zip of XML parts, and "Same Thing As CSV Files" is a zip of one
+ * The accountant's spreadsheet is a zip of XML parts, and "Same Thing as CSV Files" is a zip of one
  * CSV per tab. package.json has no zip library, and a zip is small enough to write by hand: a local
  * header and the bytes for each file, then the central directory (the table of contents every
  * reader trusts), then its end record. xlsx-read.ts is the matching reader.

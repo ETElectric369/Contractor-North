@@ -40,9 +40,9 @@ export type Cell = string | number | null;
 export type CsvTable = { header: string[]; rows: Cell[][]; summaryRows?: number; total?: number };
 
 export const HEADERS: Record<"on_hand" | "tools" | "tools_billed", string[]> = {
-  on_hand: ["Item", "Unit", "On Hand", "Cost On Hand", "Date Bought", "Supplier", "Ticket Number", "Note"],
+  on_hand: ["Item", "Unit", "On Hand", "Cost on Hand", "Date Bought", "Supplier", "Ticket Number", "Note"],
   tools: ["Date", "Supplier", "Ticket Number", "What", "Cost", "Filed As", "Job Number"],
-  tools_billed: ["Date", "Supplier", "Job Number", "Job", "What", "Billed To Customer (At Cost)", "Invoice"],
+  tools_billed: ["Date", "Supplier", "Job Number", "Job", "What", "Billed to Customer (At Cost)", "Invoice"],
 };
 
 // ── CSV ──────────────────────────────────────────────────────────────────────

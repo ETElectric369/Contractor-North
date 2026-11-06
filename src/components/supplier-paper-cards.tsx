@@ -27,7 +27,7 @@ import { unmarkAlreadyBilled, type AlreadyBilledWrite } from "@/app/(app)/jobs/a
 type UndoToken = NonNullable<SupplierActionResult["undo"]>;
 /** What's On It, per card: reading, read, or a read that failed (said, with Try Again). */
 export type PaperContentsState = { state: "loading" } | { state: "error"; error: string } | { state: "ok"; contents: PaperContents };
-/** `undoWait`: the tap was Waiting On A Credit, and Undo puts back the wait it replaced (none, or the
+/** `undoWait`: the tap was Waiting on a Credit, and Undo puts back the wait it replaced (none, or the
  *  first stamp on a card told "Wait 30 More Days") with stopWaitingOnCredit. */
 export type PaperDone = Done;
 type Done = {
@@ -36,13 +36,13 @@ type Done = {
   undo?: UndoToken;
   undoWait?: { since: string | null; by: string | null };
   error?: string;
-  /** Already Billed On INV-x? (0357): asked after a paper is filed on a job a sent bill could cover. */
+  /** Already Billed on INV-x? (0357): asked after a paper is filed on a job a sent bill could cover. */
   alreadyBilled?: NonNullable<SupplierActionResult["alreadyBilled"]>;
   /** It was marked billed there: Undo takes the mark back off (and the filing's Undo returns). */
   marked?: NonNullable<AlreadyBilledWrite["undo"]>;
   /** The filing's own sentence, said again once a mark is undone. */
   filedMessage?: string;
-  /** Filed by the card's Already Billed On J-010 door: the sheet opened by itself, so closing it
+  /** Filed by the card's Already Billed on J-010 door: the sheet opened by itself, so closing it
    *  unmarked is said ("the paper stays filed"), never a silent half-answer. */
   asked?: boolean;
   /** The job it was filed on, for that sentence. */
@@ -155,7 +155,7 @@ const openedWords = (j: PaperJob) => (j.opened ? `Opened ${formatDateShort(j.ope
 // Without a `scope` a card set keeps its own (the /bills list never vanishes).
 
 //
-// THE OPEN ALREADY BILLED SHEET IS KEPT THERE TOO. Already Billed On J-010 on the LAST card files the
+// THE OPEN ALREADY BILLED SHEET IS KEPT THERE TOO. Already Billed on J-010 on the LAST card files the
 // paper, and the filing's revalidate clears the line in the same pass that answers the tap: a sheet
 // held in the card set's own state went with it, and so did "It is not marked Already Billed", which
 // only its close can say. Kept in the scope, whichever instance is on screen (the card set, or the
@@ -185,8 +185,8 @@ export const setSupplierPaperScopeForTest = putScope;
 /** What the card's headline says the paper names: CED's own words, or where it already sits. */
 function saysLine(c: SupplierPaperCard): string {
   if (c.said) return `It Says ${c.said}`;
-  if (c.state === "record" && c.onJob) return `It's On ${c.onJob.label}`;
-  return "No Job Name On It";
+  if (c.state === "record" && c.onJob) return `It's on ${c.onJob.label}`;
+  return "No Job Name on It";
 }
 
 /**
@@ -201,7 +201,7 @@ export function PaperContentsView({ cardTotal, view, onRetry }: { cardTotal: num
   if (view.state === "loading") {
     return (
       <p className="mt-2 text-xs text-slate-500" role="status">
-        Opening The Bill…
+        Opening the Bill…
       </p>
     );
   }
@@ -251,7 +251,7 @@ export function PaperContentsView({ cardTotal, view, onRetry }: { cardTotal: num
       )}
       {c.pdfUrl ? (
         <a href={c.pdfUrl} target="_blank" rel="noopener noreferrer" className="flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
-          Open The PDF
+          Open the PDF
         </a>
       ) : (
         c.pdfNote && <p className="py-1 text-slate-500">{c.pdfNote}</p>
@@ -266,12 +266,12 @@ export function PaperContentsView({ cardTotal, view, onRetry }: { cardTotal: num
  * One card per supplier paper nobody has put in the books, the same cards on My Day and on /bills
  * (both are fed by supplierPaperFeed). The card asks the one question and every answer is one tap:
  *
- *   CED Sent A Bill · $301.81 · It Says 13897 HONEYSUCKLE
- *   [Put It On J-011] [Another Job] [Shop Stock] [Business Cost]
+ *   CED Sent a Bill · $301.81 · It Says 13897 HONEYSUCKLE
+ *   [Put It on J-011] [Another Job] [Shop Stock] [Business Cost]
  *
  * THE APP SUGGESTS, A PERSON DECIDES. The matcher's clear guess is the first button and nothing is
  * ever preselected; when several jobs match just as well (the Fernhills) they are chips and none is
- * first; when there is nothing to go on it says Pick A Job. Every tap says what it did, with Undo
+ * first; when there is nothing to go on it says Pick a Job. Every tap says what it did, with Undo
  * while no customer invoice has claimed the bill. Staff only: these carry prices.
  */
 export function SupplierPaperCards({
@@ -412,7 +412,7 @@ export function SupplierPaperCards({
 
   /**
    * ALREADY BILLED ON J-010 (0357, Erik: "on supplier bills on my day inside needs action should also
-   * be a button for already charged"). The paper is filed on that job first, exactly as Put It On
+   * be a button for already charged"). The paper is filed on that job first, exactly as Put It on
    * does it (fileSupplierPaper: the same guards, the same sentence, the same Undo), and then the
    * sheet opens by itself to pick the line that already charged for it. If the filing refuses, the
    * card says why and nothing opens. If he closes the sheet without marking, the paper stays filed
@@ -560,7 +560,7 @@ export function SupplierPaperCards({
             charged for this paper by hand already (Pinyon Sage on INV-00023). */}
         {d.alreadyBilled && !d.marked && (
           <Button type="button" variant="outline" disabled={busy === d.card.invoiceId} onClick={() => setMarking(d)}>
-            {d.alreadyBilled.invoiceNumber ? `Already Billed On ${d.alreadyBilled.invoiceNumber}?` : "Already Billed?"}
+            {d.alreadyBilled.invoiceNumber ? `Already Billed on ${d.alreadyBilled.invoiceNumber}?` : "Already Billed?"}
           </Button>
         )}
       </div>
@@ -581,7 +581,7 @@ export function SupplierPaperCards({
     </Button>
   );
 
-  /** Another Job / Pick A Job: the shared picker (paper-answers), his best guesses first. A weak
+  /** Another Job / Pick a Job: the shared picker (paper-answers), his best guesses first. A weak
    *  card's nearest jobs ride there too (card.closest), so "The closest are first" is true. */
   function picker(card: SupplierPaperCard) {
     const closest = [card.suggestion, ...card.candidates, ...(card.closest ?? [])].filter(Boolean) as PaperJob[];
@@ -620,7 +620,7 @@ export function SupplierPaperCards({
     return (
       <div key={c.invoiceId} className="rounded-lg border border-slate-200 bg-white p-3">
         <p className="text-sm font-semibold text-slate-900">
-          {c.supplier} Sent A Bill · {formatCurrency(c.total)} · {saysLine(c)}
+          {c.supplier} Sent a Bill · {formatCurrency(c.total)} · {saysLine(c)}
         </p>
         <p className="mt-0.5 text-xs text-slate-500">
           {c.invoiceNumber} · {formatDateShort(c.date)} · {c.closed ? "the supplier shows it paid" : "still open with the supplier"}
@@ -640,7 +640,7 @@ export function SupplierPaperCards({
         )}
 
         {/* WHAT'S ON IT comes before every answer: he sees the paper, then he decides. */}
-        {/* Then Waiting On A Credit, before the answers: the one thing to say when there is no
+        {/* Then Waiting on a Credit, before the answers: the one thing to say when there is no
             answer yet (CED is taking it back off). */}
         <div className="mt-2 flex flex-wrap gap-2">
           <Button type="button" variant="outline" aria-expanded={!!reading[c.invoiceId]} onClick={() => toggleContents(c)}>
@@ -650,7 +650,7 @@ export function SupplierPaperCards({
               line lives under it. A bill on no account has no Wait door (the action refuses it too). */}
           {c.accountId && (
             <Button type="button" variant="outline" disabled={busy === c.invoiceId} onClick={() => wait(c)}>
-              {c.waitingCredit?.overdue ? "Wait 30 More Days" : "Waiting On A Credit"}
+              {c.waitingCredit?.overdue ? "Wait 30 More Days" : "Waiting on a Credit"}
             </Button>
           )}
         </div>
@@ -686,13 +686,13 @@ export function SupplierPaperCards({
 
         {c.candidates.length > 0 && <p className="mt-2 text-xs text-slate-500">It could be any of these. Only you know which:</p>}
         <div className="mt-2 flex flex-wrap gap-2">
-          {c.state === "record" && c.onJob && jobButton(c, c.onJob, `Record It On ${c.onJob.label}`, "primary")}
-          {c.state === "needs_job" && c.suggestion && jobButton(c, c.suggestion, `Put It On ${c.suggestion.label}`, "primary")}
+          {c.state === "record" && c.onJob && jobButton(c, c.onJob, `Record It on ${c.onJob.label}`, "primary")}
+          {c.state === "needs_job" && c.suggestion && jobButton(c, c.suggestion, `Put It on ${c.suggestion.label}`, "primary")}
           {/* ALREADY BILLED (0357): the same job, filed first, then the line that already charged
               for it. Only where a bill that went out on that job could hold it (withAlreadyBilledDoors). */}
           {c.alreadyBilledOn && (
             <Button type="button" variant="outline" disabled={busy === c.invoiceId} onClick={() => fileThenMark(c, c.alreadyBilledOn!)} title={c.alreadyBilledOn.name}>
-              {`Already Billed On ${c.alreadyBilledOn.label}`}
+              {`Already Billed on ${c.alreadyBilledOn.label}`}
             </Button>
           )}
           {c.state === "needs_job" &&
@@ -706,7 +706,7 @@ export function SupplierPaperCards({
               ),
             )}
           <Button type="button" variant="outline" disabled={busy === c.invoiceId} onClick={() => toggle("job")}>
-            {hasGuess ? "Another Job" : "Pick A Job"}
+            {hasGuess ? "Another Job" : "Pick a Job"}
           </Button>
           {/* Shop Stock off (0352): the feed says so, and the shelf isn't offered. */}
           {feed.shopStock !== false && (
@@ -774,10 +774,10 @@ export function SupplierPaperCards({
       )}
       {shelf && (
         <ShelfTicketSheet
-          title={`Record ${shelf.card.invoiceNumber} To Stock`}
+          title={`Record ${shelf.card.invoiceNumber} to Stock`}
           lines={shelf.lines}
           total={shelf.total}
-          fileLabel="Record To Stock"
+          fileLabel="Record to Stock"
           onClose={() => setShelf(null)}
           onFile={async (choices) => {
             const card = shelf.card;
@@ -788,7 +788,7 @@ export function SupplierPaperCards({
             });
             if (!res.ok) return { ok: false, error: res.error };
             setShelf(null);
-            // No Undo here: its rolls come off the shelf with Take It Off The Shelf, on /bills.
+            // No Undo here: its rolls come off the shelf with Take It Off the Shelf, on /bills.
             settle(card, res, `${card.invoiceNumber} is in shop stock now.`);
             return { ok: true };
           }}

@@ -86,7 +86,7 @@ export function RowMoreSheetView({
  * THE APP'S ONE ROW ⋯ (My Day's agenda rows first; every Needs You row next). A 44px ⋯ opens a small
  * sheet titled with the row, its verbs as SHEET_ROW rows.
  *
- * A row can open a sheet of its own above this one (Move To Another Day…, Edit Details…). This sheet
+ * A row can open a sheet of its own above this one (Move to Another Day…, Edit Details…). This sheet
  * STAYS MOUNTED under it the whole time: the child renders inside it, after it in the tree, so it
  * stacks above it at the same z-index, and a Back, an Escape or the child's Cancel closes the child
  * only (the Modal's overlay stack). The sheet closes when a row says its verb landed (`close`), or

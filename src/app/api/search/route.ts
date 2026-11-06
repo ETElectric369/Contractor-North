@@ -98,7 +98,7 @@ export async function GET(req: Request) {
       type: "Appointment",
       label: a.title,
       // WHEN is the answer being sought — lead the sub with the date.
-      sub: [a.starts_at ? formatDate(a.starts_at) : "Waiting For A Day", a.customers?.name ?? (a.jobs ? `${a.jobs.job_number} ${a.jobs.name}` : null)]
+      sub: [a.starts_at ? formatDate(a.starts_at) : "Waiting for a Day", a.customers?.name ?? (a.jobs ? `${a.jobs.job_number} ${a.jobs.name}` : null)]
         .filter(Boolean)
         .join(" · "),
       // A visit waiting for a day has no day to drill into (never the calendar's 1970): its own page.

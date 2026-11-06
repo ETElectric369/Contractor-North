@@ -172,12 +172,12 @@ describe("stripeSubscriptionLive — the one rule behind Manage Billing vs Check
 describe("planStateLine — the one line on Settings", () => {
   afterEach(() => vi.unstubAllEnvs());
   it("the trial, in days (the company's own calendar when tz is given)", () => {
-    expect(planStateLine(state("trial", { daysLeft: 5 }))).toBe("Trial Ends In 5 Days");
-    expect(planStateLine(state("trial", { daysLeft: 1 }))).toBe("Trial Ends In 1 Day");
+    expect(planStateLine(state("trial", { daysLeft: 5 }))).toBe("Trial Ends in 5 Days");
+    expect(planStateLine(state("trial", { daysLeft: 1 }))).toBe("Trial Ends in 1 Day");
     expect(planStateLine(state("trial", { daysLeft: 0 }))).toBe("Trial Ends Today");
     expect(planStateLine(state("trial", { daysLeft: null }))).toBeNull();
     const org = { subscription_status: "trialing", trial_ends_at: new Date(NOW + 5 * DAY).toISOString() };
-    expect(planStateLine(accessState(org, { nowMs: NOW, tz: "America/Los_Angeles" }))).toBe("Trial Ends In 5 Days");
+    expect(planStateLine(accessState(org, { nowMs: NOW, tz: "America/Los_Angeles" }))).toBe("Trial Ends in 5 Days");
   });
   it("grace, in days", () => {
     expect(planStateLine(state("grace", { daysLeft: 3 }))).toBe("Grace: 3 Days Left");

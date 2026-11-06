@@ -12,7 +12,7 @@
  *   labor         -> Labor            (the time importer)
  *   costs         -> Materials        (bills, orders, receipts, returns)
  *   change_orders -> Change Orders
- *   quote         -> From The Estimate (lines copied from an estimate, which can be either)
+ *   quote         -> From the Estimate (lines copied from an estimate, which can be either)
  *   milestone     -> Contract Payments (a scheduled draw on a fixed-price contract)
  *   draw_credit   -> Credits           (the deposit and earlier bills coming back off)
  *   a deposit bill's own lines -> Deposit
@@ -48,7 +48,7 @@ export const LINE_GROUP_LABEL: Readonly<Record<LineGroup, string>> = {
   labor: "Labor",
   materials: "Materials",
   change_orders: "Change Orders",
-  estimate: "From The Estimate",
+  estimate: "From the Estimate",
   contract: "Contract Payments",
   deposit: "Deposit",
   credit: "Credits",
@@ -104,7 +104,7 @@ export function lineGroup(
  * Sales Tax, Credits, a Deposit, Contract Payments. Decided by the line's KIND, never by its words:
  * a word list ("fee", "referral") would only ever fit the company that wrote it, and a default that
  * guesses "fee" for every unsettled line would drop real work for every company that types its
- * lines. Read by billedWorkOnInvoices (the T&M Progress Summary and the job page's Work To Date)
+ * lines. Read by billedWorkOnInvoices (the T&M Progress Summary and the job page's Work to Date)
  * and by the Kind chip, which says out loud which way the line counts.
  */
 export const WORK_COMPLETED_GROUPS: ReadonlySet<LineGroup> = new Set<LineGroup>(["labor", "materials", "change_orders", "estimate"]);

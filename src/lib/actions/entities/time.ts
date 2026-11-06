@@ -121,7 +121,7 @@ export const timeActions: Record<string, ActionDef> = {
       // took off hold), because both are the same kind of fact and there is one channel for them.
       //
       // AND IT IS HIS WORDING OF THE SAME FACTS, not the screens' (clock-told: `say`). Every screen
-      // ends the sentence with "change it if you're somewhere else" because Change The Job is beside
+      // ends the sentence with "change it if you're somewhere else" because Change the Job is beside
       // it. Nort relayed those words and could not do it: his only move on a running shift is
       // switch_job, which CUTS, leaving the minutes already on the wrong customer exactly where they
       // are. His sentence names the three doors that DO move the punch, and says he cannot.

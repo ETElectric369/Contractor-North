@@ -36,8 +36,8 @@ function refreshOnce(refresh: () => void): boolean {
 /**
  * THE PAGE READS AGAIN BEFORE ITS LINKS DIE. The page is live (Erik: "Update everything right away"),
  * and every photo and pick file is a 10-minute signed URL. A page left open, or restored by iOS
- * from memory or the back-forward cache (after View And Pay and back), would otherwise show blank
- * tiles, a raw storage error behind "Open The PDF", and a stale "Up to date as of". So: on a
+ * from memory or the back-forward cache (after View and Pay and back), would otherwise show blank
+ * tiles, a raw storage error behind "Open the PDF", and a stale "Up to date as of". So: on a
  * restore, on coming back to the tab after 8 minutes, and every 8 minutes while it is on screen,
  * the server render runs again, which mints fresh links and a fresh "as of".
  */
@@ -394,7 +394,7 @@ export function PortalPicks({ picks }: { picks: PortalPick[] }) {
                   className="seaglass-btn inline-flex h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[rgb(var(--glass-ink))]"
                 >
                   {cur.file.kind === "pdf" ? <FileText className="h-4 w-4" aria-hidden /> : <ExternalLink className="h-4 w-4" aria-hidden />}
-                  <span>{cur.file.kind === "pdf" ? "Open The PDF" : "Open The Picture"}</span>
+                  <span>{cur.file.kind === "pdf" ? "Open the PDF" : "Open the Picture"}</span>
                 </a>
               ) : null}
               {cur.linkUrl ? (
@@ -405,7 +405,7 @@ export function PortalPicks({ picks }: { picks: PortalPick[] }) {
                   className="seaglass-btn inline-flex h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[rgb(var(--glass-ink))]"
                 >
                   <ExternalLink className="h-4 w-4" aria-hidden />
-                  <span>Open The Link</span>
+                  <span>Open the Link</span>
                 </a>
               ) : null}
             </div>

@@ -24,7 +24,7 @@ export type LeftToBillRow = { label: string; percent?: number | null; dollars: n
  * twin of the Unbilled card on a job billed by its work. Staff only (the page never mounts it for a
  * tech: every figure here is money).
  *
- *   A fixed-price job with a live estimate and no schedule: "Contract $C", the big "Left To Bill $L"
+ *   A fixed-price job with a live estimate and no schedule: "Contract $C", the big "Left to Bill $L"
  *   (the contract less what went out on sent bills; lib/payment-schedule-math leftToBill), a thin
  *   Billed | Left bar, and the job's own New Invoice (lane 4's NewInvoiceButton, opened on Part Of
  *   The Estimate, which takes a part of exactly $L). The button never prints $L: the click opens the
@@ -80,7 +80,7 @@ export function LeftToBillCard({
   const eyebrow = isSchedule
     ? `Payment Schedule · ${money(view.scheduled)}`
     : noPrice
-      ? "No Price On The Estimate Yet"
+      ? "No Price on the Estimate Yet"
       : `${accepted || estimates.length === 0 ? "Contract" : "Estimate"} ${money(view.contract)}`;
   const doneWords = isSchedule ? "every payment is billed" : "the contract is billed";
 
@@ -92,7 +92,7 @@ export function LeftToBillCard({
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{eyebrow}</div>
             {/* THE ONE NUMBER. */}
             <div className="mt-1 text-2xl font-bold text-slate-900">
-              Left To Bill {money(view.left)}
+              Left to Bill {money(view.left)}
               {view.billedInFull && <span className="text-base font-medium text-slate-500"> · {doneWords}</span>}
             </div>
             {/* Billed | Left, as one thin bar (text to visual: the figure's own mark). */}
@@ -132,7 +132,7 @@ export function LeftToBillCard({
                         {r.label}
                         {Number(r.percent) > 0 ? ` · ${Number(r.percent)}%` : ""} · {money(r.dollars)} ·{" "}
                         <span className={r.billed ? "text-emerald-700" : r.next ? "text-amber-700" : undefined}>
-                          {r.billed ? "Billed" : r.next ? "Next" : "Still To Come"}
+                          {r.billed ? "Billed" : r.next ? "Next" : "Still to Come"}
                         </span>
                       </li>
                     ))}

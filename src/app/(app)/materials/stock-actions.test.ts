@@ -62,7 +62,7 @@ beforeEach(() => {
 describe("takeFromStockAction: a count in, never a price", () => {
   it.each([["cost"], ["unit_price"], ["amount"], ["price"]])("refuses a %s before it signs anyone in or takes anything", async (key) => {
     const r = await takeFromStockAction({ itemId: ITEM, jobId: JOB, qty: 60, [key]: 1 });
-    expect(r).toEqual({ ok: false, error: "Took From Stock takes a count, never a price. Nothing was taken." });
+    expect(r).toEqual({ ok: false, error: "Took from Stock takes a count, never a price. Nothing was taken." });
     expect(requireMember).not.toHaveBeenCalled();
     expect(takeFromStock).not.toHaveBeenCalled();
   });
@@ -116,7 +116,7 @@ describe("takeFromStockAction: a count in, never a price", () => {
     await afterCalls[0]();
     expect((createNotifications.mock.calls[0] as any[])[2]).toMatchObject({
       title: "Brian took 20 ft of 12/2 NM-B, stock showed 5 ft",
-      body: "For Honeysuckle. File the roll on Shop Stock, then Settle From Stock — or Undo the take.",
+      body: "For Honeysuckle. File the roll on Shop Stock, then Settle from Stock — or Undo the take.",
       url: `/inventory?item=${ITEM}`, // opens on the item, where Settle From The Shelf is
     });
   });

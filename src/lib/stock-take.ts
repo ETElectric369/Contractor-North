@@ -27,7 +27,7 @@ const EN: Record<string, string> = {
   mt_takesReadFailed: "Couldn't read what's been taken for this job just now. Reload before taking more.",
   mt_takeUnheardNoSignal: "No signal, so Take It didn't hear back.",
   mt_takeUnheard: "Take It didn't hear back.",
-  mt_takeMaySavedCheck: "{lead} It may have saved: check Taken From Stock below before tapping again.",
+  mt_takeMaySavedCheck: "{lead} It may have saved: check Taken from Stock below before tapping again.",
   mt_takeMaySavedReload: "{lead} It may have saved: reload before tapping again.",
   mt_takeItOffFirst: "Take It Off {invoice} First",
   mt_partBilledOn: "Part billed on {invoice}, the rest not billed yet",
@@ -201,7 +201,7 @@ export function tookWords(t: { qty: number; unit: string; item: string; job: str
 
 /** What the office does about a short. Counting can't settle one (a count has no roll, and
  *  settle_short walks rolls), so the words name the two ways that work. */
-export const SHORT_FIX = "File the roll on Shop Stock, then Settle From Stock — or Undo the take.";
+export const SHORT_FIX = "File the roll on Shop Stock, then Settle from Stock — or Undo the take.";
 
 /**
  * settle_short (0303) ends its refusal with "File the roll or count the shelf first.", but a count
@@ -360,7 +360,7 @@ export function matchShelfItem(rows: ShelfRow[], spoken: string): ShelfMatch {
   return { kind: "none" };
 }
 
-/** The link that opens the job's Took From Stock sheet filled in (Nort's card, and nothing else). */
+/** The link that opens the job's Took from Stock sheet filled in (Nort's card, and nothing else). */
 export function takeHref(jobId: string, itemId: string, qty?: number | null): string {
   const qs = new URLSearchParams({ tab: "materials", take: itemId });
   if (qty && qty > 0) qs.set("qty", fmtQty(qty));

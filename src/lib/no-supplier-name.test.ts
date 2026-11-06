@@ -5,7 +5,7 @@ import { codeOnly } from "@/lib/migration-body.test-util";
 
 /**
  * NO SUPPLIER'S NAME IN THE APP'S WORDS (Wave 0). "Choose CED PDFs", "Add To CED Documents",
- * "Return To CED", a PO that defaulted to CED: every company saw one electrical distributor named
+ * "Return to CED", a PO that defaulted to CED: every company saw one electrical distributor named
  * on its screens. A paper says the company's own supplier account's name (shortSupplierName) or
  * "Supplier". Comments may name who asked for what; the code a person reads may not.
  */

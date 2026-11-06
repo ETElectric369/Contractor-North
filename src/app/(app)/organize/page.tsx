@@ -14,7 +14,7 @@ import { featureOn } from "@/lib/features";
 export const dynamic = "force-dynamic";
 // Read Now and Read Again on a card run inside this page's server actions; the reader's own time,
 // not the platform's default, decides when it gives up (audit v994, SI4). A paper put in through
-// Snap Or Note is read on its own route (/api/paperwork/read), with the same 60 seconds.
+// Snap or Note is read on its own route (/api/paperwork/read), with the same 60 seconds.
 export const maxDuration = 60;
 
 export default async function OrganizePage() {
@@ -68,7 +68,7 @@ export default async function OrganizePage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      {/* ONE PAPER DOOR (W1-30): papers come in through Snap Or Note, this button or + anywhere. */}
+      {/* ONE PAPER DOOR (W1-30): papers come in through Snap or Note, this button or + anywhere. */}
       <PageHeader title={t("nv_page_organize")} description={t("nv_desc_organize")}>
         <SnapOrNoteButton />
       </PageHeader>

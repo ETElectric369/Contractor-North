@@ -214,7 +214,7 @@ export function ConvertMenu({
         />
         {/* "Schedule", not "Schedule inspection" — Erik: "takes up way too much space on the
             screen and is distracting". An inspection is the only thing there is to schedule on
-            a LEAD row; the modal it opens says "Book An Inspection" in its title, which is where
+            a LEAD row; the modal it opens says "Book an Inspection" in its title, which is where
             that word belongs. */}
         <Button
           variant="outline"

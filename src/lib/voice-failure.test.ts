@@ -11,10 +11,10 @@ import { dict } from "@/lib/i18n";
 const EM_DASH = "—";
 
 describe("the lines a failed voice turn shows", () => {
-  it("names Talk To Nort and the text box, never a mic button the panel lacks", () => {
-    // The top bar's Nort button is gone (W1-09): the voice starts from Talk To Nort, the first row
-    // under Search Or Ask, so that is the control a try-again line names.
-    expect(TRY_AGAIN_LINE).toContain("Talk To Nort");
+  it("names Talk to Nort and the text box, never a mic button the panel lacks", () => {
+    // The top bar's Nort button is gone (W1-09): the voice starts from Talk to Nort, the first row
+    // under Search or Ask, so that is the control a try-again line names.
+    expect(TRY_AGAIN_LINE).toContain("Talk to Nort");
     expect(TRY_AGAIN_LINE).not.toContain("Nort button");
     expect(TRY_AGAIN_LINE).toContain("type below");
     expect(TRY_AGAIN_LINE.toLowerCase()).not.toContain("tap the mic");

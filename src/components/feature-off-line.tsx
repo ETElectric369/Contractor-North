@@ -14,7 +14,7 @@ import { FEATURE_BY_KEY, featureOn, type FeatureKey, type FeatureMap } from "@/l
  *
  *   the owner:      "<Feature> · Off" with a Turn On button (turns on the switch, and its parent if
  *                   that is what's off, then refreshes the page).
- *   everyone else:  "<Feature> · Off · Ask The Owner", no button: only the owner can turn a switch
+ *   everyone else:  "<Feature> · Off · Ask the Owner", no button: only the owner can turn a switch
  *                   on (set_org_feature), and a button that can't work for this person is a dead door.
  *
  * The words follow the signed-in person's language (useLang + the shell catalog, lib/words/shell

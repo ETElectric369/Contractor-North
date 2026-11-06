@@ -834,7 +834,7 @@ export async function applyBankCore(
   // Materials & Bills, on the job's own profit and in the accountant's download (0375).
   await writeBills(work.filter((w) => written(w) && w.choice?.choice === "job"), { one: "job cost wasn't written", many: "job costs weren't written" });
 
-  // CASH TAKEN OUT (NOT A COST) WRITES NOTHING (Erik, 2026-09-27; W1-34), like Not A Cost (Transfer):
+  // CASH TAKEN OUT (NOT A COST) WRITES NOTHING (Erik, 2026-09-27; W1-34), like Not a Cost (Transfer):
   // the bank line is counted, and the cash counts only when its receipts come in, each filed as a cost
   // paid with cash. There is no cash-box balance to top up. (A petty-cash top-up someone had already
   // written is MATCHED above, so it counts once, and this download's Undo still takes its mark off.)
@@ -1394,7 +1394,7 @@ function answerWords(c: BankChoice, names: BankNames, direction: "in" | "out"): 
  * (unwindLineRows); its new answer's row is written by Apply's own shape (bankBillRow); the line
  * says the new answer, sorted by a person; and the rule the old answer taught is settled.
  *
- * THE NEW ANSWER is one that writes nothing (Owner's Draw, Cash Taken Out, Not A Cost, Not Income,
+ * THE NEW ANSWER is one that writes nothing (Owner's Draw, Cash Taken Out, Not a Cost, Not Income,
  * Owner's Money In, Other Income) or one paid bill (a business cost, a cost on a job). A payment answer
  * (matched, a supplier's, crew pay, an invoice) is refused in words: it ties the line to somebody
  * else's money, and Undo and Apply again is the road for that today.

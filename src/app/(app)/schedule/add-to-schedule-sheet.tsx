@@ -28,7 +28,7 @@ import { addJobDay } from "./actions";
  * still in flight, the most recently worked first, each by its name with its street and who), the start
  * (the time tapped, else the work day's start), the length (the same time controls as everywhere: 1h 2h
  * 4h Full Day End; a job nobody sized goes down as two hours and says so), and who's on it (the team as
- * initials chips). Add To Schedule ADDS the day to the job (addJobDay): its other days stay, the new
+ * initials chips). Add to Schedule ADDS the day to the job (addJobDay): its other days stay, the new
  * day keeps its own hours, and an on-hold job comes off hold. Nothing is written until then; a refusal
  * is said in words, here, and the sheet stays open.
  *
@@ -79,7 +79,7 @@ export function defaultDraft(start: string, sizeMinutes: number | null | undefin
 }
 
 /**
- * THE SHEET'S HOURS AFTER A CHANGE, exactly as Add To Schedule will store them (addJobDay), so the sheet
+ * THE SHEET'S HOURS AFTER A CHANGE, exactly as Add to Schedule will store them (addJobDay), so the sheet
  * never shows an end the save won't keep. While nobody chose a length, the save sends none and the
  * writer gives the new start the job's size (a day or more runs to closing, else the size, else two
  * hours): so does this, from defaultDraft. Once a length is chosen (a chip, an End, Full Day) the save

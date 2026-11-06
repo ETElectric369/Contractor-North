@@ -2,7 +2,7 @@ import { revalidatePath } from "next/cache";
 
 /**
  * THE money nerve: after any invoice/payment/draw mutation, refresh every surface that shows
- * money totals so they can't disagree — the Invoices page (Owed To You, By Customer and Payments In
+ * money totals so they can't disagree — the Invoices page (Owed to You, By Customer and Payments In
  * all live there now, W1-29), the invoice page, the My Day money line (getMoneyPipeline), and the
  * money reports. They're all force-dynamic, so re-running them is cheap and can never show a stale
  * total. Call this from every money mutation instead of a lone revalidatePath("/billing") — that was

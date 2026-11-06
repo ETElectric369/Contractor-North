@@ -15,7 +15,7 @@ vi.mock("@/lib/native-push", () => ({ registerForNativePush: vi.fn(), nativePush
 
 import { pushTriggersFor } from "./push-settings";
 import { ALL_ON, type FeatureMap } from "@/lib/features";
-import { esTitleCase } from "../../../../tests/es-function-words";
+import { esTitleCase, titleCaseIn } from "../../../../tests/title-case-words";
 
 /**
  * THE ALERT SWITCHES AND THE SWITCH BOARD (0352). An alert only a switched-off feature sends isn't
@@ -74,7 +74,7 @@ describe("pushTriggersFor", () => {
     expect(es("owner", off("leads")).find((t) => t.key === "inquiry")!.label).toBe("Nuevas solicitudes de clientes");
     expect(es("owner").find((t) => t.key === "inquiry")!.label).toBe("Nuevas consultas / prospectos");
     expect(es("owner").find((t) => t.key === "long_shift")!.label).toBe("Un reloj de la cuadrilla con 12 horas");
-    const titleCase = (s: string) => s.split(/[\s:]+/).filter(Boolean).every((w) => /^[\p{Lu}\p{N}]/u.test(w));
+    const titleCase = (s: string) => titleCaseIn(s, "en"); // the one judge (cn-v1148)
     for (const key of ["booked", "billing", "bug_watch"]) {
       const row = es("owner", ALL_ON, true).find((t) => t.key === key)!;
       expect(esTitleCase(row.label), row.label).toBe(true); // Spanish: the significant words (cn-v1147)
@@ -90,7 +90,7 @@ describe("pushTriggersFor", () => {
  * company member ever sees it.
  */
 describe("pushTriggersFor: the Bug Watch row", () => {
-  const BUG_WATCH = "bug_watch:Bug Watch: Blockers And The Monday Digest";
+  const BUG_WATCH = "bug_watch:Bug Watch: Blockers and the Monday Digest";
   const platform = (role: string | null, f?: FeatureMap) => pushTriggersFor(role, f, true).map((t) => `${t.key}:${t.label}`);
 
   it("is not there for an owner, a tech, or an unknown role", () => {
@@ -116,7 +116,7 @@ describe("pushTriggersFor: the Bug Watch row", () => {
     const row = pushTriggersFor("owner", ALL_ON, true).find((t) => t.key === "bug_watch")!;
     expect(row.help).toBe("North's own team only: a page the moment something platform-wide breaks, and the Monday morning digest.");
     expect(row.audience).toBe("platform");
-    for (const word of row.label.split(/[\s:]+/).filter(Boolean)) expect(word[0]).toBe(word[0].toUpperCase());
+    expect(titleCaseIn(row.label, "en"), row.label).toBe(true); // the one judge (cn-v1148)
   });
 });
 
@@ -126,8 +126,8 @@ describe("pushTriggersFor: the Bug Watch row", () => {
  * see the switch; the office and the crew, who can neither pick a plan nor update the card, never see
  * a switch for a buzz they cannot receive (KEEP THIS HONEST).
  */
-describe("pushTriggersFor: the Billing And Your Plan row", () => {
-  const BILLING = "billing:Billing And Your Plan";
+describe("pushTriggersFor: the Billing and Your Plan row", () => {
+  const BILLING = "billing:Billing and Your Plan";
 
   it("is there for an owner and an admin", () => {
     expect(rows("owner")).toContain(BILLING);
@@ -149,11 +149,11 @@ describe("pushTriggersFor: the Billing And Your Plan row", () => {
 
   it("says what it covers, in Title Case, to admins", () => {
     const row = pushTriggersFor("owner", ALL_ON).find((t) => t.key === "billing")!;
-    expect(row.label).toBe("Billing And Your Plan");
+    expect(row.label).toBe("Billing and Your Plan");
     expect(row.help).toBe("Your trial's last days, a declined card, and when a plan ends. Owners and admins only.");
     expect(row.audience).toBe("admins");
     expect(row.soon).toBeUndefined();
-    for (const word of row.label.split(/[\s:]+/).filter(Boolean)) expect(word[0]).toBe(word[0].toUpperCase());
+    expect(titleCaseIn(row.label, "en"), row.label).toBe(true); // the one judge (cn-v1148)
   });
 });
 

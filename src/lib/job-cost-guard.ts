@@ -15,11 +15,11 @@
  *
  * So the rule lives HERE, at the write, and every door below asks this one function:
  *   · insertItemizedBill         (a paper filed from Organize, a receipt read on the job page, shop stock)
- *   · createBill                 (Type It In, Add By Hand, Nort's bill.create)
+ *   · createBill                 (Type It In, Add by Hand, Nort's bill.create)
  *   · updateBill                 (the Edit Bill box, Nort's bill.update: a re-point or a re-price)
  *   · correctBill                (Correct This Bill, 0381: the supplier's later paper as its own bill
  *                                 under the original; it always carries its lines, asked anyway)
- *   · recordSupplierInvoiceAsBill (Record It As A Bill on the supplier's card)
+ *   · recordSupplierInvoiceAsBill (Record It as a Bill on the supplier's card)
  *   · applyBankCore              (sorting a bank download: a line put on the job it was for, 0375 -
  *                                 the dropdown above, now its own answer. The bank card is held here
  *                                 at BOTH ends: lib/bank-download's jobRefusalFor keeps a job off the

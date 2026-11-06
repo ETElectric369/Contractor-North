@@ -11,6 +11,7 @@ import { join } from "node:path";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 
 import { SupplierDuplicates, type SupplierDuplicateActions } from "./supplier-duplicates";
+import { titleCaseIn } from "../../../../tests/title-case-words";
 import type { DuplicateBillGroup } from "./supplier-balance";
 
 const group = (over: Partial<DuplicateBillGroup> = {}): DuplicateBillGroup => ({
@@ -31,13 +32,13 @@ const render = (groups: DuplicateBillGroup[], actions: SupplierDuplicateActions 
 const buttons = (html: string) => [...html.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)].map((m) => m[1].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim());
 
 describe("Both Are Real on the card", () => {
-  it("an open pair offers Keep It On each job AND one Both Are Real for the pair, every button Title Case", () => {
+  it("an open pair offers Keep It on each job AND one Both Are Real for the pair, every button Title Case", () => {
     const html = render([group()]);
     const b = buttons(html);
-    expect(b).toContain("Keep It On 13 Larkspur");
-    expect(b).toContain("Keep It On 41 Bayberry");
+    expect(b).toContain("Keep It on 13 Larkspur");
+    expect(b).toContain("Keep It on 41 Bayberry");
     expect(b.filter((t) => t === "Both Are Real")).toHaveLength(1);
-    for (const t of b) expect(t, t).toMatch(/^(?:[A-Z0-9][^\s]*)(?:\s+[A-Z0-9][^\s]*)*$/);
+    for (const t of b) expect(titleCaseIn(t, "en"), t).toBe(true);
     expect(html).toContain("Both Are Real keeps both costs where they are and the pair stops being asked about.");
     expect(html).toContain("or that both are real purchases");
   });
@@ -45,11 +46,11 @@ describe("Both Are Real on the card", () => {
   it("an answered pair offers neither pick nor Both Are Real; a mount without the door draws no button", () => {
     const answered = render([group({ resolution: { keptBillId: "a" } })]);
     expect(answered).not.toContain("Both Are Real");
-    expect(answered).not.toContain("Keep It On");
+    expect(answered).not.toContain("Keep It on");
     const noDoor = render([group()], { resolveDuplicate: vi.fn(), unresolveDuplicate: vi.fn() });
     expect(noDoor).not.toContain("Both Are Real");
     expect(noDoor).not.toContain("both are real purchases");
-    expect(buttons(noDoor)).toContain("Keep It On 13 Larkspur");
+    expect(buttons(noDoor)).toContain("Keep It on 13 Larkspur");
   });
 });
 

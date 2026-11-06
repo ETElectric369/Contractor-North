@@ -50,7 +50,7 @@ describe("the estimate's cards follow the signed-in person's language", () => {
     expect(t).toContain("Agregar Circuito");
     expect(t).toContain("Abrir el Panel de J-012 Larkspur");
     expect(t).toContain("Esta Es la Propuesta.");
-    expect(t).not.toMatch(/Circuit Schedule|Add Circuit|Generate From Line Items|No circuit schedule yet/);
+    expect(t).not.toMatch(/Circuit Schedule|Add Circuit|Generate from Line Items|No circuit schedule yet/);
   });
 
   it("the customer card with nobody attached, and the paper-format switch, in Spanish", () => {
@@ -63,7 +63,7 @@ describe("the estimate's cards follow the signed-in person's language", () => {
     expect(p).toContain("Predeterminado de la Empresa · Activado");
     expect(p).toContain("Mostrar");
     expect(p).toContain("Ocultar");
-    expect(p).not.toContain("Labor And Parts On The Paper");
+    expect(p).not.toContain("Labor and Parts on the Paper");
   });
 
   it("the Email / Text chips on an invoice and on a quote, in Spanish (drawn on billing too)", () => {
@@ -78,16 +78,16 @@ describe("the estimate's cards follow the signed-in person's language", () => {
   it("with no provider every piece says what it always said, byte for byte", () => {
     const c = text(en(card()));
     expect(c).toContain("Circuit Schedule · prints as a second page");
-    expect(c).toContain("Generate From Line Items");
-    expect(c).toContain("This Is The Proposal. The Job Keeps Its Own List On The Panel Tab.");
+    expect(c).toContain("Generate from Line Items");
+    expect(c).toContain("This Is the Proposal. The Job Keeps Its Own List On the Panel Tab.");
     expect(c).toContain("Open J-012 Larkspur's Panel");
-    expect(c).toContain("No circuit schedule yet. Tap Generate From Line Items to read the breakers and wire in the line items, or Add Circuit to type rows by hand.");
+    expect(c).toContain("No circuit schedule yet. Tap Generate from Line Items to read the breakers and wire in the line items, or Add Circuit to type rows by hand.");
     expect(c).toContain("Add Circuit");
     const n = text(en(nobody()));
     expect(n).toContain("Prepared for Nobody attached yet — it prints without a name until you pick someone.");
     expect(n).toContain("Attach Customer");
     const p = text(en(paper()));
-    expect(p).toContain("Labor And Parts On The Paper");
+    expect(p).toContain("Labor and Parts on the Paper");
     expect(p).toContain("Company Default · On");
     expect(p).toContain("Prints each task's hours at the rate and its parts beneath it, on the paper and the customer's link. The company default is set in Document Studio.");
     const q = text(en(createElement(EmailButton, { id: "q-1", kind: "quote", textReady: true })));
@@ -109,14 +109,14 @@ describe("the keys say the literal each one replaced", () => {
       qt_didntSaveTryAgain: "That didn't save — try again.",
       qt_copiedPasteIt: "Copied — paste it into a text or email.",
       qt_confirmEmailInvoiceAmount: "Send this {money} invoice to {who} by email? This marks it Sent.",
-      qt_btn_startAnInspection: "Start An Inspection",
+      qt_btn_startAnInspection: "Start an Inspection",
       qb_noPriceBookYet: "No price book yet. Upload or build one under Money → Price List and these will autocomplete.",
       qb_hoursStand: "· your hours stand; the kit’s parts follow the units",
-      qb_btn_saveTheKit: "Save The Kit",
+      qb_btn_saveTheKit: "Save the Kit",
       qb_priceSetByHand: "Price set by hand — the breakdown stays off the paper",
     };
     for (const [k, v] of Object.entries(table)) expect(EN[k], k).toBe(v);
-    // Save The Kit's Spanish is the button qs_lib_kitNotKept names.
+    // Save the Kit's Spanish is the button qs_lib_kitNotKept names.
     expect(dict("es").qb_btn_saveTheKit).toBe("Guardar el Kit");
     expect(dict("es").qs_lib_kitNotKept).toContain("Guardar el Kit");
   });

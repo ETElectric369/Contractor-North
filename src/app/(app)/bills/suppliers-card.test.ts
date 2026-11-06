@@ -131,7 +131,7 @@ describe("the card says the things a balance cannot say for itself", () => {
     expect(CARD).not.toContain("Mark those receipts paid in the bills list");
     expect(CARD).not.toContain("is still marked unpaid.`");
     // A check's door opens All Bills (FoldOpener), 44px, saying what it opens.
-    expect(CARD).toContain('seeAllInAllBills("Open In All Bills")');
+    expect(CARD).toContain('seeAllInAllBills("Open in All Bills")');
     expect(CARD).toContain('<a href="#all-bills"');
     expect(CARD).not.toContain("further down this page");
     expect(CARD).toContain("still marked On Account.`");
@@ -159,7 +159,7 @@ describe("the card says the things a balance cannot say for itself", () => {
 
 /**
  * ONE NUMBER, ONE BUTTON, ONE "CHECK THESE" (W1-33). The closed line's amber "+ $N they never sent
- * paper for" is "N To Check"; the detail opens on Record A Payment and one slate line of the model's
+ * paper for" is "N To Check"; the detail opens on Record a Payment and one slate line of the model's
  * own arithmetic; each live contradiction is one check. A failure is never a check.
  */
 describe("the supplier detail: Check These", () => {
@@ -238,23 +238,23 @@ describe("the supplier detail: Check These", () => {
         }),
       );
     const quiet = render([acct({ bills: [bill("b1", 100)], payments: [pay("p1", 40, "2026-09-05")] })]);
-    expect(quiet).not.toContain("To Check");
+    expect(quiet).not.toContain("to Check");
     expect(quiet).not.toContain("Check These");
     expect(quiet).not.toContain('id="supplier-checks-a1"');
-    // The detail opens on Record A Payment, the slate line under it, and the ⋯ holding Edit Account.
-    expect(quiet).toContain("Record A Payment");
+    // The detail opens on Record a Payment, the slate line under it, and the ⋯ holding Edit Account.
+    expect(quiet).toContain("Record a Payment");
     expect(quiet).toContain(`$100.00 open on 1 bill. You&#x27;ve sent $40.00 since ${formatDate("2026-09-05")}.`);
     expect(quiet).toMatch(/<button[^>]*aria-label="Actions"/);
     const live = render([acct({ onAccount: false, bills: [bill("b3", 16.28)] })]);
-    expect(live).toContain("1 To Check");
+    expect(live).toContain("1 to Check");
     expect(live).toContain('id="supplier-checks-a1"');
     expect(live).toContain("Check These (1)");
     expect(live).toContain("1 bill marked On Account, $16.28, but you pay Valley Supply at the register.");
-    expect(live).toContain("Turn On A Running Balance");
+    expect(live).toContain("Turn On a Running Balance");
   });
 
   it("the card: N To Check replaces the '+ $N they never sent paper for' line; the failure line stays; grids and Why Don't These Subtract? are gone", () => {
-    expect(CARD).toContain("{checks.length} To Check");
+    expect(CARD).toContain("{checks.length} to Check");
     expect(CARD).not.toContain("they never sent paper for\n");
     expect(CARD).not.toContain("+ {formatCurrency(noDocTotal)} they never sent paper for");
     expect(CARD).toContain("Couldn&apos;t check your bills against their papers");

@@ -15,7 +15,7 @@ import { uploadJobPhotos } from "./upload-job-photos";
 /**
  * READ A PHOTO (the panel-first wave; Erik: "hone it in"). ONE small card, right above the panel.
  *
- * One button. Read A Photo → take one, or pick one (the panel's own photo first, then the job's,
+ * One button. Read a Photo → take one, or pick one (the panel's own photo first, then the job's,
  * ONE at a time) → the read lands ON THE PANEL: dimmed lines in their spaces to Keep All or tap
  * each one, and where the photo's words differ from a kept line, the photo's words beside it with
  * Use It. The panel draws both; this card only reads. Under the button, one sentence of state.
@@ -87,7 +87,7 @@ export function PanelReaders({
   // same (Use It, or a crewmate), the line goes away by itself.
   const facts = useMemo(() => panelFacts(panel, said), [panel, said]);
 
-  /** Read A Photo: with no photo on the job yet, straight to the camera (or the library). */
+  /** Read a Photo: with no photo on the job yet, straight to the camera (or the library). */
   function start() {
     if (!ordered.length) {
       cameraRef.current?.click();
@@ -119,7 +119,7 @@ export function PanelReaders({
       // crewmate's taken in the same minute.
       taken = r.photos.find((p) => !!path && p.path === path) ?? null;
       if (!taken) {
-        setStatus({ text: "The photo is on the job's Photos, but it isn't in the list yet. Tap Read A Photo and pick it.", tone: "error", notes: [] });
+        setStatus({ text: "The photo is on the job's Photos, but it isn't in the list yet. Tap Read a Photo and pick it.", tone: "error", notes: [] });
         return;
       }
     } catch (err) {
@@ -205,11 +205,11 @@ export function PanelReaders({
   }
 
   return (
-    <section className={card} aria-label="Read A Photo">
+    <section className={card} aria-label="Read a Photo">
       {/* No `capture`: the phone asks Camera or Photo Library, the same as the dock's Photo button. */}
       <input ref={cameraRef} type="file" accept="image/*" className="hidden" onChange={(e) => void takePhoto(e)} />
       <Button className="w-full" onClick={start} disabled={busy !== null || capped}>
-        {busy === "photo" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} Read A Photo
+        {busy === "photo" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} Read a Photo
       </Button>
 
       {picking && busy === null && ordered.length > 0 && (
@@ -245,7 +245,7 @@ export function PanelReaders({
             aria-expanded={plansOpen}
             className="flex min-h-[44px] w-full items-center gap-2 text-left text-sm font-medium text-[rgb(var(--glass-ink))]"
           >
-            <FileText className="h-4 w-4 shrink-0" /> Read Circuits From The Plans
+            <FileText className="h-4 w-4 shrink-0" /> Read Circuits from the Plans
           </button>
           {plansOpen &&
             (plans.length === 0 ? (
@@ -260,7 +260,7 @@ export function PanelReaders({
                     {plans.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name || "Plans"} · {formatDate(p.created_at)}
-                        {p.onCustomer ? " · On The Customer" : ""}
+                        {p.onCustomer ? " · On the Customer" : ""}
                       </option>
                     ))}
                   </select>
@@ -331,7 +331,7 @@ export function PhotoPicker({
           </Button>
         )}
         <Button variant="outline" onClick={onTake}>
-          <Camera className="h-4 w-4" /> Take A New One
+          <Camera className="h-4 w-4" /> Take a New One
         </Button>
       </div>
     </div>

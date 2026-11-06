@@ -54,7 +54,7 @@ describe("Measure can be left on a frozen full-screen camera with dead buttons a
   });
 });
 
-describe("Open In AR can hang forever and block every later model", () => {
+describe("Open in AR can hang forever and block every later model", () => {
   const fn = between(scan, "    @objc func previewFile(_ call: CAPPluginCall) {", "    /// One scan on screen at a time");
 
   it("a screen mid-way in or out is answered in words, not presented over blind", () => {
@@ -85,7 +85,7 @@ describe("Open In AR can hang forever and block every later model", () => {
   });
 });
 
-describe("Open In AR: previewFile can hang forever with a stuck Open In AR button, and the viewer re-downloads the whole model it already drew", () => {
+describe("Open in AR: previewFile can hang forever with a stuck Open in AR button, and the viewer re-downloads the whole model it already drew", () => {
   // The Swift half: the shell side never leaves the page's call (and its button) pending, and a
   // refused present leaves no staged copy behind. (The page-side half, the viewer fetching the
   // bytes once and drawing from them, lives in src/components/model-viewer.tsx.)
@@ -96,9 +96,9 @@ describe("Open In AR: previewFile can hang forever with a stuck Open In AR butto
     expect(timer.indexOf("try? FileManager.default.removeItem(at: url)")).toBeLessThan(timer.indexOf("call.reject(Self.couldNotOpenModel)"));
   });
 
-  it("the viewer fetches the bytes ONCE: the loader draws from them (a blob URL, told where the sheets live) and Open In AR reuses them", () => {
+  it("the viewer fetches the bytes ONCE: the loader draws from them (a blob URL, told where the sheets live) and Open in AR reuses them", () => {
     const v = readFileSync(path.join(ROOT, "src/components/model-viewer.tsx"), "utf8");
-    // one fetch helper, used by the loader's road and by Open In AR; the bytes are kept in bytesRef
+    // one fetch helper, used by the loader's road and by Open in AR; the bytes are kept in bytesRef
     expect(v.split("await fetchModelBytes(url)").length - 1).toBe(2);
     expect(v).not.toContain("await fetch(url)\n        if");
     expect(v).toContain("const bytes = bytesRef.current ?? (await fetchModelBytes(url));");

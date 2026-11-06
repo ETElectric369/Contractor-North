@@ -145,7 +145,7 @@ describe("the doors, by role, shell and standing", () => {
     expect(html).not.toContain('href="/subscribe"');
     expect(html).not.toContain("Subscribe");
   });
-  it("a trial, or a company with no live subscription: Upgrade is a link to /subscribe (Pick A Plan)", () => {
+  it("a trial, or a company with no live subscription: Upgrade is a link to /subscribe (Pick a Plan)", () => {
     const trial = render({ access: access("trial"), liveSubscription: false, hasCustomer: false });
     expect(trial).toMatch(/<a href="\/subscribe"[^>]*>Upgrade<\/a>/);
     expect(doorsIn(trial)).toEqual(["Upgrade", "Add Usage"]);

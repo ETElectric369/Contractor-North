@@ -185,7 +185,7 @@ export function DropTarget({
           onClick={() => setLeftBehind(null)}
           className="mt-2 block min-h-11 w-full rounded-lg bg-amber-50 px-3 py-2 text-left text-sm text-amber-900"
           role="status"
-          title={say(lang, words, "vi_btn_tapToDismiss", "Tap To Dismiss")}
+          title={say(lang, words, "vi_btn_tapToDismiss", "Tap to Dismiss")}
         >
           {leftBehind}
         </button>

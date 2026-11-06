@@ -91,12 +91,12 @@ describe("A. no silent contact", () => {
     expect(row(lead({ customer_id: "cust-1" }))).toMatch(/<a[^>]*href="\/crm\/cust-1"[^>]*>Rita Moss<\/a>/);
   });
 
-  it("Save As Contact is in the ⋯ panel only for a lead with no card that hasn't become anything", () => {
-    expect(panel(lead())).toContain("Save As Contact");
-    expect(panel(lead({ customer_id: "cust-1" }))).not.toContain("Save As Contact");
-    expect(panel(lead({ converted_at: "2026-09-20T10:00:00Z", converted_to: "quote" }))).not.toContain("Save As Contact");
+  it("Save as Contact is in the ⋯ panel only for a lead with no card that hasn't become anything", () => {
+    expect(panel(lead())).toContain("Save as Contact");
+    expect(panel(lead({ customer_id: "cust-1" }))).not.toContain("Save as Contact");
+    expect(panel(lead({ converted_at: "2026-09-20T10:00:00Z", converted_to: "quote" }))).not.toContain("Save as Contact");
     // 44px, Title Case.
-    expect(panel(lead())).toMatch(/<button[^>]*class="[^"]*min-h-11[^"]*"[^>]*><svg[^>]*>.*?<\/svg> Save As Contact<\/button>/);
+    expect(panel(lead())).toMatch(/<button[^>]*class="[^"]*min-h-11[^"]*"[^>]*><svg[^>]*>.*?<\/svg> Save as Contact<\/button>/);
   });
 
   it("the toast says which: a new card, or the card the book already had; Open is offered, nothing navigates itself", async () => {
@@ -107,7 +107,7 @@ describe("A. no silent contact", () => {
       convert: async () => ({ ok: true, id: "cust-9", contact: { id: "cust-9", name: "Rita Moss", existing: false } }),
       toast, open, refresh,
     });
-    expect(toast.mock.calls[0][0]).toBe("Saved Rita Moss As A Contact");
+    expect(toast.mock.calls[0][0]).toBe("Saved Rita Moss as a Contact");
     expect(toast.mock.calls[0][2].label).toBe("Open");
     expect(open).not.toHaveBeenCalled();
     toast.mock.calls[0][2].onClick();
@@ -118,7 +118,7 @@ describe("A. no silent contact", () => {
       convert: async () => ({ ok: true, id: "cust-2", contact: { id: "cust-2", name: "Rita Moss", existing: true } }),
       toast, open, refresh,
     });
-    expect(toast.mock.calls[0][0]).toBe("Linked To Rita Moss");
+    expect(toast.mock.calls[0][0]).toBe("Linked to Rita Moss");
 
     toast.mockClear();
     await saveLeadAsContact({ id: "lead-1", name: "Rita Moss" }, { convert: async () => ({ ok: false, error: "Lead not found." }), toast, open, refresh });
@@ -154,7 +154,7 @@ describe("B. one next-step chip on the row", () => {
   it("Referred By lives in the ⋯ panel, and only with Track Referrals on", () => {
     const referred = lead({ ...({ referrer: { full_name: "Chris Lane" } } as object) });
     expect(row(referred)).not.toContain("Chris Lane");
-    expect(panel(referred, { referralsOn: true })).toContain("Referred By Chris Lane");
+    expect(panel(referred, { referralsOn: true })).toContain("Referred by Chris Lane");
     expect(panel(referred, { referralsOn: false })).not.toContain("Chris Lane");
   });
 });
@@ -194,10 +194,10 @@ describe("C. the status moves itself", () => {
 describe("D. New Lead in seven", () => {
   const fields = (v = inquiryFormValue()) => renderToStaticMarkup(createElement(InquiryFields, { value: v, onChange: () => {} }));
 
-  it("shows Name, Phone, Address, What They Need, What Kind Of Work, How Long and a closed More Options, and no Residential or commercial", () => {
+  it("shows Name, Phone, Address, What They Need, What Kind of Work, How Long and a closed More Options, and no Residential or commercial", () => {
     const html = fields();
     const labels = [...html.matchAll(/<label[^>]*>([^<]+)<\/label>/g)].map((m) => m[1]);
-    expect(labels).toEqual(["Name", "Phone", "Address", "What They Need", "What Kind Of Work", "How Long"]);
+    expect(labels).toEqual(["Name", "Phone", "Address", "What They Need", "What Kind of Work", "How Long"]);
     expect(html).toContain("More Options");
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain("Company · Email"); // the closed row's summary
@@ -217,13 +217,13 @@ describe("D. New Lead in seven", () => {
     expect(moreOptionsFilled(inquiryFormValue())).toBe(false);
   });
 
-  it("a picked street shows its town on one grey line; a typed one offers Add The Town, and its town lives in More Options", () => {
+  it("a picked street shows its town on one grey line; a typed one offers Add the Town, and its town lives in More Options", () => {
     const picked = inquiryFormValue(lead());
     expect(picked.town_picked).toBe(true);
     expect(fields(picked)).toContain('<p class="mt-1 text-xs text-slate-500">Testville, CA 96161</p>');
     const typed = { ...inquiryFormValue(), address: "44 Pine Rd" };
     const html = fields(typed);
-    expect(html).toMatch(/min-h-11[^"]*"[^>]*>Add The Town<\/button>/);
+    expect(html).toMatch(/min-h-11[^"]*"[^>]*>Add the Town<\/button>/);
     // A town typed with no street is kept, in More Options (open, since it holds something).
     const townOnly = inquiryFormValue(lead({ address: null }));
     expect(townOnly.town_picked).toBe(false);

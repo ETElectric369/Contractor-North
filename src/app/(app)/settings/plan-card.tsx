@@ -23,7 +23,7 @@ import { buyExtraUsage, openPortal } from "./billing-actions";
  *
  * THE DOORS, by role, shell and standing:
  *   owner / admin, web      Upgrade (a live Stripe subscription → the portal, where Stripe switches
- *                           the plan; otherwise /subscribe, Pick A Plan) — NOT for a comped company
+ *                           the plan; otherwise /subscribe, Pick a Plan) — NOT for a comped company
  *                           (/subscribe bounces it home: a dead door) and NOT on the top tier with a
  *                           live subscription (nothing above Company); Add Usage (only when the
  *                           install sells it, billing-doors extraUsageConfigured, and only while the

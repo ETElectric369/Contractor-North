@@ -16,7 +16,7 @@ import {
 import { cleanVendorCard, knownVendorNames, listedKind, matchesVendorFilter, vendorFilters, type VendorCard } from "./item-options-math";
 
 /**
- * Import A List, the sorting half (vendor import, Phase 1). Every name here is MADE UP: a real
+ * Import a List, the sorting half (vendor import, Phase 1). Every name here is MADE UP: a real
  * customer's vendor list never goes in this repo (it is public).
  *
  * The laws under test: the app suggests and a person decides (every kind is a labelled guess, a
@@ -78,7 +78,7 @@ describe("headings: recognised and left out, never a vendor", () => {
     expect(t.rows).toHaveLength(200);
     expect(t.overCap).toBe(5);
     expect(previewHeading(200, "List.xlsx", true, 5)).toEqual({
-      title: "200 Names In List.xlsx",
+      title: "200 Names in List.xlsx",
       detail: "The heading row was left out. Only the first 200 rows are shown; 5 more were left out. Split the file to add them.",
     });
   });
@@ -252,7 +252,7 @@ describe("the preview: notes in plain words, ticks that leave the deciding to a 
     expect(rowsToAdd(rows, [])[0]).toMatchObject({ phone: "(530) 555-0142", email: "bids@granitepeak.example", source_url: site, maps_url: null });
     // The preview row itself still says what the file said: a pick fills Add, it isn't saved anywhere.
     expect(rows[0].phone).toBeNull();
-    // None Of These (no pick) or nothing ticked: no source rides along.
+    // None of These (no pick) or nothing ticked: no source rides along.
     rows[0].pick = { choice, take: [] };
     expect(rowsToAdd(rows, [])[0]).toMatchObject({ phone: null, source_url: null });
     rows[0].pick = null;

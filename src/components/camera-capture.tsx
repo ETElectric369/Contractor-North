@@ -541,12 +541,12 @@ export function CameraCaptureView({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Take A Photo"
+        aria-label="Take a Photo"
         className="flex max-h-full w-full max-w-md flex-col overflow-y-auto overscroll-contain rounded-2xl bg-white shadow-xl"
       >
         <div className="flex shrink-0 items-center justify-between border-b border-slate-100 py-1 pl-4 pr-1">
           <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-            <Camera className="h-4 w-4" /> Take A Photo
+            <Camera className="h-4 w-4" /> Take a Photo
           </span>
           <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close" title="Close">
             <X />
@@ -601,7 +601,7 @@ export function CameraCaptureView({
                 onChange={(e) => onPickCamera(e.target.value)}
                 className="h-11 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 text-sm text-slate-900"
               >
-                {!selected && <option value="">Choose A Camera</option>}
+                {!selected && <option value="">Choose a Camera</option>}
                 {cameras.map((c) => (
                   <option key={c.deviceId} value={c.deviceId}>
                     {c.label}
@@ -638,7 +638,7 @@ export function CameraCaptureView({
           </div>
 
           <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
-            <ImageUp /> Choose A Photo Instead
+            <ImageUp /> Choose a Photo Instead
           </Button>
           <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={onChooseFile} />
         </div>

@@ -14,7 +14,7 @@ import { normalizeDocNumber } from "@/lib/same-purchase";
  * asks a person once, and the answer is remembered on that supplier's account (the caller keeps it).
  * CED's portal download is the first fixture, never the rule.
  *
- * PURE: no database, no browser. The doors (Snap Or Note, Organize, the paste box, a statement
+ * PURE: no database, no browser. The doors (Snap or Note, Organize, the paste box, a statement
  * PDF, a statement a model read off a scan) turn what they hold into an OpenList here; the page
  * reconciles it against the account's papers here; Apply writes what the plan says, and only after
  * a person presses it.
@@ -62,7 +62,7 @@ export type RememberedColumns = {
 export const FIELD_LABELS: Record<OpenListField, string> = {
   reference: "Paper Number",
   type: "Type",
-  po: "PO Or Job",
+  po: "PO or Job",
   invoiceDate: "Paper Date",
   dueDate: "Due Date",
   amount: "Amount",
@@ -808,7 +808,7 @@ const OWN_DATE_LABEL = /^(?:statement\s*date|as\s*of|date)\s*:?$/i;
 
 /**
  * THE SAME LABEL WITH ITS DAY IN THE SAME CELL. "Statement Date: 09/25/26" is one cell; so is a title
- * cell that reads "Open Items As Of 09/25/26", where the label is not at the start. `statement date`
+ * cell that reads "Open Items as of 09/25/26", where the label is not at the start. `statement date`
  * and `as of` are the paper naming its own day and may be found anywhere in the cell; a BARE `date`
  * may not — "Invoice Date Due Date" is a column heading, so that one has to start the cell.
  */
@@ -898,7 +898,7 @@ export function tableStatementDate(table: readonly (readonly string[])[], header
     for (let j = 0; j < rows[i].length; j++) {
       const cell = rows[i][j];
       if (!cell) continue;
-      // THE DAY IN THE LABEL'S OWN CELL: "Statement Date: 09/25/26", "Open Items As Of 09/25/26".
+      // THE DAY IN THE LABEL'S OWN CELL: "Statement Date: 09/25/26", "Open Items as of 09/25/26".
       for (const { re, rank } of OWN_DATE_IN_CELL) {
         const m = re.exec(cell);
         if (m) add(rank, headingDate(m[1]));

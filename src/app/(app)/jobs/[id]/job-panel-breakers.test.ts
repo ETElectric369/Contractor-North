@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { titleCaseIn } from "../../../../../tests/title-case-words";
 
 /**
  * THE BREAKERS CARD ON SCREEN (Panel plan, phase 3; ONE LINE since the panel-first wave), drawn from
@@ -77,7 +78,7 @@ const render = (data: BreakersData, panel = PANEL) => renderToStaticMarkup(creat
 const textOf = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ");
 const buttons = (html: string) =>
   [...html.matchAll(/<button[^>]*>[\s\S]*?<\/button>/g)].map((m) => ({ markup: m[0], text: m[0].replace(/<[^>]+>/g, "").replace(/&#x27;/g, "'").trim() }));
-const titleCase = (s: string) => s.split(/\s+/).filter((w) => /^[a-z]/i.test(w)).every((w) => /^[A-Z]/.test(w));
+const titleCase = (s: string) => titleCaseIn(s, "en"); // the one judge (cn-v1148)
 
 const details = (html: string) => {
   const i = html.indexOf("<details");
@@ -90,17 +91,17 @@ describe("the crew's Breakers card on J-011: one line, one door each", () => {
   const t = textOf(html);
 
   it("says what's short with its one door, and what came that isn't placed yet with its one door", () => {
-    expect(t).toContain("Short one 2P 20A (Bath Floor Heat) — Add To Materials");
+    expect(t).toContain("Short one 2P 20A (Bath Floor Heat) — Add to Materials");
     // 8 x Q2020 + 1 x Q21530CT came, and none of the night's new circuits has a space yet.
     expect(t).toContain("9 bought breakers not placed yet — Place Them");
     expect(t).not.toContain("All breakers accounted for.");
-    expect(buttons(html).map((b) => b.text)).toEqual(["Add To Materials", "Place Them"]);
+    expect(buttons(html).map((b) => b.text)).toEqual(["Add to Materials", "Place Them"]);
   });
 
   it("draws no Details for a tech: no count by size, no tickets as read, no swap, no list or shelf", () => {
     expect(html).not.toContain("<details");
     expect(t).not.toContain("Details");
-    for (const office of ["Need 2 x", "8 x Q2020", "Q21530CT", "Or Swap One", "Not Q22020CT2", "On The List", "Spare", "Q220"]) {
+    for (const office of ["Need 2 x", "8 x Q2020", "Q21530CT", "Or Swap One", "Not Q22020CT2", "On the List", "Spare", "Q220"]) {
       expect(t, office).not.toContain(office);
     }
   });
@@ -124,7 +125,7 @@ describe("the office's Breakers card on J-011", () => {
 
   it("says the same one line as the crew's, outside Details", () => {
     const line = textOf(outside(html));
-    expect(line).toContain("Short one 2P 20A (Bath Floor Heat) — Add To Materials");
+    expect(line).toContain("Short one 2P 20A (Bath Floor Heat) — Add to Materials");
     expect(line).toContain("9 bought breakers not placed yet — Place Them");
     expect(line).not.toContain("$");
     expect(line).not.toContain("8802-SO-257555");
@@ -140,16 +141,16 @@ describe("the office's Breakers card on J-011", () => {
     expect(d).toContain("Q220 Is $18.76 In Your Price Book.");
     expect(d).toContain("Q2020 Isn't In Your Price Book.");
     expect(d).toContain("Q22020CT Isn't In Your Price Book.");
-    expect(d).toContain("Or Swap One Q2020 For A Q22020CT");
+    expect(d).toContain("Or Swap One Q2020 for a Q22020CT");
     expect(d).toContain("Not Q22020CT2, That Is Two 2-Pole 20s");
     expect(d).toContain("Only if a space takes a quad.");
-    expect(d).toContain("On The List, Not Bought Yet");
+    expect(d).toContain("On the List, Not Bought Yet");
     expect(d).toContain("8 came on a ticket already.");
     const labels = buttons(details(html)).map((b) => b.text);
-    expect(labels).toContain("Add Q220 To Materials");
-    expect(labels).toContain("Add Q22020CT To Materials");
+    expect(labels).toContain("Add Q220 to Materials");
+    expect(labels).toContain("Add Q22020CT to Materials");
     expect(labels.filter((l) => l === "Place")).toHaveLength(2);
-    expect(labels.filter((l) => l === "Add To Price Book").length).toBeGreaterThanOrEqual(3);
+    expect(labels.filter((l) => l === "Add to Price Book").length).toBeGreaterThanOrEqual(3);
   });
 
   it("is 44px and Title Case", () => {
@@ -199,7 +200,7 @@ describe("the line's other sentences", () => {
     expect(buttons(html)).toEqual([]);
   });
 
-  it("Add To Materials adds every order the shortfall needs, in one tap; Place Them opens the first breaker waiting", () => {
+  it("Add to Materials adds every order the shortfall needs, in one tap; Place Them opens the first breaker waiting", () => {
     const got: { part: string | null; qty: number }[][] = [];
     const circuits = [
       circuit({ room: "Bath", description: "Floor Heat", amps: 20, poles: 2, ...PLACED }),
@@ -209,8 +210,8 @@ describe("the line's other sentences", () => {
     const html = renderToStaticMarkup(
       createElement(BreakersCardView, { data: { ...crewData, bought: [], list: [] }, circuits, panel: PANEL, ...handlers, onAddAllToMaterials: (o) => got.push(o) }),
     );
-    expect(textOf(html)).toContain("Short one 2P 20A (Bath Floor Heat) and one 2P 30A (Laundry Dryer) — Add To Materials");
-    doors.get("Add To Materials")!();
+    expect(textOf(html)).toContain("Short one 2P 20A (Bath Floor Heat) and one 2P 30A (Laundry Dryer) — Add to Materials");
+    doors.get("Add to Materials")!();
     expect(got).toEqual([[expect.objectContaining({ part: "Q220", qty: 1 }), expect.objectContaining({ part: "Q230", qty: 1 })]]);
 
     const opened: string[] = [];
@@ -234,7 +235,7 @@ describe("the card's other states", () => {
     const data = { ...crewData, bought: [...BOUGHT, { description: "SIEM Q22030CT", qty: 1 }] };
     const t = textOf(render(data));
     expect(t).toContain("Can't read SIEM Q22030CT (1) on a ticket, so it isn't counted.");
-    expect(t).toContain("Short one 2P 20A (Bath Floor Heat) — Add To Materials");
+    expect(t).toContain("Short one 2P 20A (Bath Floor Heat) — Add to Materials");
     const d = textOf(details(render({ ...officeData, bought: data.bought })));
     expect(d).toContain("Can't Read This Breaker: SIEM Q22030CT (1). Can't Read Q22030CT. Confirm What Is Inside It.");
   });
@@ -246,7 +247,7 @@ describe("the card's other states", () => {
     expect(labels).not.toContain("Place");
     // ONE name for the one door that makes a panel, the same as the tab's last door.
     expect(labels).toContain("Add New Panel");
-    expect(labels).not.toContain("Add The Panel");
+    expect(labels).not.toContain("Add the Panel");
   });
   it("an unreadable ticket line keeps the card from saying all: it says what it counted", () => {
     const placed = [circuit({ room: "Kitchen", description: "A1", amps: 20, poles: 1, space: 1, half: "A" }), circuit({ room: "Kitchen", description: "B1", amps: 20, poles: 1, space: 1, half: "B" })];
@@ -283,7 +284,7 @@ describe("the card's other states", () => {
   it("a ticket credit nobody can read is named as a credit and not counted either way", () => {
     const t = textOf(render({ ...crewData, bought: [...BOUGHT, { description: "SP 20A 120/240V CB (Q120)", qty: 2, credit: true }] }));
     expect(t).toContain("A credit on a ticket for SP 20A 120/240V CB (Q120) (2) isn't counted either way.");
-    expect(t).toContain("Short one 2P 20A (Bath Floor Heat) — Add To Materials");
+    expect(t).toContain("Short one 2P 20A (Bath Floor Heat) — Add to Materials");
   });
   it("a new circuit with no amps is said beside the line, never silently left out", () => {
     const t = textOf(render(crewData, PANEL));
@@ -306,7 +307,7 @@ describe("the card's other states", () => {
   });
 });
 
-describe("Place From What Was Bought", () => {
+describe("Place from What Was Bought", () => {
   it("pre-fills a Q2020's two halves with the first unplaced 1P 20A circuits, for a person to confirm", () => {
     const q2020 = groupBreakers(BOUGHT).groups.find((g) => g.codes.includes("Q2020"))!;
     const html = renderToStaticMarkup(

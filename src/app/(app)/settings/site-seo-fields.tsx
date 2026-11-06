@@ -187,7 +187,7 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
           placeholder="https://g.page/r/…/review"
         />
         <p className="mt-1 text-xs text-slate-500">
-          Where your &ldquo;Review Us On Google&rdquo; button sends people. The Business Profile link above opens your
+          Where your &ldquo;Review Us on Google&rdquo; button sends people. The Business Profile link above opens your
           LISTING — the customer still has to find the review box. Google gives you a direct one: Business Profile
           &rarr; <span className="font-medium">Ask for reviews</span> &rarr; copy the link (it looks like
           g.page/r/…/review). Leave this empty and the button keeps using the profile link.

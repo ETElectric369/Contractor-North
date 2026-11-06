@@ -23,11 +23,11 @@ const step = (l: Partial<LeadStepInput>, v: LeadVisits | null = null, estimatesO
 const booked = (nextAt: string | null, over: Partial<LeadVisits> = {}): LeadVisits => ({ done: 0, upcoming: 1, nextAt, ...over });
 
 describe("each rule", () => {
-  it("1. a focus row that became something: Became An Estimate / Became A Job, slate", () => {
-    expect(step({ converted_at: "2026-09-20T10:00:00Z", converted_to: "quote" })).toMatchObject({ label: "Became An Estimate", tone: "slate" });
-    expect(step({ converted_at: "2026-09-20T10:00:00Z", converted_to: "estimate" }).label).toBe("Became An Estimate");
-    expect(step({ converted_at: "2026-09-20T10:00:00Z", converted_to: "job", status: "won" })).toMatchObject({ label: "Became A Job", tone: "slate" });
-    expect(step({ converted_at: "2026-09-20T10:00:00Z", converted_to: "customer" }).label).toBe("Became A Job");
+  it("1. a focus row that became something: Became an Estimate / Became a Job, slate", () => {
+    expect(step({ converted_at: "2026-09-20T10:00:00Z", converted_to: "quote" })).toMatchObject({ label: "Became an Estimate", tone: "slate" });
+    expect(step({ converted_at: "2026-09-20T10:00:00Z", converted_to: "estimate" }).label).toBe("Became an Estimate");
+    expect(step({ converted_at: "2026-09-20T10:00:00Z", converted_to: "job", status: "won" })).toMatchObject({ label: "Became a Job", tone: "slate" });
+    expect(step({ converted_at: "2026-09-20T10:00:00Z", converted_to: "customer" }).label).toBe("Became a Job");
   });
 
   it("2. lost: Lost, slate", () => {
@@ -80,7 +80,7 @@ describe("each rule", () => {
 
 describe("the order: the first rule that matches wins", () => {
   it("became something beats lost; lost beats a passed follow-up", () => {
-    expect(step({ converted_at: "2026-09-20T10:00:00Z", converted_to: "job", status: "lost" }).label).toBe("Became A Job");
+    expect(step({ converted_at: "2026-09-20T10:00:00Z", converted_to: "job", status: "lost" }).label).toBe("Became a Job");
     expect(step({ status: "lost", next_follow_up_at: "2026-09-01" }).label).toBe("Lost");
   });
 
@@ -106,9 +106,9 @@ describe("what shows around the chip", () => {
     expect(step({ lead_bucket: "A", status: "lost" }).label).toBe("Lost");
   });
 
-  it("· Needs A Visit follows when a site visit is required and nothing is booked", () => {
-    expect(step({ site_inspection_required: true }).label).toBe("New · Call Them · Needs A Visit");
-    expect(step({ site_inspection_required: true, lead_bucket: "B" }).label).toBe("B · New · Call Them · Needs A Visit");
+  it("· Needs a Visit follows when a site visit is required and nothing is booked", () => {
+    expect(step({ site_inspection_required: true }).label).toBe("New · Call Them · Needs a Visit");
+    expect(step({ site_inspection_required: true, lead_bucket: "B" }).label).toBe("B · New · Call Them · Needs a Visit");
     expect(step({ site_inspection_required: true }, booked(null)).label).toBe("Inspection · No Day Yet");
     expect(step({ site_inspection_required: true }, { done: 1, upcoming: 0, nextAt: null }).label).toBe("Walked · Estimate Next");
   });

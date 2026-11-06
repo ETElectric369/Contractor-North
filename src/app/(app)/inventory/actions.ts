@@ -79,7 +79,7 @@ export async function createInventoryItem(formData: FormData): Promise<Result> {
     });
     if (!roll.ok) {
       revalidatePath("/inventory");
-      return { ok: false, id, error: `The item is made, but its roll didn't go into stock: ${roll.error} Add it from the item's row with Add A Roll Counted In.` };
+      return { ok: false, id, error: `The item is made, but its roll didn't go into stock: ${roll.error} Add it from the item's row with Add a Roll Counted In.` };
     }
   }
   revalidatePath("/inventory");
@@ -282,7 +282,7 @@ export async function undoShelfMove(moveId: string): Promise<Result & { message?
 }
 
 /**
- * A RETURN UNDONE LETS ITS CREDIT GO BACK. Return To CED files a job-less credit to the shelf to tie
+ * A RETURN UNDONE LETS ITS CREDIT GO BACK. Return to CED files a job-less credit to the shelf to tie
  * it (0350); when the last live return naming it is undone, and a return is what filed it there
  * (stock_moves.credit_filed_by_return), it comes back off the shelf, a plain credit on Bills again
  * that can be filed on a job. A credit someone filed to the shelf themselves stays where they put it.
@@ -568,7 +568,7 @@ export async function returnToSupplier(input: { lotId: string; qty: number; cred
   return { ok: true, id: String(row.id), message: money.words };
 }
 
-/** Undo a take from the shelf (Phase 3's Took From Stock), until an invoice bills it. */
+/** Undo a take from the shelf (Phase 3's Took from Stock), until an invoice bills it. */
 export async function undoShelfTake(drawGroup: string): Promise<Result> {
   const res = await undoTake(drawGroup);
   return res.ok ? { ok: true } : { ok: false, error: res.error };
@@ -610,9 +610,9 @@ export async function addOpeningRoll(input: { itemId: string; pieces: number; co
 }
 
 /**
- * SHOP STOCK, TYPED IN (Add By Hand's Type It In, W1-FU-misc B): a stock purchase with no paper.
+ * SHOP STOCK, TYPED IN (Add by Hand's Type It In, W1-FU-misc B): a stock purchase with no paper.
  *
- * It lands exactly like Snap Or Note's Shop Stock (organize/actions fileItem's "stock" branch): a bill
+ * It lands exactly like Snap or Note's Shop Stock (organize/actions fileItem's "stock" branch): a bill
  * with no job, on_shelf, category Shop Stock, paid or on account as the person said (On Account is
  * never saved as paid), with ONE line (the item, how many, the amount), and that line goes into stock
  * as one roll through shelveLines (0328). So Stock Bought counts it in the month on the purchase, and

@@ -133,7 +133,7 @@ describe("jobBillingStatus — the /jobs completed-row tag (shares AR's invoiceB
     expect(jobBillingStatus([inv("paid", 500, 500), inv("sent", 500)])).toBe("partial");
   });
 
-  it("every live invoice settled → Paid In Full", () => {
+  it("every live invoice settled → Paid in Full", () => {
     expect(jobBillingStatus([inv("paid", 1000, 1000)])).toBe("paid_in_full");
     expect(jobBillingStatus([inv("paid", 500, 500), inv("paid", 250, 250)])).toBe("paid_in_full");
   });
@@ -150,7 +150,7 @@ describe("jobBillingStatus — the /jobs completed-row tag (shares AR's invoiceB
     expect(jobBillingStatus([inv("draft", 5000, 0)], { hasOpenMilestones: true })).toBe("to_be_invoiced");
   });
 
-  it("a VOID invoice can't block Paid In Full", () => {
+  it("a VOID invoice can't block Paid in Full", () => {
     expect(jobBillingStatus([inv("paid", 1000, 1000), inv("void", 800)])).toBe("paid_in_full");
   });
 
@@ -159,13 +159,13 @@ describe("jobBillingStatus — the /jobs completed-row tag (shares AR's invoiceB
     expect(jobBillingStatus([inv("paid", 100, 99.996)])).toBe("paid_in_full");
   });
 
-  it("paid deposit + a DRAFTED final draw → Partial, never Paid In Full (billing isn't finished)", () => {
+  it("paid deposit + a DRAFTED final draw → Partial, never Paid in Full (billing isn't finished)", () => {
     // The real draw workflow: deposit collected, finish-job drafts the final draw.
     // The lingering draft is money still to bill — the job can't read settled.
     expect(jobBillingStatus([inv("paid", 2000, 2000), inv("draft", 3000)])).toBe("partial");
   });
 
-  it("a $0 leftover draft doesn't block Paid In Full (nothing left to bill)", () => {
+  it("a $0 leftover draft doesn't block Paid in Full (nothing left to bill)", () => {
     expect(jobBillingStatus([inv("paid", 1000, 1000), inv("draft", 0)])).toBe("paid_in_full");
   });
 

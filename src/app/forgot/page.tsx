@@ -53,7 +53,7 @@ export default async function ForgotPage({
           {inShell ? (
             <Link href="/login?mode=code" className="block">
               <Button size="lg" className="w-full">
-                Sign In With A Code
+                Sign In with a Code
               </Button>
             </Link>
           ) : (
@@ -72,14 +72,14 @@ export default async function ForgotPage({
             <p className="mt-4 text-center text-sm text-slate-500">
               Didn&apos;t get it, or the link won&apos;t open?{" "}
               <Link href="/login?mode=code" className="font-medium text-brand hover:underline">
-                Sign In With A Code
+                Sign In with a Code
               </Link>
             </p>
           )}
 
           <p className="mt-6 text-center text-sm text-slate-500">
             <Link href="/login" className="font-medium text-brand hover:underline">
-              Back To Sign In
+              Back to Sign In
             </Link>
           </p>
         </div>

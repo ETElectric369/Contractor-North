@@ -17,7 +17,7 @@
  *     picture tied to a bill, and an unfiled picture a paper reader handled. The tie is the one the
  *     receipt reader, Add Cost and File It already write: organized_items.bill_id (or tied_bill_id,
  *     Same Purchase: Tie Them) beside document_id. A receipt or bill tied to no bill at all is listed
- *     in the Costs tab's Receipts & Papers and says so, beside its Record As Cost, so nothing leaves a
+ *     in the Costs tab's Receipts & Papers and says so, beside its Record as Cost, so nothing leaves a
  *     screen silently. An Invoice on no bill is only listed: nothing reads one into a bill, so a flag
  *     on it would have no button to answer it.
  *
@@ -38,7 +38,7 @@ export function isMoneyCategory(category: string | null | undefined): boolean {
 }
 
 /** The papers the receipt reader turns into a bill: a Receipt or a Bill. The Costs tab's upload
- *  reads these and Record As Cost is offered on these, so these alone can be "Not On A Bill Yet"
+ *  reads these and Record as Cost is offered on these, so these alone can be "Not on a Bill Yet"
  *  (an Invoice is money paper too, but nothing reads it into a bill: the flag would be a dead end). */
 export function isCostableCategory(category: string | null | undefined): boolean {
   return category === "Receipt" || category === "Bill";
@@ -101,7 +101,7 @@ export type SortedJobPapers<D extends JobPaperRow> = {
   /** Bill id (a bill on this job) → its papers among this job's documents, picture or PDF. */
   byBill: Record<string, D[]>;
   /** Receipts and bills on the books through nothing (no bill anywhere, no supplier's document, no
-   *  petty cash): "Not On A Bill Yet", beside Record As Cost. Never an Invoice (isCostableCategory).
+   *  petty cash): "Not on a Bill Yet", beside Record as Cost. Never an Invoice (isCostableCategory).
    *  null = the ties couldn't be read, so nothing is claimed. */
   loose: D[] | null;
   /** The documents the Photos tab holds (grid and fold), for the Costs tab's own list. */

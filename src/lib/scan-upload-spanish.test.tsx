@@ -12,14 +12,14 @@ import { offerLabel } from "@/lib/playbook/scope";
 import { retiredLabel } from "@/lib/playbook/answers";
 import { DropTarget } from "@/components/drop-target";
 import { TellNort } from "@/components/tell-nort";
-import { esTitleCase } from "../../tests/es-function-words";
+import { esTitleCase, titleCaseIn } from "../../tests/title-case-words";
 
 /**
  * THE ENGLISH A SPANISH TECH STILL MET INSIDE THE SHEET (the visit-page-in-Spanish wave, cn-v1144,
  * builder E). The Inspector's own words went to the vi_ catalog (inspector-spanish.test); what was left
  * came from the libraries and the shared pieces the sheet calls — lib/native-scan's kept-model words and
  * Discard Kept 3D Model, lib/upload-words' storage refusal and the words the sheet hands it,
- * lib/native-measure's refusals, lib/playbook/scope's "Add The Deck Tasks (2)", lib/playbook/answers'
+ * lib/native-measure's refusals, lib/playbook/scope's "Add the Deck Tasks (2)", lib/playbook/answers'
  * retired label, the drop zone's own three words, and the whole Just Tell Nort panel.
  *
  * The rule each follows: a library imports no catalog (lib/catalog-free-libs.test.ts); it keeps its
@@ -39,13 +39,8 @@ const nt_ = CATALOGS.find((c) => c.prefix === "nt_")!;
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const textOf = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;|&rsquo;|’/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
 const buttons = (html: string) => [...html.matchAll(/<button[^>]*>[\s\S]*?<\/button>/g)].map((m) => textOf(m[0]));
-/** Every word begins with a capital, a digit or a symbol, after Spanish's opening ¿ / ¡; a {slot} is a hole. */
-const titleCase = (s: string) =>
-  s
-    .replace(/\{\w+\}/g, " ")
-    .split(/\s+/)
-    .filter(Boolean)
-    .every((w) => /^[¿¡]?[\p{Lu}\p{N}&/+·(—–]/u.test(w));
+/** English Title Case through the one judge (tests/title-case-words, cn-v1148). */
+const titleCase = (s: string) => titleCaseIn(s, "en");
 
 describe("lib/native-scan speaks the reader's language when handed it, and its English without", () => {
   it("the kept-model words", () => {
@@ -143,11 +138,11 @@ describe("lib/native-measure, lib/playbook/scope and lib/playbook/answers", () =
   });
 
   it("the offer row: Title Case in both languages, the company's own scope word as typed, the count in its parentheses", () => {
-    expect(offerLabel("deck", 2)).toBe("Add The Deck Tasks (2)");
+    expect(offerLabel("deck", 2)).toBe("Add the Deck Tasks (2)");
     expect(offerLabel("deck", 2, "es", es)).toBe("Agregar las Tareas de Deck (2)");
     expect(offerLabel("panel swap", 1, "es", es)).toBe("Agregar las Tareas de Panel Swap (1)");
-    expect(offerLabel("deck", 2, "en", es)).toBe("Add The Deck Tasks (2)");
-    expect(fillText(EN.vi_btn_addTheScopeTasks, { scope: "Deck", count: "(2)" })).toBe("Add The Deck Tasks (2)");
+    expect(offerLabel("deck", 2, "en", es)).toBe("Add the Deck Tasks (2)");
+    expect(fillText(EN.vi_btn_addTheScopeTasks, { scope: "Deck", count: "(2)" })).toBe("Add the Deck Tasks (2)");
   });
 
   it("a retired question's label: the key's own words are data, the why is the catalog's", () => {
@@ -205,7 +200,7 @@ describe("the drop zone's own words", () => {
   it("the pill's default, the wrong-type line and the dismiss title come through `words`; the language is the provider's", () => {
     expect(src).toContain('const pill = label ?? say(lang, words, "vi_dropFilesHere", "Drop Files Here");');
     expect(src).toContain('say(lang, words, "vi_fileTypeDoesntGoHere", "That file type doesn\'t go here")');
-    expect(src).toContain('title={say(lang, words, "vi_btn_tapToDismiss", "Tap To Dismiss")}');
+    expect(src).toContain('title={say(lang, words, "vi_btn_tapToDismiss", "Tap to Dismiss")}');
     expect(src).toContain("const lang = useLang();");
     expect(ES.vi_dropFilesHere).toBe("Suelta los archivos aquí");
     expect(ES.vi_fileTypeDoesntGoHere).toBe("Ese tipo de archivo no va aquí");
@@ -327,12 +322,12 @@ describe("the keys this wave added", () => {
     vi_couldntOpenMeasure: "Couldn't open Measure. Try again, or type the measurement.",
     vi_measureNoNumber: "Measure came back without a number. Try again.",
     vi_measureSameSpot: "Measure came back with nothing — the points sat on the same spot. Try again.",
-    vi_btn_addTheScopeTasks: "Add The {scope} Tasks {count}",
+    vi_btn_addTheScopeTasks: "Add the {scope} Tasks {count}",
     vi_retiredWas: "{base} — choices you've since changed",
     vi_retiredKept: "{base} — answered before you changed this question",
     vi_dropFilesHere: "Drop Files Here",
     vi_fileTypeDoesntGoHere: "That file type doesn't go here",
-    vi_btn_tapToDismiss: "Tap To Dismiss",
+    vi_btn_tapToDismiss: "Tap to Dismiss",
   };
   const NT: Record<string, string> = {
     // The one English change of the wave: the default label was "Just tell Nort" (lowercase, a door no surface drew);

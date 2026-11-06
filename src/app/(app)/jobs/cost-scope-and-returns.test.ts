@@ -233,8 +233,8 @@ describe("C2: a return with no lines cannot be put on a job by any door", () => 
   // ITEM C1-5: THE CHANGE IS HELD TO THE RULE, NOT THE RESTING STATE. Asked of the resting state, the
   // guard refused EVERY save on a lineless credit already sitting on a job — the rows the code before
   // item C2 was free to create. The job's Costs tab Edit Bill box always sends `amount` and now
-  // `scope_category` too, so marking one Settled At The Counter, or fixing its date, or setting its
-  // Part Of The Job came back refused, with a next step ("leave it as a business cost") that needs a
+  // `scope_category` too, so marking one Settled at the Counter, or fixing its date, or setting its
+  // Part of the Job came back refused, with a next step ("leave it as a business cost") that needs a
   // Job field that box has not got.
   describe("a lineless credit ALREADY on a job (item C1-5)", () => {
     const LEGACY = { job_id: "job-1", amount: -51.58 };
@@ -257,7 +257,7 @@ describe("C2: a return with no lines cannot be put on a job by any door", () => 
       expect(wroteTo("bills", "update")!.payload.status).toBe("paid");
     });
 
-    it("and its Part Of The Job can still be set, which is the row the budget needs", async () => {
+    it("and its Part of the Job can still be set, which is the row the budget needs", async () => {
       state.scopes = ["Framing", "Decking"];
       state.stored = { ...LEGACY };
       state.storedLines = [];
@@ -291,7 +291,7 @@ describe("C2: a return with no lines cannot be put on a job by any door", () => 
       expect(res.ok).toBe(false);
       // "Leave it as a business cost" is a Job field, and the Costs tab's Edit Bill box has none.
       expect(res.error).not.toMatch(/leave it as a business cost/i);
-      expect(res.error).toMatch(/Open The Bill/);
+      expect(res.error).toMatch(/Open the Bill/);
       expect(res.error).toMatch(/Business Cost \(No Job\)/);
     });
 

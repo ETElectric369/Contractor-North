@@ -302,7 +302,7 @@ export function SiteFooter({ chrome, extInPlace = false }: { chrome: SiteChrome;
           {ig && <a href={`https://www.instagram.com/${ig}`} className="flex items-center gap-2 hover:text-white"><Instagram className="h-4 w-4" style={{ color: brand }} /> @{ig}</a>}
           {gbpUrl && (
             <a href={reviewUrl} {...ext} className="flex items-center gap-2 hover:text-white">
-              <Star className="h-4 w-4" style={{ color: brand }} /> Review Us On Google
+              <Star className="h-4 w-4" style={{ color: brand }} /> Review Us on Google
             </a>
           )}
           <Link

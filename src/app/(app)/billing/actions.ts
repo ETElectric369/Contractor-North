@@ -607,7 +607,7 @@ export async function textInvoice(
   if (!invoice) return { ok: false, error: "Invoice not found." };
   const { data: org } = await supabase.from("organizations").select("id, name, settings").maybeSingle();
   // TEXTING NOT SET UP (lib/sms-readiness): said where he tapped, before the invoice is stamped
-  // sent or anything is promised. The receipt row reads `notReady` and opens Text From This Phone.
+  // sent or anything is promised. The receipt row reads `notReady` and opens Text from This Phone.
   if (!smsReadiness(org).ready) return { ok: false, notReady: true, error: TEXT_NOT_READY_REFUSAL };
   // THE PLAN HAS ENDED (cn-v1137, decision 3): a lapsed company sends no texts. Said where he
   // tapped, in his role (the owner is told the door, everyone else the owner); nothing is sent.
@@ -716,7 +716,7 @@ export type ImportStats = {
   skipped_claimed: number;
   /** The invoice numbers holding those claims, oldest first — e.g. ["INV-061"]. */
   claimed_on: string[];
-  /** Materials only: takes from stock (Took From Stock) newly on the invoice this run, one line
+  /** Materials only: takes from stock (Took from Stock) newly on the invoice this run, one line
    *  each. Counted apart from `pulled_in`, whose noun is "bills". */
   stock_pulled_in?: number;
   /** The sentence, ready to show: "5 time entries pulled in · 9 already on INV-061 skipped". */
@@ -941,7 +941,7 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
       ok: false,
       id: ex.id,
       error: isDrawKind(ex.invoice_kind)
-        ? `This estimate is billed in parts - ${label} came from it. Bill the next part with the job's New Invoice → Part Of The Estimate.`
+        ? `This estimate is billed in parts - ${label} came from it. Bill the next part with the job's New Invoice → Part of the Estimate.`
         : `This estimate is already billed on ${label}. Open it from Billing, or bill anything extra as a change order.`,
     };
   }
@@ -1541,7 +1541,7 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Im
   // added (withClaimStats diffs it against the read-back after).
   const before = await landedSourceIds(supabase, invoiceId, "quote", rows);
   // The estimate lines already on this invoice, by id: only a line this tap ADDS is filed from the
-  // book, so a line the office handed back with "Read It From The Line" stays as they left it.
+  // book, so a line the office handed back with "Read It from the Line" stays as they left it.
   const standing = await estimateLineIds(supabase, ctx.orgId, invoiceId);
   const rep = await upsertImportedItems(supabase, invoiceId, "quote", rows);
   if (rep.error) return { ok: false, error: rep.error };
@@ -1578,7 +1578,7 @@ async function estimateLineIds(supabase: any, orgId: string | null, invoiceId: s
  * ADDED (not in `standing`, the ids read before the RPC) that starts with one of the org's codes
  * the kind its book item says (createInvoiceFromQuote does the same as it inserts). A line that was
  * already on the invoice is never touched: its kind is whatever it landed with or a person set,
- * and a null there may be the office's own "Read It From The Line", which a re-import must not
+ * and a null there may be the office's own "Read It from the Line", which a re-import must not
  * undo. No `standing` (the read failed) files nothing: the lines then read by their words.
  * Classification only - no words, amount or order - so a failure costs the import nothing; it is
  * reported, and the line reads by its words as before.
@@ -1646,7 +1646,7 @@ export async function setInvoiceItemKind(
     // A hand line only: an imported return or credit is what it is, and an importer may refresh
     // its figure. And the bill never goes below $0.
     if (line.import_source || !canBeDiscount(line.line_total)) {
-      return { ok: false, error: "Only a hand-typed line that takes money off can be a discount — add one with Add A Discount." };
+      return { ok: false, error: "Only a hand-typed line that takes money off can be a discount — add one with Add a Discount." };
     }
     const { data: all, error: allErr } = await supabase.from("invoice_items").select("line_total").eq("invoice_id", invoiceId);
     if (allErr) return { ok: false, error: dbError(allErr) };
@@ -3709,7 +3709,7 @@ export async function setInvoiceStatus(
   // hand, is the customer's first copy: the draft page promised "Due N days after you send it", so
   // the same guarded, best-effort second write as email / text / share moves an untouched due date
   // to today + the terms (a date picked by hand stays; a failure leaves the date and never fails
-  // this). A draft that already carries a sent_at went out before and came Back To Draft: its date
+  // this). A draft that already carries a sent_at went out before and came Back to Draft: its date
   // is the one the customer holds, so it stays. Before recalc, so the PDF reads the stamped row.
   if (status === "sent" && cur.status === "draft" && sentAtKnown && !cur.sent_at) await restampDueOnFirstSend(supabase, id);
   // A DRAFT never auto-advances on payment (cn-v549), so a draft that was fully prepaid

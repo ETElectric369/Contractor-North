@@ -20,19 +20,19 @@ import type { Answers } from "@/lib/playbook/types";
 import type { Profile } from "@/lib/types";
 
 /**
- * THE TOP BAR: Back · logo · Search Or Ask · Nort · + · Bell · Avatar — the same controls for every
+ * THE TOP BAR: Back · logo · Search or Ask · Nort · + · Bell · Avatar — the same controls for every
  * role and every company (W1-09), each a 44px target, with nothing scrolling sideways at 375px (the
  * company logo gives way first). Nort off, his button isn't drawn and the bar is one control shorter.
  *
  * SEARCH OR ASK is one door where there were two (the Search button and the graduation cap). It
- * opens the command bar (cn:command): search anything; with Nort on, Talk To Nort is its first row,
+ * opens the command bar (cn:command): search anything; with Nort on, Talk to Nort is its first row,
  * typing a question and pressing Enter asks him, and the setup rows (Start Here, Finish Setting Up,
- * Show Me How, Take The Setup Again) sit inside it for staff. With Nort off it reads Search, and the
+ * Show Me How, Take the Setup Again) sit inside it for staff. With Nort off it reads Search, and the
  * setup rows move under Help in the avatar menu.
  *
  * NORT'S BUTTON, ONE TAP (Erik, 2026-09-27: "theres not Nort button anymore"). He is an intercom,
  * used hands-busy in the truck — one tap or it isn't safe — so a menu row alone buried him. The
- * button runs talkToNort(), the very call Search Or Ask's Talk To Nort row makes, inside its own
+ * button runs talkToNort(), the very call Search or Ask's Talk to Nort row makes, inside its own
  * click so the mic starts inside the tap (iOS). While Nort listens, thinks or speaks it IS the red
  * Stop Nort, so the bar keeps exactly one voice control and one Stop.
  *
@@ -170,12 +170,12 @@ export function Topbar({
             <span data-x="setup-dot" className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-white" />
           )}
         </button>
-        {/* NORT, ONE TAP: Talk To Nort, or the red Stop Nort while he works. Nort off: not drawn. */}
+        {/* NORT, ONE TAP: Talk to Nort, or the red Stop Nort while he works. Nort off: not drawn. */}
         {nortOn &&
           (nortBusy ? (
             <button
               onClick={() => window.dispatchEvent(new Event("cn:assistant-stop"))}
-              // The same anchor as Talk To Nort: it is the same button, in its other state.
+              // The same anchor as Talk to Nort: it is the same button, in its other state.
               data-upright
               data-tour="nort"
               aria-label={t("sh_stopNort")}
@@ -186,7 +186,7 @@ export function Topbar({
             </button>
           ) : (
             <button
-              // SYNCHRONOUS, ON PURPOSE: talkToNort() (the same call as Search Or Ask's Talk To Nort
+              // SYNCHRONOUS, ON PURPOSE: talkToNort() (the same call as Search or Ask's Talk to Nort
               // row) dispatches cn:nort-talk, and GlobalAssistant's launch() starts the mic before
               // this click returns — inside the tap, as iOS needs. Never put an await in front of it.
               onClick={talkToNort}

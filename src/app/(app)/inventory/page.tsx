@@ -36,7 +36,7 @@ export const dynamic = "force-dynamic";
  *
  * OFFICE ONLY, ON THE SERVER (0302). requireStaff is the refusal, and the shelf's tables are
  * staff-only to read. A tech's view of the shelf is shelf_for_crew (names and counts, no cost),
- * which arrives with Took From Stock in Phase 3.
+ * which arrives with Took from Stock in Phase 3.
  *
  * EVERY FIGURE HERE IS THE LEDGER'S (0303). On hand is the rolls' pieces left, never typed; value
  * is every live roll's dollars left, to the cent, off its receipt. Count It writes the difference
@@ -142,7 +142,7 @@ export default async function ShopStockPage({
   const people = Array.from(new Set(moveList.map((m) => m.created_by).filter(Boolean).map(String)));
   // Which receipts an invoice the customer holds already bills (the receipt, or the order it
   // delivered): the same claim read the Bills page makes, scoped the same way, by job. On those the
-  // receipt card has no Put The Rest On The Shelf, so the Waiting card must not send anyone to it.
+  // receipt card has no Put the Rest on the Shelf, so the Waiting card must not send anyone to it.
   const [bills, profiles, claimRows] = await Promise.all([
     billIds.length
       ? supabase.from("bills").select("id, supplier, bill_date, job_id, on_shelf").eq("org_id", orgId).in("id", billIds)
@@ -284,7 +284,7 @@ export default async function ShopStockPage({
     (d: any) => !linked.has(String(d.id)) && companyUseWord(d.job_name_raw)?.shelf,
   );
   // WHERE EACH ONE STANDS ON /bills (audit v1018, class 14), read only when there is one to place:
-  // Record To Shelf is offered only where its fold holds the paper. A paper a bill covers by its
+  // Record to Shelf is offered only where its fold holds the paper. A paper a bill covers by its
   // number, or a credit memo took back, is not waiting for the shelf at all. A failed read says so.
   const homes = stockCandidates.length
     ? await readSupplierPaperHomes(supabase, orgId, todayStrInTz(orgTz)).catch((e: unknown) => {
@@ -397,7 +397,7 @@ export default async function ShopStockPage({
               ? "Everything with a reorder point set is above it."
               : q
                 ? "Try a different search."
-                : "Put the rest of a roll in stock from a job's receipt (Bills), file a STOCK ticket to Shop Stock from the tray, or Record To Stock on a supplier document. New Item is for something already in stock with no receipt here."
+                : "Put the rest of a roll in stock from a job's receipt (Bills), file a STOCK ticket to Shop Stock from the tray, or Record to Stock on a supplier document. New Item is for something already in stock with no receipt here."
           }
         >
           {(lowOnly || q) && (
@@ -418,7 +418,7 @@ export default async function ShopStockPage({
       )}
 
       <Card className="mt-6 p-4">
-        <h2 className="text-base font-semibold text-slate-900">Waiting To Go In Stock</h2>
+        <h2 className="text-base font-semibold text-slate-900">Waiting to Go in Stock</h2>
         <p className="mt-0.5 text-sm text-slate-500">
           Things that probably belong in stock. Nothing here moves on its own: each one names the button that would put it there, and you
           decide.

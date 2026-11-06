@@ -113,7 +113,7 @@ describe("the chip when the visits are not known", () => {
   });
 
   it("and it never claims a visit is still needed, which is the same guess the other way", () => {
-    expect(chip({ site_inspection_required: true }, VISITS_UNREAD).label).not.toContain("Needs A Visit");
+    expect(chip({ site_inspection_required: true }, VISITS_UNREAD).label).not.toContain("Needs a Visit");
   });
 
   it("a lead's bucket still leads the chip: the letter is the lead's own fact, not the visit read's", () => {
@@ -121,7 +121,7 @@ describe("the chip when the visits are not known", () => {
   });
 
   it("what the visits could not change still gets said: a lead that became something, said no, or is overdue", () => {
-    expect(chip({ converted_at: "2026-09-30T00:00:00Z", converted_to: "job" }, VISITS_UNREAD).label).toBe("Became A Job");
+    expect(chip({ converted_at: "2026-09-30T00:00:00Z", converted_to: "job" }, VISITS_UNREAD).label).toBe("Became a Job");
     expect(chip({ status: "lost" }, VISITS_UNREAD).label).toBe("Lost");
     expect(chip({ next_follow_up_at: "2026-09-20" }, VISITS_UNREAD).label).toBe("Call Back · Sep 20");
   });

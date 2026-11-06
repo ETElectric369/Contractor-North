@@ -22,7 +22,7 @@ import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
-// Look Up and Read With Nort are server actions on this page that call the model (a lookup is up
+// Look Up and Read with Nort are server actions on this page that call the model (a lookup is up
 // to three rounds with web searches, three names at a time). The page's own time, not the
 // platform's default, decides when they give up (audit v994, SI4), so a slow chunk is not cut off
 // before its lookups reach the ledger.
@@ -180,7 +180,7 @@ export default async function PriceListPage() {
           kind: vendorKindOf(c.kind) ?? null,
           trade: (c.trade as string | null) ?? null,
           is_person: Boolean(c.is_person),
-          // Look Up's provenance: THE PROJECTION LAW, or View On Map never sees the saved link.
+          // Look Up's provenance: THE PROJECTION LAW, or View on Map never sees the saved link.
           source_url: linkOf(c.source_url) ?? null,
           maps_url: linkOf(c.maps_url) ?? null,
           looked_up_at: (c.looked_up_at as string | null) ?? null,

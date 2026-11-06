@@ -313,7 +313,7 @@ export function PullToRefresh() {
             ) : (
               <>
                 <ArrowDown className={`h-4 w-4 transition-transform ${ready ? "rotate-180" : ""}`} />
-                {ready ? "Let Go To Refresh" : "Pull To Refresh"}
+                {ready ? "Let Go to Refresh" : "Pull to Refresh"}
               </>
             )}
           </p>

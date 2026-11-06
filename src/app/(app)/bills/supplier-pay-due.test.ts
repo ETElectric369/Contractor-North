@@ -81,12 +81,12 @@ const rowsOf = (docs = hisDocuments()) => supplierDocumentRows({ documents: docs
 const TONIGHT = "2026-09-26";
 
 describe("Pay CED By Oct 10: the line on his real documents", () => {
-  it("tonight: Pay CED $5,174.62 By Oct 10, Saves $35.50 on 7 invoices", () => {
+  it("tonight: Pay CED $5,174.62 by Oct 10, Saves $35.50 on 7 invoices", () => {
     const due = supplierPayDue({ rows: rowsOf(), accounts: ACCOUNTS, today: TONIGHT });
     expect(due).toHaveLength(1);
     expect(due[0]).toMatchObject({ accountId: CED, supplier: "CED", owed: 5174.62, saves: 35.5, invoices: 7, sent: 0, payBy: "2026-10-10", daysLeft: 14 });
     const [item] = supplierPayActionItems(due);
-    expect(item.title).toBe("Pay CED $5,174.62 By Oct 10");
+    expect(item.title).toBe("Pay CED $5,174.62 by Oct 10");
     expect(item.subtitle).toBe("Saves $35.50 on 7 invoices");
     expect(item.when).toBe("2026-10-10");
     expect(item.href).toBe(`/bills?pay=${CED}`);
@@ -109,7 +109,7 @@ describe("Pay CED By Oct 10: the line on his real documents", () => {
     // THEIR figure (supplierSays): the discount is theirs, so the cheque is measured against their
     // own list, which stands beside our open bills on the card (0383).
     expect(due.owed).toBe(supplierBalance(account, TONIGHT).supplierSays!.gross);
-    // "Discount Still On The Table".
+    // "Discount Still on the Table".
     const claim = claimableDiscounts(rows, TONIGHT);
     expect(due.saves).toBe(claim.dueOnNext);
     expect(due.invoices).toBe(claim.rows.filter((r) => r.reading.by === claim.nextDeadline).length);
@@ -206,7 +206,7 @@ describe("Paying clears the line (keyed to the cheque, never to when a paper lan
     const [due] = dueWith([pay(1500, "2026-10-03")]);
     expect(due).toMatchObject({ owed: 5174.62, sent: 1500, saves: 35.5 });
     const [item] = supplierPayActionItems([due]);
-    expect(item.title).toBe("Pay CED $5,174.62 By Oct 10");
+    expect(item.title).toBe("Pay CED $5,174.62 by Oct 10");
     expect(item.subtitle).toBe("Saves $35.50 on 7 invoices · $1,500.00 already sent");
   });
 

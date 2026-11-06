@@ -6,12 +6,12 @@ import { BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
 
 /**
  * THE ANSWERS A PAPER CARD OPENS, SHARED (W1-31). A supplier's paper on Needs You and a receipt in
- * Snap Or Note's tray ask the same question the same way ("Put It On J-011", "Another Job", "Shop
+ * Snap or Note's tray ask the same question the same way ("Put It on J-011", "Another Job", "Shop
  * Stock", "Business Cost"), so the two pickers behind those buttons are one component each:
  *
- *   · Another Job (Pick A Job when there is no job guess): the Closest jobs first, then Every Job
+ *   · Another Job (Pick a Job when there is no job guess): the Closest jobs first, then Every Job
  *     still open, then the Completed Jobs in their own group (a late ticket for a finished job is
- *     still that job's cost), with its own Put It On J-0xx and Cancel. Nothing is ever selected
+ *     still that job's cost), with its own Put It on J-0xx and Cancel. Nothing is ever selected
  *     for anyone.
  *   · Business Cost: a grid of 44px bucket buttons, the company's own buckets from
  *     BUSINESS_COST_BUCKETS, never a hard-coded list.
@@ -57,7 +57,7 @@ export function JobPicker({
   onPut,
   onCancel,
   busy = false,
-  verb = "Put It On",
+  verb = "Put It on",
   refusal = null,
 }: {
   /** What the picker is asking, for a screen reader: "Which job was 8802-1106969 for?". */
@@ -70,7 +70,7 @@ export function JobPicker({
   onPut: (job: PickJob) => void;
   onCancel: () => void;
   busy?: boolean;
-  /** "Put It On" for a paper, "Put Photo On" for a job photo. */
+  /** "Put It on" for a paper, "Put Photo on" for a job photo. */
   verb?: string;
   /** The sentence that stops this paper going on any job (the gate the server asks): the button is
    *  shut and says why. */
@@ -85,7 +85,7 @@ export function JobPicker({
   return (
     <div className="mt-2 space-y-2">
       <Select aria-label={ariaLabel} value={value} onChange={(e) => onChange(e.target.value)} className="min-h-11">
-        <option value="">— Pick The Job —</option>
+        <option value="">— Pick the Job —</option>
         {first.length > 0 && (
           <optgroup label="Closest">
             {first.map((j) => (

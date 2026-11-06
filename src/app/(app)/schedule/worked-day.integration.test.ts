@@ -423,7 +423,7 @@ d("worked days booked after the fact, and the rail's Undo (Wave 2 lane 1)", () =
     expect(await undoPlaceVisit(v, placed.placedAt!)).toEqual({ ok: false, error: "It changed since, so nothing was undone." });
     expect(await visit()).toMatchObject({ starts_at: moved.starts_at, ends_at: moved.ends_at });
 
-    // Still where the place left it: back to Waiting For A Day (0368 allows a visit with no day).
+    // Still where the place left it: back to Waiting for a Day (0368 allows a visit with no day).
     await c.query("update public.appointments set starts_at = $2::timestamptz where id = $1", [v, placed.placedAt]);
     expect(await undoPlaceVisit(v, placed.placedAt!)).toEqual({ ok: true });
     expect(await visit()).toMatchObject({ starts_at: null, ends_at: null, status: "scheduled" });

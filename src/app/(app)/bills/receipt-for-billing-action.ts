@@ -4,7 +4,7 @@
  * ONE RECEIPT'S BILLING CARD, READ ON ITS OWN (Already Billed's shelf step, Pinyon Sage).
  *
  * The Bills page builds every job receipt's card in one breath (bills/page.tsx). Already Billed
- * asks "Did J-010 Use All Of It?" and, on No, shows the same card for the one receipt so the kept
+ * asks "Did J-010 Use All of It?" and, on No, shows the same card for the one receipt so the kept
  * GFCIs go on the shelf BEFORE the paid invoice claims it (0328 refuses the shelf after). Same
  * shape, same reads, one bill: its lines with what a person decided about each (0268 billable,
  * 0272 billed_amount, is_stock), the rolls on the shelf from those lines, and the invoice that

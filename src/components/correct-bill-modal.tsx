@@ -174,7 +174,7 @@ export function CorrectBillModal({
                   <Label htmlFor={`cb-what-${i}`}>{credit ? "Which Line Comes Back?" : "What Is It For?"}</Label>
                   {credit ? (
                     <Select id={`cb-what-${i}`} className="h-11" value={r.description} onChange={(e) => setRow(i, { description: e.target.value })}>
-                      <option value="">Pick A Line</option>
+                      <option value="">Pick a Line</option>
                       {pickable.map((l, k) => (
                         <option key={k} value={String(l.description ?? "").trim()}>
                           {String(l.description ?? "").trim()} · {formatCurrency(l.amount)}

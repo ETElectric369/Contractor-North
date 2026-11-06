@@ -118,13 +118,13 @@ describe("the rail and the sheets speak Spanish to a Spanish reader", () => {
     expect(t).not.toMatch(/waiting|No Address Yet|On Hold/);
   });
 
-  it("Add To Schedule: its title and doors, and the day said with its slot", () => {
+  it("Add to Schedule: its title and doors, and the day said with its slot", () => {
     const jobs = [{ id: "j1", name: "12 Thistlewood Ln", status: "in_progress", address: "12 Thistlewood Ln", assigned_to: [] }];
     const t = text(es(createElement(AddToScheduleSheet, { at: { day: "2026-11-05", minute: null }, jobs, team: [], workDay: WORK_DAY, onClose: () => {} })));
     for (const w of ["Agregar a la Agenda", "Trabajo", "Día", "Hora", "O una Cita", "En Curso"]) expect(t, w).toContain(w);
     expect(t).toMatch(/Nueva Cita el jue, 5 de nov/);
     expect(t).toMatch(/jue, 5 de nov\. El trabajo conserva sus otros días\./);
-    expect(t).not.toMatch(/Add To Schedule|Or An Appointment|keeps every other day/);
+    expect(t).not.toMatch(/Add to Schedule|Or an Appointment|keeps every other day/);
   });
 
   it("New Job: its door, and the customer picker's", () => {
@@ -155,10 +155,10 @@ describe("the rail and the sheets speak Spanish to a Spanish reader", () => {
   it("the come-back picker: the chips, and the day it comes back said with its slot", () => {
     const t = text(es(createElement(ComeBackPicker, { label: "Pausar", requireWhy: true, todayStr: "2026-11-05", onSubmit: () => {}, onCancel: () => {} })));
     for (const w of ["Mañana", "Lun", "En una Semana", "Elegir un Día", "Pausar", "Cancelar"]) expect(t, w).toContain(w);
-    // In A Week is picked: Thursday the 5th + 7.
+    // In a Week is picked: Thursday the 5th + 7.
     expect(t).toContain("Vuelve el 12 nov");
     expect(t).toContain("Di por qué: es el recordatorio cuando vuelva el trabajo");
-    expect(t).not.toMatch(/Comes back|Pick A Day|Tomorrow/);
+    expect(t).not.toMatch(/Comes back|Pick a Day|Tomorrow/);
   });
 
   it("Kind? · How long?: the kinds and the lengths in Spanish", () => {

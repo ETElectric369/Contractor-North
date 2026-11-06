@@ -122,7 +122,7 @@ export async function saveVendorField(input: {
   if (!cardsReady) return { ok: false, error: CARDS_NOT_READY };
   const previous = card ? ((card[input.field] as string | null) ?? null) : null;
   // A saved map link belongs to the address it was found with. An address typed by hand drops it,
-  // so View On Map searches the new address instead of opening the old place. (Only when the card
+  // so View on Map searches the new address instead of opening the old place. (Only when the card
   // has one, which means 0341 is on this database.)
   const staleMap = input.field === "address" && !!card?.maps_url && value !== previous;
   if (card) {

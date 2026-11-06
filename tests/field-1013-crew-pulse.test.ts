@@ -73,7 +73,7 @@ describe("the Now card draws it", () => {
   const card = (crewProp: ReturnType<typeof crewForCard>) =>
     renderToStaticMarkup(createElement(NowCard, { open: null, job: null, userId: "me", crew: crewProp }));
   it("a tech's card (crew undefined) has no block", () => {
-    expect(card(undefined)).not.toContain("On The Clock");
+    expect(card(undefined)).not.toContain("On the Clock");
   });
   it("a failed read is said, never a silent nobody", () => {
     const html = card(null);
@@ -82,7 +82,7 @@ describe("the Now card draws it", () => {
   });
   it("rows are 44px links to the entry on Timecards, the job by name, since when", () => {
     const html = card(crewPulse(crew, "me", TZ, TODAY));
-    expect(html).toContain("On The Clock");
+    expect(html).toContain("On the Clock");
     expect(html).toContain("3 of 4");
     expect(html).toContain('href="/timecards?week=0&amp;entry=e-c"');
     expect(html).toMatch(/<a[^>]*class="flex min-h-11 items-center/);
@@ -143,7 +143,7 @@ describe("the Time Clock draws it (the block takes what the page read; staff onl
   });
   it("Title Case heading, the count of everyone, one 44px row per person on the clock — the job by name, since when, Clock Out <Name> into that entry's sheet on Timecards", () => {
     const html = block();
-    expect(html).toContain("Who’s On The Clock");
+    expect(html).toContain("Who’s on the Clock");
     expect(html).toContain("3 of 4");
     expect(html).toContain('href="/timecards?week=0&amp;entry=e-b"');
     // clockDoorWords: the first name for a teammate ("Clock Out Crew" for Crew B and Crew C), none for yourself.

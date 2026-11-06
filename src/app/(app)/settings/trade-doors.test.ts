@@ -157,7 +157,7 @@ describe("setOrgTrade", () => {
     expect(res.offers?.key).toBe("deck");
     expect(res.offers?.menu).toBe("Deck / Carpentry");
     expect(res.offers?.codes).toEqual(TRADE_PACKAGES.deck.codes); // a company with no codes is offered them all
-    expect(res.offers?.switches.map((s) => s.words)).toEqual(["Kits & Sizing By Sq Ft on", "Contracts & Lien Rights on"]);
+    expect(res.offers?.switches.map((s) => s.words)).toEqual(["Kits & Sizing by Sq Ft on", "Contracts & Lien Rights on"]);
     expect(res.offers?.hasSheet).toBe(false);
     expect(res.clearedWords).toBeNull();
     expect(res.offersError).toBeUndefined();
@@ -328,7 +328,7 @@ describe("the three doors", () => {
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.moved.map((s) => s.key)).toEqual(["kits", "contracts"]);
-    expect(res.words).toBe("Kits & Sizing By Sq Ft on, Contracts & Lien Rights on.");
+    expect(res.words).toBe("Kits & Sizing by Sq Ft on, Contracts & Lien Rights on.");
 
     // Already on the preset: nothing is sent, and that is said.
     state.rpcCalls = [];
@@ -342,7 +342,7 @@ describe("the three doors", () => {
     const res = await applyTradeSwitches("deck");
     expect(res.ok).toBe(false);
     if (res.ok) return;
-    expect(res.error).toBe("Contracts & Lien Rights on didn't land: Only the owner can turn features on or off. Kits & Sizing By Sq Ft on.");
+    expect(res.error).toBe("Contracts & Lien Rights on didn't land: Only the owner can turn features on or off. Kits & Sizing by Sq Ft on.");
     expect(res.moved.map((s) => s.key)).toEqual(["kits"]);
   });
 

@@ -10,7 +10,7 @@ import { renderToStaticMarkup } from "react-dom/server";
  * A split family is "the FIRST entry, and every piece whose split_from points at it" (0288). That column
  * is `on delete set null`, so deleting the first entry nulls every survivor's pointer at once: the pieces
  * still touch to the second, but splitFamilies finds no family, splitNeighbors finds no neighbours,
- * Timecards draws neither Move The Split nor Join Back Into One Shift, and join_time_entries refuses them
+ * Timecards draws neither Move the Split nor Join Back into One Shift, and join_time_entries refuses them
  * outright (0320). Nothing said so, and a delete has no Undo.
  *
  * Two fixes, pinned here: deleteTimeEntry re-roots the survivors on the earliest of them, and the door
@@ -238,7 +238,7 @@ describe("what the delete door says", () => {
     expect(said).toContain("Delete this part of the split shift?");
     expect(said).toContain("The 2.32 h on J-013 · 56 Timber Trail go with it");
     expect(said).toContain("this can't be undone");
-    expect(said).toContain("Join Back Into One Shift");
+    expect(said).toContain("Join Back into One Shift");
   });
 
   it("and it names the job the joined shift would keep — the FIRST part's, which may be this one", () => {
@@ -261,7 +261,7 @@ describe("what the delete door says", () => {
    * THE DEFECT: the words named a door the screen was not showing (review, 2026-10-03). A RUNNING piece
    * — which is every second piece a Switch Job leaves behind — opens the clock-out sheet, and that sheet
    * has Delete and no Join Back at all; join_time_entries refuses a running shift outright ("Clock out
-   * first", 0322). So "cancel and tap Join Back Into One Shift" sent the office to cancel and hunt for
+   * first", 0322). So "cancel and tap Join Back into One Shift" sent the office to cancel and hunt for
    * a button that was not there, on a delete with no Undo. The way back is real and it is on that very
    * sheet: clock out, then join.
    */
@@ -269,7 +269,7 @@ describe("what the delete door says", () => {
     const said = deleteConfirmWords({ hours: null, label: "J-011 Honeysuckle", keepsJob: "J-013 ARR 56", running: true });
     expect(said).toContain("Delete this part of the split shift?");
     expect(said).toContain("Its time on J-011 Honeysuckle goes with it");
-    expect(said).not.toContain("cancel and tap Join Back Into One Shift");
+    expect(said).not.toContain("cancel and tap Join Back into One Shift");
     expect(said).toContain("cancel and clock this shift out first");
     // The way back still names the job the joined day would keep, which is the fact that bites.
     expect(said).toContain("all of it on J-013 ARR 56");
@@ -277,7 +277,7 @@ describe("what the delete door says", () => {
 
   it("a CLOSED piece still names the button, because that is the one its sheet draws", () => {
     const said = deleteConfirmWords({ hours: 2.5, label: "J-011 Honeysuckle", keepsJob: "J-013 ARR 56", running: false });
-    expect(said).toContain("cancel and tap Join Back Into One Shift");
+    expect(said).toContain("cancel and tap Join Back into One Shift");
     expect(said).not.toContain("clock this shift out first");
   });
 
@@ -296,8 +296,8 @@ describe("what the delete door says", () => {
  *
  * splitNeighbors only asks that `next` STARTS where this piece ends, so the `next` of a closed first
  * piece is the RUNNING clock a Switch Job opened. Timecards packed its clock_out with String(null) —
- * the string "null", which is truthy — so the editor drew Join Back Into One Shift on a boundary
- * join_time_entries can only refuse (0322), and Move The Split on a piece with no end to slide to.
+ * the string "null", which is truthy — so the editor drew Join Back into One Shift on a boundary
+ * join_time_entries can only refuse (0322), and Move the Split on a piece with no end to slide to.
  */
 describe("the split tools are only drawn where they can work", () => {
   const prev = {
@@ -344,8 +344,8 @@ describe("the split tools are only drawn where they can work", () => {
 
   it("THE DEFECT: the next piece is the running clock, so neither door is drawn on that boundary", () => {
     const html = renderEditor({ prev: null, next: { ...prev, id: C, clock_in: "2026-09-22T20:00:00Z", clock_out: null, label: "J-012 Larkspur" } });
-    expect(html).not.toContain("Join Back Into One Shift");
-    expect(html).not.toContain("Move The Split");
+    expect(html).not.toContain("Join Back into One Shift");
+    expect(html).not.toContain("Move the Split");
     expect(html).not.toContain("Split from the part after");
     // The shift itself still opens and can still be split: nothing else was taken away.
     expect(html).toContain("Split This Shift");
@@ -356,7 +356,7 @@ describe("the split tools are only drawn where they can work", () => {
     const html = renderEditor({ prev, next: after });
     expect(html).toContain("Split from the part before");
     expect(html).toContain("Split from the part after");
-    expect(html.split("Join Back Into One Shift").length - 1).toBe(2);
+    expect(html.split("Join Back into One Shift").length - 1).toBe(2);
   });
 
   it("and Timecards stops telling the editor a running neighbour is closed", () => {

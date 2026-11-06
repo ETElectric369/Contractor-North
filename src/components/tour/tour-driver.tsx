@@ -57,7 +57,7 @@ export function TourDriver({
    *  at step 3 of a different list. */
   storageKey?: string;
   /** The Nort switch (0352, rule k). Off, a lesson reads its neutral words (TourStep.plain): no
-   *  "I", no Nort, and no first card pointing at Search Or Ask as his home (it reads "Search" and
+   *  "I", no Nort, and no first card pointing at Search or Ask as his home (it reads "Search" and
    *  holds no Nort rows then). The setup tour itself never runs with Nort off (SetupHost opens the
    *  questions instead). */
   nortOn?: boolean;
@@ -348,7 +348,7 @@ export function TourDriver({
             if (asksAnything) void dictation.start(); // same tap — iOS refuses a mic opened any later
           }}
         >
-          {asksAnything ? (<><Mic className="h-4 w-4" /> Start — Press And Talk</>) : (<>Start</>)}
+          {asksAnything ? (<><Mic className="h-4 w-4" /> Start — Press and Talk</>) : (<>Start</>)}
         </Button>
         {asksAnything && (
           <button
@@ -492,8 +492,8 @@ export function TourDriver({
               speakSmart(line);
             }
           }}
-          aria-label={nortOn ? (muted ? "Let Nort speak" : "Mute Nort") : muted ? "Turn The Sound On" : "Mute"}
-          title={nortOn ? (muted ? "Let Nort speak" : "Mute Nort") : muted ? "Turn The Sound On" : "Mute"}
+          aria-label={nortOn ? (muted ? "Let Nort speak" : "Mute Nort") : muted ? "Turn the Sound On" : "Mute"}
+          title={nortOn ? (muted ? "Let Nort speak" : "Mute Nort") : muted ? "Turn the Sound On" : "Mute"}
           className="rounded-md p-2 text-slate-400 hover:bg-slate-100"
         >
           {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}

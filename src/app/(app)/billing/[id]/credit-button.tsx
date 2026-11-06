@@ -46,7 +46,7 @@ export function CreditButton({
    * WHAT THIS INVOICE CAN STILL TAKE — the number applyCustomerCredit checks against.
    *
    * It has been in the response all along (`balance: invoiceBalance(inv.total, inv.amount_paid)`)
-   * and this window threw it away, which is why "Apply To This Invoice" was offered on invoices
+   * and this window threw it away, which is why "Apply to This Invoice" was offered on invoices
    * with nothing left to cover and for credits far bigger than the shortfall. Reading the
    * server's own figure keeps the gate and the rule on the same number; computing a balance here
    * would be inventing one.
@@ -229,7 +229,7 @@ export function CreditButton({
                         onClick={() => act(() => applyCustomerCredit(c.id, invoiceId))}
                         className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                       >
-                        Apply To This Invoice
+                        Apply to This Invoice
                       </button>
                     )}
                     {/* A credit that should never have existed (posted to stand in for a discount)

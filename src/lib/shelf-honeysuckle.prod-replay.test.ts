@@ -6,7 +6,7 @@ import { planShelving, shelfCountGuess } from "./shelf-plan";
 import { jobMaterialCostFrom } from "./job-cost";
 
 /**
- * THE HONEYSUCKLE 8/19 REPLAY (Shop Stock, Phase 2): exactly what Put The Rest On The Shelf would do
+ * THE HONEYSUCKLE 8/19 REPLAY (Shop Stock, Phase 2): exactly what Put the Rest on the Shelf would do
  * to ET's live 8/19 CED ticket (bill 11e96fc3) - WITHOUT WRITING. It reads the ticket, the job and
  * the draft that bills it inside a READ ONLY transaction, runs the same pure plan shelveLines runs
  * (planShelving), and prints the payload shelve_bill_lines would receive and every figure that
@@ -24,7 +24,7 @@ const d = REPLAY_DBPW && REPLAY_DB_HOST && REPLAY_DB_USER && SHELF_REPLAY === "1
 const ET = "60195593-2e18-4230-bc8e-7a32d36d038d";
 const BILL = "11e96fc3-5bdf-421f-9fa8-e8763427bf93";
 
-d("Honeysuckle 8/19: Put The Rest On The Shelf, replayed read-only against ET's live books", () => {
+d("Honeysuckle 8/19: Put the Rest on the Shelf, replayed read-only against ET's live books", () => {
   it("would bill Honeysuckle $0 of the coil, put 250 ft on the shelf at $180.17, and take $180.17 off the job - writing nothing", async () => {
     const c = new pg.Client({ host: REPLAY_DB_HOST, port: 5432, user: REPLAY_DB_USER, password: REPLAY_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await c.connect();

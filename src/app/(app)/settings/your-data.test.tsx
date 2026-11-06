@@ -87,7 +87,7 @@ describe("the owner", () => {
     expect(doors.filter((d) => d === "Download Everything")).toHaveLength(1);
     expect(doors.filter((d) => d === "Company Files")).toHaveLength(1);
     expect(doors.filter((d) => d === "Download")).toHaveLength(2);
-    expect(text).toContain("Files By Job");
+    expect(text).toContain("Files by Job");
     // Newest first: J-052 (Oct 20) before J-047 (Oct 1); the job with no files is not a row.
     const at = (s: string) => text.indexOf(s);
     expect(at("9 Thistlewood Court · J-052 — Catbird Rentals")).toBeGreaterThan(-1);
@@ -160,7 +160,7 @@ describe("not the owner", () => {
     const { text, doors } = await render(false);
     expect(text).toContain("Ask Larkspur to download the company's data.");
     expect(doors.filter((d) => /Download|Company Files|Show More/.test(d))).toHaveLength(0);
-    expect(text).not.toContain("Files By Job");
+    expect(text).not.toContain("Files by Job");
     expect(text).not.toContain("No job has files yet.");
   });
 
@@ -178,7 +178,7 @@ describe("not the owner", () => {
     vi.mocked(requireOwnerExport).mockResolvedValueOnce({ ok: true, orgId: "org-2", profileId: "u-other" });
     const other = await render(true);
     expect(other.text).toContain("Ask Larkspur to download the company's data.");
-    expect(other.text).not.toContain("Files By Job");
+    expect(other.text).not.toContain("Files by Job");
   });
 });
 

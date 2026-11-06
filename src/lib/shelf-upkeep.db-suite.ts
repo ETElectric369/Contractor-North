@@ -201,7 +201,7 @@ export function defineShelfUpkeepSuite(connect: () => Promise<SqlClient>) {
     if (!needs()) return;
     await tx(async () => {
       const s = await shelved();
-      // A job-less credit the return itself files to the shelf, as Return To CED does, and says so.
+      // A job-less credit the return itself files to the shelf, as Return to CED does, and says so.
       const credit = await shelfCredit(-30, false);
       await as(staffId);
       await c.query("update public.bills set on_shelf = true where id = $1 and job_id is null", [credit]);

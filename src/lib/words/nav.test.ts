@@ -104,7 +104,7 @@ describe("the nav catalog", () => {
     // The schedule's two headings.
     expect(carries(src("schedule/crew-board.tsx"), "Everyone&apos;s Day", "nv_sched_everyonesDay")).toBe(true);
     expect(nav.en.nv_sched_everyonesDay).toBe("Everyone's Day");
-    expect(carries(src("schedule/page.tsx"), "Waiting For A Day", "nv_sched_waitingForADay")).toBe(true);
+    expect(carries(src("schedule/page.tsx"), "Waiting for a Day", "nv_sched_waitingForADay")).toBe(true);
     // The Calendar back-link beside both headings.
     expect(nav.en.nv_sched_calendar).toBe("Calendar");
     expect(nav.es.nv_sched_calendar).toBe("Calendario");

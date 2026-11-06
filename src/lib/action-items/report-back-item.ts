@@ -20,7 +20,7 @@ export function reportBackActionItem(
   return {
     id: `reportback-${job.id}`,
     kind: "job_report_back",
-    title: first ? `Tell ${first} Where It Stands` : "Tell The Customer Where It Stands",
+    title: first ? `Tell ${first} Where It Stands` : "Tell the Customer Where It Stands",
     subtitle: `${jobWords(job)} · ${standing.sentence}`,
     who: null,
     when: standing.lastWorked,

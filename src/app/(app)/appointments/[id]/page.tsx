@@ -105,14 +105,14 @@ export default async function AppointmentCapturePage({
         // answers that the booking doors paste into `notes`, and the only way this page can tell
         // "the office wrote this note" from "this paragraph IS the intake summary, shown properly
         // below" is to have the original to compare against.
-        // jobs(...) is the linked job the top card names ("Clock In On J-055"), and its status is
+        // jobs(...) is the linked job the top card names ("Clock In on J-055"), and its status is
         // whether a visit that is over still offers a clock on it (a finished job does not); the lead's
-        // customer_id is who "Link To J-055 Instead" looks for when the visit has no customer.
+        // customer_id is who "Link to J-055 Instead" looks for when the visit has no customer.
         "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, unit, city, state, zip, notes, customer_id, inquiry_id, capture, outcome, outcome_at, customers(name, company_name, type), inquiries(name, company_name, type, phone, message, intake, customer_id), jobs(id, job_number, name, status)",
       )
       .eq("id", id)
       .maybeSingle(),
-    // phone: the crew's "Call The Office" door on a visit with no job yet.
+    // phone: the crew's "Call the Office" door on a visit with no job yet.
     supabase.from("organizations").select("settings, phone, stripe_account_id, stripe_account_status, stripe_charges_enabled").limit(1).maybeSingle(),
     // Jobs/customers/staff option lists for the Edit-details modal (the same
     // SSOT helper the schedule's picker uses).
@@ -164,7 +164,7 @@ export default async function AppointmentCapturePage({
       from.select("schema, playbook").eq("is_public_intake", true).limit(1).maybeSingle(),
     ),
     // WHO IS LOOKING, and whether they are on the clock: the top card's four faces (start / ask the
-    // office / clock in / you're on the clock here) and its Switch To This Job depend on both.
+    // office / clock in / you're on the clock here) and its Switch to This Job depend on both.
     // crew_lead: whether they fill in the inspection on a visit they are on (0356).
     supabase.from("profiles").select("role, crew_lead").eq("id", viewerId ?? "").maybeSingle(),
     supabase
@@ -237,7 +237,7 @@ export default async function AppointmentCapturePage({
 
   /* WHAT THE VISIT BECAME (cn-v1069). The estimate written up from it is linked INSIDE the capture
      (capture.quote_id, saveQuote's backlink); this page never read it, so a visit whose estimate was
-     sent, declined or turned into a job still offered Start The Estimate as if nothing had happened.
+     sent, declined or turned into a job still offered Start the Estimate as if nothing had happened.
      One read, RLS-scoped; a quote that can't be read is simply not there. */
   const behindQuoteId = captureQuoteId(a.capture);
   const quoteBehind = behindQuoteId
@@ -448,7 +448,7 @@ export default async function AppointmentCapturePage({
               live one — which is half of why "can't cancel inspection" reads as broken. */}
           {a.status === "cancelled" && <Badge tone="slate">{t("vp_cancelledBadge")}</Badge>}
           {/* AT MOST ONE MAIN BUTTON, THEN ⋯ (W2-11). The row used to carry up to seven controls
-              (Get Paid, a small "mark complete", Delete, a bare ✓ and ✗, Clear The Date, Edit
+              (Get Paid, a small "mark complete", Delete, a bare ✓ and ✗, Clear the Date, Edit
               Details). THE OFFICE'S VERBS all save through requireStaff, and Get Paid puts money
               in front of a tech: a tech gets the badges and the page, not the doors (Wave 0). */}
           {/* THE MONEY DOOR — a work visit that is still on. Not on an inspection: Erik, "i dont
@@ -467,7 +467,7 @@ export default async function AppointmentCapturePage({
             />
           )}
           {/* A booked inspection's main button: done, so the Inspections tab moves it to
-              To write up. A completed inspection has none: the Inspector's Start The Estimate
+              To write up. A completed inspection has none: the Inspector's Start the Estimate
               is its next step. A cancelled visit has none either. */}
           {viewerIsStaff && isInspection && booked && (
             <MarkCompleteButton id={a.id} label={t("vp_btn_markInspectionDone")} />
@@ -540,7 +540,7 @@ export default async function AppointmentCapturePage({
                   : null
               }
               preview={{
-                // The same one namer the Start The Job door uses (lib/job-name): the street number
+                // The same one namer the Start the Job door uses (lib/job-name): the street number
                 // and name ("12 Elm St #56" with a unit), else "Rita Moss · <the visit's words>",
                 // never its "Site inspection:" tag.
                 name: previewJobName,
@@ -609,7 +609,7 @@ export default async function AppointmentCapturePage({
       {/* The inspection and the estimate, for the visits that need them. Under their own heading
           so the page reads: start the work (above), or walk it through and price it (here).
           THE SWITCH BOARD (0352): the inspection is Leads', so with Leads off it shows only on a
-          visit that already holds one (under the Off line); Estimates off drops Start The Estimate. */}
+          visit that already holds one (under the Off line); Estimates off drops Start the Estimate. */}
       {showInspector && (
         <>
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{viewerIsStaff && estimatesOn ? t("vp_inspectionOrEstimate") : t("vp_inspection")}</h2>
@@ -672,8 +672,8 @@ export default async function AppointmentCapturePage({
             }
             // Pricing is the office's: nobody else is handed the door to the estimator.
             estimateHref={viewerIsStaff && estimatesOn ? `/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}` : null}
-            // The estimate already written up from this visit: its door reads Open The Estimate while
-            // it stands; a declined or expired one hands Start The Estimate back (cn-v1069).
+            // The estimate already written up from this visit: its door reads Open the Estimate while
+            // it stands; a declined or expired one hands Start the Estimate back (cn-v1069).
             estimate={estimate}
             nortOn={featureOn(orgSettings.features, "nort")}
             buildOwn={featureOn(orgSettings.features, "safety_log")}

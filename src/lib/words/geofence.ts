@@ -50,7 +50,7 @@ export const words: WordCatalog = {
     gf_back: "Back",
     gf_stillWorking: "Still Working",
     gf_clockOutNow: "Clock Out Now",
-    gf_pickTheTime: "Pick The Time…",
+    gf_pickTheTime: "Pick the Time…",
   },
   es: {
     gf_theJobSite: "el sitio de trabajo",

@@ -46,7 +46,7 @@ export async function countTeammates(
 
 /**
  * Where a new request's bell entry and push land (rule d). Leads on: the lead list. Leads off:
- * My Day, where the request still arrives as a "New Request From …" card with Call Back (every
+ * My Day, where the request still arrives as a "New Request from …" card with Call Back (every
  * public request door keeps working with Leads off; only the list is out of the way).
  */
 export function requestHref(features: FeatureMap | null | undefined): "/leads" | "/planner" {

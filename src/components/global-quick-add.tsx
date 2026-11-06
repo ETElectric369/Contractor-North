@@ -12,7 +12,7 @@ import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
 /**
  * THE + (W1-11: eight rows to six). It lives in the top bar on every page.
  *
- * The office: Snap Or Note first (the one paper door: a photo, a PDF, a list or a note), then the
+ * The office: Snap or Note first (the one paper door: a photo, a PDF, a list or a note), then the
  * typed creates, each landing on its create form, never a list to hunt through (a ?new=1 the page
  * reads to open its form, or a route that IS the form). A switch that is off removes only its own
  * row (the switch board, 0352).
@@ -21,7 +21,7 @@ import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
  * Customers keeps its own Add) and New Reminder (My Day's Add line, the Reminders page's own line
  * and Nort make Reminders). /crm?new=1 and /tasks?new=1 still open those forms from a link.
  *
- * The crew: the + IS Snap Or Note (a photo of a receipt for the job he's on, or a note for the
+ * The crew: the + IS Snap or Note (a photo of a receipt for the job he's on, or a note for the
  * office). He is never offered New Job, Appointment, Estimate, Invoice or Lead: those saves are the
  * office's (createJob is requireStaff; a tech's New Job failed on Save).
  *
@@ -53,7 +53,7 @@ export function quickAddActions(isStaff: boolean, features?: FeatureMap | null, 
   return ACTIONS.filter((a) => (isStaff || !a.staffOnly) && (!a.feature || featureOn(features, a.feature))).map((a) => ({ ...a, label: t(a.key) }));
 }
 
-/** What a tap on the + does: the office's menu, or (the crew) Snap Or Note itself. */
+/** What a tap on the + does: the office's menu, or (the crew) Snap or Note itself. */
 export function plusOpens(isStaff: boolean): "menu" | "snap-or-note" {
   return isStaff ? "menu" : "snap-or-note";
 }
@@ -73,7 +73,7 @@ export type QuickAddGo = { way: "soft" } | { way: "full" } | { way: "offline"; s
  *   · the last navigation failed (the shell's cn:navigation-failed, cleared as soon as a later
  *     navigation lands), or the same tap's soft navigation never landed: a FULL load, which really
  *     retries;
- *   · but never a full load while Snap Or Note is still sending files: its queue lives in this
+ *   · but never a full load while Snap or Note is still sending files: its queue lives in this
  *     page's memory and a reload would drop them without a word. That tap says so and waits;
  *   · otherwise the ordinary soft navigation.
  *
@@ -100,7 +100,7 @@ export function quickAddGo(
 const ROW =
   "relative z-10 flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15";
 
-/** The office's menu rows: Snap Or Note first, then the typed creates. */
+/** The office's menu rows: Snap or Note first, then the typed creates. */
 export function QuickAddMenu({
   isStaff,
   features,

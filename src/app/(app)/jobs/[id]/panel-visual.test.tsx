@@ -232,7 +232,7 @@ describe("the reads on the door", () => {
     expect(l.circuit).toBeNull();
     expect(model.dimmed.map((s) => s.id)).toEqual([wineCooler.id]);
     const html = draw(ALL);
-    expect(html).toMatch(/data-line="suggested"[^>]*><button[^>]*>.*Space 13, Suggested From The Panel Photo:.*Wine Cooler · 20<\/button><button[^>]*>Keep<\/button>/);
+    expect(html).toMatch(/data-line="suggested"[^>]*><button[^>]*>.*Space 13, Suggested From the Panel Photo:.*Wine Cooler · 20<\/button><button[^>]*>Keep<\/button>/);
     expect(html).toMatch(/data-line="suggested"[^>]*class="[^"]*opacity-80/);
   });
 

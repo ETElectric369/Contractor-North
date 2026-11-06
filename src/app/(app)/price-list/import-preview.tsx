@@ -135,7 +135,7 @@ export function ImportCsvModal({ open, onClose }: { open: boolean; onClose: () =
   }
 
   return (
-    <Modal open={open} onClose={() => { reset(); onClose(); }} title="Import Price List From CSV" size="xl">
+    <Modal open={open} onClose={() => { reset(); onClose(); }} title="Import Price List from CSV" size="xl">
       <div className="space-y-4">
         {msg && <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{msg}</div>}
         {headers.length === 0 ? (

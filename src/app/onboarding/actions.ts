@@ -19,7 +19,7 @@ export async function createOrganization(formData: FormData) {
   }
 
   // THE TRADE IS KEPT NOW (0352). It seeds the picked trade's WHOLE job-code list from the registry
-  // (lib/trade-package — the one list "Import A Trade's Codes" offers too, so nothing is left to
+  // (lib/trade-package — the one list "Import a Trade's Codes" offers too, so nothing is left to
   // import later), and it is saved as the company's trade key with its starting switches
   // (lib/features featurePreset). "Other / Not Listed" is a real answer: trade-neutral codes and the
   // light preset. No answer at all is not one: the select is required, and a form that arrives

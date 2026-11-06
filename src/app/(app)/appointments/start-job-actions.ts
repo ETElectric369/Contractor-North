@@ -9,7 +9,7 @@
  *   - the clock:    the Timeclock's clockIn, or its switchJob when the tapper is already on the clock
  *                   somewhere else, so every guard those two keep (one open clock, the long-shift
  *                   refusal, the tech clamp, the job promotion) holds here too;
- *   - the link:     linkAppointmentTo, the Edit Details door, for "Link To J-055 Instead";
+ *   - the link:     linkAppointmentTo, the Edit Details door, for "Link to J-055 Instead";
  *   - the ask:      ringOffice, for a tech on a visit with no job yet.
  *
  * The app suggests, a person decides: nothing links or starts itself, and every result says what
@@ -23,7 +23,7 @@
  * (lib/appointments/visit-start: startedAtProblem, startedWords, jobShort, clockWords) take the same
  * language and the caller's translator. A warning the Time Clock's own clockIn / switchJob sends back
  * is already in the caller's language (cs_) and rides through as received. The office's bell line
- * (Ask The Office) is one line for every office reader and stays as it was.
+ * (Ask the Office) is one line for every office reader and stays as it was.
  */
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -318,7 +318,7 @@ export async function startJobFromVisit(input: {
 }
 
 /**
- * "Link To J-055 Instead": the visit gets the job somebody already made for this customer today,
+ * "Link to J-055 Instead": the visit gets the job somebody already made for this customer today,
  * rather than a second one. Re-asks the same rule the page offered it from, so a stale page cannot
  * link a job the rule no longer names; Edit Details still links any job by hand.
  */

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * THE STOCK LIST IS READ EACH TIME THE SHEET OPENS. /bills' Add By Hand stays on the page between
+ * THE STOCK LIST IS READ EACH TIME THE SHEET OPENS. /bills' Add by Hand stays on the page between
  * openings (it sits in the header; closing the sheet only hides it, and router.refresh() keeps it).
  * When the list was read once for good, an item just made with New Item was missing from What Is
  * It? the next time, so the person typed it again and a spelling off by a dash made a second item

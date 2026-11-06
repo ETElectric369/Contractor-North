@@ -11,7 +11,7 @@ import { openListViews } from "@/app/(app)/bills/open-list-core";
  * ── THE STATEMENTS WAITING ON RECONCILE (2026-10-03) ──────────────────────────────────────────
  *
  * Erik: "so it still doesnt make sense to me that all this reconcile stuff is on the bills page." He
- * dropped a statement into Bring In A Statement and then walked to /bills to answer it. The rule that
+ * dropped a statement into Bring In a Statement and then walked to /bills to answer it. The rule that
  * decides which screen answers a paper is `answeredOnReconcile` (lib/paperwork.ts) and it is the only
  * filter here: a bank download and a supplier's open list compare two records, so they are answered
  * on this page; everything that becomes a cost stays on Bills with the jobs and the buckets.

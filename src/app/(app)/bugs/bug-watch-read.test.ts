@@ -105,7 +105,7 @@ describe("Bug Watch shows the failed read where the list would be", () => {
     expect(list).toContain("!readError && openCount > 0");
   });
 
-  it("the Report A Problem panel reads the rows out of the same shape, and a failed read never wipes a list that had loaded", () => {
+  it("the Report a Problem panel reads the rows out of the same shape, and a failed read never wipes a list that had loaded", () => {
     const reporter = src("src/components/bug-reporter.tsx");
     expect(reporter).not.toContain(".then(setReports)");
     // Both reads set the rows ONLY when the read came back clean (cn-v1130, skeptic #34): a failed

@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 /**
  * CALL BACK (the switch board, 0352). With Leads switched off a request still reaches Needs You as
- * "New Request From …", and the one thing to do about it is one tap: Call Back dials the number.
+ * "New Request from …", and the one thing to do about it is one tap: Call Back dials the number.
  * With Leads on the row's button is Called (the number is behind its ⋯).
  */
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), replace: vi.fn() }) }));
@@ -35,12 +35,12 @@ describe("ActionList — a request with Leads off", () => {
     expect(html).not.toContain("Call Back");
     expect(html).not.toContain("tel:");
     expect(html).toMatch(/<button[^>]*>Called<\/button>/);
-    expect(html).toContain('aria-label="More For Dana Reyes"');
+    expect(html).toContain('aria-label="More for Dana Reyes"');
   });
 
-  it("Leads off: 'New Request From Dana Reyes' with a 44px Call Back that dials her", () => {
+  it("Leads off: 'New Request from Dana Reyes' with a 44px Call Back that dials her", () => {
     const html = render(false);
-    expect(html).toContain("New Request From Dana Reyes");
+    expect(html).toContain("New Request from Dana Reyes");
     const a = html.match(/<a [^>]*href="tel:[^"]*"[^>]*>.*?<\/a>/)![0];
     expect(a).toContain('href="tel:(530) 555-0142"');
     expect(a).toContain("Call Back");
@@ -155,12 +155,12 @@ describe("ActionList — one named button per row, and ⋯ (W1-13)", () => {
         isStaff: true,
       }),
     );
-    for (const label of ["Get Paid", "Settle It", "Record It", "Pick A Day", "Snooze", "Take Off Hold"]) expect(html, label).toContain(`>${label}<`);
+    for (const label of ["Get Paid", "Settle It", "Record It", "Pick a Day", "Snooze", "Take Off Hold"]) expect(html, label).toContain(`>${label}<`);
     for (const gone of ['title="Dismiss"', 'aria-label="Mark done"', 'title="Open"', 'title="Assign to someone"', 'title="Schedule / set a date"']) expect(html, gone).not.toContain(gone);
     expect(html).not.toMatch(/Dismiss|Delete/);
     // A job needing a day has ⋯ (Assign, Finish, Cancel); an overdue invoice has nothing behind one.
-    expect(html).toContain('aria-label="More For job"');
-    expect(html).not.toContain('aria-label="More For inv"');
+    expect(html).toContain('aria-label="More for job"');
+    expect(html).not.toContain('aria-label="More for inv"');
   });
 
   it("every button is 44px: the row's (the Call Back pattern) and the ⋯; the row opens from one target the size of the row", () => {
@@ -213,7 +213,7 @@ describe("ActionList — piles (W1-14)", () => {
   it("when not every one is here, See All opens the list page instead", () => {
     const html = renderToStaticMarkup(createElement(ActionList, { items: pile({ estimates_not_sent: { capped: true } }), todayStr: "2026-09-26", isStaff: true }));
     expect(html).toContain("Estimates Not Sent · 3+");
-    expect(html).toMatch(/<a[^>]*href="\/quotes\?status=draft"[^>]*>See All On Estimates<\/a>/);
+    expect(html).toMatch(/<a[^>]*href="\/quotes\?status=draft"[^>]*>See All on Estimates<\/a>/);
   });
 
   it("a capped Done, Not Billed pile has no page that lists its rows: See All unfolds every row read here, never a link to /billing", () => {
@@ -239,7 +239,7 @@ describe("ActionList — piles (W1-14)", () => {
 describe("ActionList — a verb's refusal is always said, and the server's list decides what shows", () => {
   const list = () => readFileSync(join(process.cwd(), "src/components/action-items/action-list.tsx"), "utf8");
 
-  it("a sheet's verb (⋯, Snooze, Still Waiting, Set Aside Until…, Assign, a confirm, Pick A Day) waits for the server: its row and sheet stay to say a refusal", () => {
+  it("a sheet's verb (⋯, Snooze, Still Waiting, Set Aside Until…, Assign, a confirm, Pick a Day) waits for the server: its row and sheet stay to say a refusal", () => {
     for (const verb of ["snooze", "dismiss", "schedule", "do"] as const) {
       expect(verbLanding({ kind: "invoice_draft" }, verb, { sheet: true }).optimistic, verb).toBe(false);
     }

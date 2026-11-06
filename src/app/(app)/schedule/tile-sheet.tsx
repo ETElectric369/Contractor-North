@@ -38,10 +38,10 @@ import { translator, fillText } from "@/lib/i18n";
  * there should be a time adjustment inside the job itself with the crew picker". This replaces the
  * clear-and-reset: the day (a deliberate Move), the time (the same controls as the job page:
  * components/block-time-controls), the crew as initials chips (the job page's own crew logic,
- * useJobCrew, through setJobCrew), and the two ways out: Open The Job and Clear The Date.
+ * useJobCrew, through setJobCrew), and the two ways out: Open the Job and Clear the Date.
  *
  * A VISIT gets the same sheet: its day, its time and the one person going (a visit carries one,
- * appointments.assigned_to), with Open The Visit and Clear The Date.
+ * appointments.assigned_to), with Open the Visit and Clear the Date.
  *
  * STAFF ONLY. The schedule is the office's (a tech never reaches /schedule); `canEdit` false still
  * reads everything out with nothing to tap, and every writer behind it asks requireStaff. No price
@@ -283,7 +283,7 @@ function DayRow({
   );
 }
 
-/** The two-tap Clear The Date: the first tap asks, in words, what it will do. */
+/** The two-tap Clear the Date: the first tap asks, in words, what it will do. */
 function ClearTheDate({
   what,
   clear,

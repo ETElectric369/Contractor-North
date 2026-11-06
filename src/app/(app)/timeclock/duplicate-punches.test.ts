@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * Erik: "yes remove the duplicates and track down the problem causing that please". The same work
  * landed twice: a clock punch with no job, then the office typed the day again on the job. So:
  *   - a refused Add Entry hands back the shift in the way (a no-job punch is named as one);
- *   - Put This On <job> moves only the job of a shift that has none, and says what it did;
+ *   - Put This on <job> moves only the job of a shift that has none, and says what it did;
  *   - Company Time files a no-job shift under the company's own code, with an Undo;
  *   - shiftsOnDay lists what the person already has on the day, billed or not;
  *   - a clock-in never starts over hours already recorded: a tech's round-back stops at his own
@@ -166,7 +166,7 @@ describe("Add Entry over a punch that has no job", () => {
     expect(r.error).toBe(
       "Brian Taylor has been clocked in since Friday Sep 11, 10:31 AM with no job on the clock, so these hours would be counted twice. Clock Brian out at the time they stopped, then save these hours.",
     );
-    // Running on no job: Put This On <job> is offered too (putShiftOnJob takes an open row).
+    // Running on no job: Put This on <job> is offered too (putShiftOnJob takes an open row).
     expect(r.clash).toMatchObject({ id: PUNCH, clockOut: null, noJob: true, jobId: null, lunchMinutes: 0, notes: null });
     // No claims read for a running punch: the door is the clock-out, not "put that shift on the job".
     expect(calls.some((c) => c.table === "invoice_items")).toBe(false);
@@ -215,7 +215,7 @@ describe("Add Entry over a punch that has no job", () => {
   });
 });
 
-describe("Put This On <job>", () => {
+describe("Put This on <job>", () => {
   const routes = (entry: any, updated: any[] = [{ id: PUNCH }]) => (q: Q): Reply => {
     if (q.table === "time_entries" && q.verb === "select") return { data: entry };
     if (q.table === "jobs") return { data: { id: JOB, job_number: "J-028", name: "41 Larkspur" } };

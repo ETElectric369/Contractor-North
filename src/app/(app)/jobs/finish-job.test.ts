@@ -133,7 +133,7 @@ describe("finishJob on a FIXED-PRICE job billed with progress payments (unchange
     const res = await finishJob(JOB, {});
     expect(res.ok).toBe(true);
     expect(res.warning).toBe(
-      "19.5 h ($2,437.50) of work on this job is not on a bill yet. Finishing didn't bill it - bill it with the job's New Invoice → This Is The Last Bill.",
+      "19.5 h ($2,437.50) of work on this job is not on a bill yet. Finishing didn't bill it - bill it with the job's New Invoice → This Is the Last Bill.",
     );
     expect(res.speak).toMatch(/^Job finished\. 19\.5 h/);
     // The only write is the job's status: no invoice is written, sent or promoted.
@@ -155,7 +155,7 @@ describe("finishJob on a FIXED-PRICE job billed with progress payments (unchange
     state.unbilledFails = true;
     const res = await finishJob(JOB, {});
     expect(res.ok).toBe(true);
-    expect(res.warning).toBe("Couldn't check just now whether any hours or bills are still off a bill - bill what's left with the job's New Invoice → This Is The Last Bill.");
+    expect(res.warning).toBe("Couldn't check just now whether any hours or bills are still off a bill - bill what's left with the job's New Invoice → This Is the Last Bill.");
     expect(res.warning).not.toMatch(/Progress Payment|Invoices tab/);
   });
 });
@@ -431,7 +431,7 @@ describe("setJobStatus — 'complete' is finishing, not a status write (M2)", ()
     // The sentence and the warning finishJob gives, handed back out of the status writer so no
     // caller (Nort included) loses them.
     expect(res.warning).toBe(
-      "19.5 h ($2,437.50) of work on this job is not on a bill yet. Finishing didn't bill it - bill it with the job's New Invoice → This Is The Last Bill.",
+      "19.5 h ($2,437.50) of work on this job is not on a bill yet. Finishing didn't bill it - bill it with the job's New Invoice → This Is the Last Bill.",
     );
     expect(res.speak).toMatch(/^Job finished\. 19\.5 h/);
     expect(res.id).toBe("inv-00028");

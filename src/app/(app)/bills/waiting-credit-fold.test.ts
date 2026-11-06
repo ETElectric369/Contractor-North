@@ -9,8 +9,8 @@ import { supplierDocumentRows, supplierPaperFeed } from "./supplier-papers";
 
 /**
  * NOTHING HE SET ASIDE VANISHES (0346). A bill waiting on a credit is off Needs You and My Day; on
- * /bills it is ONE folded line under its supplier, "Waiting On A Credit (1)", with Stop Waiting,
- * and it is not listed a second time in Their Papers' Not Recorded Yet (W1-33: was Not In Your Books).
+ * /bills it is ONE folded line under its supplier, "Waiting on a Credit (1)", with Stop Waiting,
+ * and it is not listed a second time in Their Papers' Not Recorded Yet (W1-33: was Not in Your Books).
  */
 
 const CED = "acct-ced";
@@ -51,11 +51,11 @@ function render(stop?: () => Promise<{ ok: boolean }>) {
   );
 }
 
-describe("the Waiting On A Credit fold under CED", () => {
+describe("the Waiting on a Credit fold under CED", () => {
   it("is one line with its count and money, the paper, when it started and when it comes back", () => {
     const html = render(async () => ({ ok: true }));
     expect(html).toContain('id="supplier-waiting-credit-acct-ced"');
-    expect(html).toContain("Waiting On A Credit (1)");
+    expect(html).toContain("Waiting on a Credit (1)");
     expect(html).toContain("$59.17");
     expect(html).toContain("8802-1107139");
     expect(html).toContain("13683 HAZELNUT");
@@ -63,17 +63,17 @@ describe("the Waiting On A Credit fold under CED", () => {
     expect(html).toContain("Stop Waiting");
   });
 
-  it("is never listed twice: not in Not Recorded Yet, not in Invoices With No Job, and Their Papers counts nothing for it", () => {
+  it("is never listed twice: not in Not Recorded Yet, not in Invoices with No Job, and Their Papers counts nothing for it", () => {
     const html = render(async () => ({ ok: true }));
     expect(html).not.toContain("Not Recorded Yet");
-    expect(html).not.toContain("Not In Your Books");
-    expect(html).not.toContain("Invoices With No Job");
+    expect(html).not.toContain("Not in Your Books");
+    expect(html).not.toContain("Invoices with No Job");
     // Their Papers is there (its reference is inside), with no number: nothing open is in it.
     expect(html).toContain("Their Papers");
     expect(html).not.toMatch(/Their Papers \(/);
   });
 
-  it("stays in view: Waiting On A Credit is not inside Their Papers", () => {
+  it("stays in view: Waiting on a Credit is not inside Their Papers", () => {
     const html = render(async () => ({ ok: true }));
     const their = html.indexOf('id="supplier-their-papers-acct-ced"');
     expect(their).toBeGreaterThan(-1);
@@ -104,7 +104,7 @@ describe("Their Papers counts each open paper once (badges count what is open, o
         actions: { setInvoiceJob: async () => ({ ok: true }) },
       }),
     );
-    expect(html).toContain("Invoices With No Job (1)");
+    expect(html).toContain("Invoices with No Job (1)");
     expect(html).toContain("Not Recorded Yet (1)");
     expect(html).toContain("Their Papers (1)");
     expect(html).not.toContain("Their Papers (2)");

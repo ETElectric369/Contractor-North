@@ -22,12 +22,12 @@ export const FEEDER_SWITCHES: Partial<Record<ActionKind, readonly FeatureKey[]>>
  * LIVE OBLIGATIONS (rule c): these keep reaching Needs You while their rows exist, whatever the
  * switches say, because somebody outside the company is waiting on them or money is held up:
  *   inquiry            a request from the website or a lead door (every public door keeps working
- *                      with Leads off); with Leads off it reads "New Request From …" + Call Back
+ *                      with Leads off); with Leads off it reads "New Request from …" + Call Back
  *   quote_awaiting     an estimate already in the customer's hands
  *   quote_accepted     a customer said yes
  *   contract_unsigned  a contract already sent
  *   lien_deadline      a legal clock
- *   stock_short        pieces taken past the shelf bill nothing until settled (Took From Stock
+ *   stock_short        pieces taken past the shelf bill nothing until settled (Took from Stock
  *                      goes with the switch, so no new ones are made)
  * switches.test.ts pins that none of them ever gets a switch above.
  */
@@ -55,7 +55,7 @@ export type InquiryRow = {
 
 /**
  * One request on Needs You. Leads on: the lead row, its button Called, and (when there's a number)
- * Call behind its ⋯. Leads off: the same request, in plain words ("New Request From Dana"), with the
+ * Call behind its ⋯. Leads off: the same request, in plain words ("New Request from Dana"), with the
  * phone number its Call Back button dials: the lead list is out of the way, the person asking for
  * work is not. The card still opens the request itself (/leads?focus=, which renders with the Off
  * line). The row table (row-buttons.ts) decides which button says what.
@@ -89,7 +89,7 @@ export function inquiryActionItem(q: InquiryRow, todayStr: string, leadsOn: bool
     // Its chip says Request (Wave 1, W1-15: the row carries its own words; the list has no Leads
     // header left to rename).
     chip: "Request",
-    title: fresh ? `New Request From ${who}` : `Request From ${who}`,
+    title: fresh ? `New Request from ${who}` : `Request from ${who}`,
     subtitle: fresh ? "Call them back" : "Follow up",
     phone,
   };

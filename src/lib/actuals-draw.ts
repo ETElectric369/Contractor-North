@@ -471,7 +471,7 @@ export function bringInSentence(outcomes: readonly BringInOutcome[]): { sentence
  *   no estimate and no draw yet → no sheet: createInvoiceForJob, exactly as the old button did.
  *   anything else               → the New Invoice sheet (newInvoiceChoices).
  *
- * A preset from another door (?invoice=deposit|part, Take A Deposit Instead) opens the sheet with
+ * A preset from another door (?invoice=deposit|part, Take a Deposit Instead) opens the sheet with
  * that choice made - except where the sheet could only be refused (an open draft, a schedule).
  */
 export type NewInvoiceFacts = {
@@ -513,14 +513,14 @@ export function invoicePresetFromParam(value: string | null | undefined): NewInv
  * THE SHEET'S CHOICES (2 or 3 buttons), each one a door the server takes:
  *
  *   Deposit                 always (createProgressInvoice, kind deposit, a fixed amount).
- *   Part Of The Estimate    when there is an estimate to take a part of (a %, or an amount typed
+ *   Part of the Estimate    when there is an estimate to take a part of (a %, or an amount typed
  *                           instead; createProgressInvoice kind progress, or final).
- *   Bill The Work So Far    only on a job that bills its actuals, and only when there is work to
+ *   Bill the Work So Far    only on a job that bills its actuals, and only when there is work to
  *                           bill: its figure is the Overview card's own door (workSoFarDoor), so
  *                           the sheet and the card can never show two numbers. The default there.
  *   The Whole Estimate      on a fixed-price job whose estimate isn't on a bill yet and that has
  *                           no draws (createInvoiceForJob copies the estimate's lines).
- *   Bill The Change Orders  on a fixed-price job whose estimate already went out on a bill, with
+ *   Bill the Change Orders  on a fixed-price job whose estimate already went out on a bill, with
  *                           no draws, once a change order is approved: createInvoiceForJob makes
  *                           the second invoice with each approved change order as its own line
  *                           (one already on a bill is skipped). Without it the sheet had only a
@@ -570,7 +570,7 @@ export function newInvoiceChoices(
  * (the choice is there, or the job doesn't bill its actuals).
  */
 export const WORK_SO_FAR_UNREAD =
-  "The hours and bills not on a bill yet couldn't be read just now, so Bill The Work So Far isn't here. Reload the page to bill the work so far.";
+  "The hours and bills not on a bill yet couldn't be read just now, so Bill the Work So Far isn't here. Reload the page to bill the work so far.";
 
 export function workSoFarNote(f: { billsActuals: boolean; unbilledRead: boolean; workDoor: CardDoor }): string | null {
   if (!f.billsActuals) return null;
@@ -587,9 +587,9 @@ export function workSoFarNote(f: { billsActuals: boolean; unbilledRead: boolean;
  * change order's own door; only a job already billed in draws is told to type an amount.
  */
 export function estimateBilledInFullWords(f: { changesOffered: boolean; drawBilled: boolean; billingType: string | null | undefined }): string {
-  if (f.changesOffered) return "The estimate is billed in full. Approved change orders go on their own bill: Bill The Change Orders.";
+  if (f.changesOffered) return "The estimate is billed in full. Approved change orders go on their own bill: Bill the Change Orders.";
   if (!f.drawBilled && f.billingType !== "tm")
-    return "The estimate is billed in full. Put extra work on a change order: once it's approved, Bill The Change Orders bills it here.";
+    return "The estimate is billed in full. Put extra work on a change order: once it's approved, Bill the Change Orders bills it here.";
   return "The estimate is billed in full. For an extra, type an amount instead.";
 }
 

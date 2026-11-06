@@ -15,8 +15,8 @@ import { shortDate, type UsageState, type UsageWindow } from "@/lib/usage-window
  * taken from the state fired the 80 notice at 55% and burned the month's one usage_80 stamp, so the
  * real 80% went untold. So:
  *
- *   usage_80:<YYYY-MM>    pct ≥ 80 — "Usage: 80% Of This Month", the reset day in the body
- *   usage_100:<YYYY-MM>   out (pct ≥ 100) — "Usage: Used Up For This Month", the lighter-model sentence
+ *   usage_80:<YYYY-MM>    pct ≥ 80 — "Usage: 80% of This Month", the reset day in the body
+ *   usage_100:<YYYY-MM>   out (pct ≥ 100) — "Usage: Used Up for This Month", the lighter-model sentence
  *
  * The words come through the caller's translator and the us_ catalog, in the person's language.
  */

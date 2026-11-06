@@ -44,7 +44,7 @@ describe("the sheet", () => {
 
   it("opens on the day and the half hour tapped: the job search, the jobs with their street and who, the day, the time", () => {
     const t = text(html);
-    expect(t).toContain("Add To Schedule");
+    expect(t).toContain("Add to Schedule");
     expect(html).toMatch(/<input[^>]*aria-label="Find a job"/);
     expect(t).toContain("Honeysuckle");
     expect(t).toContain("22 Honeysuckle Way · Kim Hale");
@@ -61,12 +61,12 @@ describe("the sheet", () => {
     expect(t).not.toContain("Saved");
   });
 
-  it("every door is 44px, and Add To Schedule waits for a job", () => {
+  it("every door is 44px, and Add to Schedule waits for a job", () => {
     // The Modal's own header X is the app's shared chrome, the same on every sheet.
     const ds = doors(html).filter((d) => !d.includes('aria-label="Close"'));
     expect(ds.length).toBeGreaterThan(8);
     for (const d of ds) expect(d, d).toMatch(/\b(min-)?h-11\b/);
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Add To Schedule<\/button>/);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Add to Schedule<\/button>/);
   });
 
   it("from the day's +: the work day's start", () => {
@@ -143,16 +143,16 @@ describe("the open spots and the day's +, on the grid", () => {
 
   it("with the office's add: every column's open time is a door, and each day header carries a 44px +", () => {
     const html = grid({ onSlotTap: () => {}, onDayClick: () => {} });
-    expect(html.match(/<button[^>]*aria-label="Add To Schedule, Mon 28"/g)?.length).toBe(2);
+    expect(html.match(/<button[^>]*aria-label="Add to Schedule, Mon 28"/g)?.length).toBe(2);
     // 44 by 44: tall AND wide, so a thumb aimed at the + never lands on the day's label beside it.
-    const plus = html.match(/<button[^>]*aria-label="Add To Schedule, Tue 29"[^>]*>/)?.[0] ?? "";
+    const plus = html.match(/<button[^>]*aria-label="Add to Schedule, Tue 29"[^>]*>/)?.[0] ?? "";
     expect(plus).toMatch(/class="[^"]*\bmin-h-11\b/);
     expect(plus).toMatch(/class="[^"]*\b(min-)?w-11\b/);
   });
 
   it("without it (anyone else, /timecards) or while work is armed, no add door at all", () => {
-    expect(grid({})).not.toContain("Add To Schedule");
-    expect(grid({ onSlotTap: () => {}, placement: { label: "Place 1 here", onPlace: () => {} } })).not.toContain("Add To Schedule");
+    expect(grid({})).not.toContain("Add to Schedule");
+    expect(grid({ onSlotTap: () => {}, placement: { label: "Place 1 here", onPlace: () => {} } })).not.toContain("Add to Schedule");
   });
 
   it("a tap is floored to the half hour it lands in, never outside the day", () => {

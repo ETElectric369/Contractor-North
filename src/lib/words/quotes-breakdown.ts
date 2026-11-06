@@ -27,7 +27,7 @@ export const words: WordCatalog = {
     qb_note: "Note",
     qb_notePlaceholder: "A note under this line — it prints on the estimate.",
     qb_btn_editNote: "Edit Note",
-    qb_btn_addANote: "Add A Note",
+    qb_btn_addANote: "Add a Note",
 
     // ── A task's labor rows: who, the hours, the rate chip and the way back to the rule ──
     qb_rateTyped: "× {at} · typed",
@@ -36,21 +36,21 @@ export const words: WordCatalog = {
     qb_rateRuleMoved: "quoted at {at} · the rule says {rule} now",
     qb_noRate: "no rate",
     qb_usePersonsRate: "Use {name}'s Rate",
-    qb_btn_useCustomersLevel: "Use The Customer's Level",
-    qb_btn_useCompanyDefault: "Use The Company Default",
+    qb_btn_useCustomersLevel: "Use the Customer's Level",
+    qb_btn_useCompanyDefault: "Use the Company Default",
     qb_who: "Who",
     qb_labor: "Labor",
-    qb_someoneNoLongerOnTeam: "Someone No Longer On The Team",
+    qb_someoneNoLongerOnTeam: "Someone No Longer on the Team",
     qb_other: "Other…",
     qb_whoInYourWords: "Who, in your words",
     qb_whoPlaceholder: "Helper, 2-man crew…",
     qb_hours: "Hours",
     qb_hoursQ: "hours?",
-    qb_btn_changeTheRate: "Change The Rate",
+    qb_btn_changeTheRate: "Change the Rate",
     qb_rate: "Rate",
     qb_perHour: "$/h",
     qb_btn_removeThisLabor: "Remove This Labor",
-    qb_btn_addLaborAtAnotherRate: "Add Labor At Another Rate",
+    qb_btn_addLaborAtAnotherRate: "Add Labor at Another Rate",
     qb_laborTotal: "Labor {amount}",
 
     // ── A task's parts ──
@@ -60,10 +60,10 @@ export const words: WordCatalog = {
     qb_priceEach: "Price each",
     qb_priceQ: "price?",
     qb_btn_removeThisPart: "Remove This Part",
-    qb_btn_addAPart: "Add A Part",
+    qb_btn_addAPart: "Add a Part",
     qb_partsTotal: "Parts {amount}",
 
-    // ── The kit it came from, and Remember As A Kit (kitSummary and the kit rule's refusals are lib/estimate/kit-from-task's, qs_lib_kit…) ──
+    // ── The kit it came from, and Remember as a Kit (kitSummary and the kit rule's refusals are lib/estimate/kit-from-task's, qs_lib_kit…) ──
     qb_fromKitNamed: "From the kit {name}",
     qb_fromKitGone: "From the kit it was built from (no longer in your kits)",
     qb_fromKitHidden: "From the kit it was built from",
@@ -79,13 +79,13 @@ export const words: WordCatalog = {
     qb_scope: "Scope",
     qb_scopePlaceholder: "the scope, like Deck",
     qb_btn_saving: "Saving…",
-    qb_btn_saveTheKit: "Save The Kit",
+    qb_btn_saveTheKit: "Save the Kit",
     qb_btn_cancel: "Cancel",
-    qb_btn_rememberAsAKit: "Remember As A Kit",
+    qb_btn_rememberAsAKit: "Remember as a Kit",
     qb_willSave: "Will save: {summary}",
     qb_rememberedAsKit: "Remembered as the kit {name} — it's under Kits on the Price List and in the Inspector's kit picker.",
     qb_couldNotRememberKit: "Could not remember the kit.",
-    qb_couldNotReachServer: "Could not reach the server — press Save The Kit again.",
+    qb_couldNotReachServer: "Could not reach the server — press Save the Kit again.",
     qb_priceSetByHand: "Price set by hand — the breakdown stays off the paper",
 
     // ── Where a rate came from (lib/pricing/labor-rate laborRateFromWords; its English stays inline there) ──

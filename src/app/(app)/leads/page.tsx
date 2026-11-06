@@ -56,7 +56,7 @@ export default async function InquiriesPage({
   // A deep-link can point at a lead that already left the open list — a just-converted lead,
   // or the "From lead" backlink on an estimate/job (which points at a now-converted lead). Fetch
   // that one by id and surface it at the top so the link always lands on a real, flashing row
-  // instead of an empty list. Its chip (Became An Estimate / Became A Job / Lost) makes clear it's
+  // instead of an empty list. Its chip (Became an Estimate / Became a Job / Lost) makes clear it's
   // already been acted on.
   let focusExtra: Inquiry | null = null;
   if (focus && !inquiries.some((i) => i.id === focus)) {

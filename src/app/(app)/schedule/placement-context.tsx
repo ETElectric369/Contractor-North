@@ -180,7 +180,7 @@ export function PlacementProvider({
 
   /**
    * PUT BACK WHERE IT WAS: each job through undoPlaceJob (its days, its listed day, its status) and
-   * each visit through undoPlaceVisit (back to Waiting For A Day, through unscheduleAppointment). BOTH
+   * each visit through undoPlaceVisit (back to Waiting for a Day, through unscheduleAppointment). BOTH
    * are refused in words when the work changed since the place — the ten seconds the Undo toast lives
    * are long enough for someone else to move that same visit, and taking their newer time away while
    * the toast said "Put back where it was." is the lost update the job path has always refused. Every
@@ -320,7 +320,7 @@ export function PlacementProvider({
            day; the rail's place carries it now, on the toast that names the day. Only when every job and
            visit placed landed, and only for work an Undo can truly put back: a job the place took off
            hold (its reason and its day went with the hold) and a lead booked as an inspection (a visit
-           was made) get none; their blocks' sheets carry Move and Clear The Date. */
+           was made) get none; their blocks' sheets carry Move and Clear the Date. */
         const undoable =
           !leads.length &&
           jobs.length + appts.length > 0 &&

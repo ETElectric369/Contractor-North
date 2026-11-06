@@ -435,7 +435,7 @@ export function SiteStudio({
               onClick={() => void flushLiveEdits().then(() => setPageEdit((v) => !v))}
               className={`text-sm font-medium underline-offset-2 hover:underline ${pageEdit ? "text-amber-600" : "text-brand"}`}
             >
-{pageEdit ? "✕ Close On-Page Editing" : "Edit On The Page →"}
+{pageEdit ? "✕ Close On-Page Editing" : "Edit on the Page →"}
             </button>
           </div>
         )}
@@ -458,7 +458,7 @@ export function SiteStudio({
                 }
                 className="text-sm font-medium text-brand underline-offset-2 hover:underline"
               >
-                Arrange This Version By Hand →
+                Arrange This Version by Hand →
               </button>
             ) : (
               <Card key={selected.id}>

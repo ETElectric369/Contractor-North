@@ -73,9 +73,9 @@ const doc = (id: string, over: Record<string, unknown>) => ({
 const PAPERS = [
   doc("si-1106969", { invoice_number: "8802-1106969", invoice_date: "2026-09-04", job_name_raw: "13897 HONEYSUCKLE", total: 301.81, open_balance: 301.81 }),
   doc("si-1107820", { invoice_number: "8802-1107820", invoice_date: "2026-09-16", job_name_raw: "13897 HONEYSUCKLE", total: 187.64, open_balance: 187.64 }),
-  // His real credit memo on no job: its only home is CED's own Invoices With No Job list.
+  // His real credit memo on no job: its only home is CED's own Invoices with No Job list.
   doc("si-1104645", { invoice_number: "8802-1104645", kind: "credit_memo", invoice_date: "2026-08-06", job_name_raw: "13631 NIGHTSHADE", total: -31.86, open_balance: -31.86 }),
-  // 13683 HAZELNUT, set aside for a credit on Sep 20: Stop Waiting is in its Waiting On A Credit fold.
+  // 13683 HAZELNUT, set aside for a credit on Sep 20: Stop Waiting is in its Waiting on a Credit fold.
   doc("si-1107139", { invoice_number: "8802-1107139", invoice_date: "2026-09-10", job_name_raw: "13683 HAZELNUT", total: 59.17, open_balance: 59.17, waiting_credit_since: "2026-09-20T18:00:00Z" }),
 ];
 
@@ -147,7 +147,7 @@ vi.mock("./bills-search-box", () => ({
   useBillsSearch: () => ({ query: "", setQuery: () => {}, rows: [], keys: null }),
 }));
 
-// Add By Hand's props are read off the button: its sheet only draws once tapped.
+// Add by Hand's props are read off the button: its sheet only draws once tapped.
 vi.mock("./add-business-cost", () => ({
   AddByHandButton: (p: { jobs: unknown[]; jobsUnread?: boolean }) => {
     state.hand = p;
@@ -187,7 +187,7 @@ describe("every read answered (the baseline the failures are measured against)",
 
   it("search: every paper lands where its own buttons are (class 14)", async () => {
     const { rows } = await renderWith();
-    // The credit memo on no job: CED's own lists (Invoices With No Job), not a dead row.
+    // The credit memo on no job: CED's own lists (Invoices with No Job), not a dead row.
     expect(paper(rows, "si-1104645").href).toBe(`#supplier-invoices-${CED}`);
     // Waiting on a credit: its fold, where Stop Waiting is.
     expect(paper(rows, "si-1107139").href).toBe(`#supplier-waiting-credit-${CED}`);
@@ -225,7 +225,7 @@ describe("the bills unread", () => {
     const { text } = await renderWith("bills");
     expect(text).toContain("Couldn't check your books just now");
     expect(text).not.toMatch(/\$10\.00 ahead/);
-    expect(text).not.toContain("Square With Everyone");
+    expect(text).not.toContain("Square with Everyone");
     // Since 0383 CED's figure is our own open bills too, so with the bills unread it cannot total either.
     expect(text).not.toContain("Consolidated Electrical Distributors says");
     expect(text).toContain("Couldn't Total");
@@ -277,7 +277,7 @@ describe("the payments unread", () => {
   });
 
   it("CED never reads 'you have sent $0.00': its payments say they couldn't be read", async () => {
-    // W1-33: one slate line under Record A Payment, model B's own arithmetic, instead of the grid.
+    // W1-33: one slate line under Record a Payment, model B's own arithmetic, instead of the grid.
     const whole = await renderWith();
     expect(whole.text).toContain("You've sent $100.00 since Sep 5, 2026");
     const { text } = await renderWith("supplier_payments");
@@ -299,9 +299,9 @@ describe("which receipt made which bill, unread", () => {
     expect(text).toContain("Couldn't load which receipt made each bill just now, so every receipt file is listed. Reload to try again.");
     // The bills themselves were read: the ledger still lists them, led by what's open.
     expect(text).not.toContain("Couldn't read your bills just now");
-    // "Bought On Account", not "Unpaid" (8a982483): see bills-receipts.tsx. The figure is his own
+    // "Bought on Account", not "Unpaid" (8a982483): see bills-receipts.tsx. The figure is his own
     // paperwork and the Suppliers card above answers the debt.
-    expect(text).toContain("All Bills · 3 Bought On Account $529.45");
+    expect(text).toContain("All Bills · 3 Bought on Account $529.45");
   });
 });
 
@@ -328,7 +328,7 @@ describe("Needs You never gives an all-clear over a read that failed", () => {
 });
 
 describe("the jobs unread", () => {
-  it("Add By Hand is told, so its sheet says it couldn't load the jobs instead of 'no jobs yet'", async () => {
+  it("Add by Hand is told, so its sheet says it couldn't load the jobs instead of 'no jobs yet'", async () => {
     await renderWith();
     expect(state.hand?.jobsUnread).toBe(false);
     expect(state.hand?.jobs.length).toBe(2);

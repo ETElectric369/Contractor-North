@@ -21,7 +21,7 @@ import { PortalShell, type PortalOrg } from "./portal-shell";
  * link never changes, and the code is one tap away every time.
  *
  * No dead end: no email on file → Call and Email the business; a code that ran out → Send A New
- * Code right there; a code already in the inbox → I Already Have A Code; an email that isn't theirs
+ * Code right there; a code already in the inbox → I Already Have a Code; an email that isn't theirs
  * any more → ask the business to update it, Call and Email right there. Every answer is said.
  *
  * A code already out and still good (the customer went to Mail for it and came back through the
@@ -146,7 +146,7 @@ export function PortalSignIn({
                   setTimeout(() => input.current?.focus(), 0);
                 }}
               >
-                I Already Have A Code
+                I Already Have a Code
               </button>
             </div>
           </>
@@ -182,7 +182,7 @@ export function PortalSignIn({
             <p className="mt-3 text-center text-sm text-slate-700">
               Didn&apos;t get it? Check spam, or{" "}
               <button type="button" className={LINK_BTN} onClick={sendCode} disabled={pending}>
-                Send A New Code
+                Send a New Code
               </button>
             </p>
             <NotYourEmail org={org} />
@@ -296,7 +296,7 @@ export function PortalSignOut({ signOut }: { signOut: () => Promise<{ ok: boolea
         }
         className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-slate-700 underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[rgb(var(--glass-ink))]"
       >
-        <LogOut className="h-4 w-4" aria-hidden /> {pending ? "Signing Out…" : "Sign Out On This Device"}
+        <LogOut className="h-4 w-4" aria-hidden /> {pending ? "Signing Out…" : "Sign Out on This Device"}
       </button>
       {failed ? <p className="text-sm text-red-800" role="alert">That didn&apos;t sign you out. Try again in a minute.</p> : null}
     </div>

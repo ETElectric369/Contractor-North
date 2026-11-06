@@ -212,7 +212,7 @@ describe("gaps and the model's answer", () => {
   });
 
   it("fills gaps from the model and never replaces what the page's card said", () => {
-    const base = { name: "Guess From Title", email: "sales@acme.example", city: "Quincy" };
+    const base = { name: "Guess from Title", email: "sales@acme.example", city: "Quincy" };
     const model = { name: "Acme Electric Supply", email: "other@acme.example", phones: ["(530) 555-0101"], street: "9 Oak Ave", city: "Portola", state: "CA", zip: "96122", about: "Electrical supply house" };
     const out = mergeModelFields(base, ["name"], model, ["name", "phone", "email", "address", "notes"]);
     expect(out).toEqual({

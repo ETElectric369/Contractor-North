@@ -120,7 +120,7 @@ export function placeGlassMenu({
  */
 export function useGlassMenuPlacement(
   open: boolean,
-  /** What the panel is showing, when it can change while it stays open (the job's Add A Cost menu
+  /** What the panel is showing, when it can change while it stays open (the job's Add a Cost menu
    *  swaps "which paper?" in place). A new value measures the panel again: a short view that fit
    *  below the trigger must not hand its placement to a tall one that then hangs under the dock. */
   contentKey?: string | number,

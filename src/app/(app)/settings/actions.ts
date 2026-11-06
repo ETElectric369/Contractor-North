@@ -1454,7 +1454,7 @@ export async function saveJobCode(input: {
   return { ok: true };
 }
 
-/** Import a whole trade's codes at once (Settings → Job codes → "Import A Trade's Codes"). `packId`
+/** Import a whole trade's codes at once (Settings → Job codes → "Import a Trade's Codes"). `packId`
  *  is a trade KEY: the rows are the registry's one list for that trade (lib/trade-package, the same
  *  list sign-up seeds), so there is no second spelling anywhere. A code the company already holds is
  *  skipped by its CANONICAL spelling for that trade (canonicalCode folds the pre-1135 packs' aliases:

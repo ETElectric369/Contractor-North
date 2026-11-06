@@ -35,7 +35,7 @@ const num = (v: unknown): number | null => {
  * HOW THE KITS READ WENT (item 3 of the deferred four, 2026-10-10). firstThatWorks hands back the
  * first rung without an error and never says which — so a read that fell to a BARE rung (no 0386
  * columns: no task kit can exist) or failed on every rung emptied the Inspector's kit picker in
- * silence, and a task that had picked a kit then read "Kit No Longer In The Price List", which was
+ * silence, and a task that had picked a kit then read "Kit No Longer in the Price List", which was
  * false. The read now carries its state, and every page says it in the same words.
  *   ok        the first rung: everything the kits know
  *   thin      a lower item rung won: no vendors and/or no part links — names may be short

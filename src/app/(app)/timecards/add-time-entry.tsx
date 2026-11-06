@@ -33,14 +33,14 @@ import { StopClockSheet } from "./stop-clock-sheet";
  *   Who · Job · Day · Start · End · Lunch   (and Job Code, only while the Job Codes switch is on)
  *
  * Miles, a pay-rate override and notes live on the shift's editor, which the toast after a save
- * opens in one tap ("Open That Shift"); an end on another day is the "Ends The Next Day" box.
+ * opens in one tap ("Open That Shift"); an end on another day is the "Ends the Next Day" box.
  *
  * THE JOB IS ALWAYS SOMETHING SOMEBODY CHOSE. On the job's own page it is that job ("Job · 41
  * Larkspur"). On Timecards it starts where the schedule put the person that day (shiftsOnDay's
  * scheduledJob: the crew board's day row, else a rostered job whose days cover it), and on "Pick
  * The Job" when the schedule says nothing, so Save refuses until someone picks: a job, Company Time
  * (the company's own not-billed code), or, for a company with no such code, No Job, said to wait
- * under Hours On No Job. A preselect never overwrites a pick the person made.
+ * under Hours on No Job. A preselect never overwrites a pick the person made.
  *
  * STAFF ONLY: a tech clocks live (the Timeclock), and createManualEntry is requireStaff anyway.
  */
@@ -82,7 +82,7 @@ export function addedWords(f: { hours: number; who: string; day: string; where: 
 
 /**
  * The Job field's answer, as Save writes it: the job and code, and the words the toast names it by.
- * A placeholder ("Pick The Job") is a refusal in words that name both ways out.
+ * A placeholder ("Pick the Job") is a refusal in words that name both ways out.
  */
 export function resolveJobChoice(f: {
   value: string;
@@ -107,7 +107,7 @@ export function resolveJobChoice(f: {
 }
 
 /**
- * Where the Job field goes when the day's schedule answers: the scheduled job, or "Pick The Job"
+ * Where the Job field goes when the day's schedule answers: the scheduled job, or "Pick the Job"
  * (nothing scheduled, marked off, or a day that couldn't be read). `null` means leave it: the
  * person picked something, and a preselect never overwrites a pick.
  */
@@ -129,7 +129,7 @@ function clockWords(iso: string, tz: string): string {
  * here, and the job's Time tab lists Clock Out <Name> only for punches on this job. So when the shift
  * in the way is still RUNNING, the same words the office reaches for on Timecards sit right under the
  * refusal, "Clock Out Brian" (clockDoorWords, "Clock Out" for the viewer's own clock), and open the
- * clock-out sheet in place. A closed clash keeps its own door (Put This On <job>, in the day's list).
+ * clock-out sheet in place. A closed clash keeps its own door (Put This on <job>, in the day's list).
  */
 export function ClockOutClashDoor({
   clash,
@@ -208,7 +208,7 @@ export function AddTimeEntry({
   const [tookLunch, setTookLunch] = useState(false);
   const [jobCode, setJobCode] = useState("");
 
-  /* THE JOB FIELD. `jobValue` is a job id, COMPANY_TIME, NO_JOB, or "" for "Pick The Job". A pick
+  /* THE JOB FIELD. `jobValue` is a job id, COMPANY_TIME, NO_JOB, or "" for "Pick the Job". A pick
      the person made (jobTouched) is never overwritten by what the schedule says. */
   const [jobValue, setJobValue] = useState("");
   const jobTouched = useRef(false);
@@ -241,8 +241,8 @@ export function AddTimeEntry({
     setJobValue(v);
   }
   // A new person or a new day: the schedule is asked again, and an untouched Job field waits for it
-  // on "Pick The Job" rather than holding the last day's job while the answer is on its way. The
-  // "On The Schedule That Day" heading goes too, so the list never names the last person's or
+  // on "Pick the Job" rather than holding the last day's job while the answer is on its way. The
+  // "On the Schedule That Day" heading goes too, so the list never names the last person's or
   // day's job as this one's while the answer is on its way (or while the Day is blank).
   function whoOrDayChanged() {
     if (fixedJob) return;
@@ -325,7 +325,7 @@ export function AddTimeEntry({
     const hm = clockInputValue(clockOutIso, tz);
     if (stopDay !== day || !hm) return;
     setStartT(hm);
-    // An End at or before the new Start would ask "Ends The Next Day": move it an hour past instead.
+    // An End at or before the new Start would ask "Ends the Next Day": move it an hour past instead.
     let endMoved = false;
     if (endsBeforeStart(hm, endT)) {
       const [h, m] = hm.split(":").map(Number);
@@ -450,10 +450,10 @@ export function AddTimeEntry({
             <div>
               <Label htmlFor="ate-job">Job</Label>
               <Select id="ate-job" className="h-11" value={jobValue} onChange={(e) => pickJob(e.target.value)}>
-                <option value="">Pick The Job</option>
+                <option value="">Pick the Job</option>
                 {orphan && <option value={jobValue}>{labelOf(jobValue)}</option>}
                 {scheduledOpt && (
-                  <optgroup label="On The Schedule That Day">
+                  <optgroup label="On the Schedule That Day">
                     <option value={scheduledOpt.id}>{scheduledOpt.label}</option>
                   </optgroup>
                 )}
@@ -475,7 +475,7 @@ export function AddTimeEntry({
                 {companyTimeCode ? <option value={COMPANY_TIME}>Company Time (Not Billed)</option> : <option value={NO_JOB}>No Job</option>}
               </Select>
               {!companyTimeCode && jobValue === NO_JOB && (
-                <p className="mt-1 text-xs text-amber-800">It waits under Hours On No Job until someone picks one.</p>
+                <p className="mt-1 text-xs text-amber-800">It waits under Hours on No Job until someone picks one.</p>
               )}
               {/* The list stops 30 days after a job finishes; the job's own page takes any job. */}
               <p className="mt-1 text-xs text-slate-500">Older job? Add it from the job&apos;s Time tab.</p>
@@ -485,7 +485,7 @@ export function AddTimeEntry({
             </div>
           )}
 
-          {/* What this person already has that day, with Put This On <job> for a punch on no job (the
+          {/* What this person already has that day, with Put This on <job> for a punch on no job (the
               duplicate punches, 2026-09-26), and where the schedule put them, which the Job field
               above starts on. Reads again when the person, the day or the job changes, and after a
               refusal. */}
@@ -550,7 +550,7 @@ export function AddTimeEntry({
                   onChange={(e) => setNextDayTicked(e.target.checked)}
                   className="h-5 w-5 shrink-0 rounded border-slate-300 text-brand"
                 />
-                <span>Ends The Next Day</span>
+                <span>Ends the Next Day</span>
               </label>
             </div>
           )}

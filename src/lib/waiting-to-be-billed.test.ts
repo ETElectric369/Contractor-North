@@ -39,7 +39,7 @@ function fakeDb(tables: Record<string, unknown[]>, fail: Record<string, string> 
   };
 }
 
-describe("Waiting To Be Billed", () => {
+describe("Waiting to Be Billed", () => {
   it("lists the T&M jobs with open work, oldest work first, a complete job with an invoice among them; a job with nothing open is not on it", async () => {
     work.byJob = {
       a: done({ hours: 3.5, oldestAt: "2026-09-20T15:00:00Z", billsBilled: 120, total: 500 }),

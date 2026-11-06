@@ -11,7 +11,7 @@ import { join } from "node:path";
  *     door uses), so a clock that knew the job stays two buttons;
  *   - it opens at once on "Finding your jobs…": the clock has already answered, and the list
  *     arrives after (the clock never waits on it);
- *   - each job is one 44px row; "Skip, The Office Will Pick" is always there and writes nothing;
+ *   - each job is one 44px row; "Skip, the Office Will Pick" is always there and writes nothing;
  *   - a tap is the checked write, and anything but a landed write is a plain line;
  *   - job names only, never a price.
  */
@@ -89,7 +89,7 @@ describe("the sheet", () => {
     expect(html).toContain("Which Job Are You On?");
     expect(html).toContain("Finding your jobs…");
     expect(html).toContain("You&#x27;re clocked in.");
-    expect(html).toContain("Skip, The Office Will Pick");
+    expect(html).toContain("Skip, the Office Will Pick");
   });
 
   it("lists each job as one 44px row, the likely ones with why, and names only (no price)", () => {
@@ -111,7 +111,7 @@ describe("the sheet", () => {
   it("Skip writes nothing and closes; a row tap picks that job", () => {
     const props = view({ phase: "ready", jobs, isStaff: false });
     const tree = WhichJobSheetView(props);
-    clickable(tree, "Skip, The Office Will Pick")!.props.onClick();
+    clickable(tree, "Skip, the Office Will Pick")!.props.onClick();
     expect(props.onSkip).toHaveBeenCalledTimes(1);
     expect(props.onPick).not.toHaveBeenCalled();
     clickable(tree, "13631 Nightshade")!.props.onClick();
@@ -155,7 +155,7 @@ describe("the sheet", () => {
     const placed = render(view({ phase: "ready", jobs, isStaff: false }, { placed: "Your punch is on 41 Larkspur." }));
     expect(placed).toContain("Your punch is on 41 Larkspur.");
     expect(placed).toContain(">Done</button>");
-    expect(placed).not.toContain("Skip, The Office Will Pick");
+    expect(placed).not.toContain("Skip, the Office Will Pick");
   });
 });
 
@@ -236,17 +236,17 @@ describe("My Day asks from the same list the clock asked from", () => {
   const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const onNoJob = { id: "p1", clock_in: "2026-09-27T14:00:00Z", notes: null, job_id: null };
 
-  it("the Now card on a punch with no job has ONE door, Pick The Job, and it opens the clock's own sheet", () => {
+  it("the Now card on a punch with no job has ONE door, Pick the Job, and it opens the clock's own sheet", () => {
     const html = renderToStaticMarkup(createElement(NowCard, { userId: "u1", open: onNoJob, job: null }));
     expect(html).toContain("Which job are you on?");
     expect(html).toContain("You’re on the clock, but this punch has no job yet.");
     // One door, 44px (the default button is h-11), and no list of its own to fall short of the sheet.
-    expect(html.match(/Pick The Job/g)).toHaveLength(1);
-    expect(html).toMatch(/<button[^>]*class="[^"]*h-11[^"]*"[^>]*>Pick The Job<\/button>/);
+    expect(html.match(/Pick the Job/g)).toHaveLength(1);
+    expect(html).toMatch(/<button[^>]*class="[^"]*h-11[^"]*"[^>]*>Pick the Job<\/button>/);
     expect(html).not.toContain("<select");
     expect(html).not.toContain("Put It on the Job");
     const card = src("src/app/(app)/planner/now-card.tsx");
-    // The door's words come through the catalog since cn-v1138 (md_pickTheJob is "Pick The Job" in English).
+    // The door's words come through the catalog since cn-v1138 (md_pickTheJob is "Pick the Job" in English).
     expect(card).toMatch(/onClick=\{\(\) => setAsk\(\{ entryId: open\.id, moment: "in" \}\)\}>\s*\{t\("md_pickTheJob"\)\}/);
     // The card mounts the sheet once: the same one the clock opens after a punch on no job.
     expect(card.match(/<WhichJobSheet /g)).toHaveLength(1);

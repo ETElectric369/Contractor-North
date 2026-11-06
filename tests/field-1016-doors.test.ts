@@ -66,13 +66,13 @@ describe("the registry: providers, read fresh each time; a list the model can re
   });
   it("the listing names what each door takes, never its handler; a door with neither fill nor add is not listed; bad names are skipped", () => {
     registerNortDoors(() => ({
-      "task-measure-1": { label: "  Add A  Measurement ", fields: ["label", "value", "unit"], add: () => ({ ok: true, landed: "m" }) },
+      "task-measure-1": { label: "  Add a  Measurement ", fields: ["label", "value", "unit"], add: () => ({ ok: true, landed: "m" }) },
       "task-note-1": { label: "Note", fill: () => ({ ok: true, landed: "n" }) },
       dead: { label: "nothing" },
       "bad name": { label: "x", fill: () => ({ ok: true, landed: "" }) },
     }));
     expect(listNortDoors()).toEqual([
-      { name: "task-measure-1", label: "Add A Measurement", can: ["add"], fields: ["label", "value", "unit"] },
+      { name: "task-measure-1", label: "Add a Measurement", can: ["add"], fields: ["label", "value", "unit"] },
       { name: "task-note-1", label: "Note", can: ["fill"] },
     ]);
     registerNortDoors(() => ({ "need-work": { label: "Work", options: ["Deck", "Remodel", "  x ".repeat(30)], now: "  Remodel  ", fill: () => ({ ok: true, landed: "" }) } }));
@@ -103,7 +103,7 @@ describe("the route's context lines: the phone's list clamped, what landed clamp
     expect(
       doorContextLines([
         { name: "task-note-1", label: "Note on 'Panel'", can: ["fill"] },
-        { name: "task-measure-1", label: "Add A Measurement", can: ["add"], fields: ["label", "value", "unit", "Bad!"] },
+        { name: "task-measure-1", label: "Add a Measurement", can: ["add"], fields: ["label", "value", "unit", "Bad!"] },
         { name: "need-work", label: "Work", can: ["fill"], options: ["Deck", "Remodel"], now: "Remodel" },
         { name: "bad name", label: "x", can: ["fill"] },
         { name: "no-can", label: "x", can: [] },
@@ -111,7 +111,7 @@ describe("the route's context lines: the phone's list clamped, what landed clamp
         "junk",
         null,
       ]),
-    ).toEqual(["[task-note-1] Note on 'Panel'", "[task-measure-1] Add A Measurement (add a row: label, value, unit)", '[need-work] Work — choices: Deck / Remodel — now: "Remodel"', "[ctrl] ab c"]);
+    ).toEqual(["[task-note-1] Note on 'Panel'", "[task-measure-1] Add a Measurement (add a row: label, value, unit)", '[need-work] Work — choices: Deck / Remodel — now: "Remodel"', "[ctrl] ab c"]);
     expect(doorContextLines("nope")).toEqual([]);
     expect(doorContextLines(Array.from({ length: 100 }, (_, i) => ({ name: `d${i}`, label: "x", can: ["fill"] })))).toHaveLength(80);
   });

@@ -161,7 +161,7 @@ export async function insertKeyedRows(
 const CODE_RE = /\[([^\]]+)\]/;
 
 /** A TYPED ROW'S KEY (cn-v1134, addCaptureItemsToJobList): "capture:<the id the sheet stored with it>", so a second
- *  press of Won · Pick The Job lists nothing twice. To every reader it is UNKEYED still — a row typed on site that a
+ *  press of Won · Pick the Job lists nothing twice. To every reader it is UNKEYED still — a row typed on site that a
  *  line may claim (the adoption below, the sync's hand rows) — never a line's claimed row: read as a claimed one it
  *  would be passed over and the line's part written beside it, a second copy of what the crew already has. */
 export const CAPTURE_KEY = "capture:";

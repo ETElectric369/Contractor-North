@@ -421,7 +421,7 @@ d("the portal link asks for a code (0331)", { timeout: 30_000 }, () => {
     await c.query("rollback to savepoint s_slide");
   });
 
-  it("Sign Out On This Device ends only this device", async () => {
+  it("Sign Out on This Device ends only this device", async () => {
     if (!needs()) return;
     await c.query("savepoint s_signout");
     const token = await tokenOf(custA);

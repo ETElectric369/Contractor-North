@@ -176,7 +176,7 @@ describe("scheduledJobFor: a rostered job whose days cover the date", () => {
   });
 
   it("A GAP DAY IS NOT A JOB DAY: a job booked day 1 and day 3 is not on day 2, and on day 2 the job booked that day wins", async () => {
-    // Honeysuckle: 9/18, 9/22 and 9/24 (Add To Schedule), its window mirrored 9/18 8 AM to 9/24 4 PM.
+    // Honeysuckle: 9/18, 9/22 and 9/24 (Add to Schedule), its window mirrored 9/18 8 AM to 9/24 4 PM.
     // Siskin: one day, 9/23 at 10 AM. Brian is on both crews.
     const honeysuckle = { id: "honeysuckle", scheduled_start: "2026-09-18T15:00:00Z", scheduled_end: "2026-09-24T23:00:00Z" };
     const siskin = { id: "siskin", scheduled_start: "2026-09-23T17:00:00Z", scheduled_end: "2026-09-23T19:00:00Z" };

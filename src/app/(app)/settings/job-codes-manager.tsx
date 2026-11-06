@@ -107,7 +107,7 @@ export function JobCodesManager({ jobCodes, trade }: { jobCodes: JobCode[]; trad
       {/* Quick-start: import a whole trade's codes at once (lib/trade-package, the one list sign-up
           seeds; a code you already hold under an older spelling is skipped, never twinned). */}
       <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-        <div className="mb-2 text-sm font-medium text-slate-700">Import A Trade&apos;s Codes</div>
+        <div className="mb-2 text-sm font-medium text-slate-700">Import a Trade&apos;s Codes</div>
         <div className="flex flex-wrap items-center gap-2">
           <Select value={pack} onChange={(e) => { setPack(e.target.value); setImportMsg(null); }} className="max-w-[220px]">
             {TRADE_PACK_OPTIONS.map((o) => (

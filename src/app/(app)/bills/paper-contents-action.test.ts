@@ -136,7 +136,7 @@ describe("supplierPaperContents: 8802-1107139, $59.17, 13683 HAZELNUT", () => {
     // so, and how to keep it, rather than showing a dead link.
     expect(res.contents.pdfUrl).toBeNull();
     expect(res.contents.pdfNote).toBe(
-      "Its PDF wasn't saved here, only what was read from invoice_8802-1107139.pdf. Put that PDF in again through Snap Or Note on Bills to keep it.",
+      "Its PDF wasn't saved here, only what was read from invoice_8802-1107139.pdf. Put that PDF in again through Snap or Note on Bills to keep it.",
     );
   });
 

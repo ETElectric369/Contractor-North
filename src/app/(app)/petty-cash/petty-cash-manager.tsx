@@ -106,7 +106,7 @@ export function PettyCashManager({ items, balance }: { items: PettyTx[]; balance
               <DeleteButton action={() => deletePettyCash(i.id)} confirm="Delete this entry?" done="Entry deleted" className="flex h-11 w-11 items-center justify-center text-slate-300 hover:text-red-600 disabled:opacity-50" />
             </li>
           ))}
-          {items.length === 0 && <li className="px-4 py-10 text-center text-sm text-slate-400">No cash entries. A new cash purchase goes in through Snap Or Note or Add By Hand.</li>}
+          {items.length === 0 && <li className="px-4 py-10 text-center text-sm text-slate-400">No cash entries. A new cash purchase goes in through Snap or Note or Add by Hand.</li>}
         </ul>
       </Card>
     </div>

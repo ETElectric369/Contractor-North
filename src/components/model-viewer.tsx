@@ -9,7 +9,7 @@ import { arPreviewPresent, openInAr } from "@/lib/native-scan";
  * THE 3D VIEWER (Lidar, 3D Scan). Erik 2026-10-16: "it would render an image just fine,
  * i want that." A scanned model — the USDZ from 3D Scan, or a GLB someone dropped from
  * Polycam — drawn right here with three.js (its USD loader reads Apple's binary USD, so one file
- * serves the phone, the office and the portal): spin, zoom, pan. On an iPhone, Open In AR hands
+ * serves the phone, the office and the portal): spin, zoom, pan. On an iPhone, Open in AR hands
  * the same file to Apple's AR viewer, which drops it into the room.
  *
  * OPEN IN AR: in the North app the bytes the viewer drew go to the shell, which opens Apple's Quick
@@ -53,8 +53,8 @@ export function ModelViewer({ url, name, onClose }: { url: string; name: string;
   const [why, setWhy] = useState<string | null>(null);
   const [ar, setAr] = useState<"idle" | "opening" | "failed">("idle");
   const [arWhy, setArWhy] = useState<string | null>(null);
-  /** The model's bytes as drawn, kept for Open In AR. In the app the viewer fetches them ONCE and the
-   *  loader reads that same copy from a blob URL, so Open In AR never downloads the model again. */
+  /** The model's bytes as drawn, kept for Open in AR. In the app the viewer fetches them ONCE and the
+   *  loader reads that same copy from a blob URL, so Open in AR never downloads the model again. */
   const bytesRef = useRef<Uint8Array | null>(null);
   const kind = modelKind(name) ?? modelKind(url);
   const inShell = arPreviewPresent();
@@ -138,7 +138,7 @@ export function ModelViewer({ url, name, onClose }: { url: string; name: string;
         if (kind === "usdz") {
           const { USDLoader } = await import("three/examples/jsm/loaders/USDLoader.js");
           const loader = new USDLoader();
-          // In the app the same bytes serve Open In AR: fetched once here, drawn from a blob URL, kept
+          // In the app the same bytes serve Open in AR: fetched once here, drawn from a blob URL, kept
           // in bytesRef. The sheets beside the model are found by relative path, so the loader is told
           // where the ORIGINAL file lives. A fetch that fails falls back to loading by URL, as before.
           let drawFrom = url;
@@ -217,16 +217,16 @@ export function ModelViewer({ url, name, onClose }: { url: string; name: string;
         {kind === "usdz" && inShell ? (
           <button type="button" onClick={() => void openAr()} disabled={ar === "opening"} className={link}>
             {ar === "opening" ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
-            Open In AR
+            Open in AR
           </button>
         ) : kind === "usdz" && isIPhone() ? (
           <a rel="ar" href={url} className={link}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={PIXEL} alt="" width={1} height={1} />
-            Open In AR
+            Open in AR
           </a>
         ) : null}
-        <a href={url} target="_blank" rel="noopener noreferrer" className={link} aria-label="Open The File">
+        <a href={url} target="_blank" rel="noopener noreferrer" className={link} aria-label="Open the File">
           <Download className="h-4 w-4" aria-hidden />
         </a>
         <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 hover:bg-white/10">
@@ -241,7 +241,7 @@ export function ModelViewer({ url, name, onClose }: { url: string; name: string;
         )}
         {status === "failed" && (
           <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-white/90">
-            Couldn&apos;t draw this 3D file here ({why}). Open The File opens it in an app that reads 3D files{isIPhone() ? "" : ", or on an iPhone"}.
+            Couldn&apos;t draw this 3D file here ({why}). Open the File opens it in an app that reads 3D files{isIPhone() ? "" : ", or on an iPhone"}.
           </div>
         )}
       </div>

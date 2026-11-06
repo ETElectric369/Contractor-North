@@ -26,7 +26,7 @@ export function PortalShell({
   org: PortalOrg;
   children: React.ReactNode;
   wide?: boolean;
-  /** Under the "Questions?" line (0331: Sign Out On This Device). */
+  /** Under the "Questions?" line (0331: Sign Out on This Device). */
   footer?: React.ReactNode;
 }) {
   return (

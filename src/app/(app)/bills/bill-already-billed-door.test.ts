@@ -35,14 +35,14 @@ describe("a bill's own row", () => {
     expect(b[0].attrs).toMatch(/\bh-11\b/);
   });
 
-  it("Billed By Hand On INV-00023 · Not Billed After All on a bill a person marked", () => {
+  it("Billed by Hand on INV-00023 · Not Billed After All on a bill a person marked", () => {
     const html = renderToStaticMarkup(
       createElement(BillAlreadyBilledDoor, {
         bill: { id: "ps" },
         door: { kind: "hand", jobId: "j-010", lineId: "li-mat", ids: ["ps"], invoiceNumber: "INV-00023", what: "CED 8802-1101475" },
       }),
     );
-    expect(text(html)).toContain("Billed By Hand On INV-00023");
+    expect(text(html)).toContain("Billed by Hand on INV-00023");
     const b = buttons(html);
     expect(b.map((x) => x.words)).toEqual(["Not Billed After All"]);
     expect(b[0].attrs).toMatch(/\bh-11\b/);

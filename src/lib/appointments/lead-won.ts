@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * STAMP FOLLOWS DEED, THE LEAD TOO (review, 2026-09-25; moved into the one attach door, cn-v1069).
  *
  * A visit booked from a lead that is attached to an existing job has converted that lead exactly as
- * Start The Job would: the job carries the lead (only when it carries none), and the lead is won
+ * Start the Job would: the job carries the lead (only when it carries none), and the lead is won
  * (only when nobody stamped it yet). This used to live in Link To J-0xx Instead alone, so the SAME
  * attach made through the visit's own Connect picker (linkAppointmentTo) left the lead sitting on
  * /leads as "contacted" with its job already on the calendar. Now every road to the attach door

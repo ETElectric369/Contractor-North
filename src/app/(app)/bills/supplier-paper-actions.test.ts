@@ -85,7 +85,7 @@ beforeEach(() => {
   calls = [];
 });
 
-describe("fileSupplierPaper: Put It On J-011, one tap", () => {
+describe("fileSupplierPaper: Put It on J-011, one tap", () => {
   /** Every read and write the happy path makes, in order, per table. */
   const happy = (over: Record<string, any[]> = {}) => ({
     // fileSupplierPaper, setSupplierInvoiceJob, recordSupplierInvoiceAsBill: each checks staff.
@@ -118,7 +118,7 @@ describe("fileSupplierPaper: Put It On J-011, one tap", () => {
     expect(calls.find((c) => c.table === "bills" && c.verb === "insert")?.payload).toMatchObject({ job_id: "j-011", amount: 301.81, org_id: "org-1" });
   });
 
-  it("filing stays as it was, then asks Already Billed On INV-x? when a sent bill on the job could hold it (0357)", async () => {
+  it("filing stays as it was, then asks Already Billed on INV-x? when a sent bill on the job could hold it (0357)", async () => {
     state.client = fakeSupabase(
       happy({
         "jobs.select": [

@@ -146,7 +146,7 @@ describe("the office's files: one queue, one set of rules", () => {
     expect(said["bill.pdf"].tone).toBe("ok");
     expect(said["notes.docx"]).toEqual({
       name: "notes.docx",
-      text: "Not added: Snap Or Note takes PDFs, photos, and a supplier's list or a bank download (Excel, CSV or OFX).",
+      text: "Not added: Snap or Note takes PDFs, photos, and a supplier's list or a bank download (Excel, CSV or OFX).",
       tone: "error",
     });
     expect(said["huge.jpg"].text).toBe("Not added: it is over 15 MB. Save a smaller copy and add it again.");
@@ -371,7 +371,7 @@ describe("notes", () => {
 
   it("the note box has no maxLength: a long paste is never trimmed without a word", () => {
     const html = renderToStaticMarkup(createElement(SnapOrNoteSheet, { isStaff: true, onClose: () => {} }));
-    expect(html).toMatch(/<textarea[^>]*placeholder="Type A Note…"/);
+    expect(html).toMatch(/<textarea[^>]*placeholder="Type a Note…"/);
     expect(html).not.toMatch(/<textarea[^>]*maxlength/i);
   });
 });
@@ -454,7 +454,7 @@ describe("a tech's photo: which job, no read, no amount", () => {
     await sendTechPhoto(id, "j-2");
     expect(lines()[0]).toMatchObject({
       tone: "error",
-      text: "Not sent: didn't upload (Network error). It's waiting above: tap Put It On Smith Panel again when you have a bar or two.",
+      text: "Not sent: didn't upload (Network error). It's waiting above: tap Put It on Smith Panel again when you have a bar or two.",
     });
     expect(lines()[0].text).not.toMatch(/\$|Add Cost/);
     // The picture is still here: a camera photo isn't in his library to pick again.
@@ -463,7 +463,7 @@ describe("a tech's photo: which job, no read, no amount", () => {
     m.captureReceipt.mockRejectedValue(new TypeError("network"));
     await sendTechPhoto(id, "j-2");
     expect(lines()).toHaveLength(1);
-    expect(lines()[0].text).toBe("Not sent: the connection dropped. It's waiting above: tap Put It On Smith Panel again when you have a bar or two.");
+    expect(lines()[0].text).toBe("Not sent: the connection dropped. It's waiting above: tap Put It on Smith Panel again when you have a bar or two.");
     expect(snapStateForTest().pending.map((p) => p.name)).toEqual(["t.jpg"]);
     // And the next try files it, on the same line.
     m.captureReceipt.mockResolvedValue({ kind: "filed", docId: "d-9", tone: "ok", why: "not_asked", sentence: "Filed on the job." });
@@ -482,19 +482,19 @@ describe("a tech's photo: which job, no read, no amount", () => {
 describe("the sheet", () => {
   const sheet = (isStaff: boolean) => renderToStaticMarkup(createElement(SnapOrNoteSheet, { isStaff, onClose: () => {} }));
 
-  it("is titled Snap Or Note, with Take Photo, Choose Files for the office, and a note box with a mic", () => {
+  it("is titled Snap or Note, with Take Photo, Choose Files for the office, and a note box with a mic", () => {
     const html = sheet(true);
-    expect(html).toContain(">Snap Or Note</h2>");
+    expect(html).toContain(">Snap or Note</h2>");
     expect(html).toContain("Take Photo");
     expect(html).toContain("Choose Files");
-    expect(html).toContain('placeholder="Type A Note…"');
-    expect(html).toContain('aria-label="Say A Note"');
+    expect(html).toContain('placeholder="Type a Note…"');
+    expect(html).toContain('aria-label="Say a Note"');
   });
 
   it("a tech's sheet has Take Photo and a note, and no Choose Files", () => {
     const html = sheet(false);
     expect(html).toContain("Take Photo");
-    expect(html).toContain('placeholder="Type A Note…"');
+    expect(html).toContain('placeholder="Type a Note…"');
     expect(html).not.toContain("Choose Files");
     expect(html).not.toMatch(/<input[^>]*multiple/);
   });

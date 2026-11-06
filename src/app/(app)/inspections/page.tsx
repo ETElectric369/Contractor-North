@@ -129,7 +129,7 @@ export default async function InspectionsPage({
   return (
     <div>
       <PageHeader title={t("nv_page_inspections")} description={t("nv_desc_inspections")}>
-        {/* The shared two-mode affordance: Start An Inspection (one tap → capture) or the EXISTING
+        {/* The shared two-mode affordance: Start an Inspection (one tap → capture) or the EXISTING
             appointment flow (Set a Time | Propose Times), preset to the inspection type. */}
         {leadsOn && <NewInspectionButton schedule={scheduleInspection} />}
       </PageHeader>

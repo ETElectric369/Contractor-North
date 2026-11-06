@@ -12,7 +12,7 @@ export const CAL_WINDOW_FWD_DAYS = 400;
 
 /**
  * THE JOBS A SEGMENT IN THE WINDOW NAMES THAT THE JOBS READ DIDN'T BRING. The calendar's jobs read
- * filters on jobs.scheduled_start (the listed span), but a job whose date was cleared (Clear The Date)
+ * filters on jobs.scheduled_start (the listed span), but a job whose date was cleared (Clear the Date)
  * keeps its WORKED days as history segments with no listed span, so that read never returns it: the
  * day it was worked vanished from the calendar while the note said "Kept Sep 22 on the calendar".
  * CalendarPanel reads these ids in a second, by-id pass, so every segment in the window draws.

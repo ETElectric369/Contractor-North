@@ -1,9 +1,9 @@
 import { formatCurrency } from "@/lib/utils";
 
 /**
- * SHOP STOCK, TYPED IN (W1-FU-misc B): a stock purchase with no paper, from Add By Hand's Type It In.
+ * SHOP STOCK, TYPED IN (W1-FU-misc B): a stock purchase with no paper, from Add by Hand's Type It In.
  *
- * Before this, Shop Stock on the typed sheet was a door to Snap Or Note that threw away what was
+ * Before this, Shop Stock on the typed sheet was a door to Snap or Note that threw away what was
  * typed, and a purchase with no ticket had no way in at all (an opening roll is a count, not a
  * purchase: its cost never lands in the month it was bought). Now the sheet saves it the way Snap Or
  * Note's Shop Stock does: a bill with no job, on_shelf, category Shop Stock, with ONE line (the item,

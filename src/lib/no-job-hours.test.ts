@@ -72,7 +72,7 @@ describe("the Needs You line: one rollup, never one row per shift, never gone af
       opts(),
     );
     const item = noJobHoursActionItem({ shifts, hours: 16.43, capped: false, companyCode: "SHOP" });
-    expect(item).toMatchObject({ id: "stray-no-job", kind: "time_stray", title: "Hours On No Job · 2", href: NO_JOB_HOURS_HREF, when: null });
+    expect(item).toMatchObject({ id: "stray-no-job", kind: "time_stray", title: "Hours on No Job · 2", href: NO_JOB_HOURS_HREF, when: null });
     expect(item?.subtitle).toBe("16.4 h from Jul 1 to Sep 11 (Brian, Erik), on no job and no invoice. Put each on its job, or file it as company time.");
     expect(item?.affordances).toEqual(["open"]);
   });
@@ -88,17 +88,17 @@ describe("the Needs You line: one rollup, never one row per shift, never gone af
   it("says 'couldn't check' when the read failed, and nothing when there is nothing", () => {
     expect(noJobHoursActionItem({ shifts: [], hours: 0, capped: false, companyCode: "SHOP" })).toBeNull();
     expect(noJobHoursActionItem(null)).toBeNull();
-    expect(noJobHoursActionItem(null, { failed: true })?.title).toBe("Hours On No Job · Couldn't Check");
+    expect(noJobHoursActionItem(null, { failed: true })?.title).toBe("Hours on No Job · Couldn't Check");
   });
 
   it("a capped read says there may be more", () => {
     const shifts = noJobShiftsFrom([row()], opts());
-    expect(noJobHoursActionItem({ shifts, hours: 8.43, capped: true, companyCode: "SHOP" })?.title).toBe("Hours On No Job · 1+");
+    expect(noJobHoursActionItem({ shifts, hours: 8.43, capped: true, companyCode: "SHOP" })?.title).toBe("Hours on No Job · 1+");
   });
 
   it("a full cap with nothing listable in it is its own line, never null", () => {
     const item = noJobHoursActionItem({ shifts: [], hours: 0, capped: true, companyCode: "SHOP" });
-    expect(item).toMatchObject({ id: "stray-no-job", title: "Hours On No Job · Couldn't List Them All", href: NO_JOB_HOURS_HREF });
+    expect(item).toMatchObject({ id: "stray-no-job", title: "Hours on No Job · Couldn't List Them All", href: NO_JOB_HOURS_HREF });
     expect(item?.subtitle).toContain(`newest ${NO_JOB_READ_CAP}`);
   });
 });

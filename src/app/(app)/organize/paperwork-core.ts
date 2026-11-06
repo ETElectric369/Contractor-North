@@ -42,7 +42,7 @@ import {
 /**
  * THE PARTS OF FILING PAPER THAT MORE THAN ONE DOOR NEEDS (0295).
  *
- * Organize's tray, Snap Or Note's cards on /bills and a receipt read on a job page all write the same
+ * Organize's tray, Snap or Note's cards on /bills and a receipt read on a job page all write the same
  * bill from the same row, so the row-to-bill writer, the line cleaner and the reader's prompt live
  * here once. This is NOT a "use server" module: nothing in it can be called from a browser. The
  * doors that can are in actions.ts and paperwork-actions.ts, and each of them checks who is asking
@@ -377,7 +377,7 @@ export function rematchTray<T extends PaperItem>(items: readonly T[], ctx: MarkC
 }
 
 /**
- * ONE PROMPT FOR ANY PIECE OF PAPER (Organize, Snap Or Note). It reads and classifies; it does
+ * ONE PROMPT FOR ANY PIECE OF PAPER (Organize, Snap or Note). It reads and classifies; it does
  * not decide where anything goes.
  *
  * IT NEVER SEES THE JOB LIST (Erik, 2026-09-24: a model's guess alone never picks a job). The
@@ -464,7 +464,7 @@ export type ReaderOptions = {
   pos?: MarkPo[];
   /** The company's own name and its people's: never a customer or a job name on the paper. */
   selfNames?: string[];
-  /** A person answered "Bill Or Receipt" to "What is this?": it is a cost, whatever the model says. */
+  /** A person answered "Bill or Receipt" to "What is this?": it is a cost, whatever the model says. */
   personSaysCost?: boolean;
 };
 
@@ -729,7 +729,7 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
       "id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id, jobs(job_number, name)",
     ),
     // EVERY OTHER BUSINESS COST WITH NO NUMBER (review of release/v1026): the same shape written by
-    // Add By Hand, or a company's fill-ups loaded by hand from a bank export before the bank
+    // Add by Hand, or a company's fill-ups loaded by hand from a bank export before the bank
     // door, carry no bank_line_id, so the read above never sees them and a pump receipt of the same
     // money filed a second cost. No job, live, no number in either column, in a bucket (or the
     // pre-0362 Gas & Truck). Never names bank_line_id, so it answers before 0363 too.
@@ -934,11 +934,11 @@ export function standingRefusal(st: BillStanding, then: string, nothing: string,
   if (st.setAside.length) {
     const c = st.setAside[0];
     const more = st.setAside.length > 1 ? ` and ${st.setAside.length - 1} more` : "";
-    return `The copy on ${c.label}${more} was set aside as a duplicate of this bill, so taking this one down would make that copy count on its job again. On Bills, under The Same Ticket On Two Jobs, press Change Your Mind first, then ${then}. ${nothing}`;
+    return `The copy on ${c.label}${more} was set aside as a duplicate of this bill, so taking this one down would make that copy count on its job again. On Bills, under The Same Ticket on Two Jobs, press Change Your Mind first, then ${then}. ${nothing}`;
   }
   if (opts.shelf !== false && st.stocked.length) {
     const n = st.stocked.length;
-    return `${n === 1 ? `A line of this receipt (${st.stocked[0]}) is` : `${n} lines of this receipt are`} in shop stock, and that can't go back onto the paper. On Bills, press Take It Out Of Stock on ${n === 1 ? "it" : "them"} first, then ${then}. ${nothing}`;
+    return `${n === 1 ? `A line of this receipt (${st.stocked[0]}) is` : `${n} lines of this receipt are`} in shop stock, and that can't go back onto the paper. On Bills, press Take It Out of Stock on ${n === 1 ? "it" : "them"} first, then ${then}. ${nothing}`;
   }
   return null;
 }
@@ -1007,7 +1007,7 @@ function tableNotThere(err: unknown): boolean {
 
 /**
  * WHAT ELSE STANDS ON A DOCUMENT A FILING MADE, READ BEFORE IT IS DELETED (review of audit v994
- * wave 2, PR4). A photo filed from Organize now lands in the job's own folder, so Show On Portal
+ * wave 2, PR4). A photo filed from Organize now lands in the job's own folder, so Show on Portal
  * takes it and the Panel tab can pick it. Deleting the documents row then took it off the
  * customer's page (job_shared_documents cascades, 0300/0326) and cleared the panel's photo
  * (job_panels.photo_document_id is ON DELETE SET NULL, 0333), with nothing said. So the door
@@ -1046,7 +1046,7 @@ export function isJobFolderPath(path: string | null | undefined, orgId: string |
 /**
  * A PAPER FILED ON A JOB GETS ITS OWN COPY IN THE JOB'S FOLDER (audit v994, PR4). The paper lives
  * in <org>/organize/, which 0213 keeps staff-only: the office saw a panel photo filed to J-047 and
- * the tech on J-047 did not, and Show On Portal refused it as not in the job's folder. The copy
+ * the tech on J-047 did not, and Show on Portal refused it as not in the job's folder. The copy
  * keeps the file's extension (the Photos tab knows a picture by it); the organize original stays
  * for the tray and Undo. Null: the copy didn't land, and the caller says so.
  */
@@ -1191,7 +1191,7 @@ export async function papersAfterBillDeleted(
     all.length
       ? `${all.length === 1 ? `Its paper, "${all[0]}", is` : `${all.length} papers behind it are`} back under Needs You on Bills. If this bill was a duplicate, press Set Aside on ${all.length === 1 ? "that paper" : "them"}; if not, File It again.`
       : "",
-    onJob.length ? `The receipt stays on the job; Record As Cost there makes it a cost again.` : "",
+    onJob.length ? `The receipt stays on the job; Record as Cost there makes it a cost again.` : "",
   ].filter(Boolean);
   return parts.join(" ");
 }

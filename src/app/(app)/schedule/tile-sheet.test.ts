@@ -79,13 +79,13 @@ const text = (html: string) =>
 describe("a job's sheet, for the office", () => {
   const html = render(siskin());
 
-  it("carries the day, the start and the end, the quick lengths, the crew, Open The Job and Clear The Date", () => {
+  it("carries the day, the start and the end, the quick lengths, the crew, Open the Job and Clear the Date", () => {
     expect(html).toMatch(/<input[^>]*type="date"[^>]*value="2026-09-28"/);
     expect(html).toMatch(/<input[^>]*type="time"[^>]*value="10:00"/);
     expect(html).toMatch(/<input[^>]*type="time"[^>]*value="12:00"/);
     for (const chip of ["1h", "2h", "4h", "Full Day"]) expect(html).toMatch(new RegExp(`<button[^>]*>${chip}</button>`));
-    expect(html).toMatch(/<a[^>]*href="\/jobs\/j058"[^>]*>Open The Job<\/a>/);
-    expect(text(html)).toContain("Clear The Date");
+    expect(html).toMatch(/<a[^>]*href="\/jobs\/j058"[^>]*>Open the Job<\/a>/);
+    expect(text(html)).toContain("Clear the Date");
     expect(text(html)).toContain("Move");
   });
 
@@ -128,14 +128,14 @@ describe("a job's sheet, for the office", () => {
 describe("a visit's sheet", () => {
   const html = render(visit);
 
-  it("the same time controls, who's going as one person, Open The Visit and Clear The Date", () => {
+  it("the same time controls, who's going as one person, Open the Visit and Clear the Date", () => {
     expect(html).toMatch(/<input[^>]*type="time"[^>]*value="09:00"/);
     expect(html).toMatch(/<input[^>]*type="time"[^>]*value="10:00"/);
     expect(text(html)).toContain("Who's Going");
     expect(html).toMatch(/<button[^>]*aria-pressed="true"[^>]*border-dashed[^>]*>Nobody<\/button>/);
     expect(html).toMatch(/<button[^>]*aria-label="Brian Cole"[^>]*>BC<\/button>/);
-    expect(html).toMatch(/<a[^>]*href="\/appointments\/v1"[^>]*>Open The Visit<\/a>/);
-    expect(text(html)).toContain("Clear The Date");
+    expect(html).toMatch(/<a[^>]*href="\/appointments\/v1"[^>]*>Open the Visit<\/a>/);
+    expect(text(html)).toContain("Clear the Date");
     expect(text(html)).toContain("9:00 AM – 10:00 AM · 1 hour — change it");
   });
 
@@ -150,7 +150,7 @@ describe("a visit's sheet", () => {
       visit: { id: "v3", title: "Inspection: Rich Siskin", status: "scheduled", starts_at: at("2026-09-28", "10:00")!, ends_at: at("2026-09-30", "18:00"), assigned_to: null },
     };
     const office = render(span);
-    expect(text(office)).toContain("Starts 10:00 AM · ends 6:00 PM Wed, Sep 30. One visit over several days; Open The Visit changes its end.");
+    expect(text(office)).toContain("Starts 10:00 AM · ends 6:00 PM Wed, Sep 30. One visit over several days; Open the Visit changes its end.");
     expect(text(office)).not.toContain("each day");
     expect(office).toMatch(/aria-label="Start time"/);
     expect(office).not.toMatch(/aria-label="End time"/);
@@ -178,7 +178,7 @@ describe("staff only: the crew reads it, with nothing to tap", () => {
     expect(text(html)).toContain("10:00 AM – 12:00 PM · 2 hours — change it");
     expect(html).toMatch(/aria-label="Erik Taylor"[^>]*>ET</);
     expect(html).toMatch(/href="\/jobs\/j058"/);
-    expect(text(html)).not.toContain("Clear The Date");
+    expect(text(html)).not.toContain("Clear the Date");
   });
 
   it("the schedule opens the sheet only for the office; every writer behind it asks requireStaff", () => {
@@ -300,11 +300,11 @@ describe("a worked day kept as history, tapped", () => {
   it("with no plan left: no time to set and nothing to clear, and Move gives it a day", () => {
     const t = text(render(history({ scheduled_start: null, scheduled_end: null })));
     expect(t).toContain("No day is planned yet: Move gives it one.");
-    expect(t).not.toContain("Clear The Date");
+    expect(t).not.toContain("Clear the Date");
   });
 });
 
-describe("the calendar draws a cleared job's worked day (Clear The Date keeps it there)", () => {
+describe("the calendar draws a cleared job's worked day (Clear the Date keeps it there)", () => {
   it("names the jobs a window segment points at that the listed-span read didn't bring", () => {
     expect(
       segmentJobsNotLoaded(["a"], [
@@ -403,7 +403,7 @@ describe("This Day: the tile's time is the tapped day's, once a day can keep its
     expect(html).toMatch(/<input[^>]*type="time"[^>]*value="17:00"/);
     for (const chip of ["1h", "2h", "4h", "Full Day"]) expect(html).toMatch(new RegExp(`<button[^>]*>${chip}</button>`));
     expect(t).toContain("12:00 PM – 5:00 PM · 5 hours");
-    expect(html).toMatch(/<button[^>]*>Use The Job&#x27;s Usual Hours<\/button>/);
+    expect(html).toMatch(/<button[^>]*>Use the Job&#x27;s Usual Hours<\/button>/);
     for (const d of doors(html)) expect(d, d).toMatch(/\b(min-)?h-11\b/);
   });
 
@@ -504,17 +504,17 @@ describe("a ghost, in the one sheet (SV-ghost: work nobody booked)", () => {
     ghost: { jobId: "j11", name: "22 Honeysuckle Way", jobNumber: "J-011", customer: "Kim Hale", people },
   };
 
-  it("who worked it, as a track and in words, and the two doors: Book This Day and Open The Job", () => {
+  it("who worked it, as a track and in words, and the two doors: Book This Day and Open the Job", () => {
     const html = render(ghost);
     const t = text(html);
     expect(t).toContain("Brian 11:04 AM–1:46 PM · Erik 12:30–5:30 PM. Nothing was booked this day.");
     expect(t).toContain("J-011");
     expect(html).toMatch(/<button[^>]*>(?:<svg[\s\S]*?<\/svg>)?\s*Book This Day<\/button>/);
-    expect(html).toMatch(/<a[^>]*href="\/jobs\/j11"[^>]*>Open The Job<\/a>/);
+    expect(html).toMatch(/<a[^>]*href="\/jobs\/j11"[^>]*>Open the Job<\/a>/);
     for (const d of doors(html)) expect(d, d).toMatch(/\b(min-)?h-11\b/);
-    // Never a time box, a day box or Clear The Date: a ghost is not a booking.
+    // Never a time box, a day box or Clear the Date: a ghost is not a booking.
     expect(html).not.toContain("<input");
-    expect(t).not.toContain("Clear The Date");
+    expect(t).not.toContain("Clear the Date");
   });
 
   it("the crew (no office) can read it and open the job, with nothing to book", () => {
@@ -552,7 +552,7 @@ describe("a ghost, in the one sheet (SV-ghost: work nobody booked)", () => {
     expect(t).toContain("22 Honeysuckle Way · Kim Hale — Brian 11:04 AM–1:46 PM · Erik 12:30–5:30 PM");
     expect(html).toContain("border-2 border-dashed border-slate-400");
     expect(t).toContain("Book This Day");
-    expect(t).toContain("Open The Job");
+    expect(t).toContain("Open the Job");
     for (const d of doors(html)) expect(d, d).toMatch(/\b(min-)?h-11\b/);
   });
 
@@ -561,7 +561,7 @@ describe("a ghost, in the one sheet (SV-ghost: work nobody booked)", () => {
     const row = renderToStaticMarkup(createElement(GhostRow, { day: "2026-09-25", ghost: g, canEdit: true, today: true }));
     expect(text(row)).not.toContain("Book This Day");
     expect(text(row)).toContain("Book it once the day is done.");
-    expect(row).toMatch(/<a[^>]*href="\/jobs\/j11"[^>]*>Open The Job<\/a>/);
+    expect(row).toMatch(/<a[^>]*href="\/jobs\/j11"[^>]*>Open the Job<\/a>/);
     const body = renderToStaticMarkup(createElement(GhostSheetBody, { day: "2026-09-25", ghost: g, today: true, canEdit: true, onClose: () => {} }));
     expect(text(body)).toContain("Nothing is booked for today.");
     expect(text(body)).not.toContain("Book This Day");

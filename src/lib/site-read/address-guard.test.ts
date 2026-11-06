@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { blockedAddress, blockedHostname, parseIPv6 } from "./address-guard";
 
-// Fill From Their Site reads a page at an address a person pasted. These are the addresses the
+// Fill from Their Site reads a page at an address a person pasted. These are the addresses the
 // server must never reach on anyone's behalf, IPv4 and IPv6, and the public ones it may.
 describe("blockedAddress", () => {
   it.each([

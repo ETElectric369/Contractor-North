@@ -74,8 +74,8 @@ function useCount(v: Pending<number | null> | undefined): number | null {
  * (lib/dock inMenu), landing where visibleDock lands THIS person — Team for staff, Compliance for a
  * tech (Forms with Licenses off) — and Tools only with Calculators on.
  *
- * AND, WITH NORT OFF, HELP (W1-09): the setup rows that sit under Search Or Ask while Nort is on
- * (Start Here, Finish Setting Up, Show Me How, Take The Setup Again — lib/onboarding/help-rows),
+ * AND, WITH NORT OFF, HELP (W1-09): the setup rows that sit under Search or Ask while Nort is on
+ * (Start Here, Finish Setting Up, Show Me How, Take the Setup Again — lib/onboarding/help-rows),
  * for staff. Start Here opens the questions (the tour is Nort talking). The avatar carries the
  * setup dot then, because this is the door that holds them.
  *
@@ -131,7 +131,7 @@ export function AccountMenu({
   const words = asLang(lang);
   // The sections the dock keeps behind the initials, for THIS person and these switches.
   const inMenu = menuSections(visibleDock({ isStaff, features, lapsed }));
-  // Nort on, these rows live under Search Or Ask instead (command-bar.tsx); techs have none. A
+  // Nort on, these rows live under Search or Ask instead (command-bar.tsx); techs have none. A
   // lapsed company's Nort is paused, so its lessons are not offered either.
   const help = featureOn(features, "nort") || lapsed ? [] : helpRows({ isStaff, onboarded, setup, nortOn: false, features, t });
   const bugs = useCount(platformAdmin ? bugCount : null);

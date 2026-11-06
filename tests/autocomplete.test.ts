@@ -7,7 +7,7 @@ import ts from "typescript";
 import { Input } from "@/components/ui/input";
 
 /**
- * NO FIELD IS A LOGIN BY ACCIDENT (2026-11-04: clicking My Day's "Add A Reminder Or Task…" box made
+ * NO FIELD IS A LOGIN BY ACCIDENT (2026-11-04: clicking My Day's "Add a Reminder or Task…" box made
  * macOS Safari open its Passwords panel). Safari guesses "username" for a text field that declares
  * nothing (no type, name, id or autocomplete) — the lone box in a form-less group is the classic
  * case — and a field named/id'd like a login (email, name, user…) is guessed at the same way.

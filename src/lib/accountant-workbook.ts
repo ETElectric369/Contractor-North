@@ -311,7 +311,7 @@ export type AccountantWorkbookInput = {
    *  amount_paid, due_date, customers(name). */
   arInvoices: any[];
   /** EVERY invoice made in the period, drafts and voids included (ACCOUNTANT_PERIOD_INVOICE_COLS).
-   *  ONE read: the Invoices Made In This Period list and the Sales Tax rows are both built from it, so
+   *  ONE read: the Invoices Made in This Period list and the Sales Tax rows are both built from it, so
    *  their tax figures cannot drift, and the list exists whether Sales Tax is switched on or off. */
   periodInvoices: any[];
   /** Null when Sales Tax is switched off; otherwise the company's named rates. The invoices the rows
@@ -674,7 +674,7 @@ function summaryTab(
     rows.push(line("Owner Hours (Not Pay)", ...(byMonth ? cur.months.map(hours) : []), hours(cur.totals), hours(prev.totals), round2(cur.totals.ownerHours - prev.totals.ownerHours)));
     rows.push(
       line(
-        "Owner Hours On Jobs",
+        "Owner Hours on Jobs",
         ...(byMonth ? cur.months.map(onSite) : []),
         onSite(cur.totals),
         onSite(prev.totals),
@@ -683,7 +683,7 @@ function summaryTab(
     );
     rows.push(
       line(
-        "Owner Hours In The Office (Overhead)",
+        "Owner Hours in the Office (Overhead)",
         ...(byMonth ? cur.months.map(office) : []),
         office(cur.totals),
         office(prev.totals),
@@ -697,10 +697,10 @@ function summaryTab(
     rows.push(note(OWNER_HIDDEN_NOTE));
   }
 
-  rows.push(blank(), head(`Open As Of ${input.todayYmd}`, "Amount"));
+  rows.push(blank(), head(`Open as of ${input.todayYmd}`, "Amount"));
   rows.push(line("Customers Owe You", money(open.customersCents)));
   rows.push(line("Suppliers Say You Owe", money(open.suppliersCents)));
-  if (stock) rows.push(line(`In Stock At The End Of ${through}`, money(cents(stock.total ?? 0))));
+  if (stock) rows.push(line(`In Stock at the End of ${through}`, money(cents(stock.total ?? 0))));
 
   rows.push(blank());
   if (showOwner) rows.push(note(BEFORE_TAX_NOTE));
@@ -821,28 +821,28 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
   // BY CUSTOMER (computeCustomerValue), BY JOB (job profit's cash rule), BY METHOD.
   const names = new Map<string, string>();
   for (const p of pays) if (p.invoices?.customer_id) names.set(String(p.invoices.customer_id), String(p.invoices?.customers?.name ?? "") || "A customer");
-  rows.push(blank(), title("Payments By Customer"), head("Customer", "Received"));
+  rows.push(blank(), title("Payments by Customer"), head("Customer", "Received"));
   let byCustomer = 0;
   for (const c of computeCustomerValue(pays, new Map(), names)) {
     byCustomer += cents(c.collected);
     rows.push(line(c.customer, money(cents(c.collected))));
   }
-  if (paymentsCents - byCustomer) rows.push(line("No Customer On The Invoice", money(paymentsCents - byCustomer)));
+  if (paymentsCents - byCustomer) rows.push(line("No Customer on the Invoice", money(paymentsCents - byCustomer)));
   rows.push(beforeTotals());
   rows.push(total("Total", money(paymentsCents)));
 
-  rows.push(blank(), title("Payments By Job"), head("Job Number", "Job", "Received"));
+  rows.push(blank(), title("Payments by Job"), head("Job Number", "Job", "Received"));
   let byJob = 0;
   const jobRows = [...collectedByJob(pays).entries()].map(([id, amt]) => ({ j: jobOf(id), c: cents(amt) })).sort((a, b) => b.c - a.c);
   for (const r of jobRows) {
     byJob += r.c;
     rows.push(line(r.j?.job_number ?? null, r.j?.name ?? "A job", money(r.c)));
   }
-  if (paymentsCents - byJob) rows.push(line(null, "No Job On The Invoice", money(paymentsCents - byJob)));
+  if (paymentsCents - byJob) rows.push(line(null, "No Job on the Invoice", money(paymentsCents - byJob)));
   rows.push(beforeTotals());
   rows.push(total("Total", null, money(paymentsCents)));
 
-  rows.push(blank(), title("Payments By Method"), head("Method", "Received"));
+  rows.push(blank(), title("Payments by Method"), head("Method", "Received"));
   const byMethod = new Map<string, any[]>();
   for (const p of pays) {
     const k = methodLabel(p.method);
@@ -867,10 +867,10 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
   // ONE READ FEEDS THIS LIST AND THE SALES TAX ROWS BELOW IT, so the two tie by construction rather
   // than by two reads happening to agree - and the list is here whether Sales Tax is on or off.
   const periodInvoices = (input.periodInvoices ?? []).filter((i) => i?.created_at && inPeriod(i.created_at));
-  rows.push(blank(), title("Invoices Made In This Period"));
+  rows.push(blank(), title("Invoices Made in This Period"));
   rows.push(
     note(
-      "Billed basis: each invoice on the day it was made, not the day it was paid — a different count from the payments above, which are cash. Drafts and voided invoices are listed and marked, are in no Total, and are owed nothing: a draft hasn't been sent and a void isn't a bill. Paid To Date and Still Owed To Date are rolled up to the day this was downloaded, not to the end of the period.",
+      "Billed basis: each invoice on the day it was made, not the day it was paid — a different count from the payments above, which are cash. Drafts and voided invoices are listed and marked, are in no Total, and are owed nothing: a draft hasn't been sent and a void isn't a bill. Paid to Date and Still Owed to Date are rolled up to the day this was downloaded, not to the end of the period.",
     ),
   );
   // DATE MADE, CUSTOMER, INVOICE, JOB NUMBER, JOB — the SAME first five columns, in the same order, as
@@ -881,7 +881,7 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
   // cut off at the column edge — in the one list that exists to be filtered by customer and by job —
   // while the same two names fitted in the list above. Nothing here wraps and the cell to the right is
   // always filled. Kind and Status follow, where no column of the list above needs the room.
-  rows.push(head("Date Made", "Customer", "Invoice", "Job Number", "Job", "Kind", "Status", "Subtotal", "Rate (%)", "Tax", "Total", "Paid To Date", "Still Owed To Date", "Due Date", "Note"));
+  rows.push(head("Date Made", "Customer", "Invoice", "Job Number", "Job", "Kind", "Status", "Subtotal", "Rate (%)", "Tax", "Total", "Paid to Date", "Still Owed to Date", "Due Date", "Note"));
   const madeRows: { at: string; row: Row }[] = [];
   const made = { subtotal: 0, tax: 0, total: 0, paid: 0, owed: 0, counted: 0, uncounted: 0 };
   for (const i of periodInvoices) {
@@ -898,7 +898,7 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
     //
     // The cell used to be invoiceBalance for EVERY status, with only the Total row leaving a draft or a
     // void out. A void keeps its stored total (setInvoiceStatus writes `status` alone), so a voided
-    // $5,000 invoice with nothing paid printed "Still Owed To Date $5,000.00" on a row the Total already
+    // $5,000 invoice with nothing paid printed "Still Owed to Date $5,000.00" on a row the Total already
     // excluded — one invoice with two answers in the one file whose job is to let an accountant
     // reconcile them, and a filter on this column handing back receivables Open's Customers Owe You and
     // the Summary's figure do not have. invoice-amount.ts fixed this same fault on screen already: "$X
@@ -968,7 +968,7 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
     rows.push(total("Total", null, s.rows.reduce((n, r) => n + r.count, 0), money(cents(s.totalTaxable)), money(cents(s.totalTax))));
     rows.push(note("Taxable counts only invoices that carry a rate above 0%."));
     // Never expected (one read, one filter), and never silent if it happens.
-    if (cents(s.totalTax) !== made.tax) rows.push(note("The tax here doesn't add up to the Tax column of Invoices Made In This Period, though both read the same invoices."));
+    if (cents(s.totalTax) !== made.tax) rows.push(note("The tax here doesn't add up to the Tax column of Invoices Made in This Period, though both read the same invoices."));
   }
   // ONE WIDTH PER COLUMN FOR THE WHOLE SHEET, so every list on it has to agree about what each column
   // letter holds. Nothing here wraps or auto-fits (xlsx-write.ts writes the widths literally), and a
@@ -1074,7 +1074,7 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
 
   // THE TOTALS, ROW FOR ROW WITH THE SUMMARY, UNDER THE SAME TWO HEADINGS (the profit and loss's own
   // lines, profit-and-loss.ts). Crew pay and mileage are COGS too, but their rows are on People.
-  rows.push(blank(), title("Totals By Where It Goes"), head("Goes To", "Amount"));
+  rows.push(blank(), title("Totals by Where It Goes"), head("Goes To", "Amount"));
   let all = 0;
   for (const l of pnlLines()) {
     if (l.kind === "heading") {
@@ -1106,7 +1106,7 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
 
   // WHAT WAS SENT TO EACH SUPPLIER (supplierBalance over the period's payments).
   const periodPayments = (inp.supplierPayments ?? []).filter((p) => months.has(String(p?.paid_on ?? "").slice(0, 7)));
-  rows.push(blank(), title("Paid To Suppliers"), note("What was sent to each supplier account in the period, voided payments left out. Bills count on their own dates above; a payment is not a second cost."));
+  rows.push(blank(), title("Paid to Suppliers"), note("What was sent to each supplier account in the period, voided payments left out. Bills count on their own dates above; a payment is not a second cost."));
   rows.push(head("Supplier", "Payments", "Paid"));
   let paid = 0;
   let any = false;
@@ -1125,11 +1125,11 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
   // ALL the data available to be itemized"). The rollup above says "Northline Supply · 1 · $500"; this
   // is the $500, on its day, by its method. A voided payment is listed and marked, as a payment on a
   // voided invoice is on Income, so the figure above can be checked and nothing is quietly dropped.
-  rows.push(blank(), title("Each Payment To A Supplier"), note("Every payment that made up the figures above, voided ones marked. They add up to the same Total."));
+  rows.push(blank(), title("Each Payment to a Supplier"), note("Every payment that made up the figures above, voided ones marked. They add up to the same Total."));
   // CHECK OR REFERENCE, by the name People's Each Payment Handed Over already gives it: 0270 calls the
   // column "Check number, confirmation code, whatever he can match to his bank". It was never read, so
   // the one list an accountant reconciles a bank statement against was the one list without it.
-  rows.push(head("Date", "Supplier", "Method", "Amount", "Note", "Check Or Reference", "Memo"));
+  rows.push(head("Date", "Supplier", "Method", "Amount", "Note", "Check or Reference", "Memo"));
   let paidEach = 0;
   const payRows = [...periodPayments].sort(
     (a, b) => String(a?.paid_on).localeCompare(String(b?.paid_on)) || String(a?.id ?? "").localeCompare(String(b?.id ?? "")),
@@ -1153,15 +1153,15 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
   rows.push(beforeTotals());
   rows.push(total("Total", null, null, money(paidEach)));
   // Never expected (both are the same rows), and never silent if it happens.
-  if (paidEach !== paid) rows.push(note("These payments don't add up to Paid To Suppliers above; the figure above is the one /bills shows."));
+  if (paidEach !== paid) rows.push(note("These payments don't add up to Paid to Suppliers above; the figure above is the one /bills shows."));
 
   // TOOLS: already inside the costs above; listed so the accountant can tell them apart.
   const days = { from: input.period.start, to: through };
-  rows.push(blank(), title("Tools The Company Kept"), note("Already counted above. Listed so tools can be told apart: depreciation is your accountant's call."));
+  rows.push(blank(), title("Tools the Company Kept"), note("Already counted above. Listed so tools can be told apart: depreciation is your accountant's call."));
   const kept = toolsList(lists, days, tz);
   if (kept.rows.length) rows.push(...tableRows(kept, [4], [0]));
   else rows.push(note("None in this period."));
-  rows.push(blank(), title("Tools Billed To Customer"), note("Tools on a job's receipt that the customer was billed for, at cost. The customer paid for these; they are not the company's."));
+  rows.push(blank(), title("Tools Billed to Customer"), note("Tools on a job's receipt that the customer was billed for, at cost. The customer paid for these; they are not the company's."));
   const billedAll = toolsBilledList(lists, tz);
   const billed: CsvTable = { header: billedAll.header, rows: billedAll.rows.filter((r) => typeof r[0] === "string" && r[0] >= days.from && r[0] <= days.to) };
   if (billed.rows.length) rows.push(...tableRows(billed, [5], [0]));
@@ -1172,7 +1172,7 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
   // itemized the paper — what it was, how many, at what price, what it was filed as, whether the
   // customer was billed for it and whether the container went on the shelf. Nothing new is read: these
   // are the receipt's own lines, the same ones the Materials tab and the Tools lists work from.
-  rows.push(blank(), title("Every Line On Every Ticket"));
+  rows.push(blank(), title("Every Line on Every Ticket"));
   rows.push(note("The lines of each ticket counted above, in the order they were entered. Already counted: a ticket's own total is its row at the top of this tab, not these lines added again."));
   rows.push(head("Date", "Supplier", "Bill Number", "Job Number", "Job", "Filed As", "Amount", "What", "Quantity", "Unit Price", "Billable", "Part Billed", "Into Stock"));
   /** A line whose container went onto the shelf: a stock lot points at it (0303's bill_line_id). */
@@ -1225,7 +1225,7 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
   }
   if (!listed) rows.push(note("No ticket in this period was entered line by line."));
   rows.push(beforeTotals());
-  rows.push(total("Total Of The Lines", null, null, null, null, null, money(lineCents)));
+  rows.push(total("Total of the Lines", null, null, null, null, null, money(lineCents)));
   rows.push(note("Part Billed is the dollars of a line this job took when only part of it was the customer's; blank means the whole line."));
   // THE GAP, SAID. A ticket is counted by its own total, so the lines are never added up instead of it
   // — and a ticket entered as a total only, or one whose lines don't cover it, leaves a difference
@@ -1238,7 +1238,7 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
         " A ticket is always counted by its own total, never by adding its lines.",
     ),
   );
-  // Thirteen columns is the widest list on this tab (Every Line On Every Ticket); the cost list's three
+  // Thirteen columns is the widest list on this tab (Every Line on Every Ticket); the cost list's three
   // new ones share 9-11 with it, so each width is the wider of the two things that land in that column.
   return { name: "Costs", rows, widths: [12, 30, 14, 12, 28, 26, 13, 44, 15, 26, 30, 13, 11] };
 }
@@ -1282,7 +1282,7 @@ function peopleTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
         ]
       : []),
     blank(),
-    head("Person", "Paid By", "Hours", "Earned", "Paid In Period", `Still Owed (${todayYmd})`, `Paid In ${year} Through ${through}`, "Miles Logged", "Miles Past Daily Commute", "Mileage Settled", "Note"),
+    head("Person", "Paid By", "Hours", "Earned", "Paid in Period", `Still Owed (${todayYmd})`, `Paid in ${year} Through ${through}`, "Miles Logged", "Miles Past Daily Commute", "Mileage Settled", "Note"),
   ];
   const crewRows: Row[] = [];
   const ownerRows: Row[] = [];
@@ -1363,7 +1363,7 @@ function peopleTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
 
     // EVERY PAYMENT HANDED TO THIS PERSON in the period — the pay and the mileage settlements, each on
     // its own day, with its method and its check or transfer number. This is the list a 1099-NEC is
-    // filed from; the per-person "Paid In Period" above is its total. Voided payments are listed and
+    // filed from; the per-person "Paid in Period" above is its total. Voided payments are listed and
     // marked (the figures above leave them out), so the total can be checked.
     for (const p of s.payments) {
       if (!months.has(p.paidOn.slice(0, 7))) continue;
@@ -1430,7 +1430,7 @@ function peopleTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
 
   rows.push(blank(), title("Each Payment Handed Over"));
   rows.push(note("Every payment in the period, on its own day: pay, and mileage a person was settled for. Voided ones are listed and marked, and are in neither Total."));
-  rows.push(head("Date", "Person", "Kind", "Method", "Check Or Reference", "Amount", "Note"));
+  rows.push(head("Date", "Person", "Kind", "Method", "Check or Reference", "Amount", "Note"));
   personPayRows.sort((a, b) => a.at.localeCompare(b.at));
   if (!personPayRows.length) rows.push(note("Nothing was handed over in this period."));
   rows.push(...personPayRows.map((d) => d.row));
@@ -1481,7 +1481,7 @@ function peopleTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
  */
 function ownerEquityRows(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<string>): Row[] {
   const { money: inp, showOwner } = input;
-  const rows: Row[] = [blank(), title(`${DRAW_LABEL} And ${PNL_WORDS.ownerMoneyIn}`)];
+  const rows: Row[] = [blank(), title(`${DRAW_LABEL} and ${PNL_WORDS.ownerMoneyIn}`)];
   rows.push(
     note(
       `Equity, not income and not a cost: these are the rows behind the two lines below ${PNL_WORDS.netProfit} on the Summary, and neither is added to or subtracted from it. Amounts are positive in both directions; Direction says which way the money went.`,
@@ -1611,7 +1611,7 @@ function openFigures(input: AccountantWorkbookInput): OpenFigures {
 function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
   const day = input.todayYmd;
   const rows: Row[] = [
-    title(`Open As Of ${day}`),
+    title(`Open as of ${day}`),
     note(`What customers owe and what suppliers say is owed on ${day}, the day this was downloaded, not at the end of ${input.period.label}.`),
     blank(),
     title("Customers Owe You"),
@@ -1628,7 +1628,7 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
   // made in August is in no cell of a Q2 file.
   rows.push(
     note(
-      `Drafts aren't counted: they haven't been sent. For an invoice made inside ${input.period.label}, when it was made, what kind it is and what tax it carried are on Income, under Invoices Made In This Period; one made before or after the period isn't in that list, and this row is all the file has on it.`,
+      `Drafts aren't counted: they haven't been sent. For an invoice made inside ${input.period.label}, when it was made, what kind it is and what tax it carried are on Income, under Invoices Made in This Period; one made before or after the period isn't in that list, and this row is all the file has on it.`,
     ),
   );
   rows.push(blank(), title("Suppliers Say You Owe"), head("Supplier", "Owed", "How North Knows"));
@@ -1744,7 +1744,7 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
   }
 
   if (open.ahead.length) {
-    rows.push(blank(), title("Paid Ahead (Credit With The Supplier)"), head("Supplier", "Credit"));
+    rows.push(blank(), title("Paid Ahead (Credit with the Supplier)"), head("Supplier", "Credit"));
     for (const a of open.ahead) rows.push(line(a.name, money(a.cents)));
     rows.push(note("Paid ahead of the bills North has: the extra sits on that supplier's account and isn't taken off what the others are owed."));
   }
@@ -1756,7 +1756,7 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
 // ── Stock ────────────────────────────────────────────────────────────────────
 
 function stockTab(input: AccountantWorkbookInput, stock: CsvTable | null, through: string): XlsxSheet {
-  const rows: Row[] = [title(`In Stock At The End Of ${through}`)];
+  const rows: Row[] = [title(`In Stock at the End of ${through}`)];
   if (!stock) {
     rows.push(note("Shop Stock isn't set up in this database, so nothing is listed."));
     return { name: "Stock", rows, widths: [40] };
@@ -1787,7 +1787,7 @@ export function workbookXlsx(wb: AccountantWorkbook, opts: { deflate?: DeflateRa
   return buildXlsx(wb.tabs, opts);
 }
 
-/** "Same Thing As CSV Files": a .zip with one CSV per tab, named by the tab. */
+/** "Same Thing as CSV Files": a .zip with one CSV per tab, named by the tab. */
 export function workbookCsvZip(wb: AccountantWorkbook, opts: { deflate?: DeflateRaw; modified?: Date } = {}): Uint8Array {
   return buildZip(
     wb.tabs.map((t) => ({ name: `${t.name}.csv`, data: tabCsv(t) })),

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// BUG REPORTS ARE NORTH'S, NOT A COMPANY'S (Wave 0). Every company files (Report A Problem, Nort's
+// BUG REPORTS ARE NORTH'S, NOT A COMPANY'S (Wave 0). Every company files (Report a Problem, Nort's
 // bug.report); only a platform admin (0176) reads the list or marks one fixed, and another
 // company's report is marked through platform_set_bug_status (0354), because 0176's WITH CHECK
 // keeps a direct write in the admin's own org.
@@ -83,12 +83,12 @@ describe("a platform admin marks any company's report", () => {
 describe("where the bug doors are", () => {
   const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
-  it("Report A Problem mounts for everyone; its list and Mark Fixed are the platform admin's", () => {
+  it("Report a Problem mounts for everyone; its list and Mark Fixed are the platform admin's", () => {
     const layout = src("src/app/(app)/layout.tsx");
     expect(layout).not.toContain("isStaff && <BugReporter");
     expect(layout).toContain("<BugReporter orgId={profile.org_id} platformAdmin={platformAdmin} />");
     const reporter = src("src/components/bug-reporter.tsx");
-    expect(reporter).toContain('title="Report A Problem"');
+    expect(reporter).toContain('title="Report a Problem"');
     expect(reporter).toContain("{platformAdmin && reports.length > 0 && (");
   });
 

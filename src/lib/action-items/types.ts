@@ -34,7 +34,7 @@
 import type { SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
 
 export type ActionKind =
-  | "job_to_schedule" // a job with nothing ahead of it: no day, no segment, no visit, nobody on it (Jobs Needing A Day)
+  | "job_to_schedule" // a job with nothing ahead of it: no day, no segment, no visit, nobody on it (Jobs Needing a Day)
   | "inquiry" // a new/uncontacted lead
   | "appointment" // a scheduled appt awaiting completion
   | "inspection_writeup" // an inspection that HAPPENED and has no estimate yet — the visit is spent, the money is not
@@ -57,12 +57,12 @@ export type ActionKind =
   // ONE rolled-up item ("Supplier Bills · 11") carrying a card per supplier paper that needs a
   // person. A rollup, never one item per paper: that is how it badges +1 (the invariant above).
   | "supplier_paper"
-  // "Pay CED $5,174.62 By Oct 10 · Saves $35.50 on 7 invoices": one per supplier account whose own
+  // "Pay CED $5,174.62 by Oct 10 · Saves $35.50 on 7 invoices": one per supplier account whose own
   // open documents carry a live prompt-pay discount due within two weeks. Dated by that deadline and
   // gone once it passes (supplier-pay-due.ts), so it badges honestly: a decision with an expiry.
   | "supplier_pay"
   // A receipt or bill photo on a job that no bill, supplier document or petty cash accounts for (a
-  // crew member's photo from Snap Or Note, or a staff snap whose read failed): lib/job-photos' own rule.
+  // crew member's photo from Snap or Note, or a staff snap whose read failed): lib/job-photos' own rule.
   | "receipt_unbilled"
   // A time-and-materials job in progress whose customer has not been told where it stands since the
   // first clocked day closed (lib/report-back): "Tell Dana Where It Stands · 6h in · guess was 8h".
@@ -176,7 +176,7 @@ export interface ActionItem {
   href: string; // deep link for Open
   affordances: Affordance[]; // canonical verbs valid for THIS item
   /** THE ROW'S CHIP, when this row's state has its own words (W1-15): "Billed, Not Paid" on a visit
-   *  whose invoice is open, "Clock Left Running", "On No Job", "Note To Review", "Bank Download",
+   *  whose invoice is open, "Clock Left Running", "On No Job", "Note to Review", "Bank Download",
    *  "Request" with Leads off. Absent: the kind's own chip (KIND_META). */
   chip?: string;
   /** supplier_paper only: the cards the rollup carries, and the jobs their pickers offer. */
@@ -277,7 +277,7 @@ export interface PileInfo {
   capped: boolean;
   /** The pile's list page, when it has one. */
   listHref: string | null;
-  /** "See All On Estimates": the link that stands in for the unfold when not every row is here. */
+  /** "See All on Estimates": the link that stands in for the unfold when not every row is here. */
   listLabel: string | null;
   /** The pile's verb, the words on its button (it opens the pile): "Send It". */
   verb: string;
@@ -331,22 +331,22 @@ export function waitingForViewer(rows: WaitingItem[], isStaff: boolean): Waiting
  * its own says them instead (ActionItem.chip). The tones are the ones each kind always had.
  */
 export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blue" | "amber" | "green" }> = {
-  job_to_schedule: { label: "Needs A Day", tone: "amber" },
+  job_to_schedule: { label: "Needs a Day", tone: "amber" },
   inquiry: { label: "Lead", tone: "green" },
   appointment: { label: "Not Closed Out", tone: "blue" },
-  inspection_writeup: { label: "Needs An Estimate", tone: "green" },
+  inspection_writeup: { label: "Needs an Estimate", tone: "green" },
   // Row override: "Billed, Not Paid" when an open invoice anchors the visit (query.ts).
   visit_unbilled: { label: "Done, Not Billed", tone: "green" },
   quote_draft: { label: "Not Sent", tone: "green" },
-  // Row overrides: "Note To Review" for a note, "Bank Download" for a bank download (query.ts).
-  organize: { label: "Paper To Sort", tone: "slate" },
+  // Row overrides: "Note to Review" for a note, "Bank Download" for a bank download (query.ts).
+  organize: { label: "Paper to Sort", tone: "slate" },
   invoice_overdue: { label: "Past Due", tone: "amber" },
   quote_awaiting: { label: "No Reply Yet", tone: "green" },
   quote_accepted: { label: "Won", tone: "green" },
   invoice_draft: { label: "Not Sent", tone: "slate" },
   lien_deadline: { label: "Lien Deadline", tone: "amber" },
   contract_unsigned: { label: "Not Signed", tone: "blue" },
-  // Hours On No Job and a closed shift on no job; a clock still running says "Clock Left Running".
+  // Hours on No Job and a closed shift on no job; a clock still running says "Clock Left Running".
   time_stray: { label: "On No Job", tone: "amber" },
   job_unbilled_work: { label: "No Costs Yet", tone: "amber" },
   // Deliberately NOT "No Costs Yet" (job_unbilled_work = nothing captured yet);
@@ -357,7 +357,7 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   stock_short: { label: "To Settle", tone: "amber" },
   supplier_paper: { label: "To File", tone: "amber" },
   supplier_pay: { label: "Discount Ends", tone: "green" },
-  receipt_unbilled: { label: "Not On A Bill", tone: "amber" },
+  receipt_unbilled: { label: "Not on a Bill", tone: "amber" },
   // Row overrides say which: To Book, Not Written Up, Failed, Cancelled (permit-inspection-items).
   permit_inspection: { label: "Permit Inspection", tone: "amber" },
   job_report_back: { label: "Report Back", tone: "blue" },
@@ -382,7 +382,7 @@ export function appointmentAffordances(isStaff: boolean): Affordance[] {
 // (0367) is there, on a hold or an estimate's follow-up only while 0366's day is; "schedule" on a
 // win only when the estimate has a job to put the day on.
 export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
-  // Pick A Day (schedule), ⋯ Assign (assign), Finish (do: job.finish), Cancel (dismiss: cancelled).
+  // Pick a Day (schedule), ⋯ Assign (assign), Finish (do: job.finish), Cancel (dismiss: cancelled).
   job_to_schedule: ["schedule", "assign", "do", "dismiss", "open"],
   // NO convert verb: that sheet was the pre-0230 five-target grammar, and for a JOB-tagged lead
   // it booked a job-TYPED APPOINTMENT (bypassing the designation-does-the-converting law, which
@@ -407,7 +407,7 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // quote page's own Accepted: it stamps the day and makes the job); ⋯ Lost (dismiss) marks it
   // declined, the same decision the quote page's status dropdown makes, one tap closer.
   quote_awaiting: ["snooze", "do", "dismiss", "open"],
-  // Pick A Day lands on the won JOB (schedule, added by the build only when the estimate has one).
+  // Pick a Day lands on the won JOB (schedule, added by the build only when the estimate has one).
   // ⋯ Already Invoiced (its own sheet, not a verb) and ⋯ Lost (dismiss: marks it declined).
   quote_accepted: ["dismiss", "open"],
   // ⋯ Set Aside Until… (snooze: invoice.setAside, a day and an optional reason). Send It opens it.
@@ -420,7 +420,7 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // estimate declined (qdraft-<quote>, prefix stripped).
   quote_draft: ["dismiss", "open"],
   lien_deadline: ["open"],
-  // ⋯ Signed On Paper (do: contract.recordPaperSignature, signed by its customer today).
+  // ⋯ Signed on Paper (do: contract.recordPaperSignature, signed by its customer today).
   contract_unsigned: ["do", "open"],
   // Detector findings are DERIVED rows (a time entry / a job), not their own records, and a money
   // leak is never dismissed. An ENDLESS one (No Costs Yet on a labor-only job, To Buy while a part is
@@ -433,17 +433,17 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // A hold whose day has come: Snooze (job.snoozeHold, another day) and Take Off Hold (do:
   // job.takeOffHold), both on the row. The build takes them off while 0366 isn't on the database.
   job_on_hold: ["snooze", "do", "open"],
-  // Settled on Shop Stock (Settle From Stock once a roll is there, or Undo the take). Derived from
+  // Settled on Shop Stock (Settle from Stock once a roll is there, or Undo the take). Derived from
   // the stock's own record, so there is nothing a dismiss could write: it stays until settled.
   stock_short: ["open"],
   // Open-only in the verb grammar: the decision is on the cards INSIDE the rollup, each of which
-  // calls fileSupplierPaper itself (Put It On J-011 / Another Job / Shop Stock / Business Cost).
+  // calls fileSupplierPaper itself (Put It on J-011 / Another Job / Shop Stock / Business Cost).
   // The rollup id is synthetic, so no generic verb could name which paper it meant.
   supplier_paper: ["open"],
-  // Open-only: the door is the Record A Payment sheet on /bills (?pay=<account>). Nothing to
+  // Open-only: the door is the Record a Payment sheet on /bills (?pay=<account>). Nothing to
   // dismiss: it is derived from the supplier's documents and goes when the discount does.
   supplier_pay: ["open"],
-  // Record It opens the job's Costs tab, where Record As Cost is: the one answer it has.
+  // Record It opens the job's Costs tab, where Record as Cost is: the one answer it has.
   receipt_unbilled: ["open"],
   // Open-only: every answer is on the permit's own card (book it, move it, say how it went), and each
   // one is a different authority and a different day — no generic verb here could name which. Nothing
@@ -463,9 +463,9 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
  *      today row with urgency 2: the dollars come first);
  *   3. urgency, high first;
  *   4. when, oldest first. A row with no date counts as TODAY (not as last): a rollup like Supplier
- *      Bills or Hours On No Job is today's business, never pushed below a row dated tomorrow.
+ *      Bills or Hours on No Job is today's business, never pushed below a row dated tomorrow.
  * Ties keep the build's own order (a stable sort), so the rows the build places on purpose (Supplier
- * Bills, Pay <Supplier>, Hours On No Job) stay where it put them among their equals. `todayStr` is the
+ * Bills, Pay <Supplier>, Hours on No Job) stay where it put them among their equals. `todayStr` is the
  * company's today (YYYY-MM-DD).
  */
 export function sortActionItems<T extends Pick<ActionItem, "done" | "urgency" | "when" | "kind"> & { stream?: Stream }>(

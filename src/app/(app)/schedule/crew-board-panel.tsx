@@ -122,7 +122,7 @@ export async function CrewBoardPanel({ date }: { date?: string }) {
       .from("crew_day_assignments")
       .select("profile_id, job_id, kind, off_reason, job:job_id(id, job_number, name)")
       .eq("work_date", day),
-    // The "Put On A Job" picker. Active jobs only — you cannot send a man to a closed job.
+    // The "Put on a Job" picker. Active jobs only — you cannot send a man to a closed job.
     supabase
       .from("jobs")
       .select("id, job_number, name")
@@ -223,7 +223,7 @@ export async function CrewBoardPanel({ date }: { date?: string }) {
   const lanes: Lane[] = members.map((m) => {
     const mine = jobRows.filter((j) => (j.assigned_to ?? []).includes(m.id));
     // THE schedule's own answer for this person on this day — the engine that was written,
-    // unit-tested and never called (crew-plan.ts). It names the job "Follow The Schedule" hands
+    // unit-tested and never called (crew-plan.ts). It names the job "Follow the Schedule" hands
     // the day back to, so that button can say what it will do instead of just doing it.
     const sched = pickScheduledJobForDay(mine, day, segsByJob, schedDayByJob);
     const row = decisions.get(m.id);

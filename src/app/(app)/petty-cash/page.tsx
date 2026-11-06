@@ -24,7 +24,7 @@ export default async function PettyCashPage() {
 
   // OFF THE MENU (W1-34), NEVER OFF THE BOOKS: every entry here still counts wherever it always did
   // (job profit, Analytics, Owner Money, the Fuel card, Nort's list_petty_cash). A company that has
-  // entries finds this page in Search Or Ask; a job's Petty Cash figure links here.
+  // entries finds this page in Search or Ask; a job's Petty Cash figure links here.
   return (
     <div>
       <PageHeader title={t("nv_page_pettyCash")} description={t("nv_desc_pettyCash")} />

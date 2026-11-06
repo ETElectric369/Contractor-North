@@ -12,7 +12,7 @@ import { AiStatus } from "./ai-status";
 
 export const dynamic = "force-dynamic";
 
-/** Bug Watch — North's own page, not a subscriber's (Wave 0). Every company's Report A Problem
+/** Bug Watch — North's own page, not a subscriber's (Wave 0). Every company's Report a Problem
  *  lands here for the people who run North (platform_admins, 0176), with the error sink beneath it
  *  (cn-v1136: every caught failure, deduped, marked as it is triaged) and the AI key's status
  *  beside them: env var names and model ids are the platform's business, never a company's

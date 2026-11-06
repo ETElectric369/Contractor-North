@@ -32,7 +32,7 @@ type Line = { id: number; name: string; text: string; tone: Tone; differentDoc?:
 /**
  * A PAPER THAT ISN'T A COST (a plan, a permit, anything else for the job's file): what it can be filed
  * as from the ⋯, and what its line says. It is filed on the job as that and the receipt reader is never
- * asked, so it is never a paid read, never a bill and never "Not On A Bill Yet".
+ * asked, so it is never a paid read, never a bill and never "Not on a Bill Yet".
  */
 export const NOT_A_COST_PAPERS = [
   { category: "Plan", label: "Plan" },
@@ -58,22 +58,22 @@ export async function capturePaper(o: { orgId: string; jobId: string; file: File
 const CAMERA_HINT = "Camera didn't open? Tap ⋯ for Upload (your photos and PDFs) or Type It In, or allow the camera for North in your phone's Settings.";
 
 /**
- * THE COSTS TAB'S HEADER: ONE WAY TO ADD A COST (W1-23). One primary "Snap The Bill" (the phone's
- * camera, one shot; the desktop capture modal) and beside it a 44px ⋯, "More Ways To Add A Cost":
+ * THE COSTS TAB'S HEADER: ONE WAY TO ADD A COST (W1-23). One primary "Snap the Bill" (the phone's
+ * camera, one shot; the desktop capture modal) and beside it a 44px ⋯, "More Ways to Add a Cost":
  *
  *   Upload      the emailed-PDF / photo-library case, many at once (its own input, never the
  *               camera's: iOS drops `capture` the moment `multiple` is on);
  *   Type It In  the one typed cost sheet (QuickCostButton typeOnly), this job preselected;
- *   File A Paper (Not A Cost)
+ *   File a Paper (Not a Cost)
  *               a plan, a permit or another paper for the job's file: it asks which, then takes the
  *               same library input, files the paper as that and never runs the reader (review of
  *               W1-23: a plan sent through Upload was filed as a Receipt, read by the paid reader,
- *               told to "enter the cost manually" and counted as Not On A Bill Yet).
+ *               told to "enter the cost manually" and counted as Not on a Bill Yet).
  *
  * A snapped or uploaded paper runs THE receipt pipeline (lib/receipt-capture): prep → upload → file
  * it on the job as a Receipt → billJobReceipt reads it and WRITES the itemized bill. Write-then-show:
  * one result line per paper, in the pipeline's own words when the reader didn't run, and the file
- * is FILED either way, so nothing captured is lost; Receipts & Papers below keeps Record As Cost for
+ * is FILED either way, so nothing captured is lost; Receipts & Papers below keeps Record as Cost for
  * a retry and the pencil to re-file a paper as what it is. The bills list refreshes
  * underneath (router.refresh), and its Edit / Delete are the undo trail.
  *
@@ -97,7 +97,7 @@ export function JobCostCapture({ orgId, jobId, billsTotal: _billsTotal, nortOn =
   const snapListeners = useRef<(() => void) | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
   // THE QUEUE. A drop while a read was in flight used to hit `if (busy) return` — the files
-  // vanished without a word, the one silence these result lines exist to prevent (Snap The Bill and
+  // vanished without a word, the one silence these result lines exist to prevent (Snap the Bill and
   // Upload are disabled mid-read, but the drop zone stays live for every drag). Now every file gets
   // its row the moment it arrives ("Waiting…") and ONE reader loop drains the queue in order:
   // nothing handed to this door is ever discarded. Refs, not state — the loop is async and must see
@@ -113,7 +113,7 @@ export function JobCostCapture({ orgId, jobId, billsTotal: _billsTotal, nortOn =
   // THE ⋯. A plain panel whose rows stay MOUNTED while it is shut (hidden, never removed), so the
   // Type It In sheet it opens is never unmounted mid-edit: the panel closes as the sheet opens.
   const [moreOpen, setMoreOpen] = useState(false);
-  // File A Paper (Not A Cost)'s one question, asked inside the ⋯: which paper is it?
+  // File a Paper (Not a Cost)'s one question, asked inside the ⋯: which paper is it?
   const [askPaper, setAskPaper] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
   // The question is its second view: it adds three rows to a panel already open, so the panel is
@@ -170,7 +170,7 @@ export function JobCostCapture({ orgId, jobId, billsTotal: _billsTotal, nortOn =
   /**
    * DIFFERENT PURCHASE, RIGHT HERE (review of audit v994's fix). The line said to press it, and
    * this door had no such button: the one under Receipts & Papers only appears after another
-   * Record As Cost press, another paid read. A person looked and says it is a different purchase.
+   * Record as Cost press, another paid read. A person looked and says it is a different purchase.
    */
   async function recordAnyway(l: Line) {
     if (!l.differentDoc || busy) return;
@@ -293,21 +293,21 @@ export function JobCostCapture({ orgId, jobId, billsTotal: _billsTotal, nortOn =
     pickAs.current = as;
     if (fileRef.current) return fileRef.current.click();
     pickAs.current = null;
-    setCameraHint("Couldn't open your files on this device. Try Snap The Bill, or tap ⋯ and Type It In.");
+    setCameraHint("Couldn't open your files on this device. Try Snap the Bill, or tap ⋯ and Type It In.");
   }
 
   return (
     <Card>
       <div className="flex items-center gap-2 px-5 py-3">
         {/* NO `multiple` ON THE CAMERA INPUT. iOS ignores `capture` the moment `multiple` is
-            present and opens the photo library instead, so with both set Snap The Bill never
+            present and opens the photo library instead, so with both set Snap the Bill never
             reached the camera on an iPhone. One shot per Snap; Upload's own input keeps
             `multiple` for the emailed-PDF and photo-library case, many at once. */}
         <input ref={captureRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPick} />
         <input ref={fileRef} type="file" accept="image/*,application/pdf,.pdf" multiple className="hidden" onChange={onPick} />
-        <DropTarget onFiles={snapFiles} accept="image/*,application/pdf,.pdf" label="Drop The Bills" className="min-w-0 flex-1">
+        <DropTarget onFiles={snapFiles} accept="image/*,application/pdf,.pdf" label="Drop the Bills" className="min-w-0 flex-1">
           <Button type="button" onClick={snap} disabled={busy} className="w-full">
-            {busy ? <Loader2 className="animate-spin" /> : <Camera />} {busy ? "Reading…" : "Snap The Bill"}
+            {busy ? <Loader2 className="animate-spin" /> : <Camera />} {busy ? "Reading…" : "Snap the Bill"}
           </Button>
         </DropTarget>
         <div ref={moreRef} className="relative shrink-0">
@@ -319,8 +319,8 @@ export function JobCostCapture({ orgId, jobId, billsTotal: _billsTotal, nortOn =
               setMoreOpen((o) => !o);
               setAskPaper(false);
             }}
-            aria-label="More Ways To Add A Cost"
-            title="More Ways To Add A Cost"
+            aria-label="More Ways to Add a Cost"
+            title="More Ways to Add a Cost"
             aria-expanded={moreOpen}
           >
             <MoreHorizontal />
@@ -331,7 +331,7 @@ export function JobCostCapture({ orgId, jobId, billsTotal: _billsTotal, nortOn =
             </button>
             <QuickCostButton typeOnly orgId={orgId} jobId={jobId} label="Type It In" icon="keyboard" className={ACTIONS_ROW_CLS} onOpen={() => setMoreOpen(false)} nortOn={nortOn} />
             <button type="button" onClick={() => setAskPaper((a) => !a)} disabled={busy} className={ACTIONS_ROW_CLS} aria-expanded={askPaper}>
-              <FileText className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> File A Paper (Not A Cost)
+              <FileText className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> File a Paper (Not a Cost)
             </button>
             {askPaper && (
               <div role="group" aria-label="What Is It?" className="border-t border-white/20 pl-6">

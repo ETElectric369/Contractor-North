@@ -143,7 +143,7 @@ describe("the office and the crew see the same list; the crew never sees a price
     expect(html).not.toMatch(/\$\s?\d/);
     expect(html).not.toContain(`aria-label="${COMPANY_FIELD.material_line.label}"`);
     expect(html).not.toContain('placeholder="Vendor"');
-    expect(html).not.toContain("Mark As A Tool");
+    expect(html).not.toContain("Mark as a Tool");
     for (const s of ["12-2 Romex", "3 gang faceplate", "Hole saw"]) expect(html).toContain(s);
   });
 });

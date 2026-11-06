@@ -432,7 +432,7 @@ function ScheduleVisitCta({ handle, calendlyUrl, contact, brand }: { handle: str
         style={{ backgroundColor: brand }}
       >
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}
-        {busy ? "One Moment…" : "Request A Site Visit"}
+        {busy ? "One Moment…" : "Request a Site Visit"}
       </button>
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
     </>

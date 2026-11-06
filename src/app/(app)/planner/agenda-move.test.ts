@@ -6,8 +6,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 /**
  * MY DAY'S AGENDA ROWS: ONE ⋯. Running Late? and Navigate stay on the row; the office's verbs sit
- * behind one 44px ⋯ (the app's one row sheet): a visit's Mark Done, Move To Another Day… and Edit
- * Details…; a job's Move To Another Day… only. Techs get no ⋯. A job's move starts from the ROW's day.
+ * behind one 44px ⋯ (the app's one row sheet): a visit's Mark Done, Move to Another Day… and Edit
+ * Details…; a job's Move to Another Day… only. Techs get no ⋯. A job's move starts from the ROW's day.
  */
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
@@ -51,7 +51,7 @@ const opts = { jobs: [], customers: [], staff: [] };
 describe("the row's ⋯", () => {
   it("is 44px, and a row with nothing to act on gets none", () => {
     const html = renderToStaticMarkup(createElement(AgendaRowMenu, { title: "Smith inspection", appt, fromDate: "2026-09-28", ...opts }));
-    expect(html).toMatch(/<button type="button" aria-label="More For Smith inspection"[^>]*class="[^"]*h-11 w-11[^"]*"/);
+    expect(html).toMatch(/<button type="button" aria-label="More for Smith inspection"[^>]*class="[^"]*h-11 w-11[^"]*"/);
     // A week-view visit carries no record: no ⋯ rather than an empty sheet.
     expect(renderToStaticMarkup(createElement(AgendaRowMenu, { title: "Visit", fromDate: "2026-09-28", ...opts }))).toBe("");
   });
@@ -90,9 +90,9 @@ describe("the sheet's rows", () => {
   const render = (props: Record<string, unknown>) =>
     renderToStaticMarkup(createElement(AgendaRowActions, { close: () => {}, fromDate: "2026-09-28", tz: "America/Los_Angeles", ...opts, ...props } as any));
 
-  it("a visit: Mark Done, Move To Another Day…, Edit Details…, in that order, each a 44px row", () => {
+  it("a visit: Mark Done, Move to Another Day…, Edit Details…, in that order, each a 44px row", () => {
     const html = render({ appt });
-    const at = ["Mark Done", "Move To Another Day…", "Edit Details…"].map((w) => html.indexOf(`>${w}</button>`));
+    const at = ["Mark Done", "Move to Another Day…", "Edit Details…"].map((w) => html.indexOf(`>${w}</button>`));
     expect(at.every((i) => i > 0)).toBe(true);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
     expect(html.match(/<button[^>]*class="[^"]*min-h-\[44px\] w-full[^"]*"/g)).toHaveLength(3);
@@ -100,9 +100,9 @@ describe("the sheet's rows", () => {
     expect(html).not.toContain('title="Edit"');
   });
 
-  it("a job: Move To Another Day… only; Done never sits on a job row", () => {
+  it("a job: Move to Another Day… only; Done never sits on a job row", () => {
     const html = render({ jobId: "j9" });
-    expect(html).toContain(">Move To Another Day…</button>");
+    expect(html).toContain(">Move to Another Day…</button>");
     expect(html).not.toMatch(/Done|Edit Details/);
     expect(html.match(/<button/g)).toHaveLength(1);
   });
@@ -148,7 +148,7 @@ describe("the verbs", () => {
     expect(action.label).toBe("Undo");
     action.onClick();
     await vi.waitFor(() => expect(setStatus).toHaveBeenLastCalledWith("a1", "scheduled"));
-    await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith("Back On Your Day", "success"));
+    await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith("Back on Your Day", "success"));
   });
 
   it("a refused Mark Done keeps the sheet open and says why; a withdrawn link is said and kept until read", async () => {
@@ -188,7 +188,7 @@ describe("My Day's crew chips name someone who left", () => {
       jobId: "j1",
       people: [{ id: "gone-1", full_name: "Dana Whitfield" }],
     });
-    expect(chip).toMatchObject({ initials: "DW", name: "Dana Whitfield", departed: true, title: "Dana Whitfield · No Longer On The Team" });
+    expect(chip).toMatchObject({ initials: "DW", name: "Dana Whitfield", departed: true, title: "Dana Whitfield · No Longer on the Team" });
     // Without the whole-company list it drew a "U" titled "Unnamed" — on My Day only, for the same job.
     expect(crewChips(["gone-1"], [{ id: "p1", full_name: "Erik Taylor" }], { jobId: "j1" })[0]).toMatchObject({ name: "Unnamed" });
   });

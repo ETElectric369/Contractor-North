@@ -310,7 +310,7 @@ describe("a weekend day earns its space", () => {
   });
 
   it("and the schedule's named day is a 44px target, not a 20px word", () => {
-    // It is a DOOR — it opens that day, where Add To Schedule lives — so it is measured against the
+    // It is a DOOR — it opens that day, where Add to Schedule lives — so it is measured against the
     // 44px rule like every other control in that header. 20px of look (h-5, so the one-line header
     // does not grow) plus 12px of bleed above and below through `before`, the header's own idiom.
     const CAL = read("src/app/(app)/calendar/calendar-view.tsx");

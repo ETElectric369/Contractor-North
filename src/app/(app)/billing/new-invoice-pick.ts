@@ -1,5 +1,5 @@
 /**
- * NEW INVOICE ON /BILLING ASKS ONE QUESTION (W1-28): "Which Job Or Customer?". The modal had an
+ * NEW INVOICE ON /BILLING ASKS ONE QUESTION (W1-28): "Which Job or Customer?". The modal had an
  * estimate/blank toggle, an Estimate select, a Title, a Customer select and a Job select - five
  * decisions, two of which (which estimate, which title) the job's own door already knows. A job is
  * billed through the job's own door (createInvoiceForJob: its open draft, its estimate on a

@@ -18,12 +18,12 @@ import { filePlan, showPaper, takePaperOff } from "./portal-share-actions";
  *
  *   - loadPanelPortal: the Customer Page tab's panel card: the switch's state and a preview of
  *     exactly what the customer reads (the same directory shape and renderer the portal uses).
- *   - setPanelOnPortal: "Show The Panel On Their Page", one switch per job (Erik's decision 2: OFF
+ *   - setPanelOnPortal: "Show the Panel on Their Page", one switch per job (Erik's decision 2: OFF
  *     until the office turns it on). It sets job_panels.shown_on_portal on the job's live panels;
  *     0333's guard refuses it from anyone but the office, and 0335's portal_job_view reads it.
- *   - saveCircuitMap: "Save As Circuit Map". Renders the printed directory (the same /print/panel
+ *   - saveCircuitMap: "Save as Circuit Map". Renders the printed directory (the same /print/panel
  *     page Print Circuit Map shows, through the PDF engine), files it on the job as a Plan
- *     (filePlan: the plans door's own step), and shows it on the customer's Plans And Drawings as a
+ *     (filePlan: the plans door's own step), and shows it on the customer's Plans and Drawings as a
  *     Circuit Map that REPLACES the newest circuit map already there (showPaper with 0326's
  *     replaces chain), so the customer sees only the newest. The kind is this door's explicit
  *     word, never a guess from the file's name. Undo (undoCircuitMap) takes it off their page, and
@@ -72,7 +72,7 @@ export type PanelPortalLoad =
       panels: PanelPortalPanel[];
       /** Exactly what the customer reads for each panel (shown or not): the portal's shape. */
       preview: DirectoryPanel[];
-      /** The circuit map on their Plans And Drawings now (the newest of its chain), if any. */
+      /** The circuit map on their Plans and Drawings now (the newest of its chain), if any. */
       circuitMap: CircuitMapShown | null;
       /** false = the company's Panel Map switch is off (0352): the card isn't drawn, and the
        *  customer's page draws no "Your Panel" either. Absent = on. */
@@ -240,11 +240,11 @@ export async function saveCircuitMap(jobId: string): Promise<CircuitMapResult> {
     replaced: older?.title ?? null,
     message: older
       ? `Saved as the circuit map on ${who}'s page. It replaces "${older.title}", so ${who} sees only the new one.`
-      : `Saved as the circuit map on ${who}'s page, under Plans And Drawings.`,
+      : `Saved as the circuit map on ${who}'s page, under Plans and Drawings.`,
   };
 }
 
-/** Undo Save As Circuit Map: off their page (the older map shows again); the file stays a Plan. */
+/** Undo Save as Circuit Map: off their page (the older map shows again); the file stays a Plan. */
 export async function undoCircuitMap(documentId: string): Promise<{ ok: true; message: string } | Fail> {
   const res = await takePaperOff(documentId);
   if (!res.ok) return res;

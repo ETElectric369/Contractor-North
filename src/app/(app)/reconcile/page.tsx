@@ -41,7 +41,7 @@ import { STATEMENT_FACTS } from "./statement-facts";
 export const dynamic = "force-dynamic";
 /**
  * A SERVER ACTION RUNS UNDER THIS PAGE'S TIME (api/paperwork/read/route.ts says so; intake's page says
- * it too). Bring In A Statement now hosts a read that is an Opus transcription of a whole statement —
+ * it too). Bring In a Statement now hosts a read that is an Opus transcription of a whole statement —
  * up to four passes of 16,000 output tokens — so the platform default would end the invocation in the
  * middle of it, which says nothing to the person and cannot meter the tokens already bought. The
  * reader gets the reader's own time, as Bills and Organize already give theirs (audit v994, SI4); 300
@@ -76,7 +76,7 @@ const OWED_READ = "what your suppliers say you owe";
  * All of it was crammed into one collapsed fold at the bottom of /bills, under the heading "More".
  * That fold was a confession: somebody already knew this work did not belong on the page that
  * answers "what came in and what do I owe", and had nowhere to put it. The fold is gone now, not
- * hidden — /bills keeps Snap Or Note, Add By Hand, Needs You, the paper feed, the Suppliers card
+ * hidden — /bills keeps Snap or Note, Add by Hand, Needs You, the paper feed, the Suppliers card
  * and All Bills, and points here with ONE link where it needs to.
  *
  * ── THE FOUR THINGS THIS PAGE MAY NOT DO ──────────────────────────────────────────────────────
@@ -86,8 +86,8 @@ const OWED_READ = "what your suppliers say you owe";
  *     supplier_accounts or bills.superseded_by_bill_id — nothing of this page's own. There is no
  *     reconcile table and there must never be one.
  *  2. IT IS NEVER THE ONLY DOOR. A bank download and a supplier's open list are answered on their own
- *     card, and that card is drawn wherever the paper is — inside Bring In A Statement here, in the
- *     Organize tray, and on Snap Or Note's own sheet — so no screen is the only way to an answer. (It
+ *     card, and that card is drawn wherever the paper is — inside Bring In a Statement here, in the
+ *     Organize tray, and on Snap or Note's own sheet — so no screen is the only way to an answer. (It
  *     used to say the answer "stays under Needs You on Bills". It does not: a statement compares two
  *     records, so `answeredOnReconcile` draws its card here, where it was dropped, instead of sending a
  *     person to another page to press Apply. The old sentence is the behaviour this release replaced.)
@@ -276,14 +276,14 @@ export default async function ReconcilePage() {
           <>
             <p className="text-base font-semibold text-slate-900">
               {waiting > 0
-                ? `${waiting} ${waiting === 1 ? "Thing" : "Things"} To Sort Out`
+                ? `${waiting} ${waiting === 1 ? "Thing" : "Things"} to Sort Out`
                 : !allRead
                   ? "Couldn't Check Everything Just Now"
                   : papersOnNoAccount > 0
-                    ? `${papersOnNoAccount} ${papersOnNoAccount === 1 ? "Paper" : "Papers"} Not On A Supplier Account Yet`
+                    ? `${papersOnNoAccount} ${papersOnNoAccount === 1 ? "Paper" : "Papers"} Not on a Supplier Account Yet`
                     : statementsWaiting > 0
-                      ? `${statementsWaiting} ${statementsWaiting === 1 ? "Statement" : "Statements"} Waiting On You`
-                      : "Nothing To Sort Out Right Now"}
+                      ? `${statementsWaiting} ${statementsWaiting === 1 ? "Statement" : "Statements"} Waiting on You`
+                      : "Nothing to Sort Out Right Now"}
             </p>
             {/* "No money gap" is itself an all-clear, so it waits on every read landing. */}
             <p className="mt-1 text-sm text-slate-600">
@@ -299,7 +299,7 @@ export default async function ReconcilePage() {
                   a paper waiting for Apply is the answer to the intake door at the bottom, not a
                   disagreement between two records of ours, so it is a sentence and never a badge. */}
               {statementsWaiting > 0
-                ? ` ${statementsWaiting === 1 ? "A statement you brought in is" : `${statementsWaiting} statements you brought in are`} waiting under Bring In A Statement below.`
+                ? ` ${statementsWaiting === 1 ? "A statement you brought in is" : `${statementsWaiting} statements you brought in are`} waiting under Bring In a Statement below.`
                 : ""}
             </p>
           </>
@@ -400,7 +400,7 @@ export default async function ReconcilePage() {
                 href={`#${RECONCILE_KINDS[askedAbove].anchor}`}
                 className="mt-1 flex min-h-11 items-center text-sm font-medium text-brand hover:underline"
               >
-                Go To The Question
+                Go to the Question
               </Link>
             </Card>
           )}
@@ -435,7 +435,7 @@ export default async function ReconcilePage() {
           record, which it still does not: every write goes through the same server action the card
           always called. Answering a statement IS the reconciliation, so the card is drawn where the
           paper was dropped (see THE APPLY THE LAW DOES NOT FORBID, below). The card is drawn in the
-          Organize tray and on Snap Or Note's sheet as well, so this is not the only door to it.
+          Organize tray and on Snap or Note's sheet as well, so this is not the only door to it.
 
           IT IS DRAWN EVEN WHEN NOTHING DISAGREES. It used to sit inside {!nothingAtAll}, which hid
           it at precisely the moment a person opens this page: the book is quiet and he has the next
@@ -484,8 +484,8 @@ export default async function ReconcilePage() {
             the comment below claimed every crowding clause was already in the box. It is a bullet in
             STATEMENT_FACTS now, and reconcile-page-doors.test.ts keeps it off the card. */}
         <div className="flex items-center gap-1">
-          <h2 className="text-base font-semibold text-slate-900">Bring In A Statement</h2>
-          <InfoPopup title="How A Statement Is Read" label="How A Statement Is Read" bullets={STATEMENT_FACTS} />
+          <h2 className="text-base font-semibold text-slate-900">Bring In a Statement</h2>
+          <InfoPopup title="How a Statement Is Read" label="How a Statement Is Read" bullets={STATEMENT_FACTS} />
         </div>
         {sortsBank ? (
           <>
@@ -501,10 +501,10 @@ export default async function ReconcilePage() {
         ) : (
           /* NOT A TEASE AND NOT A DEAD DOOR: no control is drawn, and the line names the door that
              IS this viewer's. A bank download is the owner's own money (0286), so the owner brings
-             those in; a supplier's open list comes in through Snap Or Note on Bills like any paper. */
+             those in; a supplier's open list comes in through Snap or Note on Bills like any paper. */
           <p className="mt-1 text-sm text-slate-600">
             The owner brings in bank downloads: they show the owner&apos;s own money line by line. A supplier&apos;s own
-            list of what is open goes in through Snap Or Note on Bills, the same as any other paper.
+            list of what is open goes in through Snap or Note on Bills, the same as any other paper.
           </p>
         )}
         {/* ── AND IT IS ANSWERED RIGHT HERE (2026-10-03) ──────────────────────────────────────

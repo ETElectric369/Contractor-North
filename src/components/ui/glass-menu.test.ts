@@ -19,7 +19,7 @@ import { clipTopLimit, placeGlassMenu } from "./glass-menu";
  * above main's edge, the Money header and Invoices unreachable.
  *
  * This is the shared rule, so these cases are the rule's, not one menu's: the tab strip's More,
- * the job's Manage / Status / Add A Cost, the team-member menu and the section-actions menu all
+ * the job's Manage / Status / Add a Cost, the team-member menu and the section-actions menu all
  * place through placeGlassMenu, and any of them grows past the room the day someone adds a row.
  */
 

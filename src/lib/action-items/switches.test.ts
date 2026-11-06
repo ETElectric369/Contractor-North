@@ -77,9 +77,9 @@ describe("inquiryActionItem — a request on Needs You", () => {
     expect(on.more.map((d) => d.label)).toContain("Call");
   });
 
-  it("Leads off: 'New Request From Dana Reyes', Call them back, and the number to dial", () => {
+  it("Leads off: 'New Request from Dana Reyes', Call them back, and the number to dial", () => {
     const it2 = inquiryActionItem(row, "2026-09-26", false);
-    expect(it2.title).toBe("New Request From Dana Reyes");
+    expect(it2.title).toBe("New Request from Dana Reyes");
     expect(it2.subtitle).toBe("Call them back");
     expect(it2.phone).toBe("(530) 555-0142");
     // Its chip rides on the row (Wave 1, W1-15): the flat list has no Leads header to rename.
@@ -92,14 +92,14 @@ describe("inquiryActionItem — a request on Needs You", () => {
 
   it("Leads off, a follow-up with no phone: plain words and no Call Back to render", () => {
     const it3 = inquiryActionItem({ ...row, status: "contacted", phone: null, next_follow_up_at: "2026-09-20" }, "2026-09-26", false);
-    expect(it3.title).toBe("Request From Dana Reyes");
+    expect(it3.title).toBe("Request from Dana Reyes");
     expect(it3.subtitle).toBe("Follow up");
     expect(it3.phone).toBeNull();
     expect(it3.urgency).toBe(1);
   });
 
   it("a nameless request still reads as a sentence", () => {
-    expect(inquiryActionItem({ ...row, name: null }, "2026-09-26", false).title).toBe("New Request From Someone");
+    expect(inquiryActionItem({ ...row, name: null }, "2026-09-26", false).title).toBe("New Request from Someone");
   });
 });
 

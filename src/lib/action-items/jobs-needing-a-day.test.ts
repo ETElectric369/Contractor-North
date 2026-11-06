@@ -133,12 +133,12 @@ describe("the build reads it", () => {
 
   it("a lost read never calls every job dateless: one Couldn't Check line instead", () => {
     expect(query).toContain("if (isStaff && (jobsR.error || futureApptR.error)) {");
-    expect(query).toContain(`title: "Jobs Needing A Day · Couldn't Check"`);
+    expect(query).toContain(`title: "Jobs Needing a Day · Couldn't Check"`);
     // And a lost costs read never invents No Costs Yet.
     expect(query).toContain("const costsReadable = ![previewListsR, wBillsR, wPosR, wInvR].some((r) => (r as Read)?.error);");
   });
 
-  it("billed for the work = done (0205) reaches both feeders: Won, Needs A Day and Jobs Needing A Day", () => {
+  it("billed for the work = done (0205) reaches both feeders: Won, Needs a Day and Jobs Needing a Day", () => {
     // The win: an accepted estimate whose job already has a live invoice for the work is over, not
     // dateless. It asks the one settled rule (quoteSettled: a standard or final bill since it was won).
     expect(query).toContain("if (settledOf(a).settled) continue;");

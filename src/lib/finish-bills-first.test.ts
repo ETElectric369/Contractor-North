@@ -51,7 +51,7 @@ describe("paidDoorVerdict — may money end this job, and what is the person tol
     expect(v.say).toContain(SAID);
     expect(v.say).toContain("NOT finished yet");
     // No dead end: the sentence carries the one door that bills it.
-    expect(v.say).toContain("This Is The Last Bill");
+    expect(v.say).toContain("This Is the Last Bill");
     // The log line is short and the person's sentence is not — they are two different jobs.
     expect(v.why).toBe("the job has work no bill claims yet, so it isn't finished");
     expect(v.title).toBe("Still to bill");

@@ -21,7 +21,7 @@ const SUNDAY = "2026-09-27";
 const MONDAY = "2026-09-28";
 
 describe("the chips, from the company's today", () => {
-  it("on a Sunday: Tomorrow and Mon are the same day, In A Week is next Sunday", () => {
+  it("on a Sunday: Tomorrow and Mon are the same day, In a Week is next Sunday", () => {
     expect(comeBackDay(SUNDAY, "tomorrow")).toBe("2026-09-28");
     expect(comeBackDay(SUNDAY, "monday")).toBe("2026-09-28");
     expect(comeBackDay(SUNDAY, "week")).toBe("2026-10-04");

@@ -12,7 +12,7 @@
  *   Billed           folded by the invoice holding it, newest first. A DRAFT holds its rows like
  *                    any non-void invoice ("On INV-081 (draft)"), so Not Billed Yet means on no
  *                    invoice at all, and the draft is marked so it never reads as sent
- *   Nothing To Bill  on no invoice and never going on one: its PO was billed, it is $0, every line
+ *   Nothing to Bill  on no invoice and never going on one: its PO was billed, it is $0, every line
  *                    on it is the company's own, or it is a return of parts the customer was never
  *                    billed for. Listed, with why, so nothing is silent
  */

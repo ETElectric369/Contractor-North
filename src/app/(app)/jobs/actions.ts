@@ -83,8 +83,8 @@ export type CreateInvoiceForJobResult = {
    *  (the ordinary invoice → paid → finish rhythm); every other ok:false is a real failure. */
   nothingNew?: true;
   /** THE REFUSAL IS A DOOR (W1-24): this fixed-price job bills its estimate in set parts, so its
-   *  next bill is the job's New Invoice with Part Of The Estimate chosen. The job's own button opens
-   *  its sheet on that choice; /billing's New Invoice offers "Open The Job's New Invoice"
+   *  next bill is the job's New Invoice with Part of the Estimate chosen. The job's own button opens
+   *  its sheet on that choice; /billing's New Invoice offers "Open the Job's New Invoice"
    *  (/jobs/<id>?tab=invoices&invoice=part, which the job's button claims). */
   door?: "part-of-estimate";
   /** The sales-tax rate a NEW invoice started at because the caller asked for it (a fraction). Set
@@ -423,7 +423,7 @@ export async function createInvoiceForJob(
   // no contract (every T&M job - its estimate is a guide - so Tess's next hours go on the next report,
   // netting the deposit), and on a fixed-price quoted job whose draws already bill its actuals. A
   // fixed-price quoted job whose draws are all slices of the contract is not billed from actuals
-  // behind anyone's back: it is told the door (the job's New Invoice, Part Of The Estimate chosen -
+  // behind anyone's back: it is told the door (the job's New Invoice, Part of the Estimate chosen -
   // `door` carries it), with the latest draw to open.
   // A STANDARD draft beside a live draw is not a door either (every importer refuses content on it -
   // H4), so it doesn't stop this: the draw door is the one that works (openDraftOnJob agrees, and
@@ -455,7 +455,7 @@ export async function createInvoiceForJob(
       const latest = draws[0];
       return {
         ok: false,
-        error: `This job bills its estimate in parts${latest.invoice_number ? ` (latest: ${latest.invoice_number})` : ""}, so its next bill is the next part. Bill it with the job's New Invoice → Part Of The Estimate.`,
+        error: `This job bills its estimate in parts${latest.invoice_number ? ` (latest: ${latest.invoice_number})` : ""}, so its next bill is the next part. Bill it with the job's New Invoice → Part of the Estimate.`,
         door: "part-of-estimate",
         ...(latest.invoice_number ? { billedOn: { id: latest.id, number: latest.invoice_number } } : {}),
       };
@@ -1423,7 +1423,7 @@ export async function createBill(input: {
   // via RLS AND on this bill's job — same containment rule as the po_id link above.
   // NEVER SILENT (fada712a, the silent-write law): this insert was awaited and thrown away, so a
   // link that didn't land left the receipt "Not on a bill yet" beside the very bill it made, and
-  // the next Record As Cost tap would write a second bill for the same money. The bill IS in, so a
+  // the next Record as Cost tap would write a second bill for the same money. The bill IS in, so a
   // lost link cannot refuse; it is logged for the daily sweep and said on `warning`, the way
   // organize's billJobReceipt does it.
   let warning: string | undefined;
@@ -1465,7 +1465,7 @@ export async function createBill(input: {
           jobId,
         });
         warning =
-          "The cost is recorded, but its receipt did not get marked as billed. On the job's Costs tab it will say Not On A Bill Yet: tie it to this bill there, rather than Record As Cost (that would write a second bill).";
+          "The cost is recorded, but its receipt did not get marked as billed. On the job's Costs tab it will say Not on a Bill Yet: tie it to this bill there, rather than Record as Cost (that would write a second bill).";
       }
     }
   }
@@ -1485,9 +1485,9 @@ export async function createBill(input: {
  *  THE DOOR FOR A LOOSE RECEIPT (d1ff7c5a). Two paths leave a receipt "Not on a bill yet" while its
  *  bill exists: the reader answering "already on the books" (billJobReceipt writes nothing then),
  *  and a bill typed by hand with the receipt uploaded separately. This is the tie both were
- *  missing: Same Purchase: It's That Bill beside the reader's answer, and Already On A Bill → Tie It
+ *  missing: Same Purchase: It's That Bill beside the reader's answer, and Already on a Bill → Tie It
  *  on the receipt's own row. After it the row reads "On the CED bill #…", the Costs chip drops by
- *  one and Needs You's Receipts Not On A Bill row goes (all read the same sortJobPapers.loose). */
+ *  one and Needs You's Receipts Not on a Bill row goes (all read the same sortJobPapers.loose). */
 export async function linkReceiptToBill(billId: string, documentId: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -1501,7 +1501,7 @@ export async function linkReceiptToBill(billId: string, documentId: string): Pro
   if (!bill.job_id || doc.job_id !== bill.job_id) return { ok: false, error: "That receipt isn't on this cost's job." };
 
   // Idempotent: a re-tap must not stack duplicate links. ONLY A ROW THAT CARRIES A BILL counts
-  // (bill_id, or tied_bill_id): a tech's Snap Or Note row names the same document with no bill on
+  // (bill_id, or tied_bill_id): a tech's Snap or Note row names the same document with no bill on
   // it (needs_review), and "any row with this document_id" let that row block the tie, leaving the
   // receipt loose forever. A row on ANOTHER bill is said, never silently kept.
   const { data: existing, error: readErr } = await supabase
@@ -1543,7 +1543,7 @@ export async function linkReceiptToBill(billId: string, documentId: string): Pro
   if (!link?.length) return { ok: false, error: "The tie didn't save. Try again." };
   revalidatePath(`/jobs/${bill.job_id}`);
   revalidatePath("/bills");
-  revalidatePath("/planner"); // Needs You's Receipts Not On A Bill row reads the same ties
+  revalidatePath("/planner"); // Needs You's Receipts Not on a Bill row reads the same ties
   return { ok: true };
 }
 
@@ -1674,7 +1674,7 @@ export async function updateBill(
   // THE CHANGE IS WHAT IS HELD TO THE RULE, NOT THE RESTING STATE (item C1-5). Asked of the resting
   // state, this refused EVERY save on a lineless credit already sitting on a job — rows the code
   // before item C2 was free to create — so marking one Paid, or fixing its date,
-  // or setting its Part Of The Job came back refused, and the Costs tab's Edit Bill box has no Job
+  // or setting its Part of the Job came back refused, and the Costs tab's Edit Bill box has no Job
   // field with which to take the only way out it was offered. A save that moves neither the job nor
   // the figure cannot put a credit anywhere it is not already, so it goes through.
   const nextAmount = patch.amount !== undefined ? (patch.amount || 0) : oldAmount;
@@ -1690,8 +1690,8 @@ export async function updateBill(
       { jobId: nextJobId, amount: nextAmount, lines: lineRows ?? [] },
       // THE NEXT STEP NAMES A DOOR THAT IS DRAWN AT EVERY DOOR THAT CAN REACH THIS (item C1-5).
       // "Leave it as a business cost" is a Job field, and the Costs tab's Edit Bill box has not got
-      // one — the row's Open The Bill door is how a cost gets to the box that has.
-      "Snap the credit memo so its lines come with it, or Open The Bill and set its Job to Business Cost (No Job).",
+      // one — the row's Open the Bill door is how a cost gets to the box that has.
+      "Snap the credit memo so its lines come with it, or Open the Bill and set its Job to Business Cost (No Job).",
     );
     if (noReturn) return { ok: false, error: noReturn };
   }
@@ -2038,7 +2038,7 @@ export async function correctBill(input: {
   // HALF-DONE: a link that does not land (the paper tied elsewhere in the same breath, 0277's one
   // link per document) takes the correction back off, the way its lines failing does; a correction
   // standing for a paper another bill holds is one purchase counted twice. The paper takes the job
-  // its purchase is on when it had none, as Put It On would have.
+  // its purchase is on when it had none, as Put It on would have.
   if (paper) {
     const { data: joined, error: joinErr } = await supabase
       .from("bill_supplier_invoices")
@@ -2117,7 +2117,7 @@ export async function correctableBill(billId: string): Promise<{ ok: true; bill:
       supplier: String(b.supplier ?? "").trim() || "A bill",
       amount: Number(b.amount) || 0,
       bill_number: b.bill_number ?? null,
-      // The number the row prints: typed, or the one Record It As A Bill stored.
+      // The number the row prints: typed, or the one Record It as a Bill stored.
       shownNumber: b.bill_number ?? b.supplier_invoice_number ?? null,
       bill_date: b.bill_date ?? null,
       lines: [b, ...under].flatMap(linesOf),

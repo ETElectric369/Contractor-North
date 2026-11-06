@@ -62,7 +62,7 @@ describe("the Honeysuckle breaker count", () => {
     expect(swaps).toHaveLength(1);
     expect(swaps[0].get.part).toBe("Q22020CT");
     expect(swaps[0].warning).toBe("Not Q22020CT2, That Is Two 2-Pole 20s");
-    expect(swaps[0].words).toContain("Swap One Q2020 For A Q22020CT");
+    expect(swaps[0].words).toContain("Swap One Q2020 for a Q22020CT");
   });
 
   it("buying the Q220 closes it: nothing short, the one 1P 20A still spare", () => {

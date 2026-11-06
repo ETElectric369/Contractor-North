@@ -635,7 +635,7 @@ describe("one model: our open bills, with the supplier's own figure beside them 
 
 // ── WHICH PURCHASE CAME BACK ────────────────────────────────────────────────────────────────────
 //
-// `reversedPurchaseIds` is the rule standing between "Record It As A Bill" and a customer being
+// `reversedPurchaseIds` is the rule standing between "Record It as a Bill" and a customer being
 // charged for merchandise Erik sent back. It answers a question that never expires, so it is the
 // one reading in this file that keeps working after CED closes the pair - and the one whose wrong
 // answer is silent in both directions: the purchase he KEPT becomes unbillable, and the one he

@@ -141,7 +141,7 @@ describe("guardAnswer: a field with no source URL from the search is DROPPED, ne
     expect(a.found && a.choices[0].maps_url).toBe(map);
   });
 
-  it("a returned page that ISN'T a map service is never shown as View On Map: the map is a search of the kept address", () => {
+  it("a returned page that ISN'T a map service is never shown as View on Map: the map is a search of the kept address", () => {
     const planted = "https://evil.example/looks-like-a-map";
     const a = guardAnswer(
       { candidates: [{ address: "1 Elm St, Truckee, CA", maps_url: planted, sources: { address: planted } }] },

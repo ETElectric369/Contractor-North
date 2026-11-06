@@ -47,7 +47,7 @@ import { bornTasks, dismissalEntry, dismissalKey, dismissalTitle, partsFromLines
  *    TITLE ("line:<id>#<title>", the delete door since cn-v1084), so a task he deleted stays gone
  *    through a rebuild that gives its line a new id: the same title on a line nobody has is LEFT OFF
  *    (said), and the dismissal MOVES to the new key — one entry per deletion, never a pile. A VISIT's
- *    task ("task:<TaskValue id>", born by Start The Job) finds the line of the estimate drafted from
+ *    task ("task:<TaskValue id>", born by Start the Job) finds the line of the estimate drafted from
  *    that visit — by the task id the line's breakdown remembers (detail.task_id), else by exact title
  *    — and becomes the line's instead of doubling; so does an OPEN task he made by hand under the
  *    same exact title. Live tasks claim BEFORE a title dismissal bars, so a dismissal never costs a
@@ -67,7 +67,7 @@ import { bornTasks, dismissalEntry, dismissalKey, dismissalTitle, partsFromLines
  */
 
 export const LINE_KEY = "line:";
-/** A task Start The Job put on the job from the visit's Inspector (born-with-tasks tasksFromVisit). */
+/** A task Start the Job put on the job from the visit's Inspector (born-with-tasks tasksFromVisit). */
 export const VISIT_KEY = "task:";
 /** A kept orphan's key: "gone:" + the line key it had. His now; the line's again if that line returns. */
 export const GONE_KEY = "gone:";
@@ -202,7 +202,7 @@ export function planLineSync(
   const leftOff: string[] = [];
   const consumed: string[] = [];
   const redismiss: string[] = [];
-  // A VISIT task's dismissal ("task:<id>#…", the delete door after Start The Job) bars the line built
+  // A VISIT task's dismissal ("task:<id>#…", the delete door after Start the Job) bars the line built
   // from that task by the id the line's breakdown remembers — whatever the builder's units box did to
   // the title (audit v1085, carried [18]) — and MOVES to the line's key like any other.
   const orphanEntries = [...dismissed].filter((e) => !wantedKeys.has(dismissalKey(e)) && (dismissalTitle(e) !== null || dismissalKey(e).startsWith(VISIT_KEY)));

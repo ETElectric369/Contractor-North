@@ -186,7 +186,7 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
       if (superseded()) return;
       // The Website box was changed by hand while this read was out: its details aren't the box's.
       if (siteUrl(live.current.form.website) !== siteUrl(url)) {
-        setFillNote({ tone: "warn", text: "The address changed while reading, so nothing was filled. Tap Fill From Their Site." });
+        setFillNote({ tone: "warn", text: "The address changed while reading, so nothing was filled. Tap Fill from Their Site." });
         return;
       }
       if (!res.ok) {
@@ -290,7 +290,7 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
                 className="shrink-0"
               >
                 {reading ? <Loader2 className="animate-spin" /> : <Globe />}
-                {reading ? "Reading Their Site…" : "Fill From Their Site"}
+                {reading ? "Reading Their Site…" : "Fill from Their Site"}
               </Button>
             </div>
             {webHint && website.trim() && !looksLikeWebAddress(website) && (

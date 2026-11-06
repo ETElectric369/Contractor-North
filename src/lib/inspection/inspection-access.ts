@@ -2,10 +2,10 @@
  * WHO FILLS IN THE INSPECTION (0356). Erik, 2026-09-26: "crew leader yes tech no".
  *
  *   office    staff (owner / admin / office): everything, as before: the price book, scope prices,
- *             Start The Estimate, the address, the links.
+ *             Start the Estimate, the address, the links.
  *   crewLead  a crew lead (profiles.crew_lead, set only by an owner or admin) who is ON this visit
  *             (assigned_to = him, the rule 0227 reads by): the sheet's answers, notes, measurements,
- *             materials and photos. Never a price, the price book or Start The Estimate; never the
+ *             materials and photos. Never a price, the price book or Start the Estimate; never the
  *             schedule, status, customer, address or links; he adds photos and never takes one off.
  *   view      everyone else who can open the visit (a plain tech on his own visit): read-only.
  *

@@ -236,7 +236,7 @@ export function RecurringButton({
                   defaultValue={template?.kind === "expense" && template.category ? bucketOf(template.category) : ""}
                   required
                 >
-                  <option value="">Pick A Bucket</option>
+                  <option value="">Pick a Bucket</option>
                   {BUSINESS_COST_BUCKETS.map((b) => (
                     <option key={b} value={b}>{b}</option>
                   ))}

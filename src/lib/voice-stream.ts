@@ -292,7 +292,7 @@ export function isGreeting(): boolean {
   return greetingActive;
 }
 
-/** THE LANGUAGE THE TURNS ARE SPOKEN IN (cn-v1138), as the last start said it: Talk To Nort passes
+/** THE LANGUAGE THE TURNS ARE SPOKEN IN (cn-v1138), as the last start said it: Talk to Nort passes
  *  the person's (an es-US / en-US tag, lib/i18n localeOf), and a re-arm that passes none keeps it.
  *  It rides to /api/transcribe as a `lang` field — where the PROFILE wins anyway; this is the hint
  *  for a session whose profile has no answer. An "es…" tag is Spanish; anything else is English. */

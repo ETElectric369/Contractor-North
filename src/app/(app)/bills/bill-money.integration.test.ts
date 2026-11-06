@@ -13,7 +13,7 @@ import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
  * speaking as the company's office exactly as PostgREST does. Proven:
  *   · born paid is paid in full; a document the supplier part-paid carries its number; status is the
  *     number's, per purchase;
- *   · Mark Paid pays the whole purchase in full by his word; Mark On Account keeps what the payments
+ *   · Mark Paid pays the whole purchase in full by his word; Mark on Account keeps what the payments
  *     paid and is refused when they cover it, naming the payment's day;
  *   · a payment's cash never exceeds the payment, the payments on a bill never exceed the bill, a
  *     credit and a set-aside copy cannot be paid, and the company must match;
@@ -153,7 +153,7 @@ d("a bill knows how much of it is paid (0383): the triggers, the replay and the 
     needs();
     expect(await money(await bill({ amount: 44.44, status: "paid" }))).toEqual({ amount: 44.44, paid: 44.44, status: "paid" });
     expect(await money(await bill({ amount: 100, status: "unpaid" }))).toEqual({ amount: 100, paid: 0, status: "unpaid" });
-    // Record It As A Bill: the supplier says $30 of it is still open.
+    // Record It as a Bill: the supplier says $30 of it is still open.
     expect(await money(await bill({ amount: 100, status: "unpaid", amountPaid: 70 }))).toEqual({ amount: 100, paid: 70, status: "unpaid" });
     expect(await money(await bill({ amount: 100, status: "unpaid", amountPaid: 100 }))).toEqual({ amount: 100, paid: 100, status: "paid" });
     // A credit is negative both ways.
@@ -162,7 +162,7 @@ d("a bill knows how much of it is paid (0383): the triggers, the replay and the 
     expect((await refused("insert into public.bills (org_id, supplier, amount, status, amount_paid) values ($1, 'TEST CED', 10, 'unpaid', 11)", [orgId]))?.constraint).toBe("bills_amount_paid_within_amount");
   });
 
-  it("Mark Paid pays in full by his word; Mark On Account puts it back; the number drives both", async () => {
+  it("Mark Paid pays in full by his word; Mark on Account puts it back; the number drives both", async () => {
     needs();
     const b = await bill({ amount: 250 });
     await c.query("update public.bills set status = 'paid' where id = $1", [b]);

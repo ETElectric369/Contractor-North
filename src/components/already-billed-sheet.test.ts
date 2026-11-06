@@ -21,6 +21,7 @@ vi.mock("@/app/(app)/bills/receipt-billing-actions", () => ({
 import { AlreadyBilledButton, AlreadyBilledSheet, NotBilledAfterAllButton, hoursWhat, type AlreadyBilledLoad } from "./already-billed-sheet";
 import { NEEDS_UPDATE, type AbInvoice } from "@/lib/already-billed";
 import type { AlreadyBilledSheetData } from "@/lib/already-billed-read";
+import { titleCaseIn } from "../../tests/title-case-words";
 
 /**
  * THE ALREADY BILLED SHEET, AS ERIK READS IT (0357). What these pin is the law, not the styling:
@@ -69,8 +70,8 @@ const buttons = (html: string) =>
     .filter((m) => !/aria-label="Close"/.test(m[1]))
     .map((m) => ({ attrs: m[1], words: m[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() }));
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/\s+/g, " ");
-/** Title Case: every word that starts with a letter starts with a capital ("INV-00023", "h" and "$" aside). */
-const titleCase = (s: string) => s.split(/\s+/).filter((w) => /^[a-z]/i.test(w) && w !== "h").every((w) => /^[A-Z]/.test(w));
+/** Title Case through the one judge (tests/title-case-words, cn-v1148). */
+const titleCase = (s: string) => titleCaseIn(s, "en");
 
 describe("the sheet, Pinyon Sage", () => {
   it("asks which line, beside what the bill cost, and names the bill on its button", () => {
@@ -81,7 +82,7 @@ describe("the sheet, Pinyon Sage", () => {
     expect(t).toContain("INV-00023 · Materials · $110.00");
     expect(t).toContain("Nothing on INV-00023 changes");
     const b = buttons(html);
-    expect(b.map((x) => x.words)).toEqual(expect.arrayContaining(["Cancel", "Mark Billed On INV-00023"]));
+    expect(b.map((x) => x.words)).toEqual(expect.arrayContaining(["Cancel", "Mark Billed on INV-00023"]));
     for (const x of b) {
       expect(x.attrs, x.words).toMatch(/\bh-11\b|\bmin-h-11\b/);
       expect(titleCase(x.words), x.words).toBe(true);
@@ -92,15 +93,15 @@ describe("the sheet, Pinyon Sage", () => {
 
   it("with no line picked, Mark is there but can't be pressed", () => {
     const html = render({ state: "ok", data: data() }, { lineId: null });
-    const mark = buttons(html).find((x) => x.words === "Mark Billed On The Bill")!;
+    const mark = buttons(html).find((x) => x.words === "Mark Billed on the Bill")!;
     expect(mark.attrs).toMatch(/disabled/);
   });
 
-  it("asks Did J-010 Use All Of It? before it marks, with a way to the shelf and a way back", () => {
+  it("asks Did J-010 Use All of It? before it marks, with a way to the shelf and a way back", () => {
     const html = render({ state: "ok", data: data() }, { lineId: "materials", step: "ask" });
-    expect(text(html)).toContain("Did J-010 Use All Of It?");
+    expect(text(html)).toContain("Did J-010 Use All of It?");
     const b = buttons(html).map((x) => x.words);
-    expect(b).toEqual(expect.arrayContaining(["Yes, All Of It", "No, Some Went Into Stock", "Back"]));
+    expect(b).toEqual(expect.arrayContaining(["Yes, All of It", "No, Some Went into Stock", "Back"]));
     for (const x of buttons(html)) expect(titleCase(x.words), x.words).toBe(true);
   });
 
@@ -265,7 +266,7 @@ describe("the sheet, hours on no job", () => {
     expect(Array.from(html.matchAll(/<input type="checkbox"[^>]*>/g))).toHaveLength(3);
     expect(Array.from(html.matchAll(/<input type="checkbox"[^>]*checked=""[^>]*>/g))).toHaveLength(1);
     const b = buttons(html);
-    expect(b.map((x) => x.words)).toEqual(expect.arrayContaining(["Cancel", "Mark Billed On INV-055"]));
+    expect(b.map((x) => x.words)).toEqual(expect.arrayContaining(["Cancel", "Mark Billed on INV-055"]));
     for (const x of b) {
       expect(x.attrs, x.words).toMatch(/\bh-11\b|\bmin-h-11\b/);
       expect(titleCase(x.words), x.words).toBe(true);
@@ -288,7 +289,7 @@ describe("the sheet, hours on no job", () => {
     expect(t).toContain("Nothing is ticked to start. Tick the hours this line charged for.");
     expect(t).toContain("Line: 23 h · Checked: 0 h");
     // Nothing ticked that is listed: Mark can't be pressed.
-    const mark = buttons(html).find((b) => b.words === "Mark Billed On INV-055");
+    const mark = buttons(html).find((b) => b.words === "Mark Billed on INV-055");
     expect(mark?.attrs).toMatch(/disabled/);
   });
 

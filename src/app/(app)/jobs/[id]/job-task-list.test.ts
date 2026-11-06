@@ -85,7 +85,7 @@ describe("the one list: the one-line answer, every open task, the Add line, the 
     }
     expect(html).not.toContain("more on the Tasks tab");
     expect(html).not.toContain("All Tasks");
-    expect(html).toContain('placeholder="Add A Task…"');
+    expect(html).toContain('placeholder="Add a Task…"');
     expect(html).toMatch(/>Photo<\/button>|> Photo<\/button>/);
     // The Done fold is here too, closed: the count, not the rows.
     expect(html).toMatch(/>2 Done<svg|>2 Done</);
@@ -95,7 +95,7 @@ describe("the one list: the one-line answer, every open task, the Add line, the 
   it("the crew gets the same list: same rows, same Add line, same fold", () => {
     const o = office();
     const t = tech();
-    for (const s of ["Tasks: 2 of 7 done", "Pull the permit", "Label the circuits", "Add A Task", "Photo", "2 Done"]) {
+    for (const s of ["Tasks: 2 of 7 done", "Pull the permit", "Label the circuits", "Add a Task", "Photo", "2 Done"]) {
       expect(o).toContain(s);
       expect(t).toContain(s);
     }
@@ -103,7 +103,7 @@ describe("the one list: the one-line answer, every open task, the Add line, the 
 
   it("a job with no tasks shows just the Add line: no header, no rows, no fold", () => {
     const html = office({ tasks: [], photos: {} });
-    expect(html).toContain('placeholder="Add A Task…"');
+    expect(html).toContain('placeholder="Add a Task…"');
     expect(html).not.toContain("Tasks:");
     expect(html).not.toMatch(/>\d+ Done</);
     expect(html).not.toContain("<ul");
@@ -112,7 +112,7 @@ describe("the one list: the one-line answer, every open task, the Add line, the 
   it("a list that couldn't be read says so, never 'no tasks'", () => {
     const html = office({ tasks: [], failed: true });
     expect(html).toContain("Couldn’t read this job’s tasks just now. Reload to try again.");
-    expect(html).not.toContain("Add A Task");
+    expect(html).not.toContain("Add a Task");
   });
 
   it("a list that couldn't be read gives no count: no 'X of Y done' built from the Buy Materials row alone", () => {

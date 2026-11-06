@@ -318,13 +318,13 @@ describe("the bank card", () => {
       otherInSingle: [
         { id: "invoice:inv-1", label: "On INV-1001" },
         { id: "other_income", label: "Other Income" },
-        { id: "not_income", label: "Already Counted Or Not Income" },
+        { id: "not_income", label: "Already Counted or Not Income" },
         { id: "owner_in", label: "Owner's Money In" },
         { id: "cost:Fuel", label: "Refund: Fuel" },
       ],
       sortedLines: [
-        { id: "l1", day: "Sep 5", title: "Check 1043", money: "$640.00", direction: "out", answer: "Pay Pat Crew", by: "Answered By You", current: "crew:pat" },
-        { id: "l2", day: "Sep 3", title: "TRANSFER FROM 9876", money: "$5,000.00", direction: "in", answer: "Already Counted Or Not Income", by: "Answered By You", current: "not_income" },
+        { id: "l1", day: "Sep 5", title: "Check 1043", money: "$640.00", direction: "out", answer: "Pay Pat Crew", by: "Answered by You", current: "crew:pat" },
+        { id: "l2", day: "Sep 3", title: "TRANSFER FROM 9876", money: "$5,000.00", direction: "in", answer: "Already Counted or Not Income", by: "Answered by You", current: "not_income" },
       ],
       sortedMore: 0,
     };
@@ -332,7 +332,7 @@ describe("the bank card", () => {
     const text = textOf(html);
     expect(text).toContain("Sorted Lines");
     expect(text).toContain("Check 1043 $640.00");
-    expect(text).toContain("Pay Pat Crew Answered By You");
+    expect(text).toContain("Pay Pat Crew Answered by You");
     // UNDER THE APPLIED PASS, where what was counted is said.
     expect(html.indexOf("Applied Sep 27")).toBeLessThan(html.indexOf("Sorted Lines"));
     const doors = buttons(html).filter((b) => b.text === "Change Answer");

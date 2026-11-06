@@ -16,7 +16,7 @@ import "server-only";
  *   · WHICH OF THOSE ARE THIS JOB'S: filed on it by a person (job_id), or, filed nowhere, CED's job
  *     name read as the PO box the paperwork tray reads (jobFromPaperMarks): exact, one open job or
  *     nothing, never a likeness. A paper filed on ANOTHER job stays there: a person decided.
- *   · THE DOOR: Record It As A Bill, the /bills action, pressed by a person (JobPaperRow).
+ *   · THE DOOR: Record It as a Bill, the /bills action, pressed by a person (JobPaperRow).
  */
 
 import {
@@ -38,7 +38,7 @@ import { indexSupplierAliases } from "@/lib/supplier-identity";
 /** A supplier document, as the job's list needs it: the reconcile row plus its account.
  *  `onNeedsYou`: /bills has it on a Needs You card (onNeedsYouIds), so a link to it goes there;
  *  `waitingOnCredit`: a person set it aside for a credit (0346), so the link goes to its supplier's
- *  Waiting On A Credit fold; otherwise the link goes to the supplier's own line. */
+ *  Waiting on a Credit fold; otherwise the link goes to the supplier's own line. */
 export type PaperDoc = SupplierInvoiceRow & {
   accountId: string | null;
   onNeedsYou?: boolean;

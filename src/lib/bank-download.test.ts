@@ -835,7 +835,7 @@ describe("the merchant's identity, learned at Apply", () => {
   });
 });
 
-describe("Cash Taken Out (Not A Cost)", () => {
+describe("Cash Taken Out (Not a Cost)", () => {
   const names = { accounts: new Map(), crew: new Map(), invoices: new Map(), jobs: new Map() };
 
   it("is the ATM's guess and its button, in Title Case, and Petty Cash (ATM) is no answer any more", () => {
@@ -844,9 +844,9 @@ describe("Cash Taken Out (Not A Cost)", () => {
     const atm = plan.groups.find((g) => g.label.includes("ATM"))!;
     expect(atm.guess).toBe("cash_out");
     expect(atm.buttons).toContain("cash_out");
-    expect(choiceLabel({ choice: "cash_out" }, names)).toBe("Cash Taken Out (Not A Cost)");
+    expect(choiceLabel({ choice: "cash_out" }, names)).toBe("Cash Taken Out (Not a Cost)");
     const outs = everyChoice("out", ORG_BOOKS(), true).map((c) => choiceLabel(c, names));
-    expect(outs).toContain("Cash Taken Out (Not A Cost)");
+    expect(outs).toContain("Cash Taken Out (Not a Cost)");
     expect(outs).not.toContain("Petty Cash (ATM)");
   });
 
@@ -989,7 +989,7 @@ describe("what needs a person: one row per merchant, the guess first and never p
     expect(shell.buttons).toEqual(["cost:Fuel", "cost:Auto", "draw"]);
     expect(plan.groups.find((g) => g.label.includes("ACME INSURANCE"))!.guess).toBe("cost:Insurance & Licenses");
     expect(plan.groups.find((g) => g.label.includes("SERVICE FEE"))!.guess).toBe("cost:Fees");
-    // An ATM is Cash Taken Out (Not A Cost), W1-34: never a petty-cash top-up any more.
+    // An ATM is Cash Taken Out (Not a Cost), W1-34: never a petty-cash top-up any more.
     expect(plan.groups.find((g) => g.label.includes("ATM"))!.guess).toBe("cash_out");
     expect(plan.groups.find((g) => g.label.includes("ONLINE TRANSFER"))!.guess).toBe("draw");
     // Nothing the words know: no guess, and the row still asks.

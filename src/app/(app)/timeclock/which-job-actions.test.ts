@@ -234,7 +234,7 @@ describe("the jobs the sheet offers", () => {
       return {
         data: [
           job("window", { scheduled_start: "2026-09-25T15:00:00Z", scheduled_end: "2026-09-27T01:00:00Z" }),
-          // Booked Tue 9/22 and Tue 9/29 (Add To Schedule): its window spans today, but today is a GAP
+          // Booked Tue 9/22 and Tue 9/29 (Add to Schedule): its window spans today, but today is a GAP
           // between its day rows, so it is not on today's schedule and not offered.
           job("gap", { status: "scheduled", scheduled_start: "2026-09-22T15:00:00Z", scheduled_end: "2026-09-29T23:00:00Z" }),
           // Scheduled, but for Monday: not today, not in progress, not offered.

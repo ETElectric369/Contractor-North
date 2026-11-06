@@ -4,7 +4,7 @@ import type { ActionDef } from "../types";
 
 export const bugActions: Record<string, ActionDef> = {
   // Nort can FILE a report for anyone (it once faked a capture because it couldn't). Same insert
-  // path as Report A Problem (createBugReport — org-scoped via the set_org_id trigger + RLS).
+  // path as Report a Problem (createBugReport — org-scoped via the set_org_id trigger + RLS).
   // Reading and resolving reports is North's own work on Bug Watch, not a company's (Wave 0).
   "bug.report": {
     name: "bug.report",

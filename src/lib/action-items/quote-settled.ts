@@ -4,7 +4,7 @@ import { isDrawKind } from "@/lib/invoice-math";
  * IS THIS ESTIMATE SETTLED? ONE RULE, ONE FUNCTION (the owner, 2026-11-04: Needs You showed June
  * estimates as needing a day, an answer or a send on a job long finished and billed).
  *
- * Three rows are built from estimates (Won, Needs A Day; No Answer Yet; Estimates Not Sent) and each
+ * Three rows are built from estimates (Won, Needs a Day; No Answer Yet; Estimates Not Sent) and each
  * asked its own inline question about the bill: one read only the job's invoices, one never looked
  * at the job at all, and none read the invoice that NAMES the estimate (invoices.quote_id, 0001).
  * Every one of them asks this now, so the three can never disagree about whether the money moved.

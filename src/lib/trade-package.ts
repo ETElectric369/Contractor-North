@@ -51,7 +51,7 @@ export type TradePackage = {
   menu: string;
   /** What you'd call the person who does it ("deck builder") — prompts and sentences. */
   words: string;
-  /** THE job-code list: sign-up seeds it whole; "Import A Trade's Codes" offers it; one spelling. */
+  /** THE job-code list: sign-up seeds it whole; "Import a Trade's Codes" offers it; one spelling. */
   codes: JobCodeSeed[];
   /** Old spellings of a code in this list (the pre-1135 packs): an import skips a code a company
    *  already has under either, so nobody gets a twin. */
@@ -356,7 +356,7 @@ export function canonicalCode(key: TradeKey, code: string): string {
   return TRADE_PACKAGES[key].codeAliases[c] ?? c;
 }
 
-/** Lightweight rows for the "Import A Trade's Codes" picker, in TRADE_ORDER (never electrical first). */
+/** Lightweight rows for the "Import a Trade's Codes" picker, in TRADE_ORDER (never electrical first). */
 export const TRADE_PACK_OPTIONS = TRADE_ORDER.map((k) => ({
   id: k,
   label: TRADE_PACKAGES[k].menu,

@@ -281,7 +281,7 @@ describe("pickProvenance: who decided where the paper went (Paper B, audit v994 
 
 describe("findSameNumber reads the bill the supplier's door wrote", () => {
   const aliases = indexSupplierAliases([{ alias: "CED", supplier_account_id: "acct-ced" }]);
-  it("a bill Record It As A Bill wrote (supplier_invoice_number) is on the books; a set-aside copy is not", () => {
+  it("a bill Record It as a Bill wrote (supplier_invoice_number) is on the books; a set-aside copy is not", () => {
     const recorded = {
       id: "rec-1",
       supplier: "CED Truckee",

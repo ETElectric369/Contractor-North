@@ -44,7 +44,7 @@ export type BillScopeAnswer =
  * date and NOT the answer, so on the default Read the Receipt save the model's guess won and nothing
  * on screen said the person's "Decking" had been thrown away (items C1-1 and C1-4).
  *
- * A BLANK answer is not an answer. The control sits on "No Part Of The Job" until somebody picks,
+ * A BLANK answer is not an answer. The control sits on "No Part of the Job" until somebody picks,
  * exactly as Category sits on its first word, so an untouched control leaves the paper's own read to
  * stand rather than silently blanking it. A word the estimate has not got is still refused by
  * scopeForWrite below — whoever said it.
@@ -136,7 +136,7 @@ export type ScopeMoveTo = { jobId: string | null; jobScopes: readonly string[] }
  *  otherwise, and the drop is SAID (never silent).
  *
  *  OFF EVERY JOB IS ITS OWN ANSWER. A cost moved to Business Cost has not moved to a job that lacks
- *  the part, and there is no Part Of The Job control on a business cost to send anybody to —
+ *  the part, and there is no Part of the Job control on a business cost to send anybody to —
  *  JobScopePicker draws nothing without a job. So that sentence says what happened and names no
  *  door, because a door that isn't drawn is a dead end. */
 export function scopeAfterJobMove(stored: string | null, to: ScopeMoveTo): { value: string | null; said: string | null } {
@@ -157,14 +157,14 @@ export function scopeAfterJobMove(stored: string | null, to: ScopeMoveTo): { val
 /** The words a screen shows for a stored value: the part's own name, or that nothing is set. */
 export function scopeSaid(value: string | null | undefined): string {
   const s = String(value ?? "").trim();
-  return s && s !== SCOPE_UNCATEGORIZED ? s : "No Part Of The Job Set";
+  return s && s !== SCOPE_UNCATEGORIZED ? s : "No Part of the Job Set";
 }
 
 /** WHAT THE ONE CONTROL SHOWS AS CHOSEN for a stored value — the mirror of scopeSaid, which puts the
  *  same value into words for a row. The reserved word is NOT a part of the job, so it is shown as
  *  none of them: main's receipt reader could store the literal "Uncategorized", and offering it as an
- *  option of its own beside "No Part Of The Job" is the two spellings of nothing in one control this
- *  module exists to prevent — with the Costs tab row beside it already saying "No Part Of The Job
+ *  option of its own beside "No Part of the Job" is the two spellings of nothing in one control this
+ *  module exists to prevent — with the Costs tab row beside it already saying "No Part of the Job
  *  Set" about the same cost, so the row and the box disagreed until he saved (item C1-3). */
 export function scopeSelected(value: string | null | undefined): string {
   const s = String(value ?? "").trim();

@@ -69,7 +69,7 @@ export function LessonOffer({
             type="button"
             disabled={pending}
             onClick={() => {
-              // Same iOS rule as the help rows under Search Or Ask: unlock audio inside the tap, or
+              // Same iOS rule as the help rows under Search or Ask: unlock audio inside the tap, or
               // Nort is silent for the whole first step on an iPhone.
               unlockAudio();
               setRunning(true);

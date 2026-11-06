@@ -17,7 +17,7 @@ import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
  *                               ON DELETE SET NULL) and kills the customer's link (0052's cascade);
  *   the delete on the row read  keyed on the updated_at it read, the delete removes the row when
  *                               nothing changed and nothing once a capture save has touched it;
- *   Put It Back On The Schedule a cancelled visit whose day passed comes back scheduled and waiting
+ *   Put It Back on the Schedule a cancelled visit whose day passed comes back scheduled and waiting
  *                               for a day (0368: applied inside this transaction when missing), on
  *                               the schedule rail's read; a day still ahead is kept; only cancelled;
  *   the five kinds              Other books (0232's check) and an old Client Meeting keeps its kind;
@@ -140,7 +140,7 @@ d("a visit that won't happen, and one put back (Wave 2 lane 4)", () => {
     expect(await deleteAsRead(clean, await stampOf(clean))).toEqual([{ id: clean }]);
   });
 
-  it("Put It Back On The Schedule: a passed day comes back waiting for a day, on the rail; a day ahead is kept; only a cancelled visit", async () => {
+  it("Put It Back on the Schedule: a passed day comes back waiting for a day, on the rail; a day ahead is kept; only a cancelled visit", async () => {
     const passed = await visit({ status: "cancelled", startsAt: "2026-01-05T17:00:00Z" });
     const back = await asOffice(async () =>
       (

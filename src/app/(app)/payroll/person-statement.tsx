@@ -165,7 +165,7 @@ export function PersonStatement({
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Owed Is Earned Less Paid</h3>
           <InfoPopup
             title="How These Three Figures Are Worked Out"
-            label="About Earned, Paid And Owed"
+            label="About Earned, Paid and Owed"
             bullets={THREE_FIGURES_FACTS}
             className="-my-2 -mr-2"
           />

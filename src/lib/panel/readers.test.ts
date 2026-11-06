@@ -286,7 +286,7 @@ describe("readerSuggestions: the plans and Nort", () => {
     });
     expect(out.drafts[0]).toMatchObject({ description: "Bath Floor Heat", panel_label: null, space: null, room: "Bath", work: "new", source: "plan" });
     expect(out.drafts[0].source_row).toMatchObject({ sheet: "E-1", ckt: "14" });
-    expect(sourceWords({ source: "plan", source_row: out.drafts[0].source_row })).toBe("From The Plans · E-1");
+    expect(sourceWords({ source: "plan", source_row: out.drafts[0].source_row })).toBe("From the Plans · E-1");
   });
 
   it("Nort's 'a 20 amp for the garage freezer' is a suggestion that feeds Freezer in the Garage", () => {

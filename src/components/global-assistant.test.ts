@@ -7,7 +7,7 @@ import { join } from "node:path";
 /**
  * NORT'S HOST HAS NO BAR BUTTON (W1-09), AND TALK TO NORT STARTS HIM INSIDE THE TAP.
  *
- * Talk To Nort (the first row under Search Or Ask) dispatches cn:nort-talk; this component's
+ * Talk to Nort (the first row under Search or Ask) dispatches cn:nort-talk; this component's
  * listener runs launch() in that dispatch, so speech.startListening() is still inside the user
  * gesture — iOS refuses a mic started any later (the old "mic never starts on iPhone" bug). The
  * listener is added once, so launch() must read the panel's open state from a ref: a closure over

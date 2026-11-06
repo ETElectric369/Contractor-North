@@ -25,7 +25,7 @@ export interface SupplierDuplicateActions {
   unresolveDuplicate?: (groupId: string) => Promise<SupplierActionResult>;
   /**
    * BOTH ARE REAL (0400 both_real_at; cn-v1137): two identical runs a month apart are normal, and the
-   * card said so while offering only Keep It On <job>. This keeps both costs where they are and the
+   * card said so while offering only Keep It on <job>. This keeps both costs where they are and the
    * pair stops being asked about. Optional: a mount without the door draws no button.
    */
   markBothReal?: (billIds: string[]) => Promise<SupplierActionResult>;
@@ -104,7 +104,7 @@ export function SupplierDuplicates({
     <Card id="same-ticket-two-jobs" className="mb-6 scroll-mt-4 p-4">
       <div className="mb-3">
         <h2 className="text-base font-semibold text-slate-900">
-          The Same Ticket On Two Jobs{openGroups.length > 0 ? ` (${openGroups.length} Waiting)` : ""}
+          The Same Ticket on Two Jobs{openGroups.length > 0 ? ` (${openGroups.length} Waiting)` : ""}
         </h2>
         <WhyFold>
           <p>
@@ -174,7 +174,7 @@ export function SupplierDuplicates({
                             href={`/jobs/${c.jobId}`}
                             className="flex min-h-11 items-center px-2 text-xs font-medium text-brand hover:underline"
                           >
-                            Open The Job
+                            Open the Job
                           </Link>
                         )}
                         {/* The job's name rides ON the button, so a tap at arm's length says what it
@@ -199,7 +199,7 @@ export function SupplierDuplicates({
                               )
                             }
                           >
-                            <span className="min-w-0 truncate">Keep It On {copyPlace(c)}</span>
+                            <span className="min-w-0 truncate">Keep It on {copyPlace(c)}</span>
                           </Button>
                         )}
                       </span>
@@ -260,7 +260,7 @@ export function SupplierDuplicates({
                         })()}
                         className="flex min-h-11 items-center font-medium text-brand hover:underline"
                       >
-                        To Change It, Open That Bill In All Bills
+                        To Change It, Open That Bill in All Bills
                       </a>
                     )}
                   </>

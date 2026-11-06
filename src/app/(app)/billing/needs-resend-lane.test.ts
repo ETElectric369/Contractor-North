@@ -162,7 +162,7 @@ describe("the board speaks one language", () => {
     expect(code).toMatch(/const awaiting = unpaid\.filter\(/);
     expect(code).toMatch(/awaiting\.map\(/);
     expect(code).not.toMatch(/unpaid\.map\(\(inv\)/);
-    // Owed To You still counts every open invoice once: the pipeline's own outstanding total.
+    // Owed to You still counts every open invoice once: the pipeline's own outstanding total.
     expect(code).toContain("const owed = pipeline.outstandingTotal;");
   });
 

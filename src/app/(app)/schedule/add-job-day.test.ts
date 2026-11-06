@@ -186,7 +186,7 @@ function honeysuckle() {
   state.db.time_entries.push({ job_id: "j011", clock_in: at("2026-09-22", "08:00") }, { job_id: "j011", clock_in: at("2026-09-24", "08:00") });
 }
 
-describe("Add To Schedule: the day joins the job, at its own hours", () => {
+describe("Add to Schedule: the day joins the job, at its own hours", () => {
   it("Honeysuckle gets today, noon to 5, beside its other days, which all stay", async () => {
     honeysuckle();
     const r = await actions.addJobDay("j011", { day: "2026-09-28", start: "12:00", length: 300 });
@@ -283,7 +283,7 @@ describe("Add To Schedule: the day joins the job, at its own hours", () => {
   });
 
   it("a job with no live plan, on the day it sits on as history: that day becomes its plan", async () => {
-    // Its date was cleared (Clear The Date) and the worked day stayed; the office puts it back on that day.
+    // Its date was cleared (Clear the Date) and the worked day stayed; the office puts it back on that day.
     state.db.jobs.push({ id: "c1", name: "Tupelo", status: "to_be_scheduled", scheduled_start: null, scheduled_end: null, planned_minutes: null, assigned_to: [] });
     state.db.job_schedule_segments.push({ job_id: "c1", start_date: "2026-09-21", end_date: "2026-09-21", start_time: "10:00:00", end_time: "14:00:00" });
     state.db.time_entries.push({ job_id: "c1", clock_in: at("2026-09-21", "10:05") });
@@ -460,7 +460,7 @@ describe("a plan that shrinks back to one day: the job's time is the block that 
   });
 });
 
-describe("before 0370, Add To Schedule never redraws the job's other days", () => {
+describe("before 0370, Add to Schedule never redraws the job's other days", () => {
   it("Siskin's one day 10 to 12 stays 10 to 12 when Wed joins it (a job's hours are each day's), so the add goes on and Wed lands at the usual 10 to 12", async () => {
     state.noHours = true;
     state.db.jobs.push({ id: "s2", name: "Siskin", status: "scheduled", scheduled_start: at("2026-10-05", "10:00"), scheduled_end: at("2026-10-05", "12:00"), planned_minutes: 120, assigned_to: [] });

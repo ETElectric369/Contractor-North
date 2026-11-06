@@ -219,9 +219,9 @@ describe("dueGraceNotice: the same rule, keyed on the unpaid period's end", () =
 
 describe("noticeWords: from the real days left, never the threshold", () => {
   it("trial", () => {
-    expect(noticeWords("trial", 7).title).toBe("Your Free Trial Ends In 7 Days");
-    expect(noticeWords("trial", 5).title).toBe("Your Free Trial Ends In 5 Days");
-    expect(noticeWords("trial", 2).title).toBe("Your Free Trial Ends In 2 Days");
+    expect(noticeWords("trial", 7).title).toBe("Your Free Trial Ends in 7 Days");
+    expect(noticeWords("trial", 5).title).toBe("Your Free Trial Ends in 5 Days");
+    expect(noticeWords("trial", 2).title).toBe("Your Free Trial Ends in 2 Days");
     expect(noticeWords("trial", 1).title).toBe("Your Free Trial Ends Tomorrow");
     expect(noticeWords("trial", 0).title).toBe("Your Free Trial Ends Today");
     expect(noticeWords("trial", 5).body).toBe(
@@ -235,10 +235,10 @@ describe("noticeWords: from the real days left, never the threshold", () => {
   });
   it("lapsed, by its reason", () => {
     expect(noticeWords("lapsed", "trial_ended").title).toBe("Your Free Trial Has Ended");
-    expect(noticeWords("lapsed", "grace_spent").title).toBe("Your Card Was Not Updated In Time");
+    expect(noticeWords("lapsed", "grace_spent").title).toBe("Your Card Was Not Updated in Time");
     expect(noticeWords("lapsed", "canceled").title).toBe("Your Subscription Has Ended");
     expect(noticeWords("lapsed", "canceled").body).toBe(
-      "Nort, texts and reminders are paused. Your customers can still pay you. Download For Your Accountant stays open. Pick a plan to continue.",
+      "Nort, texts and reminders are paused. Your customers can still pay you. Download for Your Accountant stays open. Pick a plan to continue.",
     );
   });
 });
@@ -250,16 +250,16 @@ describe("the trial notices", () => {
     expect(claims(c)).toEqual([{ p_org: ORG, p_key: "trial_7" }]);
     expect(spies.notify).toHaveBeenCalledTimes(1);
     expect(spies.notify).toHaveBeenCalledWith(ORG, ["owner-1", "admin-1"], "billing", {
-      title: "Your Free Trial Ends In 5 Days",
+      title: "Your Free Trial Ends in 5 Days",
       body: "Pick a plan in Settings › Getting Paid to keep the crew working. Your customers can still pay you and your data stays yours either way.",
       url: NOTICE_URL,
     });
     expect(spies.email).toHaveBeenCalledTimes(1);
     const mail = spies.email.mock.calls[0][0];
     expect(mail.to).toBe("hello@larkspur.example");
-    expect(mail.subject).toBe("Your Free Trial Ends In 5 Days");
+    expect(mail.subject).toBe("Your Free Trial Ends in 5 Days");
     expect(mail.fromName).toBeUndefined(); // North itself writes
-    expect(mail.html).toContain("<north>Your Free Trial Ends In 5 Days|Pick a plan in Settings");
+    expect(mail.html).toContain("<north>Your Free Trial Ends in 5 Days|Pick a plan in Settings");
     expect(mail.html).toContain("|Open Settings|https://contractor-north.vercel.app/settings?tab=getpaid</north>");
     expect(spies.report).not.toHaveBeenCalled();
   });
@@ -302,7 +302,7 @@ describe("the trial notices", () => {
     const c = fakeClient({ orgs: [org({ trial_ends_at: noonIn(3), billing_notices: { trial_7: "x" } })] });
     expect(await run(c)).toEqual(told);
     expect(claims(c)).toEqual([{ p_org: ORG, p_key: "trial_3" }]);
-    expect(spies.notify.mock.calls[0][3].title).toBe("Your Free Trial Ends In 3 Days");
+    expect(spies.notify.mock.calls[0][3].title).toBe("Your Free Trial Ends in 3 Days");
   });
 
   it("day 1: Tomorrow — under trial_1 whether the earlier doors are stamped or a week was missed", async () => {
@@ -364,7 +364,7 @@ describe("the trial notices", () => {
     const c = fakeClient({ orgs: [org({ trial_ends_at: noonIn(4), billing_notices: { trial_7: "x" } })] });
     await run(c, Date.parse("2026-11-05T07:00:00Z"));
     expect(claims(c)).toEqual([{ p_org: ORG, p_key: "trial_3" }]);
-    expect(spies.notify.mock.calls[0][3].title).toBe("Your Free Trial Ends In 2 Days");
+    expect(spies.notify.mock.calls[0][3].title).toBe("Your Free Trial Ends in 2 Days");
   });
 
   it("trialing with no end date: nothing to count down, nothing claimed", async () => {
@@ -431,7 +431,7 @@ describe("the lapse notice", () => {
     expect(claims(c)).toEqual([{ p_org: ORG, p_key: LAPSED_KEY }]);
     expect(spies.notify.mock.calls[0][3]).toEqual({
       title: "Your Free Trial Has Ended",
-      body: "Nort, texts and reminders are paused. Your customers can still pay you. Download For Your Accountant stays open. Pick a plan to continue.",
+      body: "Nort, texts and reminders are paused. Your customers can still pay you. Download for Your Accountant stays open. Pick a plan to continue.",
       url: NOTICE_URL,
     });
     spies.notify.mockClear();
@@ -454,7 +454,7 @@ describe("the lapse notice", () => {
     let c = fakeClient({ orgs: [org({ subscription_status: "past_due", current_period_end: new Date(NOW - 11 * DAY).toISOString() })] });
     await run(c);
     expect(claims(c)).toEqual([{ p_org: ORG, p_key: "lapsed" }]);
-    expect(spies.notify.mock.calls[0][3].title).toBe("Your Card Was Not Updated In Time");
+    expect(spies.notify.mock.calls[0][3].title).toBe("Your Card Was Not Updated in Time");
     spies.notify.mockClear();
     c = fakeClient({ orgs: [org({ subscription_status: "canceled" })] });
     await run(c);
@@ -502,7 +502,7 @@ describe("who is never told", () => {
 describe("the lock", () => {
   it("the claim happens BEFORE the bell and the email", async () => {
     await run(fakeClient({ orgs: [org()] }));
-    expect(spies.log).toEqual(["claim:trial_7", "notify:Your Free Trial Ends In 5 Days", "email:hello@larkspur.example"]);
+    expect(spies.log).toEqual(["claim:trial_7", "notify:Your Free Trial Ends in 5 Days", "email:hello@larkspur.example"]);
   });
 
   it("a claim that errors: failed, nothing sent, filed as cron-billing-notices with the company", async () => {
@@ -531,7 +531,7 @@ describe("the lock", () => {
     });
     expect(await run(c)).toEqual({ orgs: 2, due: 2, sent: 1, skipped: { comped: 0 }, failed: 1 });
     expect(spies.notify).toHaveBeenCalledTimes(1);
-    expect(spies.notify).toHaveBeenCalledWith(ORG2, ["owner-2"], "billing", expect.objectContaining({ title: "Your Free Trial Ends In 3 Days" }));
+    expect(spies.notify).toHaveBeenCalledWith(ORG2, ["owner-2"], "billing", expect.objectContaining({ title: "Your Free Trial Ends in 3 Days" }));
     expect(spies.email.mock.calls[0][0].to).toBe("catbird@thistlewood.example"); // no company email: the owner's
   });
 });

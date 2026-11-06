@@ -52,8 +52,8 @@ export const words: WordCatalog = {
     tc_wrapUpBodySplit: "You worked {total} this shift, {part} of it on {job}. Add miles and a note, then clock out.",
     tc_lunchOnPrev: "The lunch goes on {job}.",
     tc_lunchOnThis: "The lunch goes on this part of your shift.",
-    tc_putOnThis: "Put It On This Part Instead",
-    tc_putOnPrev: "Put It On {job} Instead",
+    tc_putOnThis: "Put It on This Part Instead",
+    tc_putOnPrev: "Put It on {job} Instead",
     tc_switchedCut: "Switched to {job}. The first part is its own entry ({hours}).",
     // "THIS PUNCH", not "this shift": a re-point moves ONE row. On a day already cut by an earlier
     // Switch Job the running row is the part since that switch, so "the whole shift moved over" would
@@ -65,7 +65,7 @@ export const words: WordCatalog = {
     tc_longShiftBody: "When did you stop?",
     tc_whenStopped: "The time you stopped work on this shift.",
     tc_nowChip: "Now ({hours} h)",
-    tc_clockOutAtThatTime: "Clock Out At That Time",
+    tc_clockOutAtThatTime: "Clock Out at That Time",
     tc_pickStop: "Pick the time you stopped.",
     // THE SHEET'S HEADLINE, shared: planner/which-job.tsx draws it, clock-told / scheduled-job /
     // offline-drain name it in a sentence, and the panel's comments point at it.
@@ -84,7 +84,7 @@ export const words: WordCatalog = {
     tc_punchGone: "That punch is gone.",
     tc_noJobSelected: "No job selected",
     tc_noJobOnPunch: "No job on this punch yet.",
-    tc_pickTheJob: "Pick The Job",
+    tc_pickTheJob: "Pick the Job",
     tc_moreOptions: "More Options",
     tc_switchJobLabel: "Switch job",
     tc_switchNoJob: "This punch has no job yet, so all of it moves onto the job you pick.",
@@ -97,7 +97,7 @@ export const words: WordCatalog = {
     tc_switch: "Switch",
     tc_cancel: "Cancel",
     tc_switchJob: "Switch Job",
-    tc_clockOutWithDetails: "Clock Out With Details…",
+    tc_clockOutWithDetails: "Clock Out with Details…",
     tc_miles: "Miles",
     tc_roundTrip: "round trip",
     tc_roundTripTitle: "Round trip: home ↔ job",
@@ -110,10 +110,10 @@ export const words: WordCatalog = {
     // THE START-TIME PICKER (clock-start-picker.tsx). The three collapsed doors are Title Case
     // (Erik's law: every word on a button) — they were template literals the title-case scan could
     // not read before cn-v1138. {time} is the half-hour the start rounds back to.
-    tc_roundedTo: "Rounded To {time} · Tap For Now",
+    tc_roundedTo: "Rounded to {time} · Tap for Now",
     tc_startingNow: "Starting Now",
-    tc_startingNowRound: "Starting Now · Round Back To {time}",
-    tc_startingNowPick: "Starting Now · Pick A Different Time",
+    tc_startingNowRound: "Starting Now · Round Back to {time}",
+    tc_startingNowPick: "Starting Now · Pick a Different Time",
     tc_useNow: "Use Now",
     tc_startWord: "Start",
     tc_stopWord: "Stop",
@@ -135,7 +135,7 @@ export const words: WordCatalog = {
     // NORT'S END-OF-DAY DEBRIEF (daily-report-debrief.tsx).
     tc_couldNotFileReport: "Could not file the report.",
     tc_offlineAnswersKept: "No connection — your answers are kept, try again when you have bars.",
-    tc_nortEndOfDay: "Nort — End Of Day",
+    tc_nortEndOfDay: "Nort — End of Day",
     tc_done: "Done",
     tc_fileReport: "File Report",
     tc_skip: "Skip",
@@ -174,11 +174,11 @@ export const words: WordCatalog = {
     tc_acPartHasLunch: "This part already has a {min}-minute lunch on it, so it stays here.",
     tc_acLunchOnPrior: "The lunch goes on {job} ({from}–{to}), before the switch.",
     tc_acLunchOnThisPart: "The lunch goes on {job}, this part of your shift.",
-    tc_putOnJob: "Put It On {job}",
+    tc_putOnJob: "Put It on {job}",
     tc_iSwitchedJobs: "I Switched Jobs During This Shift",
     tc_at: "At",
     tc_jobSwitchedToAria: "The job you switched to",
-    tc_pickAJob: "Pick A Job",
+    tc_pickAJob: "Pick a Job",
     tc_jobsGroup: "Jobs",
     tc_timeCodesGroup: "Time Codes — Paid, Not Billed",
     tc_acPreviewLeft: "{from}–{to} on {job} ({hours})",
@@ -238,7 +238,7 @@ export const words: WordCatalog = {
     tc_alreadyHasOne: "{name} already has a shift on {day}",
     tc_alreadyHasMany: "{name} already has {n} shifts on {day}",
     tc_putting: "Putting…",
-    tc_putThisOn: "Put This On {job}",
+    tc_putThisOn: "Put This on {job}",
     tc_openThatShift: "Open That Shift",
     tc_noJobSameWorkPut: "A shift on no job is usually this same work. Put it on {job} instead of adding the hours again.",
     tc_noJobSameWorkPick: "A shift on no job is usually this same work. Pick the job above to put it there instead of adding the hours again.",

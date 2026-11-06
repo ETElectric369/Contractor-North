@@ -107,7 +107,7 @@ export function appChoseSentence(label: string, from: AppPickSource, lang?: Lang
 /**
  * THE SAME FACTS FOR THE ONE DOOR THAT HAS NO BUTTON TO OFFER (Nort, 2026-10-01).
  *
- * Every screen ends the sentence with "change it if you're somewhere else" because Change The Job is
+ * Every screen ends the sentence with "change it if you're somewhere else" because Change the Job is
  * right there. Nort relayed those words verbatim — and could not do it. His only move on a running
  * shift is switch_job, and a switch CUT the shift: it closed the part so far and opened a new one, so
  * the minutes already billed to the wrong customer stayed exactly where they were. An instruction is a

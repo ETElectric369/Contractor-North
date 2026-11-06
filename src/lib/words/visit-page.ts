@@ -86,22 +86,22 @@ export const words: WordCatalog = {
   sameInBoth: [],
   en: {
     // ── The page (page.tsx): the back link, the badges, the header's main button and ⋯, the lines ──
-    vp_btn_backToSchedule: "Back To Schedule",
-    vp_btn_backToMyDay: "Back To My Day",
+    vp_btn_backToSchedule: "Back to Schedule",
+    vp_btn_backToMyDay: "Back to My Day",
     vp_btn_actions: "Actions",
     vp_pendingPick: "pending pick",
     vp_doneBadge: "done",
     vp_cancelledBadge: "cancelled",
     vp_btn_markInspectionDone: "Mark Inspection Done",
     vp_btn_editDetails: "Edit Details…",
-    vp_waitingForADay: "Waiting For A Day",
+    vp_waitingForADay: "Waiting for a Day",
     vp_noJob: "no job",
     vp_crewLeadsAfterUpdate: "Crew leads can fill this in once the office finishes an update. Until then only the office can change it.",
     vp_customerToldUsOnline: "What the customer told us online",
     vp_theirWordsConfirm: "Their words, not a finding — confirm on site.",
     vp_noneMatchedSheet: "None of these matched a question on your inspection sheet, so none of them could fill it in.",
     vp_couldntReadWebsiteForm: "Couldn't read the website form's questions just now, so the customer's answers aren't shown. Reload to try again.",
-    vp_inspectionOrEstimate: "Inspection Or Estimate",
+    vp_inspectionOrEstimate: "Inspection or Estimate",
     vp_inspection: "Inspection",
     vp_thisJob: "This job",
 
@@ -136,37 +136,37 @@ export const words: WordCatalog = {
     vp_onClockSince: "You’re on the clock on {label} since {since}.",
     vp_startingMovesWhole: "Starting this job moves this whole punch onto it — none of it stays behind.",
     vp_startingSwitchesHere: "Starting this job switches your clock here.",
-    vp_btn_linkTo: "Link To {job}",
-    vp_btn_linkToInstead: "Link To {job} Instead",
-    vp_btn_makeANewJobAnyway: "Make A New Job Anyway",
-    vp_btn_startAJobFromThisVisit: "Start A Job From This Visit",
-    vp_btn_startTheJobAndClockIn: "Start The Job And Clock In",
-    vp_btn_startTheJob: "Start The Job",
+    vp_btn_linkTo: "Link to {job}",
+    vp_btn_linkToInstead: "Link to {job} Instead",
+    vp_btn_makeANewJobAnyway: "Make a New Job Anyway",
+    vp_btn_startAJobFromThisVisit: "Start a Job from This Visit",
+    vp_btn_startTheJobAndClockIn: "Start the Job and Clock In",
+    vp_btn_startTheJob: "Start the Job",
 
     // ── The ask face: crew, no job yet ──
     vp_askOfficeToStart: "Ask the office to start the job",
     vp_askOverNoJob: "This visit is done and has no job. If the work goes on, ask the office to start one.",
     vp_askNoJobYet: "This visit has no job yet, and only the office can start one. Once they do, you can clock in right here.",
-    vp_btn_askTheOffice: "Ask The Office",
-    vp_btn_callTheOffice: "Call The Office",
-    vp_btn_textTheOffice: "Text The Office",
+    vp_btn_askTheOffice: "Ask the Office",
+    vp_btn_callTheOffice: "Call the Office",
+    vp_btn_textTheOffice: "Text the Office",
 
     // ── A linked job: clock in, switch, here, closed ──
     vp_thisVisitIs: "This visit is {job}",
     vp_switchingMovesWhole: "Switching moves this whole punch onto {job} — none of it stays behind.",
     vp_switchingEndsPart: "Switching ends that part now and starts this one.",
     vp_closedLine: "The visit is done and {job} is finished, so there’s no clock to start here.",
-    vp_youreOnTheClockHere: "You’re On The Clock Here",
-    vp_btn_switchTo: "Switch To {job}",
-    vp_btn_clockInOn: "Clock In On {job}",
+    vp_youreOnTheClockHere: "You’re on the Clock Here",
+    vp_btn_switchTo: "Switch to {job}",
+    vp_btn_clockInOn: "Clock In on {job}",
     vp_btn_open: "Open {job}",
 
     // ── The sheet: what the job will be, when the clock starts ──
-    vp_makeANewJob: "Make A New Job",
+    vp_makeANewJob: "Make a New Job",
     vp_btn_cancel: "Cancel",
     vp_btn_linking: "Linking…",
     vp_btn_starting: "Starting…",
-    vp_btn_switchToThisJob: "Switch To This Job",
+    vp_btn_switchToThisJob: "Switch to This Job",
     vp_alreadyHasSecondJob: "{customer} already has {job}, made that day. This makes a second job.",
     vp_theJobWillBe: "The job will be",
     vp_name: "Name",
@@ -181,7 +181,7 @@ export const words: WordCatalog = {
     vp_startedAt: "Started at",
     vp_btn_now: "Now",
     vp_btn_visitTime: "Visit Time · {clock}",
-    vp_btn_pickATime: "Pick A Time",
+    vp_btn_pickATime: "Pick a Time",
     vp_clockStartsAtTimeAbove: "Your clock starts at the time above.",
 
     // ── The link picker (link-picker.tsx): one box over three tables ──
@@ -199,7 +199,7 @@ export const words: WordCatalog = {
     vp_nobodyByThatName: "Nobody by that name yet.",
     vp_nothingMatchesYet: "Nothing matches yet — carry on, you can connect this later.",
     vp_couldntMakeTheLead: "Couldn't make the lead.",
-    vp_btn_addAsANewLead: "Add As A New Lead",
+    vp_btn_addAsANewLead: "Add as a New Lead",
     vp_addressGoesOnLead: "{typed} — this visit’s address goes on the lead",
     vp_couldntConnectIt: "Couldn't connect it — try again.",
 
@@ -208,8 +208,8 @@ export const words: WordCatalog = {
     vp_lost: "Lost",
     // The same word as a DOOR (the office's Lost button): a clickable is a vp_btn_ key; the status word above stays its own.
     vp_btn_lost: "Lost",
-    vp_btn_wonPickTheJob: "Won · Pick The Job",
-    vp_btn_clearTheAnswer: "Clear The Answer",
+    vp_btn_wonPickTheJob: "Won · Pick the Job",
+    vp_btn_clearTheAnswer: "Clear the Answer",
     vp_btn_keepIt: "Keep It",
     vp_writtenUpAs: "Written up as",
     // The estimate's link when it has no number yet: a navigating door, so a vp_btn_ key.
@@ -233,7 +233,7 @@ export const words: WordCatalog = {
     vp_btn_markDone: "Mark Done",
     vp_couldntPutBackOnSchedule: "Couldn't put it back on the schedule — try again.",
     vp_backOnTheSchedule: "Back on the schedule.",
-    vp_btn_putItBackOnTheSchedule: "Put It Back On The Schedule",
+    vp_btn_putItBackOnTheSchedule: "Put It Back on the Schedule",
     vp_thatVisitDidntChange: "That visit didn't change — try again.",
     vp_btn_wontHappen: "Won't Happen",
     vp_couldntUpdateStatus: "Couldn't update the status — try again.",
@@ -255,7 +255,7 @@ export const words: WordCatalog = {
     vp_btn_editInspection: "Edit Inspection",
     vp_btn_saveAppointment: "Save Appointment",
     vp_btn_saveInspection: "Save Inspection",
-    vp_btn_textTheCustomerTheseTimes: "Text The Customer These Times",
+    vp_btn_textTheCustomerTheseTimes: "Text the Customer These Times",
     vp_btn_createLink: "Create Link",
     vp_btn_edit: "Edit",
     vp_btn_done: "Done",
@@ -263,13 +263,13 @@ export const words: WordCatalog = {
     vp_btn_copied: "Copied",
     vp_btn_copyLink: "Copy Link",
     vp_btn_textIt: "Text It",
-    vp_btn_setATime: "Set A Time",
+    vp_btn_setATime: "Set a Time",
     vp_btn_proposeTimes: "Propose Times",
     vp_btn_anyone: "— Anyone —",
     vp_btn_newLead: "New Lead",
     vp_btn_newCustomer: "New Customer",
-    // The arrow after it stays in the JSX ("Convert To Job →"): a symbol is not a word.
-    vp_btn_convertToJob: "Convert To Job",
+    // The arrow after it stays in the JSX ("Convert to Job →"): a symbol is not a word.
+    vp_btn_convertToJob: "Convert to Job",
     vp_draftRestored: "Draft restored — pick up where you left off",
     vp_zoneNote: "Times are {zone} time, the business's clock.",
     vp_couldNotCreateJob: "Could not create job.",
@@ -303,20 +303,20 @@ export const words: WordCatalog = {
     vp_addressOrSite: "Address or site",
     vp_notes: "Notes",
 
-    // ── Clear The Date (unschedule-button.tsx): the ⋯ row and what it says after ──
-    vp_btn_clearTheDate: "Clear The Date",
+    // ── Clear the Date (unschedule-button.tsx): the ⋯ row and what it says after ──
+    vp_btn_clearTheDate: "Clear the Date",
     vp_btn_clearing: "Clearing…",
     vp_couldntClearTheDate: "Couldn't clear the date.",
-    vp_waitsUnderWaitingForADay: "It waits under Waiting For A Day on the schedule. Place it there when they call.",
+    vp_waitsUnderWaitingForADay: "It waits under Waiting for a Day on the schedule. Place it there when they call.",
 
-    // ── Start The Job's server (start-job-actions.ts): every message, error and warning it returns, in
+    // ── Start the Job's server (start-job-actions.ts): every message, error and warning it returns, in
     //    the caller's language (wordsOf). A warning the Time Clock's own clockIn / switchJob sends back is
     //    already in the caller's language (cs_) and rides through as received. ──
     vp_onlyOfficeStartsJob: "Only the office can start a job. Ask the office to start it, then clock in here.",
     vp_visitNotFound: "That visit could not be found.",
     vp_visitCancelledNothingStarted: "This visit was cancelled. Nothing was started.",
     vp_nothingWasStarted: "Nothing was started.",
-    vp_onClockSwitchHere: "You're on the clock on {label} since {since}. Switch To This Job moves your clock here now. Nothing was started yet.",
+    vp_onClockSwitchHere: "You're on the clock on {label} since {since}. Switch to This Job moves your clock here now. Nothing was started yet.",
     vp_onClockLinkInstead: "You're on the clock on {job}, the job {customer} already has from today. Link this visit to {job} instead. Nothing was started.",
     vp_thisCustomerLower: "this customer",
     vp_jobCouldNotBeStarted: "The job could not be started. Nothing was changed.",
@@ -388,7 +388,7 @@ export const words: WordCatalog = {
     vp_aVisitLower: "a visit",
 
     // ── lib/overlap-refusal clockInClashWords (pure: English inline, these words from the caller): the clock-in's
-    //    refusal over hours already recorded, which Start The Job And Clock In shows to the tech (start-job-actions
+    //    refusal over hours already recorded, which Start the Job and Clock In shows to the tech (start-job-actions
     //    hands it `lang` + its translator; the Time Clock's own clockIn keeps the English default). {when} is the
     //    clash's day and clocks (vp_clashWhen; a running clock has only its start), {where} " on J-050" / " with no
     //    job" or nothing, {at} the start that was tapped, {end} the clash's end, {fix} one of the two fixes. ──

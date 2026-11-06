@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { CATALOGS, dict, mergeWords, translator } from "@/lib/i18n";
 import type { WordCatalog } from "@/lib/words/types";
-import { titleCaseIn } from "./es-function-words";
+import { titleCaseIn } from "./title-case-words";
 
 /**
  * EVERY WORD IN BOTH LANGUAGES (cn-v1138). The runtime lays Spanish over English so a missing key
@@ -41,7 +41,7 @@ const TITLE_CASE_FAMILIES = [
   "ld_btn_", "ld_srv_btn_", "cu_btn_", "cu_srv_btn_", "ip_btn_",
 ];
 const TITLE_CASE_ES_ONLY = ["nv_page_"];
-/** The rule: tests/es-function-words titleCaseIn (English every word; Spanish the significant words, cn-v1147). */
+/** The rule: tests/title-case-words titleCaseIn — the significant words in both languages (Spanish cn-v1147, English cn-v1148). */
 const titleCase = titleCaseIn;
 
 const ROOT = process.cwd();
@@ -154,7 +154,7 @@ describe("the catalogs", () => {
     }
   });
 
-  it("every clickable or title key family is Title Case — English every word; Spanish the significant words, de / y / del lowercase after the first (cn-v1147)", () => {
+  it("every clickable or title key family is Title Case — the significant words: English a / the / to / of lowercase in the middle of a segment (cn-v1148), Spanish de / y / del after the first word (cn-v1147)", () => {
     const offenders: string[] = [];
     let judged = 0;
     for (const c of CATALOGS) {
@@ -172,12 +172,29 @@ describe("the catalogs", () => {
     }
     expect(judged).toBeGreaterThanOrEqual(200);
     expect(offenders).toEqual([]);
-    // The rule itself. English: every word starts with a capital, an article or a preposition included.
-    expect(titleCase("Add To The Schedule", "en")).toBe(true);
+    // The rule itself. English (cn-v1148, after Chicago and Apple): the articles, and / or, as and the short prepositions
+    // lowercase in the middle of a segment; a particle (Sign In, Turn On, Set Up), a name's "A" and the first and last word of
+    // a segment capital; a {slot} is a word, so the words around it are mid-title; a heading in capitals is judged word by word.
+    expect(titleCase("Add to the Schedule", "en")).toBe(true);
     expect(titleCase("Bills & POs", "en")).toBe(true);
     expect(titleCase("Finish Setting Up · {n} Left", "en")).toBe(true);
     expect(titleCase("They Paid — Record It", "en")).toBe(true);
+    expect(titleCase("Sign In with a Code", "en")).toBe(true);
+    expect(titleCase("Turn It On from Their Contact Page", "en")).toBe(true);
+    expect(titleCase("Swap Money In and Out", "en")).toBe(true);
+    expect(titleCase("Set Up Card Payments", "en")).toBe(true);
+    expect(titleCase("Who's on the Clock", "en")).toBe(true);
+    expect(titleCase("Log {hours}h on This Job", "en")).toBe(true);
+    expect(titleCase("Put It on {job} Instead", "en")).toBe(true);
+    expect(titleCase("No Job: A Reminder for Me", "en")).toBe(true);
+    expect(titleCase("Phase A Loads", "en")).toBe(true);
+    expect(titleCase("Import a .vcf", "en")).toBe(true);
+    expect(titleCase("SCOPE OF WORK", "en")).toBe(true);
+    expect(titleCase("Add To The Schedule", "en")).toBe(false);
     expect(titleCase("Add to The Schedule", "en")).toBe(false);
+    expect(titleCase("Sign in with a Code", "en")).toBe(false);
+    expect(titleCase("Who's on the clock", "en")).toBe(false);
+    expect(titleCase("Owed to", "en")).toBe(false);
     expect(titleCase("They Paid — record It", "en")).toBe(false);
     // Spanish (cn-v1147): the significant words; a function word lowercase after the first word of a segment.
     expect(titleCase("Lista de Precios", "es")).toBe(true);

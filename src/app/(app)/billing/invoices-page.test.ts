@@ -8,8 +8,8 @@ import { owedByCustomer, owedByLateness, type PipelineInvoice } from "@/lib/bill
 /**
  * ONE INVOICES PAGE (W1-29): who owes you, and what came in. Renders THE PAGE ITSELF against a fake
  * database (made-up customers and figures), and pins what moved:
- *   · the three tiles are gone: one Owed To You figure (the pipeline's outstanding), what of it is
- *     late in red, and one thin bar; $0 owed reads "Owed To You $0" with no bar;
+ *   · the three tiles are gone: one Owed to You figure (the pipeline's outstanding), what of it is
+ *     late in red, and one thin bar; $0 owed reads "Owed to You $0" with no bar;
  *   · the To Invoice dollars moved onto the Done - Not Invoiced header, never vanished;
  *   · no all-time figure (Analytics owns lifetime money), and no link to /payments;
  *   · Accounts Receivable folded in: "N Days Late" on late rows, and By Customer · N (closed, opened
@@ -62,7 +62,7 @@ vi.mock("next/navigation", () => ({
 // The page's own client doors, drawn as markers: this is about what the page hands them.
 vi.mock("./new-invoice-button", () => ({ NewInvoiceButton: () => createElement("button", null, "New Invoice") }));
 vi.mock("./invoice-job-button", () => ({ InvoiceJobButton: ({ label }: { label?: string }) => createElement("button", null, label ?? "Bill It") }));
-// THE ONE FUNCTION behind Waiting To Be Billed, answered per job here: job-1's oldest work is newer
+// THE ONE FUNCTION behind Waiting to Be Billed, answered per job here: job-1's oldest work is newer
 // than job-2's, so job-2 lists first.
 vi.mock("@/lib/unbilled-work", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/unbilled-work")>()),
@@ -144,12 +144,12 @@ const render = async (search: Record<string, string> = {}) =>
 const ledgerAsked = () => state.selects.some((s) => s.table === "payments" && s.cols.includes("method"));
 const waitingAsked = () => state.selects.some((s) => s.table === "jobs" && s.cols.includes("billing_type"));
 
-describe("Owed To You: one figure, what's late, one bar", () => {
+describe("Owed to You: one figure, what's late, one bar", () => {
   it("the pipeline's outstanding (sent or partly paid, never a draft), the late part in red, and the bar", async () => {
     const html = await render();
     const t = text(html);
     // $1,000 + $300 + $250 open; the $300 draft and the paid bill are not owed.
-    expect(t).toContain("Owed To You $1,550.00");
+    expect(t).toContain("Owed to You $1,550.00");
     expect(t).toContain("$1,250.00 late · 2");
     expect(html).toMatch(/text-red-700[^>]*>\s*\$1,250\.00 late · 2/);
     expect(html).toMatch(/role="img" aria-label="Not Late \$300\.00, 1–30 Days Late \$1,000\.00, Over 60 Days Late \$250\.00"/);
@@ -170,11 +170,11 @@ describe("Owed To You: one figure, what's late, one bar", () => {
     expect(text(await render())).toContain("Done - Not Invoiced · 1 · $1,200.00");
   });
 
-  it("nothing owed reads Owed To You $0, with no late line and no bar", async () => {
+  it("nothing owed reads Owed to You $0, with no late line and no bar", async () => {
     state.tables.invoices = [];
     state.tables.jobs = [];
     const html = await render();
-    expect(text(html)).toContain("Owed To You $0");
+    expect(text(html)).toContain("Owed to You $0");
     expect(text(html)).not.toMatch(/ late · /);
     expect(html).not.toContain('role="img"');
     expect(html).not.toContain('id="customers"');
@@ -245,13 +245,13 @@ describe("Payments In: a link, and the ledger only when open", () => {
  * WAITING TO BE BILLED (2026-10-07): the T&M jobs with work no invoice holds, oldest first, on the
  * same link shape as Payments In - read only when open, no count on the closed line.
  */
-describe("Waiting To Be Billed: a link, and the list only when open", () => {
+describe("Waiting to Be Billed: a link, and the list only when open", () => {
   it("closed: a 44px LINK with no count and no read of the jobs' work", async () => {
     const html = await render();
     const link = html.match(/<a[^>]*href="\/billing\?open=waiting#waiting"[^>]*>([\s\S]*?)<\/a>/);
     expect(link).not.toBeNull();
     expect(link![0]).toContain("min-h-11");
-    expect(text(link![1])).toContain("Waiting To Be Billed");
+    expect(text(link![1])).toContain("Waiting to Be Billed");
     expect(text(link![1])).not.toMatch(/\d/);
     expect(waitingAsked()).toBe(false);
     expect(text(html)).not.toContain("Oldest work");
@@ -262,7 +262,7 @@ describe("Waiting To Be Billed: a link, and the list only when open", () => {
     state.tables.jobs = (state.tables.jobs as Record<string, unknown>[]).map((j) => ({ ...j, billing_type: "tm" }));
     const html = await render({ open: "waiting" });
     expect(waitingAsked()).toBe(true);
-    expect(html).toMatch(/<a[^>]*href="\/billing"[^>]*>[\s\S]*?Waiting To Be Billed/);
+    expect(html).toMatch(/<a[^>]*href="\/billing"[^>]*>[\s\S]*?Waiting to Be Billed/);
     const t = text(html);
     const second = t.indexOf("13897 Honeysuckle · J-011 — Sam Roe");
     const first = t.indexOf("41 Larkspur Place · J-028 — Pat Lee");
@@ -308,7 +308,7 @@ describe("the pure roll-ups add up to the one figure", () => {
     expect(l.current + l.d30 + l.d60 + l.d90).toBe(175);
   });
 
-  it("the bar, By Customer and Owed To You are Analytics' aging on the same invoices, cut the same way, to the cent", async () => {
+  it("the bar, By Customer and Owed to You are Analytics' aging on the same invoices, cut the same way, to the cent", async () => {
     const { getMoneyPipeline } = await import("@/lib/billing-pipeline");
     const { computeArAging, computeArByCustomer } = await import("@/lib/analytics/money-metrics");
     const { unpaid, outstandingTotal } = await getMoneyPipeline(fake as any);
@@ -343,7 +343,7 @@ describe("the header in the viewer's language", () => {
       expect(esHtml).not.toMatch(/<h1[^>]*>Invoices<\/h1>/);
       expect(text(esHtml)).toContain("Quién te debe, qué está atrasado y qué entró.");
       // Only the map moved: the page's own words are still English.
-      expect(text(esHtml)).toContain("Owed To You $1,550.00");
+      expect(text(esHtml)).toContain("Owed to You $1,550.00");
     } finally {
       state.language = undefined;
     }

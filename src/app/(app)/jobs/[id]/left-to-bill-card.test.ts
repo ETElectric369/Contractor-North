@@ -5,7 +5,7 @@ import { leftToBill, scheduleStatus } from "@/lib/payment-schedule-math";
 
 /**
  * LEFT TO BILL (W1-19): on a job billed by its contract the Overview leads with ONE figure, "Left To
- * Bill $L", and ONE button: the job's own New Invoice opened on Part Of The Estimate (a fixed-price
+ * Bill $L", and ONE button: the job's own New Invoice opened on Part of the Estimate (a fixed-price
  * contract), or Request Next Payment (a schedule). The figure is never printed on a button whose click
  * doesn't bill it, a draft is named and never counted, and the reasoning waits in a Why? fold (a
  * <details>, so it is in the server's HTML and toContain still reaches it).
@@ -31,10 +31,10 @@ describe("a fixed-price contract", () => {
   const estimates = [{ number: "E-012", total: 20000, accepted: true }];
   const sent = [{ id: "i1", number: "INV-079", total: 5000 }];
 
-  it("Contract $C, the big Left To Bill $L, and the job's New Invoice on Part Of The Estimate", () => {
+  it("Contract $C, the big Left to Bill $L, and the job's New Invoice on Part of the Estimate", () => {
     const html = render({ view, estimates, sent });
     expect(html).toContain("Contract $20,000.00");
-    expect(html).toContain("Left To Bill $15,000.00");
+    expect(html).toContain("Left to Bill $15,000.00");
     expect(html).toContain('data-new-invoice="part"');
     expect(html).toMatch(/data-new-invoice="part"[^>]*>New Invoice</);
     // Never the figure on the button: the click opens the sheet that asks how much.
@@ -60,14 +60,14 @@ describe("a fixed-price contract", () => {
       openDraft: { id: "i2", number: "INV-080", refreshable: false },
     });
     expect(html).toContain("INV-080 ($2,000.00) is a draft.");
-    expect(html).toContain("Left To Bill $15,000.00");
+    expect(html).toContain("Left to Bill $15,000.00");
     expect(html).toMatch(/data-new-invoice="part"[^>]*>Open INV-080</);
     expect(fold(html)).toContain("draft, not counted until it goes out");
   });
 
   it("billed in full: $0.00 · the contract is billed, and no button", () => {
     const html = render({ view: leftToBill({ estimate: 20000, invoiced: 20000 }, null), estimates, sent });
-    expect(html).toContain("Left To Bill $0.00");
+    expect(html).toContain("Left to Bill $0.00");
     expect(html).toContain("the contract is billed");
     expect(html).not.toContain("<button");
   });
@@ -91,7 +91,7 @@ describe("a payment schedule", () => {
   it("the schedule's own remaining, and Request Next Payment ($next) on a fixed-price job", () => {
     const html = render({ view: leftToBill({ estimate: 10000, invoiced: 3000 }, s), rows });
     expect(html).toContain("Payment Schedule · $10,000.00");
-    expect(html).toContain("Left To Bill $7,000.00");
+    expect(html).toContain("Left to Bill $7,000.00");
     expect(html).toContain("Request Next Payment ($3,500.00)");
     expect(html).not.toContain("data-new-invoice");
     const f = fold(html);
@@ -111,7 +111,7 @@ describe("a payment schedule", () => {
   it("fully drawn: $0.00 · every payment is billed, no button", () => {
     const done = scheduleStatus(ms.map((m) => ({ ...m, invoice_id: "x", billed_amount: m.billed_amount ?? 3500 })), 10000);
     const html = render({ view: leftToBill({ estimate: 10000, invoiced: 10000 }, done), rows: [] });
-    expect(html).toContain("Left To Bill $0.00");
+    expect(html).toContain("Left to Bill $0.00");
     expect(html).toContain("every payment is billed");
     expect(html).not.toContain("<button");
   });

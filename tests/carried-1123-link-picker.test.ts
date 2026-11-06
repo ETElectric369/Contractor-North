@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeDb } from "@/test/fake-supabase";
 
 /**
- * CARRIED FROM audit v1120 (fix wave cn-v1123): the For picker's Add As A New Lead dropped the lead
+ * CARRIED FROM audit v1120 (fix wave cn-v1123): the For picker's Add as a New Lead dropped the lead
  * door's own note, and Edit Details with New Lead cleared the visit's customer before the lead existed.
  */
 type Row = Record<string, unknown>;
@@ -42,7 +42,7 @@ const ROOT = path.resolve(__dirname, "..");
 const picker = readFileSync(path.join(ROOT, "src/app/(app)/appointments/[id]/link-picker.tsx"), "utf8");
 const actions = readFileSync(path.join(ROOT, "src/app/(app)/appointments/actions.ts"), "utf8");
 
-describe("Add As A New Lead in the For picker drops the lead door's own note (duplicate-customer warning)", () => {
+describe("Add as a New Lead in the For picker drops the lead door's own note (duplicate-customer warning)", () => {
   it("a rejected action is a line in words, never a throw out of the transition", async () => {
     const out = await settleLink(Promise.reject(new Error("fetch failed")), "Couldn't make the lead.");
     expect(out).toEqual({ error: LINK_NO_SIGNAL_LINE });

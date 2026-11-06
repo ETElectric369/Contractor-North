@@ -616,7 +616,7 @@ function mostlyPapers(table: readonly (readonly string[])[], at: number, columns
  * single-paper path it goes down today — an invoice, a job plan and a deed must all behave exactly as
  * they did.
  *
- * ONE FUNCTION, BOTH DOORS, AND IT HANDS BACK THE ROWS IT ANSWERED ABOUT. Snap Or Note and Reconcile's
+ * ONE FUNCTION, BOTH DOORS, AND IT HANDS BACK THE ROWS IT ANSWERED ABOUT. Snap or Note and Reconcile's
  * statement line ask this one question, so a PDF that reads as a list at one door reads as a list at
  * the other; and because the answer carries the rows (cropped to the heading row when the letterhead
  * put it out of the readers' reach), a door cannot ask the question of one table and then read a

@@ -16,14 +16,14 @@ import { LinkPicker } from "./link-picker";
  * HOW THE VISIT ENDED — said on the visit, with the door to say it (cn-v1069).
  *
  * The visit page never read what it became: an estimate written up from it (capture.quote_id) was
- * nowhere on the page, Start The Estimate was offered again over a finished one, and the outcome
+ * nowhere on the page, Start the Estimate was offered again over a finished one, and the outcome
  * 0205 gave every visit (won / lost) was written by the estimate's status and
  * by Nort and shown by neither. Erik's two meetings "with nothing else to come of them" had no door
  * at all on the page: only Nort could close them.
  *
  *   Written up as EST-0042 · sent          the estimate, as a link; a dead one says so
  *   Won · Jun 14 · J-039 The Bayberry place  the outcome, with its day and the job when there is one
- *   [Lost] [Won · Pick The Job]            the office's doors on a completed visit with a win or
+ *   [Lost] [Won · Pick the Job]            the office's doors on a completed visit with a win or
  *                                          loss to record (a meeting too), still undecided, no job,
  *                                          no live estimate. The win is never typed alone: it is the
  *                                          JOB the visit became (the attach door, linkAppointmentTo,

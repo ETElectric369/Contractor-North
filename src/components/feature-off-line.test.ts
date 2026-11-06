@@ -25,16 +25,16 @@ describe("FeatureOffLine", () => {
     const html = render({ feature: "panel_map", features: { ...ALL_ON, panel_map: false }, isOwner: true });
     expect(html).toContain("Panel Map");
     expect(html).toContain(" · Off");
-    expect(html).not.toContain("Ask The Owner");
+    expect(html).not.toContain("Ask the Owner");
     const button = html.match(/<button[^>]*>[^<]*<\/button>/)![0];
     expect(button).toContain(">Turn On<");
     expect(button).toMatch(/\bh-11\b/);
   });
 
-  it("everyone else: 'Off · Ask The Owner', and no button", () => {
+  it("everyone else: 'Off · Ask the Owner', and no button", () => {
     const html = render({ feature: "panel_map", features: { ...ALL_ON, panel_map: false }, isOwner: false });
     expect(html).toContain(" · Off");
-    expect(html).toContain(" · Ask The Owner");
+    expect(html).toContain(" · Ask the Owner");
     expect(html).not.toContain("<button");
   });
 

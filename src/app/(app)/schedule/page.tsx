@@ -74,7 +74,7 @@ export default async function SchedulePage({
   // "today", and the server→client day correction would remount the button
   // and close the just-opened modal whenever the two clocks disagree.
   // ?new=inspection (the + menu's New Inspection) is the same door opened on the inspection type;
-  // a tapped half hour (the day's Add To Schedule sheet) rides along as ?time=HH:MM. Both are
+  // a tapped half hour (the day's Add to Schedule sheet) rides along as ?time=HH:MM. Both are
   // checked here and read by the create form (appointment-button) when it answers ?new=1.
   if (sp.new === "appointment" || sp.new === "inspection" || (sp.new === "1" && (sp.view !== "day" || !date))) {
     const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();

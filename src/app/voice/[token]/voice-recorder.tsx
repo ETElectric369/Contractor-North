@@ -341,7 +341,7 @@ export function VoiceRecorder({
               />
             </div>
             <Button onClick={agree} disabled={pending} className="w-full sm:w-auto">
-              {pending ? "Saving…" : "I Agree And Give My Permission"} <Heart className="h-4 w-4" />
+              {pending ? "Saving…" : "I Agree and Give My Permission"} <Heart className="h-4 w-4" />
             </Button>
           </div>
         )}

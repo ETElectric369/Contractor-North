@@ -16,7 +16,7 @@ import { NORT_SAYS, landRead, readerSuggestions, type ReadRow } from "./readers"
  *     the kept fridge is not touched;
  *   - Use It changes the circuit only while it still says what the reader saw (a zero-row update
  *     otherwise, which the door reports as "someone just changed it");
- *   - a tech can't write source 'plan' (Read Circuits From The Plans is the office's); the office can;
+ *   - a tech can't write source 'plan' (Read Circuits from the Plans is the office's); the office can;
  *   - Nort's suggestion carries no document, and can't be dressed up as the estimate's;
  *   - a Plan kept on the customer by the estimator's Upload Plans (no job yet) files, and the crew
  *     can read it (plans carry no price; the stash's supplier quotes are never filed).

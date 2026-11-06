@@ -125,7 +125,7 @@ export function VendorImport({ existing, disabled, nortOn = true }: { existing: 
   /** A photo or a scanned PDF, waiting for a person to say yes to the stated price. */
   const [offer, setOffer] = useState<{ file: File; kind: "photo" | "scan" } | null>(null);
   // The Nort switch (0352, rule k): the reader works either way; with Nort off it isn't called Nort.
-  const readLabel = nortOn ? "Read With Nort" : "Read The File";
+  const readLabel = nortOn ? "Read with Nort" : "Read the File";
 
   function open(fileName: string, table: string[][], note?: string) {
     const { rows, headerSkipped, overCap } = rowsFromTable(table);
@@ -197,10 +197,10 @@ export function VendorImport({ existing, disabled, nortOn = true }: { existing: 
 
   return (
     <div className="flex flex-col gap-2">
-      <DropTarget onFiles={(f) => void onFiles(f)} accept={IMPORT_ACCEPT} multiple={false} disabled={disabled} label="Drop A Vendor List Here (Excel, CSV, PDF Or Photo)">
+      <DropTarget onFiles={(f) => void onFiles(f)} accept={IMPORT_ACCEPT} multiple={false} disabled={disabled} label="Drop a Vendor List Here (Excel, CSV, PDF or Photo)">
         <div className="flex flex-col gap-1">
           <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={disabled || reading} aria-describedby="vendor-import-hint">
-            <FileUp className="h-4 w-4" /> {reading ? "Reading…" : "Import A List"}
+            <FileUp className="h-4 w-4" /> {reading ? "Reading…" : "Import a List"}
           </Button>
           <input
             ref={fileRef}
@@ -359,7 +359,7 @@ function ImportPreview({
         return next;
       });
       // THE ONLY PICK MADE FOR A PERSON: exactly one choice came back, for a company's name. It is on
-      // screen, marked as picked for them, with None Of These beside it.
+      // screen, marked as picked for them, with None of These beside it.
       setRows((rs) =>
         rs.map((r) => {
           const a = answers.get(r.id);
@@ -496,7 +496,7 @@ function ImportPreview({
           ) : (
             <>
               <Button variant="outline" disabled={nextBatch === 0} onClick={() => void lookUp(waiting.slice(0, LOOKUP_PER_TAP))}>
-                <Search className="h-4 w-4" /> {nextBatch === 0 ? "Nothing To Look Up" : `Look Up Contact Info For ${nextBatch}`}
+                <Search className="h-4 w-4" /> {nextBatch === 0 ? "Nothing to Look Up" : `Look Up Contact Info for ${nextBatch}`}
               </Button>
               <p className="text-xs text-slate-500">
                 {nextBatch > 0
@@ -545,7 +545,7 @@ function ImportPreview({
                           ))}
                         </Select>
                         {r.kindGuessed && (
-                          <span className="mt-0.5 block text-xs text-slate-500">{r.kind ? "Guessed From The Name" : "Couldn't Tell From The Name"}</span>
+                          <span className="mt-0.5 block text-xs text-slate-500">{r.kind ? "Guessed from the Name" : "Couldn't Tell from the Name"}</span>
                         )}
                       </div>
                       <Input

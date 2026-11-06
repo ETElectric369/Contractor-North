@@ -26,7 +26,7 @@ describe("All Bills lists receipt files, and is never a second upload door (Wave
     expect(SRC).not.toContain("addDocument(");
     expect(SRC).not.toContain("<DropTarget");
     // The one paper door (W1-30): the sentence names the door that is at the top of the page.
-    expect(SRC).toContain("Add one with Snap Or Note at the top of this page.");
+    expect(SRC).toContain("Add one with Snap or Note at the top of this page.");
     expect(SRC).not.toContain("Drop Paperwork at the top");
   });
 
@@ -48,7 +48,7 @@ describe("a bill's row says what is open on it, by the number (0383)", () => {
     expect(SRC).toContain("billSettledLabel({ status: b.status, amount: b.amount, amountPaid: b.amount_paid ?? null, superseded: b.superseded }, formatCurrency)");
     expect(SRC).not.toContain("<Badge tone={statusTone(b.status)}>{b.status}</Badge>");
     expect(billSettledLabel({ status: "paid", amount: 100, amountPaid: 100 }, formatCurrency)).toBe("Paid");
-    expect(billSettledLabel({ status: "unpaid", amount: 523.47, amountPaid: 200 }, formatCurrency)).toBe("Part-Paid $200.00 Of $523.47");
+    expect(billSettledLabel({ status: "unpaid", amount: 523.47, amountPaid: 200 }, formatCurrency)).toBe("Part-Paid $200.00 of $523.47");
     expect(billSettledLabel({ status: "unpaid", amount: 100, amountPaid: 0 }, formatCurrency)).toBe("On Account");
     // The row carries the number, so the badge and the Unpaid filter read the same column.
     expect(SRC).toContain("amount_paid?: number | null;");
@@ -67,16 +67,16 @@ describe("a bill's row says what is open on it, by the number (0383)", () => {
     expect([paidByNumber, partPaid, asBefore].filter((b) => isOpenBill(b)).map((b) => b.id)).toEqual(["b2", "b3"]);
   });
 
-  it("gives the Edit Bill Status picker two Title Case choices (the add form went: Add By Hand asks Paid?)", () => {
-    // The ledger's Add A Bill By Hand fold is gone (W1-32); a new cost goes in through Add By Hand,
+  it("gives the Edit Bill Status picker two Title Case choices (the add form went: Add by Hand asks Paid?)", () => {
+    // The ledger's Add a Bill by Hand fold is gone (W1-32); a new cost goes in through Add by Hand,
     // the one typed sheet, whose Paid? is Already Paid or On Account (Still Owed).
     expect(SRC.match(/<option value="unpaid">On Account<\/option>/g)).toHaveLength(1);
-    // "Settled At The Counter" retired with 0383: a bill paid by a cheque against the account was
+    // "Settled at the Counter" retired with 0383: a bill paid by a cheque against the account was
     // never settled at any counter. Paid is his word that the whole purchase is paid in full.
     expect(SRC.match(/<option value="paid">Paid<\/option>/g)).toHaveLength(1);
-    expect(SRC).not.toContain("Settled At The Counter");
+    expect(SRC).not.toContain("Settled at the Counter");
     expect(SRC).not.toContain('<option value="unpaid">Unpaid</option>');
-    expect(SRC).not.toContain("Add A Bill By Hand");
+    expect(SRC).not.toContain("Add a Bill by Hand");
     expect(SRC).not.toMatch(/\bcreateBill\b/);
     const SHEET = readFileSync(join(process.cwd(), "src/components/quick-cost-button.tsx"), "utf8");
     expect(SHEET).toContain("Already Paid");

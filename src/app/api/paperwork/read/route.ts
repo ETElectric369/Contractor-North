@@ -6,7 +6,7 @@ import { reportError } from "@/lib/observe";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // A 12-page supplier PDF or a slow read gets the reader's own time, whichever page the read was
-// started from (W1-30: Snap Or Note is in the top bar of every page, and a server action runs under
+// started from (W1-30: Snap or Note is in the top bar of every page, and a server action runs under
 // the page's time, not this). Saved is saved either way: a read that runs out says so on its line.
 export const maxDuration = 60;
 

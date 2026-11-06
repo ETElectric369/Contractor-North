@@ -634,7 +634,7 @@ export default async function SettingsPage({
                   href="/doc-studio"
                   className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand-dark"
                 >
-                  Open The Document Studio →
+                  Open the Document Studio →
                 </Link>
               </Section>
             </div>
@@ -906,7 +906,7 @@ export default async function SettingsPage({
                       href="/site-studio"
                       className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
                     >
-                      Open The Design Studio
+                      Open the Design Studio
                     </Link>
                   </Section>
                   <Section title="Homepage">

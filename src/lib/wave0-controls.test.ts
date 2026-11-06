@@ -53,16 +53,16 @@ describe("44px targets on the controls Wave 0 re-wrapped", () => {
     expect(rec).not.toContain("rounded-md p-1 ");
   });
 
-  it("Settings' Print Business Cards and Open The Design Studio are 44px targets", () => {
+  it("Settings' Print Business Cards and Open the Design Studio are 44px targets", () => {
     const s = src("src/app/(app)/settings/page.tsx");
-    for (const label of ["Print Business Cards →", "Open The Design Studio"]) {
+    for (const label of ["Print Business Cards →", "Open the Design Studio"]) {
       const at = s.indexOf(label);
       const tag = s.slice(Math.max(s.lastIndexOf("<a\n", at), s.lastIndexOf("<Link", at)), at);
       expect(tag, label).toContain("min-h-11");
     }
   });
 
-  it("Record As Cost is a 44px target", () => {
+  it("Record as Cost is a 44px target", () => {
     const s = src("src/app/(app)/jobs/[id]/job-documents.tsx");
     // The button's own label (its text right before </button>), never a comment that names it.
     const at = s.search(/\{t\("jb_recordAsCost"\)\}\s*<\/button>/);
@@ -75,22 +75,22 @@ describe("Title Case on the clickables Wave 0 re-wrapped", () => {
   it("names each one in Title Case, and every sentence that names it says it the same way", () => {
     const settings = src("src/app/(app)/settings/page.tsx");
     expect(settings).toContain("Open Kits &amp; Job Lists");
-    expect(settings).toContain("Open The Design Studio");
+    expect(settings).toContain("Open the Design Studio");
     const inspector = src("src/app/(app)/appointments/[id]/inspector.tsx");
     // (cn-v1144, the visit page in Spanish: both read the vi_ catalog through t(); the English is byte for byte what the screen said, pinned here)
     expect(inspector).toContain('<Button type="button">{t("vi_btn_startTheEstimate")}</Button>');
-    expect(translator("en")("vi_btn_startTheEstimate")).toBe("Start The Estimate");
+    expect(translator("en")("vi_btn_startTheEstimate")).toBe("Start the Estimate");
     expect(inspector).toContain('label={t("vi_dropPhotosPdfs3d")}');
-    expect(translator("en")("vi_dropPhotosPdfs3d")).toBe("Drop Photos, PDFs Or 3D Files");
-    // The cap is gone (W1-09): its rows are built once, for Search Or Ask and for Help; their words are
+    expect(translator("en")("vi_dropPhotosPdfs3d")).toBe("Drop Photos, PDFs or 3D Files");
+    // The cap is gone (W1-09): its rows are built once, for Search or Ask and for Help; their words are
     // the shell catalog's since cn-v1139 (sh_help_again), English byte for byte.
     expect(src("src/lib/onboarding/help-rows.ts")).toContain('label: t("sh_help_again")');
-    expect(src("src/lib/words/shell.ts")).toContain('sh_help_again: "Take The Setup Again"');
+    expect(src("src/lib/words/shell.ts")).toContain('sh_help_again: "Take the Setup Again"');
     const appt = src("src/app/(app)/appointments/[id]/page.tsx");
     expect(appt).toContain('fallbackLabel={t("vp_btn_backToSchedule")}');
     expect(appt).toContain('fallbackLabel={t("vp_btn_backToMyDay")}');
-    expect(translator("en")("vp_btn_backToSchedule")).toBe("Back To Schedule");
-    expect(translator("en")("vp_btn_backToMyDay")).toBe("Back To My Day");
+    expect(translator("en")("vp_btn_backToSchedule")).toBe("Back to Schedule");
+    expect(translator("en")("vp_btn_backToMyDay")).toBe("Back to My Day");
     for (const f of [
       "src/app/(app)/jobs/[id]/job-documents.tsx",
       "src/lib/receipt-capture.ts",
@@ -98,7 +98,8 @@ describe("Title Case on the clickables Wave 0 re-wrapped", () => {
       "src/app/(app)/organize/paperwork-core.ts",
     ]) {
       const visible = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
-      expect(visible, f).not.toContain("Record as Cost");
+      // The door reads "Record as Cost" (cn-v1148 title case); neither older spelling may come back.
+      expect(visible, f).not.toMatch(/Record As Cost|Record as cost/);
     }
     expect(src("src/lib/onboarding/tour.ts")).not.toContain("press Start the estimate");
   });

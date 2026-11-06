@@ -41,32 +41,32 @@ type PileDef = {
 
 /** Each pile's words, its verb and its list page. Title Case: they sit on buttons and links. */
 export const PILE_DEFS: Record<PileName, PileDef> = {
-  estimates_not_sent: { label: "Estimates Not Sent", verb: "Send It", listHref: "/quotes?status=draft", listLabel: "See All On Estimates" },
-  no_answer_yet: { label: "No Answer Yet", verb: "Still Waiting", listHref: "/quotes?status=sent", listLabel: "See All On Estimates" },
-  won_needs_a_day: { label: "Won, Needs A Day", verb: "Pick A Day", listHref: "/quotes?status=accepted", listLabel: "See All On Estimates" },
-  late_invoices: { label: "Late Invoices", verb: "Get Paid", listHref: "/billing", listLabel: "See All On Invoices" },
-  invoices_not_sent: { label: "Invoices Not Sent", verb: "Send It", listHref: "/billing", listLabel: "See All On Invoices" },
+  estimates_not_sent: { label: "Estimates Not Sent", verb: "Send It", listHref: "/quotes?status=draft", listLabel: "See All on Estimates" },
+  no_answer_yet: { label: "No Answer Yet", verb: "Still Waiting", listHref: "/quotes?status=sent", listLabel: "See All on Estimates" },
+  won_needs_a_day: { label: "Won, Needs a Day", verb: "Pick a Day", listHref: "/quotes?status=accepted", listLabel: "See All on Estimates" },
+  late_invoices: { label: "Late Invoices", verb: "Get Paid", listHref: "/billing", listLabel: "See All on Invoices" },
+  invoices_not_sent: { label: "Invoices Not Sent", verb: "Send It", listHref: "/billing", listLabel: "See All on Invoices" },
   // No list page holds these two piles' rows (/billing lists finished jobs with no invoice, never a
   // finished visit or a No Costs Yet; /schedule is a calendar with no list of past visits nobody
   // closed out): See All unfolds every row read here instead of opening a page that doesn't list them.
   done_not_billed: { label: "Done, Not Billed", verb: "Bill It", listHref: null, listLabel: null },
   leads_to_call: {
-    label: "Leads To Call",
-    labelLeadsOff: "Requests To Call Back",
+    label: "Leads to Call",
+    labelLeadsOff: "Requests to Call Back",
     verb: "Called",
     verbLeadsOff: "Call Back",
     listHref: "/leads",
-    listLabel: "See All On Leads",
+    listLabel: "See All on Leads",
   },
-  visits_to_close_out: { label: "Visits To Close Out", verb: "Close Out", listHref: null, listLabel: null },
-  inspections_to_write_up: { label: "Inspections To Write Up", verb: "Write It Up", listHref: "/inspections", listLabel: "See All Inspections" },
-  jobs_needing_a_day: { label: "Jobs Needing A Day", verb: "Pick A Day", listHref: "/schedule", listLabel: "See All On Schedule" },
-  holds_back: { label: "Holds Back", verb: "Snooze", listHref: "/jobs?status=on_hold", listLabel: "See All On Jobs" },
-  papers_to_sort: { label: "Papers To Sort", verb: "Sort It", listHref: "/bills#sort-these", listLabel: "See All On Bills" },
-  notes_to_review: { label: "Notes To Review", verb: "File It", listHref: "/organize", listLabel: "See All In Organize" },
-  receipts_not_on_a_bill: { label: "Receipts Not On A Bill", verb: "Record It", listHref: "/bills?tab=receipts#all-bills", listLabel: "See All On Bills" },
-  stock_to_settle: { label: "Stock To Settle", verb: "Settle It", listHref: "/inventory", listLabel: "See All On Shop Stock" },
-  materials_to_buy: { label: "Materials To Buy", verb: "Buy Materials", listHref: "/materials", listLabel: "See All Materials" },
+  visits_to_close_out: { label: "Visits to Close Out", verb: "Close Out", listHref: null, listLabel: null },
+  inspections_to_write_up: { label: "Inspections to Write Up", verb: "Write It Up", listHref: "/inspections", listLabel: "See All Inspections" },
+  jobs_needing_a_day: { label: "Jobs Needing a Day", verb: "Pick a Day", listHref: "/schedule", listLabel: "See All on Schedule" },
+  holds_back: { label: "Holds Back", verb: "Snooze", listHref: "/jobs?status=on_hold", listLabel: "See All on Jobs" },
+  papers_to_sort: { label: "Papers to Sort", verb: "Sort It", listHref: "/bills#sort-these", listLabel: "See All on Bills" },
+  notes_to_review: { label: "Notes to Review", verb: "File It", listHref: "/organize", listLabel: "See All in Organize" },
+  receipts_not_on_a_bill: { label: "Receipts Not on a Bill", verb: "Record It", listHref: "/bills?tab=receipts#all-bills", listLabel: "See All on Bills" },
+  stock_to_settle: { label: "Stock to Settle", verb: "Settle It", listHref: "/inventory", listLabel: "See All on Shop Stock" },
+  materials_to_buy: { label: "Materials to Buy", verb: "Buy Materials", listHref: "/materials", listLabel: "See All Materials" },
   contracts_not_signed: { label: "Contracts Not Signed", verb: "See Contract", listHref: null, listLabel: null },
   lien_deadlines: { label: "Lien Deadlines", verb: "See Deadline", listHref: null, listLabel: null },
   // "PERMIT Inspections", because the site visit is called an Inspection too (inspection-word.test.ts)
@@ -78,12 +78,12 @@ export const PILE_DEFS: Record<PileName, PileDef> = {
 };
 
 /** The notes pile's words when it also holds papers that aren't notes (they file in Organize too). */
-export const ORGANIZE_PILE_MIXED = "To File In Organize";
+export const ORGANIZE_PILE_MIXED = "To File in Organize";
 
 /**
  * A PAPER THAT SORTS IN THE /bills TRAY (its Needs You card, once Sort These), by the filter /bills
  * uses: a receipt, anything dropped on /bills, anything read as a cost paper (a doc_type other than
- * not_a_cost), or a paper nothing has read yet (a file, no reading, no total: Snap Or Note saved it
+ * not_a_cost), or a paper nothing has read yet (a file, no reading, no total: Snap or Note saved it
  * and the reader hasn't answered). The rest (a note, a plan read as not a cost, a picture asking "What is this?") files in
  * Organize. /bills' own last term reads the reader's proposal, which Needs You doesn't read (it rides
  * the app shell's badge): "nothing has read it" is that term without it.
@@ -178,7 +178,7 @@ export function codeCount(r: ReadFacts, cap?: number): PileCount {
   return cap && n >= cap ? { capped: true } : {};
 }
 
-/** "Estimates Not Sent · 7", "Receipts Not On A Bill · 200+". */
+/** "Estimates Not Sent · 7", "Receipts Not on a Bill · 200+". */
 export function pileTitle(p: Pick<PileInfo, "label" | "count" | "capped">): string {
   return `${p.label} · ${p.count}${p.capped ? "+" : ""}`;
 }
@@ -223,7 +223,7 @@ export function rollUpPiles(
     if (placed.has(p)) continue; // a later child: already inside its pile
     placed.add(p);
     const def = PILE_DEFS[p];
-    const allNotes = p === "notes_to_review" && children.every((c) => c.chip === "Note To Review");
+    const allNotes = p === "notes_to_review" && children.every((c) => c.chip === "Note to Review");
     const label =
       p === "leads_to_call" && !leadsOn
         ? (def.labelLeadsOff ?? def.label)

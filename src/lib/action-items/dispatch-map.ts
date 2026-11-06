@@ -47,7 +47,7 @@ export function resolveRowVerb(
     if (kind === "job_to_schedule") return { name: "job.finish", input: { id } };
     // Won It: the quote page's own Accepted (stamps the day, makes or catches up the job).
     if (kind === "quote_awaiting") return { name: "quote.setStatus", input: { id, status: "accepted" } };
-    // Signed On Paper: recorded by the office, signed by the contract's customer, today.
+    // Signed on Paper: recorded by the office, signed by the contract's customer, today.
     if (kind === "contract_unsigned") return { name: "contract.recordPaperSignature", input: { id } };
     return null;
   }

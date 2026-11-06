@@ -44,7 +44,7 @@ export function NewItemButton() {
         <Modal
           open={open}
           onClose={() => setOpen(false)}
-          title="New Item In Stock"
+          title="New Item in Stock"
           footer={<ModalActions onCancel={() => setOpen(false)} submit formId="new-shelf-item" saving={pending} saveLabel="Create Item" />}
         >
           <div className="space-y-4">

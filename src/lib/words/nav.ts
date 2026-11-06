@@ -100,7 +100,7 @@ export const words: WordCatalog = {
     nv_page_organize: "Organize My…",
     nv_desc_organize: "Papers you snapped wait here until you file them.",
     nv_page_pettyCash: "Petty Cash",
-    nv_desc_pettyCash: "Cash you took out, and older cash entries. A new cash purchase goes in through Snap Or Note or Add By Hand.",
+    nv_desc_pettyCash: "Cash you took out, and older cash entries. A new cash purchase goes in through Snap or Note or Add by Hand.",
     nv_page_quotesNew: "New Estimate",
     nv_desc_quotesNew: "Build line items by hand, or let the estimator draft them from a scope of work or an uploaded plan.",
     // quotes/page.tsx: the heading is Quotes with ?filter=quote, Estimates otherwise; one line under both.
@@ -111,11 +111,11 @@ export const words: WordCatalog = {
 
     // ── The schedule's two headings (crew-board.tsx, schedule/page.tsx) ──
     nv_sched_everyonesDay: "Everyone's Day",
-    nv_sched_waitingForADay: "Waiting For A Day",
+    nv_sched_waitingForADay: "Waiting for a Day",
     // The back-link beside both (schedule/crew-board.tsx, schedule/page.tsx's map view).
     nv_sched_calendar: "Calendar",
 
-    // ── The + menu (global-quick-add.tsx ACTIONS, by key; Snap Or Note is sh_snapOrNote) ──
+    // ── The + menu (global-quick-add.tsx ACTIONS, by key; Snap or Note is sh_snapOrNote) ──
     nv_add_newLead: "New Lead",
     nv_add_newJob: "New Job",
     nv_add_newAppointment: "New Appointment",
@@ -124,8 +124,8 @@ export const words: WordCatalog = {
     nv_add_newInvoice: "New Invoice",
     // Said under the rows when a tap can't go; {label} is the row's own word (quickAddGo).
     nv_add_noSignal: "No signal right now, so {label} can't open. Tap it again once you have a bar or two.",
-    nv_add_stillSendingOne: "Snap Or Note is still sending 1 file, and reloading now would stop it. Tap {label} again once it's in.",
-    nv_add_stillSendingMany: "Snap Or Note is still sending {n} files, and reloading now would stop them. Tap {label} again once they're in.",
+    nv_add_stillSendingOne: "Snap or Note is still sending 1 file, and reloading now would stop it. Tap {label} again once it's in.",
+    nv_add_stillSendingMany: "Snap or Note is still sending {n} files, and reloading now would stop them. Tap {label} again once they're in.",
 
     // ── The Settings clusters (settings/page.tsx, by cluster id through lib/settings-words; You is sh_you) ──
     nv_set_company: "Company",

@@ -55,7 +55,7 @@ describe("the one rule (lib/sales-tax-switch)", () => {
   });
 });
 
-describe("New Invoice on /billing (W1-28: one question, Which Job Or Customer?)", () => {
+describe("New Invoice on /billing (W1-28: one question, Which Job or Customer?)", () => {
   const props = { customers: [{ id: "c-tess", name: "Tess Zane" }], jobs: [{ id: "j-011", job_number: "J-011", name: "Thistlewood", customer_id: "c-tess", customer_name: "Tess Zane" }] };
   const body = (pick: { kind: "job" | "customer"; id: string; label: string } | null, salesTax: boolean) =>
     html(NewInvoicePickBody, {

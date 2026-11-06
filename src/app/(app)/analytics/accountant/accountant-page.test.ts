@@ -100,12 +100,12 @@ describe("the page and its download agree", () => {
     expect(readFileSync(join(process.cwd(), "src/components/download-button.tsx"), "utf8")).toContain('redirect: "manual"');
   });
 
-  it("a file kept for Save The File never outlives its period: the card is keyed on the period, and Save The File waits while one opens", () => {
+  it("a file kept for Save the File never outlives its period: the card is keyed on the period, and Save the File waits while one opens", () => {
     // Next keeps a page's client state when only the search params change, so without the key a
-    // Q2 file left waiting for Save The File would still be handed over under a card that reads Q3.
+    // Q2 file left waiting for Save the File would still be handed over under a card that reads Q3.
     expect(src("page.tsx")).toMatch(/<AccountantDownload\s+key=\{period\.key\}/);
     const button = src("accountant-download.tsx");
-    const save = button.slice(button.indexOf("onClick={() => void share(ready, true)}"), button.indexOf("Save The File\n"));
+    const save = button.slice(button.indexOf("onClick={() => void share(ready, true)}"), button.indexOf("Save the File\n"));
     expect(save).toContain("disabled={busy !== null || opening !== null}");
   });
 });

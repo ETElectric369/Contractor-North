@@ -1,7 +1,7 @@
 /**
  * ── WHAT THE READ ACTUALLY DOES, ONE FACT EACH (Erik, 2026-10-03) ─────────────────────────────
  *
- * This was one paragraph of eleven facts on the Bring In A Statement card, and he could not read it:
+ * This was one paragraph of eleven facts on the Bring In a Statement card, and he could not read it:
  * "this huge box of text in front of me is hard for me to read and takes up a lot of space on the
  * screen, valuable space for reconciling". It is the same facts, as bullets, behind an info
  * icon. NOTHING IS CUT, and every clause still names something the code does — the walk

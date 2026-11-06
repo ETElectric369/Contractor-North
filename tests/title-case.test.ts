@@ -3,11 +3,12 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import ts from "typescript";
 import { dict } from "@/lib/i18n";
-import { ES_FUNCTION_WORDS } from "./es-function-words";
+import { titleCaseOffender } from "./title-case-words";
 
 /**
- * EVERY CLICKABLE IS TITLE CASE (Erik's law, cn-v1134: "Add A Task", "Won · Pick The Job",
- * "Save Inspection" — every word capitalized, never "Save inspection").
+ * EVERY CLICKABLE IS TITLE CASE (Erik's law, cn-v1134: "Add a Task", "Won · Pick the Job",
+ * "Save Inspection" — the significant words capitalized, never "Save inspection"; the function words lowercase since
+ * cn-v1147 in Spanish and cn-v1148 in English).
  *
  * This is the check, not a one-off sweep. It reads every screen file with the compiler (a regex
  * cannot tell a Button's words from a comment or a template) and collects the words a person taps:
@@ -27,9 +28,11 @@ import { ES_FUNCTION_WORDS } from "./es-function-words";
  *     the one dictionary (lib/i18n), each a hit of its own labelled [en:key] / [es:key]; a {slot} in
  *     the words is a computed hole (the rule for a computed child applies to what follows it).
  *
- * THE RULE (English): every word begins with a capital letter, a digit or a symbol. SPANISH (an [es:key] hit,
- * cn-v1147) capitalizes the significant words, the RAE's way: a function word (a, de, la, y… tests/es-function-words)
- * stays lowercase except as the first word or the first after a separator ("Lista de Precios", "Mover a un Día").
+ * THE RULE: the significant words, in both languages (tests/title-case-words holds it). English (cn-v1148, after
+ * Chicago and Apple): a function word — a, an, the, and, or, as, to, of, in, on, by, for, with… — stays lowercase
+ * except as the first or the last word of a segment ("Back to Schedule", "Who's on the Clock"; a particle stays
+ * capital: "Sign In with a Code", "Turn It On"). Spanish (an [es:key] hit, cn-v1147, the RAE's way): a function word
+ * (a, de, la, y…) stays lowercase except as the first word of a segment ("Lista de Precios", "Mover a un Día").
  * "·", "&", "/", "—", "+"
  * and a quoted bit pass on their own; the word after a "·", an "&" or a "(" is a word and must be
  * capitalized too. A template literal, or anything the compiler cannot read as plain words, is
@@ -117,11 +120,12 @@ export function collectClickables(source: string, fileName: string): Hit[] {
       if (!(key in dict("en"))) return false;
       for (const lang of ["en", "es"] as const) {
         const parts = (dict(lang)[key] ?? "").split(/\{\w+\}/);
-        into(e, kind, parts[0], `${lang}:${key}`);
-        for (const tail of parts.slice(1)) {
-          if (plainText(tail).split(/\s+/).filter((w) => /\p{L}/u.test(w)).length < 2) continue;
-          into(e, `${kind} (tail)`, tail, `${lang}:${key}`);
-        }
+        // The words before a slot are cut short by it: a (head) hit, whose last word may be mid-title ("Put It on {job} Instead").
+        into(e, parts.length > 1 ? `${kind} (head)` : kind, parts[0], `${lang}:${key}`);
+        parts.slice(1).forEach((tail, i, tails) => {
+          if (plainText(tail).split(/\s+/).filter((w) => /\p{L}/u.test(w)).length < 2) return;
+          into(e, `${kind} (tail)${i < tails.length - 1 ? " (head)" : ""}`, tail, `${lang}:${key}`);
+        });
       }
       return true;
     }
@@ -173,10 +177,14 @@ export function collectClickables(source: string, fileName: string): Hit[] {
     const visit = (node: ts.Node): void => {
       const children: ts.NodeArray<ts.JsxChild> | undefined = ts.isJsxElement(node) ? node.children : ts.isJsxFragment(node) ? node.children : undefined;
       if (!children) return;
-      for (const c of children) {
+      for (const [i, c] of children.entries()) {
         const sink = computed ? quiet : into;
-        if (ts.isJsxText(c)) sink(c, kind, c.text);
-        else if (ts.isJsxExpression(c)) {
+        if (ts.isJsxText(c)) {
+          // The words before a computed child are cut short by it ("Billed by Hand on {inv}"): a (head) hit, whose last
+          // word may be mid-title and so, when a function word, lowercase.
+          const head = children.slice(i + 1).some((d) => ts.isJsxExpression(d) && !stringsOf(d.expression, kind, () => {}));
+          sink(c, head ? `${kind} (head)` : kind, c.text);
+        } else if (ts.isJsxExpression(c)) {
           if (!stringsOf(c.expression, kind, sink)) computed = true;
         } else if (ts.isJsxElement(c)) {
           if (!DOOR_TAG(tagOf(c.openingElement))) visit(c);
@@ -222,47 +230,15 @@ export function collectClickables(source: string, fileName: string): Hit[] {
 const PROPER_NAMES = ["Tap to Pay on iPhone", "Tap to Pay", "iPhone", "iPad", "iOS", "macOS"];
 
 /**
- * The first word of the text that does not begin with a capital, a digit or a symbol — or null
- * when every word does. A quoted bit is one thing and passes; a "/" splits two words; a file
- * extension (".vcf") is a name, not a word; a proper name keeps its owner's spelling.
+ * The first word of the text that breaks the rule — or null when every word keeps it (tests/title-case-words
+ * titleCaseOffender, the one rule). A proper name keeps its owner's spelling. `tail`: the text starts mid-value (after a
+ * {slot} or a computed child) and its first word, when a function word, may be either case. `head`: the text is cut short
+ * by a slot or a computed child, and its last word, when a function word, is mid-title ("Billed by Hand on {inv}").
  */
-export function titleCaseOffence(text: string, lang: "en" | "es" = "en", tail = false): string | null {
-  let plain = text.replace(/“[^”]*”|"[^"]*"|‘[^’]*’/g, " ");
+export function titleCaseOffence(text: string, lang: "en" | "es" = "en", tail = false, head = false): string | null {
+  let plain = text;
   for (const name of PROPER_NAMES) plain = plain.split(name).join(" ");
-  // Spanish (cn-v1147): the significant words. A function word after the first word of a segment must be lowercase;
-  // a separator (· — – & / or an opening "(") starts a new segment. A tail after a {slot} starts mid-value, so its
-  // first word may be a lowercase function word ("{n} para Hoy").
-  let segStart = !tail;
-  let first = true;
-  for (const tok of plain.split(/(\s+|\/)/).filter((t) => t && !/^\s+$/.test(t))) {
-    if (/^[·—–&\/]+$/.test(tok)) {
-      segStart = true;
-      continue;
-    }
-    if (tok.startsWith(".")) continue;
-    if (tok.startsWith("(")) segStart = true;
-    const core = tok.replace(/^[^\p{L}\p{N}]+/u, "");
-    if (!core) continue;
-    const word = core.replace(/[^\p{L}\p{N}]+$/u, "").toLowerCase();
-    if (lang === "es" && ES_FUNCTION_WORDS.has(word)) {
-      const lower = /^\p{Ll}/u.test(core);
-      if (segStart && !lower) {
-        segStart = first = false;
-        continue;
-      }
-      if (segStart && lower && !(tail && first)) return tok;
-      if (tail && first) {
-        segStart = first = false;
-        continue;
-      }
-      if (!segStart && !lower) return tok;
-      segStart = first = false;
-      continue;
-    }
-    segStart = first = false;
-    if (/^\p{Ll}/u.test(core)) return tok;
-  }
-  return null;
+  return titleCaseOffender(plain, lang, { openStart: tail, openEnd: head });
 }
 
 /**
@@ -358,9 +334,9 @@ describe("the scanner reads the shapes a door's words take", () => {
         </>
       );`;
     expect(collectClickables(src, "a.tsx").map((h) => [h.kind, h.text])).toEqual([
-      ["<Link>", "Edit"],
+      ["<Link> (head)", "Edit"],
       ["<Button>", "Save changes"],
-      ["<Button>", "Log"],
+      ["<Button> (head)", "Log"],
       ["<Button>", "Hours"],
       ["<Button> (tail)", "on this job"],
       ["<a> (tail)", "Read more"],
@@ -430,14 +406,14 @@ describe("the scanner reads the shapes a door's words take", () => {
       ["<Button>", "Marcar Entrada", "es:tc_clockIn"],
       ["<Button>", "Clocking Out…", "en:tc_clockingOut"],
       ["<Button>", "Marcando Salida…", "es:tc_clockingOut"],
-      ["<Button>", "Clock Out At That Time", "en:tc_clockOutAtThatTime"],
+      ["<Button>", "Clock Out at That Time", "en:tc_clockOutAtThatTime"],
       ["<Button>", "Marcar Salida a Esa Hora", "es:tc_clockOutAtThatTime"],
-      // "Put It On {job} Instead": the words before the slot; "Instead" alone is a one-word tail.
-      ["<button>", "Put It On", "en:tc_putOnPrev"],
-      ["<button>", "Ponerlo en", "es:tc_putOnPrev"],
+      // "Put It on {job} Instead": the words before the slot, a (head) whose last word is mid-title; "Instead" alone is a one-word tail.
+      ["<button> (head)", "Put It on", "en:tc_putOnPrev"],
+      ["<button> (head)", "Ponerlo en", "es:tc_putOnPrev"],
       // "Now ({hours} h)": "Now (" before the slot; " h)" is a figure's unit.
-      ["<Button>", "Now (", "en:tc_nowChip"],
-      ["<Button>", "Ahora (", "es:tc_nowChip"],
+      ["<Button> (head)", "Now (", "en:tc_nowChip"],
+      ["<Button> (head)", "Ahora (", "es:tc_nowChip"],
       // An unknown key is computed, so the two-word tail after it is still judged.
       ["<Button> (tail)", "Save changes", undefined],
       ["ModalActions saveLabel", "Clock Out", "en:tc_clockOut"],
@@ -450,22 +426,32 @@ describe("the scanner reads the shapes a door's words take", () => {
     expect(titleCaseOffence("Él mismo")).toBe("mismo");
   });
 
-  it("the rule: every word capital, a digit or a symbol; a quoted bit passes; the word after · & ( / counts", () => {
-    for (const ok of ["Save Changes", "Won · Pick The Job", "Verify & Sign In", "Add 3 More", "Bills & POs", "Saved — Open It", "Say “yes please” Now", "Yes/No", "+ New", "E-sign It", "Don't Stop", "(Optional) Field", "Import A .vcf", "Enable Tap to Pay on iPhone", "Get This iPhone Ready"])
+  it("the rule: the significant words capital, a function word lowercase in the middle of a segment; a quoted bit passes; the word after · & ( / counts", () => {
+    for (const ok of ["Save Changes", "Won · Pick the Job", "Verify & Sign In", "Add 3 More", "Bills & POs", "Saved — Open It", "Say “yes please” Now", "Yes/No", "+ New", "E-sign It", "Don't Stop", "(Optional) Field", "Import a .vcf", "Enable Tap to Pay on iPhone", "Get This iPhone Ready", "Back to Schedule", "Who's on the Clock", "Sign In with a Code", "Turn It On from Their Contact Page", "Swap Money In and Out", "Set Up Card Payments", "Phase A Loads", "No Job: A Reminder for Me", "Still on the Clock?", "SCOPE OF WORK", "Announce Tap to Pay on iPhone to the Crew"])
       expect(titleCaseOffence(ok), ok).toBeNull();
     expect(titleCaseOffence("Save changes")).toBe("changes");
     expect(titleCaseOffence("Won · pick the job")).toBe("pick");
     expect(titleCaseOffence("Verify & sign In")).toBe("sign");
     expect(titleCaseOffence("Open (your lien rights)")).toBe("(your");
     expect(titleCaseOffence("Yes/no")).toBe("no");
-    expect(titleCaseOffence("Announce Tap to Pay on iPhone to the Crew")).toBe("to");
     expect(titleCaseOffence("iMessage Setup")).toBe("iMessage");
+    // English (cn-v1148): a capital function word in the middle of a segment is the offence; the first and last word stay capital.
+    expect(titleCaseOffence("Back To Schedule")).toBe("To");
+    expect(titleCaseOffence("Won · Pick The Job")).toBe("The");
+    expect(titleCaseOffence("Announce Tap to Pay on iPhone To The Crew")).toBe("To");
+    expect(titleCaseOffence("Sign in with a Code")).toBe("in");
+    expect(titleCaseOffence("Who's on the clock")).toBe("clock");
+    expect(titleCaseOffence("Owed to")).toBe("to");
+    // A (head) hit ends where a slot or a computed child begins, so its last word may be a lowercase function word.
+    expect(titleCaseOffence("Billed by Hand on", "en", false, true)).toBeNull();
+    expect(titleCaseOffence("Billed by Hand on")).toBe("on");
   });
 
   it("Spanish is judged by its own rule (cn-v1147): the significant words, a function word lowercase after the first", () => {
     expect(titleCaseOffence("Price List", "en")).toBeNull();
-    expect(titleCaseOffence("Add To The Schedule", "en")).toBeNull();
-    expect(titleCaseOffence("Add to The Schedule", "en")).toBe("to");
+    expect(titleCaseOffence("Add to the Schedule", "en")).toBeNull();
+    expect(titleCaseOffence("Add To The Schedule", "en")).toBe("To");
+    expect(titleCaseOffence("Add to The Schedule", "en")).toBe("The");
     expect(titleCaseOffence("Lista de Precios", "es")).toBeNull();
     expect(titleCaseOffence("Lista De Precios", "es")).toBe("De");
     expect(titleCaseOffence("Lista de precios", "es")).toBe("precios");
@@ -510,7 +496,7 @@ describe("every clickable in the app is Title Case", () => {
   it("names the first word that is not capital on every door that has one", () => {
     const offenders = hits
       .filter((h) => !isSentence(h.text) && !allowed(h.file, h.text))
-      .map((h) => ({ ...h, word: titleCaseOffence(h.text, h.via?.startsWith("es:") ? "es" : "en", h.kind.endsWith("(tail)")) }))
+      .map((h) => ({ ...h, word: titleCaseOffence(h.text, h.via?.startsWith("es:") ? "es" : "en", h.kind.includes("(tail)"), h.kind.includes("(head)")) }))
       .filter((h) => h.word)
       .map((h) => `${h.file}${h.via ? ` [${h.via}]` : ""}:${h.line} ${h.kind} "${h.text}" — "${h.word}"`);
     expect(offenders).toEqual([]);

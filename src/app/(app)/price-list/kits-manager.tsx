@@ -191,7 +191,7 @@ function EditKitModal({ kit, onClose }: { kit: Kit; onClose: () => void }) {
         <div><Label htmlFor="ek-name">Kit name</Label><Input autoComplete="off" id="ek-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="A name for the whole assembly" /></div>
         <div><Label htmlFor="ek-cat">Scope</Label><Input id="ek-cat" value={category} placeholder="e.g. Deck — the job kind that offers this kit's tasks" onChange={(e) => setCategory(e.target.value)} /></div>
         <div className="grid grid-cols-2 gap-3">
-          <div><Label htmlFor="ek-hours">Hours Per Unit</Label><Input id="ek-hours" inputMode="decimal" value={hoursPerUnit} onChange={(e) => setHoursPerUnit(e.target.value)} placeholder="empty = parts only" /></div>
+          <div><Label htmlFor="ek-hours">Hours per Unit</Label><Input id="ek-hours" inputMode="decimal" value={hoursPerUnit} onChange={(e) => setHoursPerUnit(e.target.value)} placeholder="empty = parts only" /></div>
           <div><Label htmlFor="ek-unit">Unit</Label><Input id="ek-unit" value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="footing, step, opening" /></div>
         </div>
         <p className="text-xs text-slate-500">With hours per unit this is a task kit: the Inspector offers it on a task, and the estimate prices your hours × the units. It will no longer appear in Add From Kit on estimates and invoices (clear the hours to bring it back).</p>
@@ -219,7 +219,7 @@ function LinkItemModal({ item, priceItems, orgDefaultPct, onClose }: { item: Kit
     });
   }
   return (
-    <Modal open onClose={onClose} title="Link To Item" size="md" footer={<ModalActions onCancel={onClose} onSave={onClose} saveLabel="Done" hideCancel />}>
+    <Modal open onClose={onClose} title="Link to Item" size="md" footer={<ModalActions onCancel={onClose} onSave={onClose} saveLabel="Done" hideCancel />}>
       <div className="space-y-3">
         <p className="text-sm text-slate-600">
           <span className="font-medium text-slate-900">{item.description}</span> is a frozen line — it keeps the price it was
@@ -257,9 +257,9 @@ function SizingFields({ sizing, onChange, idPrefix, measurements = [] }: { sizin
               onChange({ ...sizing, sizedBy: "", qtyPer: "", perSqft: m === "sqft" ? sq || 1 : "", perLf: m === "lf" ? lf || 1 : "" });
             }}
           >
-            <option value="fixed">Fixed Quantity — Typed On The Estimate</option>
-            <option value="sqft">Per Sq Ft Of The Job</option>
-            <option value="lf">Per Linear Ft Of The Job</option>
+            <option value="fixed">Fixed Quantity — Typed on the Estimate</option>
+            <option value="sqft">Per Sq Ft of the Job</option>
+            <option value="lf">Per Linear Ft of the Job</option>
             {measurements.filter((m) => !m.builtIn).map((m) => (
               <option key={m.key} value={`m:${m.key}`}>
                 Per {m.label}{m.unit ? ` (${m.unit})` : ""}
@@ -394,7 +394,7 @@ function EditItemModal({ item, orgDefaultPct, measurements = [], onClose }: { it
             </p>
             <p className="mt-1 text-xs text-slate-500">Priced from the book — edit the item in the Price List to change its name, unit or price.</p>
             <button type="button" onClick={unlink} disabled={pending} className="mt-2 text-xs text-slate-400 underline-offset-2 hover:text-red-600 hover:underline">
-              Unlink — Freeze At Today&rsquo;s Price
+              Unlink — Freeze at Today&rsquo;s Price
             </button>
           </div>
         ) : (

@@ -251,7 +251,7 @@ describe("setJobTimes says no in words", () => {
   });
 });
 
-describe("Clear The Date", () => {
+describe("Clear the Date", () => {
   it("the plan leaves, the worked day stays, and a Scheduled job waits for a day again", async () => {
     state.db.jobs.push({ id: "j10", status: "scheduled", scheduled_start: at("2026-09-28", "10:00"), scheduled_end: at("2026-09-28", "12:00"), planned_minutes: null });
     state.db.job_schedule_segments.push(
@@ -280,7 +280,7 @@ describe("Clear The Date", () => {
   });
 });
 
-describe("Clear The Date, then put back: lands exactly where and as long as chosen, the history stays history", () => {
+describe("Clear the Date, then put back: lands exactly where and as long as chosen, the history stays history", () => {
   const cleared = async (id: string) => {
     state.db.jobs.push({ id, status: "scheduled", scheduled_start: at("2026-09-29", "10:00"), scheduled_end: at("2026-09-29", "12:00"), planned_minutes: null });
     state.db.job_schedule_segments.push(

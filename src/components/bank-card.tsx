@@ -21,7 +21,7 @@ import { NotNowOrDelete } from "@/components/not-now-or-delete";
  *   Bank ••1234 · Aug 26–Sep 25 · 96 sorted · 17 already in North · 5 need you, in 3 rows
  *   [one bar: where the money went]
  *   SHELL 123 ANYTOWN · 3 charges · $288.45   [Fuel] [Auto] [Owner's Draw] [Other…]
- *   Deposit Sep 4 · $1,275.00        [On INV-1001] [Other Income] [Already Counted Or Not Income] [Other…]
+ *   Deposit Sep 4 · $1,275.00        [On INV-1001] [Other Income] [Already Counted or Not Income] [Other…]
  *       Card: $17,751.63 paid this period, $17,228.55 to reach here after $523.08 of fees.
  *   Check 1043 · $640.00             [Pay Pat] [Other…]
  *   [Apply] [Set Aside]
@@ -661,7 +661,7 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
                     : "Charges showing as Money In? Some card downloads print them that way round."}
                 </p>
                 <Button variant="outline" onClick={() => run("swap", () => swapBankDownload(itemId))} disabled={working}>
-                  {busy === "swap" ? <Loader2 className="animate-spin" /> : <ArrowLeftRight />} Swap Money In And Out
+                  {busy === "swap" ? <Loader2 className="animate-spin" /> : <ArrowLeftRight />} Swap Money In and Out
                 </Button>
               </div>
             )}

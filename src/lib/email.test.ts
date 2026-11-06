@@ -132,14 +132,14 @@ describe("sendEmail: a refused key is a blocker", () => {
  */
 describe("renderPlatformNoticeEmail — a note from North itself", () => {
   const html = renderPlatformNoticeEmail({
-    heading: "Your Free Trial Ends In 5 Days",
+    heading: "Your Free Trial Ends in 5 Days",
     message: "Pick a plan in Settings › Getting Paid to keep the crew working.",
     cta: { label: "Open Settings", href: "https://app.contractornorth.com/settings?tab=getpaid" },
   });
 
   it("North's header, the heading and the message, signed — Contractor North, and no Hi <name>", () => {
     expect(html).toContain('<div style="font-size:20px;font-weight:700">Contractor North</div>');
-    expect(html).toContain("Your Free Trial Ends In 5 Days");
+    expect(html).toContain("Your Free Trial Ends in 5 Days");
     expect(html).toContain("Pick a plan in Settings › Getting Paid to keep the crew working.");
     expect(html).toContain("— Contractor North");
     expect(html).not.toMatch(/\bHi\b/);

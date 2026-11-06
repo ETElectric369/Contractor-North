@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
  * On 9/19 the office billing 41 Larkspur saw no 9/11 hours on the job's Time tab and typed the day
  * again; Brian's own 9/11 punch was in the book on no job. The tab now lists this job's crew's
  * closed, job-less, unbilled, non-company-time punches from the day before its first day to two
- * days after its last, each with Put This On <job> (office only), and shows nothing when there are
+ * days after its last, each with Put This on <job> (office only), and shows nothing when there are
  * none.
  */
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
@@ -159,11 +159,11 @@ describe("the list on the Time tab", () => {
   });
   const render = (p: Parameters<typeof NoJobPunchesList>[0]) => renderToStaticMarkup(createElement(NoJobPunchesList, p));
 
-  it("names each punch with its own clock times and offers Put This On <job>, 44px", () => {
+  it("names each punch with its own clock times and offers Put This on <job>, 44px", () => {
     const html = render(props());
-    expect(html).toContain("Punches With No Job");
+    expect(html).toContain("Punches with No Job");
     expect(html).toContain("Brian · Fri, Sep 11 · 10:31 AM to 6:57 PM · 8.43 h");
-    expect(html).toMatch(/<button[^>]*class="[^"]*min-h-11[^"]*"[^>]*>Put This On 41 Larkspur<\/button>/);
+    expect(html).toMatch(/<button[^>]*class="[^"]*min-h-11[^"]*"[^>]*>Put This on 41 Larkspur<\/button>/);
     expect(nearPunchLine({ ...punch, jobCode: "ROUGH" }, TZ)).toBe("Brian · Fri, Sep 11 · 10:31 AM to 6:57 PM · 8.43 h · ROUGH");
   });
 
@@ -172,7 +172,7 @@ describe("the list on the Time tab", () => {
     expect(render(props({ punches: [], failed: true }))).toContain("Couldn’t check this crew’s punches with no job just now.");
   });
 
-  it("the tap is Put This On for that punch; a refusal is a plain line under it", () => {
+  it("the tap is Put This on for that punch; a refusal is a plain line under it", () => {
     const p = props();
     const tree = NoJobPunchesList(p) as ReactElement;
     const find = (node: ReactNode): ReactElement<{ onClick: () => void }> | null => {
@@ -180,7 +180,7 @@ describe("the list on the Time tab", () => {
       if (Array.isArray(node)) return node.map(find).find(Boolean) ?? null;
       if (!isValidElement(node)) return null;
       const pr = node.props as { onClick?: unknown; children?: ReactNode };
-      if (typeof pr.onClick === "function" && String(pr.children).startsWith("Put This On")) return node as ReactElement<{ onClick: () => void }>;
+      if (typeof pr.onClick === "function" && String(pr.children).startsWith("Put This on")) return node as ReactElement<{ onClick: () => void }>;
       return find(pr.children);
     };
     find(tree)!.props.onClick();
@@ -191,10 +191,10 @@ describe("the list on the Time tab", () => {
   it("shows the newest five above the job's own entries, and Show All <n> (44px) opens the rest", () => {
     const many = Array.from({ length: 13 }, (_, i) => ({ ...punch, id: `p${i}` }));
     const short = render(props({ punches: many }));
-    expect(short.match(/>Put This On 41 Larkspur<\/button>/g)).toHaveLength(NEAR_SHOWN);
+    expect(short.match(/>Put This on 41 Larkspur<\/button>/g)).toHaveLength(NEAR_SHOWN);
     expect(short).toMatch(/<button[^>]*class="[^"]*min-h-11[^"]*"[^>]*>Show All 13<\/button>/);
     const all = render(props({ punches: many, showAll: true }));
-    expect(all.match(/>Put This On 41 Larkspur<\/button>/g)).toHaveLength(13);
+    expect(all.match(/>Put This on 41 Larkspur<\/button>/g)).toHaveLength(13);
     expect(all).not.toContain("Show All");
     // Five or fewer: nothing to open.
     expect(render(props({ punches: many.slice(0, NEAR_SHOWN) }))).not.toContain("Show All");
@@ -204,12 +204,12 @@ describe("the list on the Time tab", () => {
     const capped = render(props({ capped: true }));
     expect(capped).toContain("These are the newest 1. Older ones are under");
     expect(capped).toContain(`href="${NEAR_REST_HREF}"`);
-    expect(capped).toContain("Hours On No Job, On Timecards");
+    expect(capped).toContain("Hours on No Job, on Timecards");
     expect(render(props())).not.toContain("Older ones are under");
     const unlisted = render(props({ punches: [], capped: true }));
     expect(unlisted).toContain("Couldn’t list every punch with no job around this job’s days");
     expect(unlisted).toContain(`href="${NEAR_REST_HREF}"`);
-    // The same place Needs You's Hours On No Job line opens.
+    // The same place Needs You's Hours on No Job line opens.
     expect(NEAR_REST_HREF).toBe(NO_JOB_HOURS_HREF);
   });
 

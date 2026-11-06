@@ -4,10 +4,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 /**
  * THE PLANS DOOR ON SCREEN (Erik 2026-09-25: "uploading a plan file from a dropdown in the costs
- * tab is the most unituitive thing ive seen on this app in a while"). The Plans And Drawings card
- * leads with one primary Add Plans Or Drawings button; its two ways in are Upload File (PDFs or
+ * tab is the most unituitive thing ive seen on this app in a while"). The Plans and Drawings card
+ * leads with one primary Add Plans or Drawings button; its two ways in are Upload File (PDFs or
  * pictures, several at once) and Take Photo; no category dropdown anywhere in the door; every
- * target 44px and full width on a 375px phone. The Show On Portal sheet a new file opens on starts
+ * target 44px and full width on a 375px phone. The Show on Portal sheet a new file opens on starts
  * with its title cleaned from the file name, says nothing is shown yet, and its way out is Not Now.
  */
 
@@ -75,10 +75,10 @@ function card(state: PapersState) {
   return renderToStaticMarkup(createElement(PapersCard, { jobId: "job-1", orgId: "org-1", state, setState: noop, who: "Nora" }));
 }
 
-describe("Plans And Drawings card: the Add Plans Or Drawings door", () => {
+describe("Plans and Drawings card: the Add Plans or Drawings door", () => {
   it("leads with the primary button, 44px and full width on a 375px phone, with no category dropdown", () => {
     const html = card({ ready: true, papers: [], shares: [], people: {} });
-    const add = button(html, "Add Plans Or Drawings");
+    const add = button(html, "Add Plans or Drawings");
     phoneFit(add);
     // Primary: the sea-glass fill, not an outline.
     expect(add).toMatch(/bg-\[rgb\(var\(--glass-ink\)\)\]/);
@@ -89,8 +89,8 @@ describe("Plans And Drawings card: the Add Plans Or Drawings door", () => {
     // No dropdown in the card's own door (the only <select>s live on the sheet, which is closed).
     expect(html).not.toMatch(/<select/);
     // The empty list points at the door, not at the Costs tab.
-    expect(html).toContain("with Add Plans Or Drawings above");
-    expect(html).not.toContain("Receipts And Documents");
+    expect(html).toContain("with Add Plans or Drawings above");
+    expect(html).not.toContain("Receipts and Documents");
   });
 
   it("opened: the two ways in, Upload File and Take Photo, each 44px and full width on a phone", () => {
@@ -99,7 +99,7 @@ describe("Plans And Drawings card: the Add Plans Or Drawings door", () => {
     );
     phoneFit(button(html, "Upload File"));
     phoneFit(button(html, "Take Photo"));
-    expect(button(html, "Add Plans Or Drawings")).toMatch(/aria-expanded="true"/);
+    expect(button(html, "Add Plans or Drawings")).toMatch(/aria-expanded="true"/);
     // It says what happens, in plain words, before anyone picks a file.
     expect(html).toContain("Each is filed on this job as a plan. Nothing goes on Nora&#x27;s page until you press");
     expect(html).not.toMatch(/<select/);
@@ -116,12 +116,12 @@ describe("Plans And Drawings card: the Add Plans Or Drawings door", () => {
 
   it("isn't offered before the papers are ready (0326 off): the card only says why", () => {
     const html = card({ ready: false, reason: "Not switched on yet." });
-    expect(button(html, "Add Plans Or Drawings")).toBeNull();
+    expect(button(html, "Add Plans or Drawings")).toBeNull();
     expect(html).toContain("Not switched on yet.");
   });
 });
 
-describe("the Show On Portal sheet a new plan opens on", () => {
+describe("the Show on Portal sheet a new plan opens on", () => {
   function sheet(p: JobPaper, shares: SharedPaperRow[] = []) {
     return renderToStaticMarkup(
       createElement(PaperSheet, { paper: p, share: null, mode: "show", fresh: true, shares, who: "Nora", onClose: noop, onSaved: noop }),
@@ -137,12 +137,12 @@ describe("the Show On Portal sheet a new plan opens on", () => {
     expect(titleValue(sheet(paper({ name: "123_Main_St_Panel_Schedule_v2.pdf", format: "pdf" })))).toBe("123 Main St Panel Schedule v2");
   });
 
-  it("says it is filed and not shown, the way out is Not Now, and Show On Portal is the only way on", () => {
+  it("says it is filed and not shown, the way out is Not Now, and Show on Portal is the only way on", () => {
     const html = sheet(paper());
-    expect(html).toContain("Filed on this job as a plan. It goes on Nora&#x27;s page only when you press Show On Portal.");
+    expect(html).toContain("Filed on this job as a plan. It goes on Nora&#x27;s page only when you press Show on Portal.");
     expect(button(html, "Not Now")).not.toBeNull();
     expect(button(html, "Cancel")).toBeNull();
-    expect(button(html, "Show On Portal")).not.toBeNull();
+    expect(button(html, "Show on Portal")).not.toBeNull();
   });
 
   it("offers Replaces only when the job already shows a paper", () => {

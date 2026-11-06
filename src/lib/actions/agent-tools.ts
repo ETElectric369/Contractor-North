@@ -130,7 +130,7 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   // Progress billing: define a draw schedule + draft the next draw (confirm-gated).
   "payment.setSchedule",
   "payment.requestNext",
-  // Report A Problem, by voice: every role can FILE one (auth:"any"). Triage is North's own
+  // Report a Problem, by voice: every role can FILE one (auth:"any"). Triage is North's own
   // (Bug Watch, platform admins only), so bug.resolve is not a company's tool (Wave 0).
   "bug.report",
   // The one-field front door: any fragment → a private needs_review stub in the

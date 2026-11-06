@@ -55,7 +55,7 @@ export { partsFromLines, type KeyedPart } from "./born-with-tasks";
  *  - cn-v1084, the deferred items: a KEPT orphan keeps its line under a TOMBSTONE key
  *    ("gone:line:<id>#part") — his now, "kept" said once, and the line's again if that line returns
  *    (an estimate moved away and back), not a second row to buy twice. A VISIT's row ("task:<TaskValue
- *    id>#part", Start The Job on the inspection) finds the line of the estimate drafted from that
+ *    id>#part", Start the Job on the inspection) finds the line of the estimate drafted from that
  *    visit — by the task id the line's breakdown remembers (detail.task_id) and the same part, else by
  *    the part half like any orphan — and becomes the line's instead of doubling; one that finds no line
  *    stays the visit's, untouched. An UNKEYED row that is not his (typed by hand, or taken off before

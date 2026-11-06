@@ -84,7 +84,7 @@ import { isMissingWaitColumn } from "./supplier-papers";
 /**
  * THE TWO SCREENS A SUPPLIER-NAME WRITE CHANGES, REFRESHED TOGETHER (cn-v1037).
  *
- * The five doors below — Accept And File Them There, Not The Same, Give It Its Own Account, Keep It
+ * The five doors below — Accept and File Them There, Not the Same, Give It Its Own Account, Keep It
  * On <job>, Undo — moved to /reconcile, and every one of them revalidated "/bills" and nothing else.
  * Moving the components without this line would have made every button on the new page APPEAR TO DO
  * NOTHING: the write lands, the page is served from the last render, and nothing on screen moves. A
@@ -384,7 +384,7 @@ const aliasTakenSentence = (alias: string, owner: string, whatHappened = "so the
 
 /** Who owns a spelling right now, matched the way the database matches it. A read, so a second tab
  *  can still beat it - which is why every writer below also handles the unique-index error. The
- *  row's own id comes back too, because "Not The Same" has to be able to take a spelling OFF the
+ *  row's own id comes back too, because "Not the Same" has to be able to take a spelling OFF the
  *  account it is currently saved under. */
 type AliasOwner = { aliasId: string; accountId: string; name: string };
 
@@ -656,7 +656,7 @@ async function readBillsForOrg(supabase: any, orgId: string): Promise<{ rows: an
 
 /**
  * ONE SPELLING ONTO ONE ACCOUNT: its unfiled bills move, and the spelling is remembered. The one
- * piece of work shared by "file these bills", the merge review's Accept, and its "Not The Same".
+ * piece of work shared by "file these bills", the merge review's Accept, and its "Not the Same".
  *
  * The alias is written AFTER the bills move, so a refused alias cannot leave him thinking nothing
  * happened when eight bills just changed hands. Its own failure is reported in the sentence rather
@@ -764,7 +764,7 @@ export async function setBillSupplierInvoice(input: {
 
 /**
  * A proposal's id is the JSON list of the spellings it is about, because the page builds these
- * suggestions fresh on every load and there is no row anywhere to point at. "Not The Same" hands
+ * suggestions fresh on every load and there is no row anywhere to point at. "Not the Same" hands
  * the server nothing but that one string.
  *
  * WHICH IS WHY EVERY SPELLING IS CHECKED AGAINST HIS OWN UNFILED BILLS BEFORE ANYTHING IS WRITTEN.
@@ -1084,7 +1084,7 @@ export async function resolveDuplicateBill(input: {
    * sentence "this purchase is already covered", and from this write on the copy that counts is
    * the keeper. Left sitting on the copy he set aside, that link names a bill every cost reader in
    * the app deliberately ignores: the reconcile card stops asking for an invoice nothing carries,
-   * and Record It As A Bill refuses with the set-aside copy's job in the refusal - with no way
+   * and Record It as a Bill refuses with the set-aside copy's job in the refusal - with no way
    * forward, because 0277 is unique on the invoice so a corrective link could never be written.
    *
    * It is safe against both indexes: unique on the INVOICE alone means at most one row exists per
@@ -1204,7 +1204,7 @@ export async function unresolveDuplicateBill(groupId: string): Promise<SupplierA
  * BOTH ARE REAL (0400 bills.both_real_at; cn-v1137).
  *
  * The card's own words admitted it — "two identical runs a month apart are normal too" — and then
- * offered only Keep It On <job>, which removes one job's cost. The third answer is the one an
+ * offered only Keep It on <job>, which removes one job's cost. The third answer is the one an
  * electrician gives most: he bought the same eight things twice, a month apart, for two jobs. Both
  * costs stay exactly where they are; the stamp is what stops the pair being asked about
  * (duplicateTicketGroups skips a group whose copies all carry it). Nothing else moves: not a
@@ -1562,7 +1562,7 @@ export async function voidSupplierPayment(paymentId: string): Promise<SupplierAc
  *
  * The CED counter ticket is why this exists. It carries a sales-order number (8802-SO-257555) and
  * CED's invoice for the same breakers carries 8802-11xxxxx, so no number check can ever join them,
- * and the only way out the card offered was Record It As A Bill: a second $323.71 on J-011 and a
+ * and the only way out the card offered was Record It as a Bill: a second $323.71 on J-011 and a
  * second import onto Andrew's invoice. The bill must be one this document is actually offered
  * (samePurchaseFor, recomputed here): the same number, or the same account, job, and a total and
  * date within a few dollars and days.
@@ -1723,7 +1723,7 @@ export async function setSupplierInvoiceJob(input: {
 
   // ALREADY ON THE BOOKS, BY ANOTHER NAME (audit v994, DB1). A bill on this job that carries this
   // number, or a counter ticket on this account for the same money a few days apart, may be this
-  // very purchase. Said now, so "Record It As A Bill is next" is never the only thing he hears
+  // very purchase. Said now, so "Record It as a Bill is next" is never the only thing he hears
   // about a purchase that is already on the job. A read that fails says only the next step.
   let maybe: SamePurchaseCandidate | null = null;
   if (!hasLiveBill) {
@@ -1756,7 +1756,7 @@ export async function setSupplierInvoiceJob(input: {
         ? `${number} is on ${label} now, and a bill already carries its number: ${maybe.label}.`
         : maybe
           ? `${number} is on ${label} now. ${samePurchaseSentence(maybe)} If it is, press ${maybe.reprice ? "Correct This Bill" : "Same Purchase: Tie Them"} on it down in Their Papers › Not Recorded Yet; if not, Different Purchase: Record It Anyway puts the cost on the job.`
-          : `${number} is on ${label} now. Record It As A Bill, down in Their Papers › Not Recorded Yet, is what puts the cost on the job.`,
+          : `${number} is on ${label} now. Record It as a Bill, down in Their Papers › Not Recorded Yet, is what puts the cost on the job.`,
   };
 }
 
@@ -1799,13 +1799,13 @@ export async function recordSupplierInvoiceAsBill(input: {
    * RECORD TO SHELF (Shop Stock, Phase 2): a person's answer for every line of the document, by
    * its place in supplierBillLines' order (a count, or Not Stock). With it the bill has no job
    * and is the shelf's (on_shelf), whatever job CED or a person put on the document, and every
-   * counted line becomes a roll in the same press. Without it, this is Record It As A Bill.
+   * counted line becomes a roll in the same press. Without it, this is Record It as a Bill.
    */
   toShelf?: TicketLineChoice[] | null;
   /**
    * BUSINESS COST (Bills plan, Wave A): a person says this paper is the company's own, in one of
    * the business-cost buckets. The bill has no job and carries the bucket as its category, exactly the shape
-   * Add By Hand writes. Anything that is not one of them is refused, never guessed at.
+   * Add by Hand writes. Anything that is not one of them is refused, never guessed at.
    */
   businessCost?: string | null;
   /**
@@ -1843,7 +1843,7 @@ export async function recordSupplierInvoiceAsBill(input: {
   const invoiceId = String(input?.invoiceId ?? "");
   if (!invoiceId) return { ok: false, error: "Couldn't tell which invoice you meant." };
 
-  // Waiting On A Credit's stamp (0346) rides along; a database without it answers the same read
+  // Waiting on a Credit's stamp (0346) rides along; a database without it answers the same read
   // again without the column, and nothing there is waiting (readSupplierDocuments does the same).
   const invColumns =
     "id, invoice_number, kind, invoice_date, job_id, supplier_account_id, tax, shipping, total, open_balance, closed, supplier_accounts(name), jobs(name, job_number)";
@@ -1884,7 +1884,7 @@ export async function recordSupplierInvoiceAsBill(input: {
   /**
    * WAITING ON A CREDIT IS A PERSON'S DECISION, HONORED BY THE WRITE (audit v1018, class 4). /bills
    * folds a waiting paper with Stop Waiting as its only door, but the job's Costs tab used to offer
-   * Record It As A Bill on it, and nothing here asked: one tap put a cost the supplier is taking
+   * Record It as a Bill on it, and nothing here asked: one tap put a cost the supplier is taking
    * back onto the customer's job. A list is a screen and this is a write, so it refuses while the
    * wait runs. After CREDIT_WAIT_DAYS the paper is a card again by itself, and records as any card.
    * The stamp is read with the paper itself; the org's today only when there is one.
@@ -2227,7 +2227,7 @@ export async function recordSupplierInvoiceAsBill(input: {
     // and add them would be a door that does not exist.
     // NO RESTAMP HERE, AND WHY (Shop Stock, 0304's other half): these lines belong to the bill
     // written a moment ago, and a roll is keyed to a line id that did not exist until this insert,
-    // so no roll can be on it yet. Record To Shelf puts its rolls on in shelveRecordedBill below.
+    // so no roll can be on it yet. Record to Shelf puts its rolls on in shelveRecordedBill below.
     if (writeErr || !wrote?.length) {
       reportError("bills:recordAsBill.lines", writeErr ?? new Error("bill line insert wrote no rows"), { billId, lines: lines.length });
       lineNote = ` Its lines didn't save, so the ${sayMoney(total)} is in as one amount. The cost is right; the invoice will bill it as a single line.${lineNote}`;
@@ -2333,8 +2333,8 @@ async function shelveRecordedBill(
  * ONE TAP: PUT THE PAPER ON A JOB AND RECORD IT, or record it as a business cost.
  *
  * Before this, CED's 8802-1107820 ("41 LARKSPUR", $187.64) took about eight taps across two lists
- * on /bills: pick J-028 in Invoices With No Job, press File It, scroll to Purchases Not In Your
- * Books, find the row again, Record It As A Bill. The card on My Day asks the one question and the
+ * on /bills: pick J-028 in Invoices with No Job, press File It, scroll to Purchases Not In Your
+ * Books, find the row again, Record It as a Bill. The card on My Day asks the one question and the
  * answer does both halves, by calling the two actions that already do each half and already say
  * what they did (setSupplierInvoiceJob, then recordSupplierInvoiceAsBill). No third copy of either
  * write.
@@ -2572,7 +2572,7 @@ export async function undoFileSupplierPaper(input: {
   return { ok: true, message: `Undone: ${number}'s bill is gone${jobWords}. Its card is back.` };
 }
 
-/** Record To Shelf: Record It As A Bill with a person's answer for every line (Shop Stock, Phase 2). */
+/** Record to Shelf: Record It as a Bill with a person's answer for every line (Shop Stock, Phase 2). */
 export async function recordSupplierInvoiceToShelf(input: {
   invoiceId: string;
   differentPurchase?: boolean;

@@ -87,7 +87,7 @@ describe("papersNamingJob — 41 Larkspur before INV-081 went out", () => {
   });
 });
 
-describe("onNeedsYouIds — Open It On Bills lands where the paper is", () => {
+describe("onNeedsYouIds — Open It on Bills lands where the paper is", () => {
   it("is the Needs You cards' own rule: the books line, a reversed purchase and a $0.00 paper are on no card", () => {
     const card = doc({ jobNameRaw: "41 LARKSPUR", invoiceDate: "2026-09-16", total: 187.64 });
     const older = doc({ jobNameRaw: "41 LARKSPUR", invoiceDate: "2026-05-01", total: 50 });
@@ -101,7 +101,7 @@ describe("onNeedsYouIds — Open It On Bills lands where the paper is", () => {
     expect(ids.has(zero.id)).toBe(false);
   });
 
-  it("a paper waiting on a credit is on no Needs You card: it links to its supplier's Waiting On A Credit fold", () => {
+  it("a paper waiting on a credit is on no Needs You card: it links to its supplier's Waiting on a Credit fold", () => {
     const waiting = doc({ jobNameRaw: "13683 HAZELNUT", total: 59.17, waitingCreditSince: "2026-09-26" });
     expect(onNeedsYouIds([waiting], null, "2026-10-01").has(waiting.id)).toBe(false);
     expect(waitingOnCreditIds([waiting], null, "2026-10-01").has(waiting.id)).toBe(true);

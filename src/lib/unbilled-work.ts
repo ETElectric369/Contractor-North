@@ -78,7 +78,7 @@ export type UnbilledWork = {
   returnsCount: number;
   /** returnsAmount with markup, positive: what comes OFF the customer's next bill. */
   returnsCredit: number;
-  /** Pieces taken from stock onto this job (Took From Stock) that no invoice holds yet: how many
+  /** Pieces taken from stock onto this job (Took from Stock) that no invoice holds yet: how many
    *  takes (one invoice line each), what they cost the company as the database stamped them, and
    *  what the customer would be billed at the same markup as the bills. A short (taken past the
    *  shelf, no roll behind it yet) is never in these: it is `stockShorts`. Staff only - a tech's
@@ -128,7 +128,7 @@ export type UnbilledWork = {
    */
   costRows: CostRowVerdict[];
   /**
-   * THE OLDEST OPEN WORK ON THE JOB (Waiting To Be Billed, 2026-10-07): the earliest clock-in of an
+   * THE OLDEST OPEN WORK ON THE JOB (Waiting to Be Billed, 2026-10-07): the earliest clock-in of an
    * unclaimed billable hour, the earliest supplier day (bill_date, else when it was filed) of an open
    * bill, the earliest day an open order was raised, the earliest open take from stock - whichever
    * is first, as the database wrote it (an ISO time or a YYYY-MM-DD day). Null when nothing is open.

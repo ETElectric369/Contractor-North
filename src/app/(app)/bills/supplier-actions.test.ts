@@ -334,7 +334,7 @@ describe("setSupplierInvoiceJob - a set-aside copy is not 'in your books'", () =
     state.client = fakeSupabase(script([{ bill_id: NIGHTSHADE_COPY, bills: { superseded_by_bill_id: LARKSPUR_COPY } }]), calls);
     const res = await setSupplierInvoiceJob({ invoiceId: INVOICE_ID, jobId: "job-larkspur" });
     expect(res.ok).toBe(true);
-    expect(res.message).toContain("Record It As A Bill");
+    expect(res.message).toContain("Record It as a Bill");
   });
 
   it("says the cost is already in his books when a live bill carries it", async () => {
@@ -385,7 +385,7 @@ const ledger = (bills: any[] = [SO_BILL]) => ({
   "supplier_aliases.select": [{ data: [], error: null }],
 });
 
-describe("Record It As A Bill never writes a second bill for a purchase already on the books", () => {
+describe("Record It as a Bill never writes a second bill for a purchase already on the books", () => {
   const script = (over: Record<string, any[]> = {}) => ({
     "profiles.select": [STAFF],
     "supplier_invoices.select": [
@@ -487,7 +487,7 @@ describe("Same Purchase: Tie Them writes the link and nothing else", () => {
 });
 
 describe("setSupplierInvoiceJob says when the purchase may already be on the job", () => {
-  it("names the SO ticket and the tie, instead of only 'Record It As A Bill is next'", async () => {
+  it("names the SO ticket and the tie, instead of only 'Record It as a Bill is next'", async () => {
     state.client = fakeSupabase(
       {
         "profiles.select": [STAFF],
@@ -529,7 +529,7 @@ describe("setSupplierInvoiceJob says when the purchase may already be on the job
     expect(res.message).toBe(
       "8802-1109999 is on 13897 Honeysuckle now, and a bill already carries its number: Consolidated Electrical Dist. #8802-1109999, $400.00, 2026-08-01, on J-011 13897 Honeysuckle.",
     );
-    expect(res.message).not.toMatch(/Tie Them|Record It Anyway|Record It As A Bill/);
+    expect(res.message).not.toMatch(/Tie Them|Record It Anyway|Record It as a Bill/);
   });
 });
 

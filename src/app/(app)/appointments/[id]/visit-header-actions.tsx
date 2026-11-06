@@ -18,10 +18,10 @@ import { putVisitBackOnSchedule, setAppointmentStatus, wontHappenAppointment } f
 
 /**
  * THE VISIT PAGE'S ⋯ ACTIONS ROWS (W2-11). The header used to carry up to seven controls: Get Paid,
- * "Mark inspection complete" (under 44px), a Delete for empty visits, a bare ✓ and ✗, Clear The Date
+ * "Mark inspection complete" (under 44px), a Delete for empty visits, a bare ✓ and ✗, Clear the Date
  * and Edit Details (whose modal footer had a hard Delete). Now it carries at most ONE main button
  * (Get Paid on a work visit, Mark Inspection Done on a booked inspection) and this menu, last on
- * the row: Mark Done · Edit Details… · Clear The Date · Put It Back On The Schedule · — · Won't Happen.
+ * the row: Mark Done · Edit Details… · Clear the Date · Put It Back on the Schedule · — · Won't Happen.
  *
  * Each row says what happened in a toast and closes the panel; a status it changes has an Undo.
  * The rows' own words are the signed-in person's language (lib/words/visit-page, vp_); a note the
@@ -82,7 +82,7 @@ export function MarkDoneRow({ id }: { id: string }) {
   );
 }
 
-/** 'Put It Back On The Schedule' — a cancelled visit only (putVisitBackOnSchedule says the rest). */
+/** 'Put It Back on the Schedule' — a cancelled visit only (putVisitBackOnSchedule says the rest). */
 export function PutBackRow({ id }: { id: string }) {
   const router = useRouter();
   const toast = useToast();

@@ -5,10 +5,10 @@ import { firstNameOf, jobWords } from "./words";
 /**
  * RECEIPTS NOT ON A BILL (Wave 1, NY-feeders; closes lane 3's tech-photo path).
  *
- * A crew member's photo from Snap Or Note is filed on the job for the office, unread (the reader
+ * A crew member's photo from Snap or Note is filed on the job for the office, unread (the reader
  * never runs for a tech), and a staff snap whose read failed sits on the job the same way: a receipt
  * or a bill on the job that no bill, supplier document or petty cash accounts for. The job's Costs
- * tab lists it as Not On A Bill Yet beside Record As Cost, but nothing brought it to anyone: a cost
+ * tab lists it as Not on a Bill Yet beside Record as Cost, but nothing brought it to anyone: a cost
  * nobody recorded is a cost no invoice bills. Now it comes to Needs You, by lib/job-photos' OWN rule
  * (sortJobPapers(...).loose): never a second copy of what "on a bill" means.
  *
@@ -29,7 +29,7 @@ export const RECEIPTS_READ_CAP = 200;
 export const RECEIPT_CATEGORIES = ["Receipt", "Bill"] as const;
 
 /** The ties' columns: what sortJobPapers reads (the job page asks for the same), and whether the tie
- *  is still waiting for a person (then the paper is already a Papers To Sort row). */
+ *  is still waiting for a person (then the paper is already a Papers to Sort row). */
 export const RECEIPT_TIE_COLUMNS = "id, kind, category, status, document_id, bill_id, tied_bill_id, tied_supplier_invoice_id, petty_cash_id, file_url";
 
 /** How many papers one tie read names, so no request's address grows past what a server takes. */
@@ -45,7 +45,7 @@ export type ReceiptDoc = JobPaperRow & {
 /**
  * The receipts on a job that nothing accounts for; null when the ties couldn't be read. One paper,
  * one row: a paper whose tie is still waiting for a person (status needs_review) is already on Needs
- * You as a Paper To Sort, so it isn't a second row here.
+ * You as a Paper to Sort, so it isn't a second row here.
  */
 export function receiptsNotOnABill<D extends ReceiptDoc>(docs: readonly D[], ties: readonly (PaperTie & { status?: string | null })[] | null): D[] | null {
   const onJobs = (docs ?? []).filter((d) => !!d?.job_id && isCostableCategory(d.category));

@@ -73,7 +73,7 @@ type QuickCostProps = {
    *  pick it across the RSC boundary. The job action dock passes "dollar": at icon
    *  size a wallet and the Materials tab's Package box share the same rounded-rect
    *  silhouette — $ is unmistakable at a glance (Erik's 60mph feedback, 7/14). "none" is a plain
-   *  text link (/bills' Add By Hand). */
+   *  text link (/bills' Add by Hand). */
   icon?: "wallet" | "dollar" | "keyboard" | "none";
   className?: string;
   /** Fired when the modal OPENS. Do NOT unmount this component here (it would kill
@@ -86,8 +86,8 @@ type QuickCostProps = {
   nortOn?: boolean;
   /**
    * TYPE IT IN (W1-23, W1-32): THE ONE TYPED COST SHEET, for a cost with no paper to snap. The job's
-   * Costs tab ⋯ opens it with the job preselected; /bills' Add By Hand opens it with the job picker.
-   * No receipt block here: a paper goes in through Snap The Bill or Snap Or Note.
+   * Costs tab ⋯ opens it with the job preselected; /bills' Add by Hand opens it with the job picker.
+   * No receipt block here: a paper goes in through Snap the Bill or Snap or Note.
    */
   typeOnly?: boolean;
   /** The Shop Stock switch (0352), for the typed sheet's What's It For?. Absent = off (no row). */
@@ -103,7 +103,7 @@ type QuickCostProps = {
  *   · the snap sheet (My Day's Now card): supplier + amount + category + an optional receipt photo
  *     (the camera on mobile), with Read the Receipt / Type It In once a paper is attached;
  *   · TYPE IT IN (`typeOnly`): the one typed cost sheet, for a cost with no paper (the job's Costs
- *     tab ⋯, and /bills' Add By Hand).
+ *     tab ⋯, and /bills' Add by Hand).
  *
  * Both save through createBill (a cost = a bill), so every surface logs a cost the same way.
  *
@@ -298,11 +298,11 @@ function SnapCostButton({
       try {
         if (sessionStorage.getItem(SNAP_KEY)?.startsWith(`${snapId.current}:`)) sessionStorage.removeItem(SNAP_KEY);
       } catch {}
-      setCameraHint("Camera didn't open? Tap Photo Or PDF to pick from your photos, or allow the camera for North in your phone's Settings.");
+      setCameraHint("Camera didn't open? Tap Photo or PDF to pick from your photos, or allow the camera for North in your phone's Settings.");
     }, 2500);
   }
 
-  /** The library door (Photo Or PDF). Choosing it ends any camera hint. */
+  /** The library door (Photo or PDF). Choosing it ends any camera hint. */
   function pickFromLibrary() {
     setCameraHint(null);
     if (fileRef.current) return fileRef.current.click();
@@ -327,7 +327,7 @@ function SnapCostButton({
     } catch {}
     if (at && Date.now() - at < SNAP_STALE_MS && !reloadAnnounced) {
       reloadAnnounced = true;
-      toast("The app reloaded while the camera was open, so that receipt photo didn't land. Open Add Cost again and try Photo Or PDF.", "error");
+      toast("The app reloaded while the camera was open, so that receipt photo didn't land. Open Add Cost again and try Photo or PDF.", "error");
     }
     const id = snapId.current;
     return () => {
@@ -409,7 +409,7 @@ function SnapCostButton({
   /**
    * WHAT THE PERSON STATED ON THE FORM, handed to the reader: attestation beats inference.
    *
-   * EVERY ANSWER THIS SHEET COLLECTS IS IN HERE (items C1-1, C1-4). Part Of The Job was drawn, and
+   * EVERY ANSWER THIS SHEET COLLECTS IS IN HERE (items C1-1, C1-4). Part of the Job was drawn, and
    * was not in this object — so on the default Read the Receipt save (and on Different Purchase's
    * re-read, which is this same object) the model's guess won, Erik's picked "Decking" never left the
    * browser, and nothing on screen said so, while the Category dropdown right above it was carried
@@ -420,7 +420,7 @@ function SnapCostButton({
     return {
       paid,
       category: category || null,
-      // Blank is not an answer: the control sits on "No Part Of The Job" until somebody picks, so an
+      // Blank is not an answer: the control sits on "No Part of the Job" until somebody picks, so an
       // untouched one leaves the paper's own read standing (lib/bill-scope's scopeAnswered decides).
       scope: scope || null,
       // Only a date a person set is a fact; the seeded "today" would outrank the paper's own
@@ -540,7 +540,7 @@ function SnapCostButton({
     // away believing it was recorded. The reader is the door that gets the number off the paper
     // without typing, so the refusal names it — or, off a job (where Nort can't read), the field.
     if (receipt && !(amount > 0))
-      return setError(canRead ? "Type the amount, or switch to Read The Receipt." : `Type the amount — or pick a job and ${nortOn ? "Nort can read it" : "it can be read"} off the receipt.`);
+      return setError(canRead ? "Type the amount, or switch to Read the Receipt." : `Type the amount — or pick a job and ${nortOn ? "Nort can read it" : "it can be read"} off the receipt.`);
     // No job means a business cost, and a business cost goes in a bucket the person picked. A
     // preselected bucket would file every cost nobody looked at under the same word.
     if (!targetJob && !bucket) return setError("Pick the bucket this business cost goes in, or pick a job.");
@@ -633,14 +633,14 @@ function SnapCostButton({
         ) : snapTop ? (
           <div className="space-y-2">
             <Button type="button" size="lg" onClick={snap} className="w-full">
-              <Camera /> Snap The Bill
+              <Camera /> Snap the Bill
             </Button>
             <button
               type="button"
               onClick={pickFromLibrary}
               className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50"
             >
-              <Paperclip className="h-4 w-4" /> Photo Or PDF
+              <Paperclip className="h-4 w-4" /> Photo or PDF
             </button>
           </div>
         ) : (
@@ -651,7 +651,7 @@ function SnapCostButton({
                 onClick={snap}
                 className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50"
               >
-                <Camera className="h-4 w-4" /> Snap The Receipt
+                <Camera className="h-4 w-4" /> Snap the Receipt
               </button>
             )}
             <button
@@ -660,9 +660,9 @@ function SnapCostButton({
               className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50"
             >
               {phone ? (
-                <><Paperclip className="h-4 w-4" /> Photo Or PDF</>
+                <><Paperclip className="h-4 w-4" /> Photo or PDF</>
               ) : (
-                <><Camera className="h-4 w-4" /> Add Receipt: Photo Or PDF</>
+                <><Camera className="h-4 w-4" /> Add Receipt: Photo or PDF</>
               )}
             </button>
           </div>
@@ -679,7 +679,7 @@ function SnapCostButton({
             activeId={useReader ? "read" : "type"}
             onSelect={(id) => setReadMode(id === "read" ? "read" : "type")}
             items={[
-              { id: "read", label: "Read The Receipt" },
+              { id: "read", label: "Read the Receipt" },
               { id: "type", label: "Type It In" },
             ]}
           />
@@ -706,7 +706,7 @@ function SnapCostButton({
       <Modal
         open={open}
         onClose={closeModal}
-        title="Add A Cost"
+        title="Add a Cost"
         portal
         footer={
           <ModalActions
@@ -714,7 +714,7 @@ function SnapCostButton({
             onSave={onSave}
             saving={pending}
             cancelLabel={sameAsDoc ? "Done" : undefined}
-            saveLabel={sameAsDoc ? "Different Purchase: Record It Anyway" : costSaved ? "Retry Receipt" : useReader ? "Read The Receipt" : "Save Cost"}
+            saveLabel={sameAsDoc ? "Different Purchase: Record It Anyway" : costSaved ? "Retry Receipt" : useReader ? "Read the Receipt" : "Save Cost"}
           />
         }
       >
@@ -780,7 +780,7 @@ function SnapCostButton({
             <div>
               <Label htmlFor="qc-bucket">Bucket</Label>
               <Select id="qc-bucket" className="h-11" value={bucket} onChange={(e) => setBucket(e.target.value)} disabled={costSaved}>
-                <option value="">Pick A Bucket</option>
+                <option value="">Pick a Bucket</option>
                 {BUSINESS_COST_BUCKETS.map((b) => (
                   <option key={b} value={b}>{b}</option>
                 ))}
@@ -811,33 +811,33 @@ const NEW_ITEM = "__new";
 /*
  * SHOP STOCK SAVES FROM TYPE IT IN (W1-FU-misc B). A stock purchase with no paper is typed like any
  * other cost, plus what it is (an item in stock, or a new one by name) and how many in what unit. It
- * saves through addStockPurchase (inventory/actions), the same shape Snap Or Note's Shop Stock writes:
+ * saves through addStockPurchase (inventory/actions), the same shape Snap or Note's Shop Stock writes:
  * a bill on no job, bought for stock, whose one line goes into stock as one roll, so Stock Bought
- * counts it in the month on the purchase. With the ticket in hand, Snap Or Note reads every line
+ * counts it in the month on the purchase. With the ticket in hand, Snap or Note reads every line
  * instead (the sheet says so, one tap away). Undo takes it back out.
  */
 /**
  * WHERE A RECEIPT GOES WHEN THIS SHEET CAN'T TAKE IT (review of W1-23: Receipts & Papers has no
  * uploader any more, so the old sentences sending a receipt there named a door that isn't there).
- * Before the cost is saved: the job's Costs tab's Snap The Bill reads the cost off the paper, so it is
+ * Before the cost is saved: the job's Costs tab's Snap the Bill reads the cost off the paper, so it is
  * one door or the other, never both. After it is saved: only Retry Receipt ties the paper to THIS cost;
- * Snap The Bill or Upload would read it into a second bill for the same money.
+ * Snap the Bill or Upload would read it into a second bill for the same money.
  */
 export const NO_PICKER_LINE = (what: string) =>
-  `Couldn't open ${what} on this device. Type the cost here without the receipt, or close this and use Snap The Bill on the job's Costs tab, which reads the cost off the paper. Not both: that would record it twice.`;
+  `Couldn't open ${what} on this device. Type the cost here without the receipt, or close this and use Snap the Bill on the job's Costs tab, which reads the cost off the paper. Not both: that would record it twice.`;
 export const RETRY_HERE_LINE =
-  "The cost is saved: tap Retry Receipt when you have signal. Don't put this receipt in through the job's Snap The Bill or Upload, which would record the cost a second time.";
+  "The cost is saved: tap Retry Receipt when you have signal. Don't put this receipt in through the job's Snap the Bill or Upload, which would record the cost a second time.";
 
 /** The typed sheet's jobs couldn't be read: a job's cost waits for a reload, never becomes a business cost. */
 export const JOBS_UNREAD_LINE = "Couldn't load your jobs just now. Reload the page to put this cost on a job.";
 
 /** The quiet line under a typed stock purchase: the paper's own door, for a ticket in hand. */
-export const STOCK_HAVE_THE_TICKET = "Have the ticket? Snap Or Note reads every line.";
+export const STOCK_HAVE_THE_TICKET = "Have the ticket? Snap or Note reads every line.";
 
 /**
  * THE READER FAILED, SO THE TYPED FIGURE (OR $0) WAS SAVED AS THE BILL WITH THE PAPER ON IT. The
  * sentence says "receipt attached" only when createBill did not say otherwise: when the link to the
- * bill failed to land, createBill's own warning (tie it on the Costs tab, never Record As Cost) is
+ * bill failed to land, createBill's own warning (tie it on the Costs tab, never Record as Cost) is
  * the sentence, because a "receipt attached" there would claim the tie that just failed.
  */
 export function readerFallbackLine(f: { typedAmount: number; readerError?: string | null; nortOn?: boolean; linkWarning?: string | null }): string {
@@ -1116,11 +1116,11 @@ function TypeItInButton({
     if (next !== BUSINESS) setBucket(null);
   }
 
-  /** Open Snap Or Note for a ticket in hand. Anything typed here is left behind only when he says so
+  /** Open Snap or Note for a ticket in hand. Anything typed here is left behind only when he says so
    *  (picking Shop Stock itself is not something typed: with nothing else filled in, it just opens). */
   function openTheTicketDoor() {
     const typed = amount > 0 || !!where.trim() || !!billNumber.trim() || !!stockItem || !!stockName.trim() || stockPieces > 0 || !!stockUnit.trim();
-    if (typed && !window.confirm("Open Snap Or Note? What you typed here won't be saved.")) return;
+    if (typed && !window.confirm("Open Snap or Note? What you typed here won't be saved.")) return;
     close();
     openSnapOrNote();
   }
@@ -1246,7 +1246,7 @@ function TypeItInButton({
               {/* THE JOB PICKER FIRST, then the two things a cost can be besides a job. Nothing is
                   picked for him: a blank job is not a business cost. */}
               <Select id="ti-job" className="h-11" value={jobTarget ?? ""} onChange={(e) => pickTarget(e.target.value)}>
-                <option value="">Pick A Job</option>
+                <option value="">Pick a Job</option>
                 {pickerJobs.map((j) => (
                   <option key={j.id} value={j.id}>
                     {j.label}
@@ -1345,7 +1345,7 @@ function TypeItInButton({
             <div>
               <Label htmlFor="ti-po">Purchase Order</Label>
               <Select id="ti-po" className="h-11" value={poId} onChange={(e) => setPoId(e.target.value)}>
-                <option value="">Not A PO, A Cost Of Its Own</option>
+                <option value="">Not a PO, a Cost of Its Own</option>
                 {jobPos.list.map((p) => (
                   <option key={p.id} value={p.id}>
                     {[p.po_number || "PO", p.vendor || "No Vendor", formatCurrency(p.total)].join(" · ")}
@@ -1417,7 +1417,7 @@ export function StockFields({
       <div>
         <Label htmlFor="ti-item">What Is It?</Label>
         <Select id="ti-item" className="h-11" value={stockItem} onChange={(e) => onItem(e.target.value)}>
-          <option value="">Pick An Item</option>
+          <option value="">Pick an Item</option>
           <option value={NEW_ITEM}>New Item</option>
           {items.map((i) => (
             <option key={i.id} value={i.id}>
@@ -1467,7 +1467,7 @@ export function StockTicketLine({ onOpen }: { onOpen: () => void }) {
     <p className="text-sm text-slate-500">
       {STOCK_HAVE_THE_TICKET}{" "}
       <button type="button" onClick={onOpen} className="inline-flex min-h-11 items-center font-medium text-brand hover:underline">
-        Open Snap Or Note
+        Open Snap or Note
       </button>
     </p>
   );

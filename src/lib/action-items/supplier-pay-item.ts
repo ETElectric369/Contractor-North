@@ -2,7 +2,7 @@ import type { SupplierPayDue } from "@/app/(app)/bills/supplier-pay-due";
 import { formatCurrency, formatDateShort } from "@/lib/utils";
 import { AFFORDANCES, KIND_STREAM, type ActionItem } from "./types";
 
-/** The door: /bills with the account's Record A Payment sheet already open (suppliers-card.tsx). */
+/** The door: /bills with the account's Record a Payment sheet already open (suppliers-card.tsx). */
 export function supplierPayHref(accountId: string): string {
   return `/bills?pay=${encodeURIComponent(accountId)}`;
 }
@@ -25,7 +25,7 @@ export function supplierPayActionItems(dues: SupplierPayDue[] | null | undefined
     id: `supplierpay-${d.accountId}`, // synthetic (kind-prefixed): open-only, never dispatched
     kind: "supplier_pay" as const,
     stream: KIND_STREAM.supplier_pay,
-    title: `Pay ${d.supplier} ${formatCurrency(d.owed)} By ${formatDateShort(d.payBy)}`,
+    title: `Pay ${d.supplier} ${formatCurrency(d.owed)} by ${formatDateShort(d.payBy)}`,
     subtitle:
       `Saves ${formatCurrency(d.saves)} on ${d.invoices} ${d.invoices === 1 ? "invoice" : "invoices"}` +
       (d.sent > 0.005 ? ` · ${formatCurrency(d.sent)} already sent` : ""),

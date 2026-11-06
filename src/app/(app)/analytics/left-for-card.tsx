@@ -38,7 +38,7 @@ import { OfficeCanSeeSwitch } from "./office-switch";
  * Summary, so no two screens say the same money two ways. Stock bought rides inside Materials &
  * Bills here (Erik, 2026-09-27), and the line under the card says how much.
  *
- * HIS BUILD TIME IS A COST HERE AND STILL NOT A DEDUCTION. Owner Hours Charged To Jobs charges his
+ * HIS BUILD TIME IS A COST HERE AND STILL NOT A DEDUCTION. Owner Hours Charged to Jobs charges his
  * on-site hours inside COGS, and the contra line under it books the same amount back, so Net Profit
  * is the same figure it was before the allocation existed - which it has to be, because a sole
  * proprietor cannot deduct his own labour. Until he sets a cost rate the pair is not drawn at all and
@@ -301,7 +301,7 @@ export function LeftForCard({
                     href="/reconcile#bring-in-a-statement"
                     className="mt-1 inline-flex min-h-[44px] items-center text-sm font-medium text-brand-600"
                   >
-                    Bring In A Statement
+                    Bring In a Statement
                   </a>
                 )}
               </div>

@@ -66,7 +66,7 @@ describe("crewChips: the crew as that day leaves it", () => {
 
   it("a person who left still draws, named from everyone the company had, titled 'No Longer On The Team'", () => {
     const [gone] = crewChips(["p-gone"], team, { people: everyone });
-    expect(gone).toMatchObject({ initials: "DW", name: "Dana Whitfield", departed: true, title: "Dana Whitfield · No Longer On The Team" });
+    expect(gone).toMatchObject({ initials: "DW", name: "Dana Whitfield", departed: true, title: "Dana Whitfield · No Longer on the Team" });
     // Nobody the company ever had: still a chip, never dropped.
     expect(crewChips(["p-nobody"], team, { people: everyone })[0]).toMatchObject({ name: "Unnamed", initials: "U" });
   });
@@ -167,9 +167,9 @@ describe("<CrewInitials>: marks, never a door", () => {
     const four = crewChips(["p-erik", "p-brian", "p-jimmy", "p-gone"], team, { people: everyone });
     const out = html(four);
     expect(out.match(/rounded-full text-\[10px\]/g)).toHaveLength(3);
-    expect(out).toMatch(/<span title="Dana Whitfield · No Longer On The Team"[^>]*>\+1<\/span>/);
+    expect(out).toMatch(/<span title="Dana Whitfield · No Longer on the Team"[^>]*>\+1<\/span>/);
     const squeezed = html(four, { size: "xs", max: 2 });
     expect(squeezed.match(/h-3\.5 w-3\.5/g)).toHaveLength(2);
-    expect(squeezed).toMatch(/<span title="Jimmy Ruiz, Dana Whitfield · No Longer On The Team"[^>]*>\+2<\/span>/);
+    expect(squeezed).toMatch(/<span title="Jimmy Ruiz, Dana Whitfield · No Longer on the Team"[^>]*>\+2<\/span>/);
   });
 });

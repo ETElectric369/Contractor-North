@@ -37,7 +37,7 @@ import { verifySaid, verifyStatement, type ScanControls, type StatementSource, t
  *        · a payment to an on-account supplier whose name, spelling or number the line carries is
  *          that supplier's payment;
  *        · an ATM withdrawal is a petty-cash top-up of the same amount within 3 days, when one was
- *          already written (so it counts once); otherwise its guess is Cash Taken Out (Not A Cost),
+ *          already written (so it counts once); otherwise its guess is Cash Taken Out (Not a Cost),
  *          which writes nothing (W1-34);
  *        · anything else is a bill for the same amount within 3 days whose supplier the line names
  *          (a word they share, or the name's start), never one a supplier's account pays (those are
@@ -839,7 +839,7 @@ function reverified(dl: BankDownload, lines: readonly BankLine[]): Pick<BankDown
  *  is "cost:Fuel" and the truck's repairs "cost:Auto".
  *
  *  CASH TAKEN OUT (NOT A COST) (Erik, 2026-09-27; W1-34): an ATM withdrawal. It writes NO row, like
- *  Not A Cost (Transfer): the cash counts only when its receipts come in, filed as costs paid with
+ *  Not a Cost (Transfer): the cash counts only when its receipts come in, filed as costs paid with
  *  cash. It is never Owner's Draw, and there is no running cash-box balance. It was Petty Cash
  *  (ATM), which wrote a petty-cash top-up; those already written still count once, and still Undo. */
 export type BankChoice =
@@ -1027,9 +1027,9 @@ export function choiceLabel(c: BankChoice, names: BankNames): string {
     case "draw":
       return "Owner's Draw";
     case "cash_out":
-      return "Cash Taken Out (Not A Cost)";
+      return "Cash Taken Out (Not a Cost)";
     case "not_cost":
-      return "Not A Cost (Transfer)";
+      return "Not a Cost (Transfer)";
     case "supplier":
       return `Pay ${names.accounts.get(c.supplierAccountId) ?? "Supplier"}`;
     case "crew":
@@ -1045,7 +1045,7 @@ export function choiceLabel(c: BankChoice, names: BankNames): string {
     case "not_income":
       // What it is for: a deposit already in North (a payment recorded), or money that was never
       // income (a transfer from the company's own account, a loan).
-      return "Already Counted Or Not Income";
+      return "Already Counted or Not Income";
     // THE MIRROR OF "Owner's Draw", IN THE SAME WORDS PLUS THE DIRECTION (0376). Not "Owner's
     // Contribution" or "Capital In", which are an accountant's words for it and this card is read by
     // an electrician between jobs; not "Money I Put In", which reads right only to the one person who
@@ -1439,7 +1439,7 @@ export function guessFor(line: BankLine, books: BankBooks, used?: ReadonlySet<st
   const d = line.description.replace(/[*_]/g, " ");
   // A transfer is asked first: "ONLINE TRANSFER WITHDRAWAL TO XXXX9876" is the owner's, not an ATM.
   if (TRANSFER_RE.test(d) && !PROCESSOR_RE.test(d)) return { choice: "draw" };
-  // An ATM: Cash Taken Out (Not A Cost). The cash counts when its receipts come in.
+  // An ATM: Cash Taken Out (Not a Cost). The cash counts when its receipts come in.
   if (ATM_RE.test(d)) return { choice: "cash_out" };
   if (INSURANCE_RE.test(d)) return { choice: "cost", bucket: "Insurance & Licenses" };
   if (FEE_RE.test(d)) return { choice: "cost", bucket: "Fees" };
@@ -1875,7 +1875,7 @@ function namesBillsAccount(description: string, b: Pick<BooksBill, "supplierAcco
  * yet name the line. The store's words on the statement ("home depot", the first two merchant words,
  * never the bare key: "home" as a whole word would also hit "the home hardware") become an alias of
  * that account, so the next statement's line names the account outright and every reader of the
- * account's aliases (the supplier-payment match, the open list, Record It As A Bill) knows the store.
+ * account's aliases (the supplier-payment match, the open list, Record It as a Bill) knows the store.
  *
  * Learn nothing from a bill on no account (there is no identity to attach it to), from a line that
  * teaches no rule (a bare check, a transfer, a generic key), from a match the account's own spellings
@@ -2036,7 +2036,7 @@ export type FlowSegment = { key: string; label: string; cents: number };
  * loss's own word for them, profit-and-loss.ts; six pinks side by side read as one colour anyway,
  * and the legend is the place for names), Materials & Bills, Crew Pay, Owner's Draw (here: money the
  * owner took out of the account, which since 0380 is every dollar of his own spending too). The rest
- * are the bank's own: Suppliers, Cash Taken Out, Transfers, Already In North, Needs You.
+ * are the bank's own: Suppliers, Cash Taken Out, Transfers, Already in North, Needs You.
  *
  * THIS BAR IS A BREAKDOWN, so every dollar lands in exactly one segment: Fuel out on its own means
  * the Overhead segment here is the OTHER buckets, even though Fuel is an Overhead bucket itself
@@ -2121,7 +2121,7 @@ export function moneyFlow(dl: BankDownload, plan: BankPlan, books: BankBooks): {
     if (!d) continue;
     if (d.how === "already") {
       const a = books.already.get(l.key);
-      if (a?.choice === "matched" || !a) add({ key: "books", label: "Already In North" }, amt);
+      if (a?.choice === "matched" || !a) add({ key: "books", label: "Already in North" }, amt);
       else add(flowLabelOf(a.choice, a.bucket), amt);
     } else if (d.how === "rule") {
       const c = d.choice;
@@ -2378,8 +2378,8 @@ export function sortedLinesOf(rows: readonly BankSortedRow[], names: BankNames, 
       title: r.check_number && direction === "out" ? `Check ${r.check_number}` : String(r.description ?? "").trim() || (direction === "in" ? "Deposit" : "Withdrawal"),
       money: sayDollars(Math.abs(cents) / 100),
       direction,
-      answer: word === "matched" ? "Already In North (Matched)" : (label ?? word),
-      by: r.sorted_by === "match" ? "Matched" : r.sorted_by === "rule" ? "By Your Rule" : "Answered By You",
+      answer: word === "matched" ? "Already in North (Matched)" : (label ?? word),
+      by: r.sorted_by === "match" ? "Matched" : r.sorted_by === "rule" ? "By Your Rule" : "Answered by You",
       current: c ? choiceId(c) : null,
     };
   });
@@ -2442,7 +2442,7 @@ export type BankView = {
 
 const MATCH_LABEL: Record<MatchTable, string> = {
   payments: "Payments Already Recorded",
-  bills: "Bills Already On The Books",
+  bills: "Bills Already on the Books",
   supplier_payments: "Supplier Payments Already Recorded",
   pay_payments: "Crew Pay Already Recorded",
   petty_cash: "Petty Cash Already Recorded",

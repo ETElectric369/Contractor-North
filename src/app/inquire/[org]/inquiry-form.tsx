@@ -121,7 +121,7 @@ export function InquiryForm({
             style={{ backgroundColor: brandColor }}
           >
             {scheduling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}
-            {scheduling ? "One Moment…" : "Request A Site Visit"}
+            {scheduling ? "One Moment…" : "Request a Site Visit"}
           </button>
         )}
         {schedError && <p className="mt-2 text-sm text-red-600">{schedError}</p>}

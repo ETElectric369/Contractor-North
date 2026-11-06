@@ -133,7 +133,7 @@ export type StackEntry = {
   notes: string | null;
   /** 0288: the first entry's id when this row is a piece of a split shift (the bracket key). */
   family?: string | null;
-  /** The family was rebuilt from an old split by 0289: labelled "Rebuilt From An Old Split". */
+  /** The family was rebuilt from an old split by 0289: labelled "Rebuilt from an Old Split". */
   familyConverted?: boolean;
   /** A RUNNING clock's one labelled action, "Clock Out <Name>", server-rendered on the page that
    *  owns the editor's projection (anchored week only). A closed row has none: the whole row is the
@@ -232,7 +232,7 @@ function ShiftRow({ e, lead }: { e: StackEntry; lead: string }) {
               className="pointer-events-auto flex items-center gap-1"
             >
               <Badge tone="blue">Offline</Badge>
-              <span>Time Came From The Phone</span>
+              <span>Time Came from the Phone</span>
             </Link>
           )}
           {/* A running clock's "Clock Out <Name>" (the only row control left): a labelled 44px
@@ -254,7 +254,7 @@ function ShiftRow({ e, lead }: { e: StackEntry; lead: string }) {
  * like a man who clocked in twice unless something says otherwise. So the pieces of one shift sit
  * under one bracket, "Split from one shift", with the shift's total beside it, and every piece is
  * still its own row with its own tap into its own editor. Converted families (0289) say where they
- * came from instead: "Rebuilt From An Old Split".
+ * came from instead: "Rebuilt from an Old Split".
  */
 export function ShiftList({ rows, lead }: { rows: StackEntry[]; lead: (e: StackEntry) => string }) {
   const out: ReactNode[] = [];
@@ -275,7 +275,7 @@ export function ShiftList({ rows, lead }: { rows: StackEntry[]; lead: (e: StackE
     out.push(
       <li key={`split-${e.family}`} className="border-b border-slate-100 last:border-b-0">
         <div className="flex items-baseline justify-between gap-2 px-3 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand">
-          <span>{converted ? "Rebuilt From An Old Split" : "Split from one shift"}</span>
+          <span>{converted ? "Rebuilt from an Old Split" : "Split from one shift"}</span>
           <span className="font-mono normal-case tabular-nums text-slate-400">{total.toFixed(2)} h</span>
         </div>
         <ul className="ml-3 border-l-2 border-brand/40">
@@ -545,7 +545,7 @@ export function TimecardStack({
                   Out and the empty state all vanished at 640px, on the DEFAULT grouping. That is
                   0168 broken (a punch that cannot say where its time came from) and a dead end
                   (a week with no hours saying nothing at all). The list stays under the grid;
-                  its rows open the editor, which holds Copy To Someone Else… (Wave 2).
+                  its rows open the editor, which holds Copy to Someone Else… (Wave 2).
 
                   They are not two lists either — the Erik complaint this wave exists to answer.
                   The grid answers "what shape was the week", the list answers "what happened and

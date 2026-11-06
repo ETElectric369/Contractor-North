@@ -488,7 +488,7 @@ function lengthProblem(length: JobLength | undefined): string | null {
  *  (optional) sets the jobs.scheduled_start/end span on its own instead of the segments' overall
  *  span: the reschedule verbs pass the PLAN, so a kept worked day stays on the calendar as history
  *  without dragging the job's listed start back onto it (moveJobDay, scheduleJobWindow). "none" clears
- *  the listed day while the segments stay (Clear The Date keeps the worked days). Not exported: a
+ *  the listed day while the segments stay (Clear the Date keeps the worked days). Not exported: a
  *  "use server" export is callable from the client, and the mirror should never be set apart from
  *  the segments by anyone but this file. */
 async function writeScheduleRanges(
@@ -846,7 +846,7 @@ export async function scheduleJobWindow(
 /** PLACE a job on a day — the rail's and the tray's gesture. A needs-return job keeps its
  *  worked-history segments on the calendar, but they stay HISTORY: the job's listed span (its
  *  start, its end, its length) is the newly placed day(s) alone, the way moveJobDay and
- *  scheduleJobWindow write it. Unioning the history into the span made a Clear The Date job put back
+ *  scheduleJobWindow write it. Unioning the history into the span made a Clear the Date job put back
  *  on Oct 5 at 9:00 one block from its Sep 22 worked day to Oct 5 at closing, its chosen time and
  *  length gone. A job with no live plan (dateless, date cleared, or on hold with a stale date) gets
  *  the new day(s) as its plan, its worked days kept and its stale unworked days dropped; a job that
@@ -1048,7 +1048,7 @@ export async function undoPlaceJob(jobId: string, prior: PlacePrior): Promise<Re
 }
 
 /**
- * UNDO ON THE RAIL'S PLACE, FOR A VISIT (W2-05): the visit goes back to Waiting For A Day — but only
+ * UNDO ON THE RAIL'S PLACE, FOR A VISIT (W2-05): the visit goes back to Waiting for a Day — but only
  * if it is still where the place put it.
  *
  * unscheduleAppointment alone only asks whether the status is scheduled or proposed, so for the ten
@@ -1098,7 +1098,7 @@ export async function unplaceJob(jobId: string): Promise<Result> {
 }
 
 /** The plan leaves, the worked days stay as history segments, the listed day goes (mirror "none").
- *  Clear The Date and the tray's Undo. */
+ *  Clear the Date and the tray's Undo. */
 async function clearPlan(supabase: SupabaseClient, jobId: string): Promise<Result & { kept?: string[] }> {
   const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
   if (segErr) return { ok: false, error: segErr };

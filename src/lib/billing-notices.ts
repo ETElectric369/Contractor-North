@@ -95,11 +95,11 @@ export function dueGraceNotice(daysLeft: number, periodEnd: string | null | unde
 
 const TRIAL_BODY = "Pick a plan in Settings › Getting Paid to keep the crew working. Your customers can still pay you and your data stays yours either way.";
 const GRACE_BODY = "Update the card in Settings › Getting Paid › Manage Billing. The crew keeps working until then.";
-const LAPSED_BODY = "Nort, texts and reminders are paused. Your customers can still pay you. Download For Your Accountant stays open. Pick a plan to continue.";
+const LAPSED_BODY = "Nort, texts and reminders are paused. Your customers can still pay you. Download for Your Accountant stays open. Pick a plan to continue.";
 
 const LAPSED_TITLES: Record<LapsedReason, string> = {
   trial_ended: "Your Free Trial Has Ended",
-  grace_spent: "Your Card Was Not Updated In Time",
+  grace_spent: "Your Card Was Not Updated in Time",
   canceled: "Your Subscription Has Ended",
 };
 
@@ -111,7 +111,7 @@ export function noticeWords(kind: "trial" | "grace" | "lapsed", detail: number |
   if (kind === "lapsed") return { title: LAPSED_TITLES[detail as LapsedReason], body: LAPSED_BODY };
   const d = Math.max(0, Math.floor(Number(detail)));
   if (kind === "trial") {
-    const title = d === 0 ? "Your Free Trial Ends Today" : d === 1 ? "Your Free Trial Ends Tomorrow" : `Your Free Trial Ends In ${d} Days`;
+    const title = d === 0 ? "Your Free Trial Ends Today" : d === 1 ? "Your Free Trial Ends Tomorrow" : `Your Free Trial Ends in ${d} Days`;
     return { title, body: TRIAL_BODY };
   }
   return { title: `Your Card Was Declined — ${d === 1 ? "1 Day" : `${d} Days`} Left`, body: GRACE_BODY };

@@ -4,7 +4,7 @@
  * A split shift is ordinary time entries. Every piece cut from a shift points at that shift's FIRST
  * entry through `split_from` (the first entry keeps the original id and points at nothing), so a
  * family is "the first entry, and everything that points at it". Timecards brackets a family as
- * "Split from one shift", and the edit sheet offers Move The Split and Join Back only between two
+ * "Split from one shift", and the edit sheet offers Move the Split and Join Back only between two
  * pieces of the same family that touch.
  *
  * Pure: the page hands it the rows it already read.

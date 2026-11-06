@@ -67,7 +67,7 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
     <Modal
       open={!!paperFor}
       onClose={() => setPaperFor(null)}
-      title="Signed On Paper"
+      title="Signed on Paper"
       size="sm"
       footer={
         <ModalActions
@@ -147,7 +147,7 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
               {/* SIGNED ON PAPER — the normal case in this trade, and until now the only way to
                   record it was Void, which says the agreement doesn't exist (audit R3). */}
               <Button variant="outline" size="sm" onClick={() => setPaperFor(c.id)} disabled={pending}>
-                Signed On Paper
+                Signed on Paper
               </Button>
               <Button variant="ghost" size="sm" onClick={() => { if (confirmVoid(true)) run(() => voidContract(c.id)); }} disabled={pending}>
                 Void
@@ -160,7 +160,7 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <Button size="sm" onClick={() => setEditing(true)}>Review &amp; Edit</Button>
               <Button variant="outline" size="sm" onClick={() => run(() => sendContract(c.id))} disabled={pending}>
-                Send To Customer
+                Send to Customer
               </Button>
               <Button variant="ghost" size="sm" onClick={() => run(() => generateContractFromJob(jobId))} disabled={pending}>
                 Regenerate

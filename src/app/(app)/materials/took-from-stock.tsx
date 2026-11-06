@@ -17,7 +17,7 @@ import { loadShelf, takeFromStockAction, undoTakeAction } from "./stock-actions"
  * TOOK FROM STOCK (Shop Stock, Phase 3). One big button on the job's Materials tab and on the
  * job's materials list page, the same for the crew and the office, built for one hand at 60 mph:
  *
- *   Took From Stock → pick the item (names and how much is on the shelf, never a price) → a number
+ *   Took from Stock → pick the item (names and how much is on the shelf, never a price) → a number
  *   pad with the unit already there ("ft") → Take It → "Took 60 ft of 12/2 NM-B for Honeysuckle"
  *   with Undo.
  *
@@ -267,7 +267,7 @@ export function TookFromStock({
   viewerIsStaff: boolean;
   /** The page's read of the job's takes failed (jobTakes' error): said in the list's place. */
   readFailed?: boolean;
-  /** SHOP STOCK OFF (the switch board, 0352): the Took From Stock button isn't drawn and Nort's
+  /** SHOP STOCK OFF (the switch board, 0352): the Took from Stock button isn't drawn and Nort's
    *  ?take= fill doesn't open the sheet. The takes already made stay listed, Undo and all, and what
    *  is billed from them never changes. Absent = on. */
   canTake?: boolean;

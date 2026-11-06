@@ -19,7 +19,7 @@ type Item = {
   href: string;
   staffOnly?: boolean;
   aliases?: string[];
-  /** A row that DOES something instead of going somewhere (Talk To Nort, the help rows). It runs
+  /** A row that DOES something instead of going somewhere (Talk to Nort, the help rows). It runs
    *  first thing in the tap (go), before anything else, so iOS still counts it as the gesture. */
   run?: () => void;
   /** Show Me How: folding its lessons open keeps the sheet open. */
@@ -142,7 +142,7 @@ function navLeaves(nodes: DockLeaf[], sub: string, features: FeatureMap | null |
 /**
  * PETTY CASH, FOUND BY NAME (W1-34): it left the Money menu, so a company that already has petty-cash
  * rows (the layout's staff-only existence check) finds the page here, by its own words. A company
- * with none sees no row: a new cash purchase is a cost like any other (Snap Or Note, Add By Hand).
+ * with none sees no row: a new cash purchase is a cost like any other (Snap or Note, Add by Hand).
  */
 const pettyCashRow = (t: (key: string) => string): Item => ({
   kind: "Go to",
@@ -214,9 +214,9 @@ export function matchNavItems(navItems: Item[], q: string): Item[] {
 
 /**
  * WHAT SEARCH OR ASK SHOWS BEFORE ANYTHING IS TYPED (W1-09), above the first pages:
- *   Talk To Nort   first, with Nort on (it starts the mic inside its own tap: talkToNort)
+ *   Talk to Nort   first, with Nort on (it starts the mic inside its own tap: talkToNort)
  *   the help rows  staff, with Nort on (lib/onboarding/help-rows): Start Here or Finish Setting Up,
- *                  Show Me How (its lessons fold open under it), Take The Setup Again. With Nort
+ *                  Show Me How (its lessons fold open under it), Take the Setup Again. With Nort
  *                  off the same rows sit under Help in the avatar menu instead.
  * Exported so the rows, their order and their switch rules are pinned in a test.
  */
@@ -235,7 +235,7 @@ export function idleRows({
   onboarded: boolean;
   lessonsOpen?: boolean;
   toggleLessons?: () => void;
-  /** The person's language (cn-v1138): Talk To Nort and the help rows in it (cn-v1139; the lessons' own titles stay English). */
+  /** The person's language (cn-v1138): Talk to Nort and the help rows in it (cn-v1139; the lessons' own titles stay English). */
   lang?: Lang;
 }): Item[] {
   if (!featureOn(features, "nort")) return [];
@@ -283,9 +283,9 @@ export function kindWords(kind: string, t: (key: string) => string): string {
 }
 
 /**
- * SEARCH OR ASK — the global command palette (⌘K / Ctrl-K, or the top bar's Search Or Ask).
+ * SEARCH OR ASK — the global command palette (⌘K / Ctrl-K, or the top bar's Search or Ask).
  * Searches the org's jobs/customers/quotes/invoices, jumps to any page, or hands the query to
- * Nort. With nothing typed it leads with Talk To Nort and, for staff, the setup rows the old
+ * Nort. With nothing typed it leads with Talk to Nort and, for staff, the setup rows the old
  * graduation cap held (idleRows). Deep-links use Wave-1's ?tab= where useful.
  */
 export function CommandBar({
@@ -313,7 +313,7 @@ export function CommandBar({
   const lang = useLang();
   const t = translator(lang);
   const navItems = useMemo(() => commandNavItems(!!isStaff, features, hasPettyCash, lapsed, lang), [isStaff, features, hasPettyCash, lapsed, lang]);
-  // Nort off: no "Ask Nort" row, no Talk To Nort, no help rows (they're under Help in the avatar
+  // Nort off: no "Ask Nort" row, no Talk to Nort, no help rows (they're under Help in the avatar
   // menu), and no promise that Enter asks him (the drawer isn't mounted).
   const nortOn = featureOn(features, "nort");
   const [open, setOpen] = useState(false);
@@ -408,7 +408,7 @@ export function CommandBar({
   }, [q]);
 
   function go(item: Item) {
-    // A row that DOES something runs FIRST, synchronously, in the tap that picked it: Talk To Nort
+    // A row that DOES something runs FIRST, synchronously, in the tap that picked it: Talk to Nort
     // starts the mic from inside this click (iOS refuses it any later), and a help row unlocks
     // audio here so Nort's first line plays. Nothing may come between the tap and run().
     if (item.run) {
@@ -470,7 +470,7 @@ export function CommandBar({
             <button
               key={`${i}-${it.href}`}
               onMouseEnter={() => setSel(i)}
-              // go() runs a doing row (Talk To Nort, a help row) before anything else in this tap.
+              // go() runs a doing row (Talk to Nort, a help row) before anything else in this tap.
               onClick={() => go(it)}
               aria-expanded={it.expanded}
               className={`flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm ${i === sel ? "bg-brand-light/50" : "hover:bg-slate-50"}`}

@@ -329,7 +329,7 @@ export function defineOnePlaceAtATimeSuite(connect: () => Promise<SqlClient>) {
       });
     });
 
-    it("split, Move The Split and Join Back: pieces of one shift touch and never count twice", async () => {
+    it("split, Move the Split and Join Back: pieces of one shift touch and never count twice", async () => {
       if (!needs()) return;
       await step(async () => {
         const id = await entry({ in: ts("2001-03-01T16:00:00Z"), out: ts("2001-03-01T22:00:00Z") });

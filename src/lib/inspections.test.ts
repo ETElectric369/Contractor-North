@@ -89,7 +89,7 @@ describe("bucketInspections", () => {
     expect(bucketInspections([r], none, none, NOW).filed).toEqual([r]);
   });
 
-  // The lead-less "Start An Inspection" path: no inquiry_id/job_id ever exists, so the ONLY
+  // The lead-less "Start an Inspection" path: no inquiry_id/job_id ever exists, so the ONLY
   // write-up signal is the quote id saveQuote stamps onto the capture jsonb. Without it
   // the row sat in "To write up" forever (the only escape was cancelling — a lie).
   it("capture.quote_id files a lead-less write-up away (completed AND done-by-capture)", () => {

@@ -8,7 +8,7 @@ import { featureForPath } from "@/lib/feature-doors";
  * money and public-output features. A switch hides doors; a record opened by a link or a card is
  * never blocked. Each page gets the one shared Off line (components/feature-off-line), which draws
  * nothing while the feature is on (so every page is unchanged for a company with no switches), a
- * Turn On for the owner, and "Ask The Owner" with no button for anyone else, techs included.
+ * Turn On for the owner, and "Ask the Owner" with no button for anyone else, techs included.
  *
  * These pages are switch routes, so the app layout's RouteOffLine draws their line, with the
  * owner worked out from the viewer's own role (feature-off-line-wiring.test.ts pins the layout and
@@ -46,7 +46,7 @@ describe("record pages keep opening, under the Off line", () => {
 });
 
 describe("doors outside the job page", () => {
-  it("the material list's New PO follows Purchase Orders; Took From Stock is told Shop Stock", () => {
+  it("the material list's New PO follows Purchase Orders; Took from Stock is told Shop Stock", () => {
     const src = read("materials/[id]/page.tsx");
     expect(src).toMatch(/\{featureOn\(sw\.features, "purchase_orders"\) && \(\s*<NewPoButton/);
     expect(src).toContain('canTake={featureOn(sw.features, "shop_stock")}');

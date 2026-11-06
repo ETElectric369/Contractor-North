@@ -23,7 +23,7 @@ import { VisitStartCard, visitStartState, visitTimeOffered } from "./visit-start
 
 const TZ = "America/Los_Angeles";
 const preview = {
-  // The name Start The Job gives (lib/job-name): the street, never the visit's "Inspection:" tag.
+  // The name Start the Job gives (lib/job-name): the street, never the visit's "Inspection:" tag.
   name: "3245 W. Garnet Blvd",
   customer: "Tom Goodman",
   address: "3245 W. Garnet Blvd, Homewood, CA 96141",
@@ -92,19 +92,19 @@ describe("which face the card shows", () => {
 
 describe("office, no job yet", () => {
   const html = render({});
-  it("leads with Start The Job And Clock In, then Start The Job", () => {
+  it("leads with Start the Job and Clock In, then Start the Job", () => {
     expect(html).toContain('data-visit-start="start"');
-    expect(count(html, "Start The Job And Clock In")).toBe(1); // the sheet is closed until tapped
-    expect(html).toContain("Start The Job</button>");
-    expect(html.indexOf("Start The Job And Clock In")).toBeLessThan(html.indexOf("Start The Job</button>"));
+    expect(count(html, "Start the Job and Clock In")).toBe(1); // the sheet is closed until tapped
+    expect(html).toContain("Start the Job</button>");
+    expect(html.indexOf("Start the Job and Clock In")).toBeLessThan(html.indexOf("Start the Job</button>"));
     expect(html).toContain("It brings Tom Goodman, the address and the visit time along.");
-    expect(html).not.toContain("Link To");
+    expect(html).not.toContain("Link to");
   });
   it("is phone-safe at 375px", () => phoneSafe(html));
 
-  it("offers Link To J-055 Instead when the customer has the one same-day job", () => {
+  it("offers Link to J-055 Instead when the customer has the one same-day job", () => {
     const h = render({ linkInstead: { ...j55, customer: "Tom Goodman" } });
-    expect(h).toContain("Link To J-055 Instead");
+    expect(h).toContain("Link to J-055 Instead");
     expect(h).toContain("Tom Goodman already has");
     expect(h).toContain("3245 West Garnet Boulevard");
     phoneSafe(h);
@@ -113,23 +113,23 @@ describe("office, no job yet", () => {
   it("with a same-day job on offer, Link Instead LEADS and a new job is the second door", () => {
     const h = render({ linkInstead: { ...j55, customer: "Tom Goodman" } });
     const btns = h.match(/<button\b[^>]*>.*?<\/button>/g) ?? [];
-    expect(btns[0]).toContain("Link To J-055 Instead");
+    expect(btns[0]).toContain("Link to J-055 Instead");
     expect(btns[0]).toContain("bg-[rgb(var(--glass-ink))] text-white"); // the primary style
     expect(btns[1]).not.toContain("bg-[rgb(var(--glass-ink))] text-white");
-    expect(btns[1]).toContain("Make A New Job Anyway");
-    expect(h).not.toContain("Start The Job And Clock In");
+    expect(btns[1]).toContain("Make a New Job Anyway");
+    expect(h).not.toContain("Start the Job and Clock In");
   });
 
   it("Tom Goodman as it stood: on the clock on J-055 itself, the card links and never offers the switch", () => {
     const h = render({ linkInstead: { ...j55, customer: "Tom Goodman" }, openEntry: onJ55 });
     expect(h).toContain("on the clock on <span class=\"font-semibold\">J-055</span> since 12:00 PM");
     expect(h).toContain("Link this visit to it.");
-    expect(h).toContain("Link To J-055</button>");
-    expect(h).not.toContain("Link To J-055 Instead");
-    expect(h).not.toContain("Switch To This Job");
+    expect(h).toContain("Link to J-055</button>");
+    expect(h).not.toContain("Link to J-055 Instead");
+    expect(h).not.toContain("Switch to This Job");
     expect(h).not.toContain("switches your clock here");
-    expect(h).not.toContain("Start The Job And Clock In");
-    expect(h).toContain("Make A New Job Anyway");
+    expect(h).not.toContain("Start the Job and Clock In");
+    expect(h).toContain("Make a New Job Anyway");
     phoneSafe(h);
   });
 
@@ -162,7 +162,7 @@ describe("a visit that is over (Tom Goodman as it stands: visit completed, J-055
   const tomDone = { ...j55, status: "complete", customer: "Tom Goodman" };
   const buttons = (h: string) => h.match(/<button\b[^>]*>.*?<\/button>/g) ?? [];
 
-  it("leads with Link To J-055, never with Start The Job And Clock In", () => {
+  it("leads with Link to J-055, never with Start the Job and Clock In", () => {
     const h = render({ visitOver: true, linkInstead: tomDone });
     expect(h).toContain('data-visit-start="start"');
     expect(h).toContain("This visit is done");
@@ -170,32 +170,32 @@ describe("a visit that is over (Tom Goodman as it stands: visit completed, J-055
     expect(h).toContain("Link this visit to it?");
     const btns = buttons(h);
     expect(btns).toHaveLength(2);
-    expect(btns[0]).toContain("Link To J-055</button>");
+    expect(btns[0]).toContain("Link to J-055</button>");
     expect(btns[0]).not.toContain("Instead");
     expect(btns[0]).toContain("bg-[rgb(var(--glass-ink))] text-white"); // the lead door
-    expect(btns[1]).toContain("Make A New Job Anyway");
-    expect(h).not.toContain("Start The Job And Clock In");
+    expect(btns[1]).toContain("Make a New Job Anyway");
+    expect(h).not.toContain("Start the Job and Clock In");
     expect(h).not.toContain("Clock In");
     phoneSafe(h);
   });
 
   it("the same on the clock somewhere else: no switch talk, since nothing here moves the clock", () => {
     const h = render({ visitOver: true, linkInstead: tomDone, openEntry: onJ50 });
-    expect(h).toContain("Link To J-055</button>");
+    expect(h).toContain("Link to J-055</button>");
     expect(h).not.toContain("switches your clock");
-    expect(h).not.toContain("Start The Job And Clock In");
+    expect(h).not.toContain("Start the Job and Clock In");
   });
 
-  it("with no job to link, it offers one quiet Start A Job From This Visit, and no clock", () => {
+  it("with no job to link, it offers one quiet Start a Job from This Visit, and no clock", () => {
     const h = render({ visitOver: true });
     expect(h).toContain("This visit is done");
     expect(h).toContain("doesn’t start your clock");
     const btns = buttons(h);
     expect(btns).toHaveLength(1);
-    expect(btns[0]).toContain("Start A Job From This Visit");
+    expect(btns[0]).toContain("Start a Job from This Visit");
     expect(btns[0]).not.toContain("bg-[rgb(var(--glass-ink))] text-white"); // quiet: the outline door
-    expect(h).not.toContain("Start The Job And Clock In");
-    expect(h).not.toContain("Link To");
+    expect(h).not.toContain("Start the Job and Clock In");
+    expect(h).not.toContain("Link to");
     phoneSafe(h);
   });
 
@@ -217,12 +217,12 @@ describe("a visit that is over (Tom Goodman as it stands: visit completed, J-055
 
   it("a finished job on a visit still to come keeps its Clock In (only the pair closes the door)", () => {
     const h = render({ visitOver: false, job: { ...j55, status: "complete" } });
-    expect(h).toContain("Clock In On J-055");
+    expect(h).toContain("Clock In on J-055");
   });
 
   it("before the visit is over, a finished same-day job is still offered, as Link Instead", () => {
     const h = render({ visitOver: false, linkInstead: tomDone });
-    expect(buttons(h)[0]).toContain("Link To J-055 Instead");
+    expect(buttons(h)[0]).toContain("Link to J-055 Instead");
     expect(h).toContain("made that day and finished.");
   });
 });
@@ -232,23 +232,23 @@ describe("crew, no job yet: no dead end", () => {
   it("asks the office, and calls or texts it", () => {
     expect(html).toContain('data-visit-start="ask"');
     expect(html).toContain("Ask the office to start the job");
-    expect(html).toContain("Ask The Office");
+    expect(html).toContain("Ask the Office");
     expect(html).toContain('href="tel:5305550133"');
     expect(html).toContain('href="sms:5305550133"');
-    expect(html).not.toContain("Start The Job");
+    expect(html).not.toContain("Start the Job");
   });
   it("is phone-safe at 375px", () => phoneSafe(html));
   it("on a visit that is over, it never promises a clock-in right here (audit v1018)", () => {
     const h = render({ isStaff: false, visitOver: true });
     expect(h).toContain("This visit is done and has no job. If the work goes on, ask the office to start one.");
     expect(h).not.toContain("clock in right here");
-    expect(h).toContain("Ask The Office");
+    expect(h).toContain("Ask the Office");
     phoneSafe(h);
     expect(html).toContain("Once they do, you can clock in right here.");
   });
-  it("with no office phone on file, Ask The Office is still there", () => {
+  it("with no office phone on file, Ask the Office is still there", () => {
     const h = render({ isStaff: false, officePhone: null });
-    expect(h).toContain("Ask The Office");
+    expect(h).toContain("Ask the Office");
     expect(h).not.toContain("tel:");
   });
 });
@@ -256,30 +256,30 @@ describe("crew, no job yet: no dead end", () => {
 describe("a linked job, for the office and the crew alike", () => {
   for (const isStaff of [true, false]) {
     const who = isStaff ? "office" : "crew";
-    it(`${who}: Clock In On J-055 and Open J-055`, () => {
+    it(`${who}: Clock In on J-055 and Open J-055`, () => {
       const html = render({ isStaff, job: j55 });
       expect(html).toContain('data-visit-start="linked"');
-      expect(html).toContain("Clock In On J-055");
+      expect(html).toContain("Clock In on J-055");
       expect(html).toContain('href="/jobs/job-55"');
       expect(html).toContain("Open J-055");
-      expect(html).not.toContain("Start The Job");
+      expect(html).not.toContain("Start the Job");
       phoneSafe(html);
     });
   }
 
-  it("on the clock elsewhere: Switch To J-055, naming what it ends", () => {
+  it("on the clock elsewhere: Switch to J-055, naming what it ends", () => {
     const html = render({ job: j55, openEntry: onJ50 });
     expect(html).toContain('data-visit-start="switch"');
-    expect(html).toContain("Switch To J-055");
+    expect(html).toContain("Switch to J-055");
     expect(html).not.toContain("Clock In On");
     expect(html).toContain("Switching ends that part now");
     phoneSafe(html);
   });
 
-  it("already on it: You're On The Clock Here, and nothing to tap twice", () => {
+  it("already on it: You're on the Clock Here, and nothing to tap twice", () => {
     const html = render({ isStaff: false, job: j55, openEntry: onJ55 });
     expect(html).toContain('data-visit-start="here"');
-    expect(html).toContain("On The Clock Here");
+    expect(html).toContain("You’re on the Clock Here");
     expect(html).not.toContain("Clock In On");
     expect(html).toContain("Open J-055");
     phoneSafe(html);

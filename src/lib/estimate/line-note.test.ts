@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { joinLineNote, splitLineNote } from "./line-note";
 
 /**
- * THE NOTE UNDER A LINE (Add A Note; skeptic #43, S6). A line's description is its head on the first
+ * THE NOTE UNDER A LINE (Add a Note; skeptic #43, S6). A line's description is its head on the first
  * line and the note on the lines after it. These two are THE rule: the editor's two boxes, the task
  * a job is born with, the kit a task becomes and the ×N suffix all read the head through here, so a
  * note can never leak into a task's title or a kit's name, and a count can never be written into

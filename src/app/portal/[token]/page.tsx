@@ -180,7 +180,7 @@ export default async function CustomerPortalPage({
                 sub={`Running total, not a bill yet · ${
                   rb.balance < -0.005 ? `${formatCurrency(-rb.balance)} paid ahead` : `${formatCurrency(rb.balance)} left`
                 }`}
-                cta="See The Work"
+                cta="See the Work"
               />
             ))}
             {invoices.map((i: any) => {
@@ -192,7 +192,7 @@ export default async function CustomerPortalPage({
                   label={i.invoice_number}
                   sub={`${formatDate(i.created_at)} · ${bal > 0.005 ? `${formatCurrency(bal)} due` : "Paid"}`}
                   status={i.status}
-                  cta={bal > 0.005 ? "View And Pay" : "View"}
+                  cta={bal > 0.005 ? "View and Pay" : "View"}
                 />
               );
             })}
@@ -210,7 +210,7 @@ export default async function CustomerPortalPage({
                 label={ct.contract_number}
                 sub={ct.signed_at ? `Signed ${formatDate(ct.signed_at)}` : "Waiting for your signature"}
                 status={ct.status}
-                cta={ct.status === "signed" ? "View" : "Read And Sign"}
+                cta={ct.status === "signed" ? "View" : "Read and Sign"}
               />
             ))}
           </ul>
@@ -218,7 +218,7 @@ export default async function CustomerPortalPage({
       )}
 
       {quotes.length > 0 && (
-        <PortalSection id="quotes" title="Quotes And Estimates" icon={<FileText className="h-4 w-4" />}>
+        <PortalSection id="quotes" title="Quotes and Estimates" icon={<FileText className="h-4 w-4" />}>
           <ul className="portal-glass divide-y divide-slate-200/70 overflow-hidden rounded-2xl">
             {quotes.map((q: any) => (
               <Row
@@ -227,7 +227,7 @@ export default async function CustomerPortalPage({
                 label={q.quote_number}
                 sub={`${q.doc_type === "estimate" ? "Estimate" : "Quote"} · ${formatCurrency(q.total)}`}
                 status={q.status}
-                cta={q.status === "accepted" ? "View" : "Read And Accept"}
+                cta={q.status === "accepted" ? "View" : "Read and Accept"}
               />
             ))}
           </ul>

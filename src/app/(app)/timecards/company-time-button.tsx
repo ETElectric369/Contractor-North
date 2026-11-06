@@ -9,7 +9,7 @@ import { fileShiftAsCompanyTime } from "../timeclock/actions";
  * COMPANY TIME, one tap, on a Fix These row for a shift on no job: the other honest answer to
  * "which job was this?" when the answer is none (shop, errands, the office). Files it under the
  * company's non-billable time code (SHOP when there is one), which labor billing already leaves off
- * invoices, and the row leaves Hours On No Job. Undo on the toast puts back what it had.
+ * invoices, and the row leaves Hours on No Job. Undo on the toast puts back what it had.
  */
 export function CompanyTimeButton({ entryId, code }: { entryId: string; code: string }) {
   const router = useRouter();
@@ -41,7 +41,7 @@ export function CompanyTimeButton({ entryId, code }: { entryId: string; code: st
           onClick: () => {
             void fileShiftAsCompanyTime({ entry_id: entryId, undo: { code: filed, previous: r.previous ?? null } }).then(
               (u) => {
-                toast(u.ok ? "Back on Hours On No Job." : (u.error ?? "Couldn't undo."), u.ok ? "success" : "error");
+                toast(u.ok ? "Back on Hours on No Job." : (u.error ?? "Couldn't undo."), u.ok ? "success" : "error");
                 router.refresh();
               },
               () =>

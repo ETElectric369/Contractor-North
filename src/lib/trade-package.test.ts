@@ -154,7 +154,7 @@ describe("the trade package registry", () => {
     expect(calculatorPackagesFor("")).toEqual(["Estimating", "Money", "Field"]);
     expect(TRADE_PACK_OPTIONS.map((o) => o.id)).toEqual([...TRADE_ORDER]);
     expect(TRADE_PACK_OPTIONS[0]).toEqual({ id: "general", label: "General Contractor", count: TRADE_PACKAGES.general.codes.length });
-    // The menu rows render as <option> rows (sign-up, Import A Trade's Codes): every word capitalized.
+    // The menu rows render as <option> rows (sign-up, Import a Trade's Codes): every word capitalized.
     for (const k of TRADE_ORDER) for (const w of TRADE_PACKAGES[k].menu.split(/[\s/]+/)) expect(w, k).toMatch(/^[A-Z]/);
   });
 });

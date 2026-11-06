@@ -76,7 +76,7 @@ export const daysLateWords = (n: number): string => `${n} ${n === 1 ? "Day" : "D
  * WHO OWES, ROLLED UP (the Accounts Receivable page, folded into Invoices, W1-29): the pipeline's own
  * open invoices through THE by-customer roll-up (money-metrics' computeArByCustomer, the one the old
  * Accounts Receivable page used), worst lateness first, then the most owed. One read, one total: the
- * balances here add up to the page's Owed To You to the cent. Pure.
+ * balances here add up to the page's Owed to You to the cent. Pure.
  */
 export function owedByCustomer(unpaid: readonly PipelineInvoice[]): ArCustomer<PipelineInvoice>[] {
   return computeArByCustomer({ invoices: unpaid });

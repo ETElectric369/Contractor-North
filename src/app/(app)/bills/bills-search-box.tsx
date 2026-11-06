@@ -85,7 +85,7 @@ export function BillsSearchBox() {
           <button
             type="button"
             onClick={() => setQuery("")}
-            aria-label="Clear The Search"
+            aria-label="Clear the Search"
             className="absolute right-0 top-0 flex h-11 w-11 items-center justify-center text-slate-400 hover:text-slate-700"
           >
             <X className="h-4 w-4" />
@@ -98,7 +98,7 @@ export function BillsSearchBox() {
           {inList > 0 ? (
             <a href="#all-bills" className="flex min-h-11 items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-slate-50">
               <span className="text-slate-700">
-                {inList} In All Bills {inList === 1 ? "matches" : "match"}
+                {inList} in All Bills {inList === 1 ? "matches" : "match"}
               </span>
               <span className="shrink-0 font-medium text-brand">Show Them</span>
             </a>

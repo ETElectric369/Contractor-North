@@ -78,9 +78,9 @@ import { createOpenListPaper, orgToday } from "./open-list-core";
  * source_file, so Open Bill can open it. Two ways in: Choose CED PDFs uploads the PDF straight to
  * storage from the browser and sends only its `path` (Vercel caps a request body at ~4.5 MB, so
  * the bytes never ride in this action; a path is taken only in this org's organize/ced/<sha256>.pdf
- * shape), and a portal PDF put in through Snap Or Note (W1-30: the one paper door) waits as one
- * card whose Add To Supplier Documents hands over the `pdf` bytes the tray already holds, server
- * side. Pasted invoice text comes from Snap Or Note's note box (routePastedText); Bills' own paste
+ * shape), and a portal PDF put in through Snap or Note (W1-30: the one paper door) waits as one
+ * card whose Add to Supplier Documents hands over the `pdf` bytes the tray already holds, server
+ * side. Pasted invoice text comes from Snap or Note's note box (routePastedText); Bills' own paste
  * box is gone. A PDF that doesn't save never blocks the import: its documents land with the file's
  * name, as before, and the sentence says which PDF didn't save and how to keep it.
  */
@@ -239,7 +239,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
       // NOT A DEAD END: it names the file and it names the way forward.
       refused.push({
         invoiceNumber: null,
-        error: `${name} reached here as raw PDF bytes, not its text. Put it in through Snap Or Note, which reads the text out of it.`,
+        error: `${name} reached here as raw PDF bytes, not its text. Put it in through Snap or Note, which reads the text out of it.`,
       });
       continue;
     }
@@ -699,7 +699,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
     // NOTHING SILENT, AND NOT A DEAD END: the documents are in; this names the PDF that isn't, why,
     // and the way to keep it.
     detail.push(
-      `${pdfUnsaved.length === 1 ? "This PDF" : "These PDFs"} didn't save, so Open Bill can't show ${pdfUnsaved.length === 1 ? "it" : "them"}: ${sayList(pdfUnsaved)}. The documents are in. Put ${pdfUnsaved.length === 1 ? "it" : "them"} in again through Snap Or Note to keep the PDF.`,
+      `${pdfUnsaved.length === 1 ? "This PDF" : "These PDFs"} didn't save, so Open Bill can't show ${pdfUnsaved.length === 1 ? "it" : "them"}: ${sayList(pdfUnsaved)}. The documents are in. Put ${pdfUnsaved.length === 1 ? "it" : "them"} in again through Snap or Note to keep the PDF.`,
     );
   }
   if (refused.length) {

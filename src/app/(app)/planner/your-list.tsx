@@ -66,7 +66,7 @@ export interface SixSubtask {
 
 /**
  * THE REMINDER'S "LATER" ROW (Erik's open question, built as the plan recommends). His rule is
- * "nothing goes quiet without a day". It stays In A Week — due a week from today, in the company's
+ * "nothing goes quiet without a day". It stays In a Week — due a week from today, in the company's
  * timezone (todayStr is the org's day) — because a stated day is still better than no day: the row
  * comes back on the morning it matters instead of sitting on the card every day until then.
  * (Clearing the date no longer SILENCES a Reminder — lib/six-rank's last rank shows the plain undated
@@ -392,7 +392,7 @@ export function YourList({
             >
               {t("md_pickADayDots")}
             </MoveToDay>
-            {/* Nothing goes quiet without a day: In A Week, not Someday (LATER_CHOICE above). */}
+            {/* Nothing goes quiet without a day: In a Week, not Someday (LATER_CHOICE above). */}
             <button
               type="button"
               disabled={pending}
@@ -462,7 +462,7 @@ export function YourList({
             const kids = kidsByParent.get(row.id) ?? [];
             // A pin he set on an earlier day: the chip is why the row is still here, in two words.
             // BOTH PIN MARKS GO WHEN THE ROW IS CHECKED, like the flag and the due chip beside them —
-            // a struck-through line saying "Carried From Yesterday" is a sentence about finished work
+            // a struck-through line saying "Carried from Yesterday" is a sentence about finished work
             // (lib/six-rank carriedPin owns that gate for this card and for /tasks both).
             const carried = carriedPin(row, todayStr, done);
             const pinned = isPinned(row.focus_date, todayStr) && !done;

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { AFFORDANCES, KIND_STREAM, sortActionItems, type ActionItem, type ActionKind } from "./types";
 import { ORGANIZE_PILE_MIXED, PILE_DEFS, codeCount, isTrayPaper, pileAges, pileOf, pileTitle, pileUnfoldsHere, rollUpPiles, sqlCount } from "./piles";
+import { titleCaseIn } from "../../../tests/title-case-words";
 
 /**
  * SAME-KIND PILES ROLL UP (Wave 1, W1-14): two or more open rows of a pile are one row that counts 1
@@ -33,7 +34,7 @@ describe("grouping", () => {
     expect(out[0].title).toBe("Estimates Not Sent · 2");
     expect(out[0].affordances).toEqual(["open"]);
     expect(out[0].children?.map((c) => c.id)).toEqual([a.id, b.id]);
-    expect(out[0].pile).toMatchObject({ verb: "Send It", listHref: "/quotes?status=draft", listLabel: "See All On Estimates" });
+    expect(out[0].pile).toMatchObject({ verb: "Send It", listHref: "/quotes?status=draft", listLabel: "See All on Estimates" });
   });
 
   it("a lone row stays a plain row: never '· 1'", () => {
@@ -44,15 +45,15 @@ describe("grouping", () => {
   });
 
   it("finished work and No Costs Yet share Done, Not Billed; papers and notes pile apart", () => {
-    const out = roll([row("visit_unbilled"), row("job_unbilled_work"), row("organize", { paper: "tray" }), row("organize", { paper: "tray" }), row("organize", { paper: "organize", chip: "Note To Review" }), row("organize", { paper: "organize", chip: "Note To Review" })]);
+    const out = roll([row("visit_unbilled"), row("job_unbilled_work"), row("organize", { paper: "tray" }), row("organize", { paper: "tray" }), row("organize", { paper: "organize", chip: "Note to Review" }), row("organize", { paper: "organize", chip: "Note to Review" })]);
     const titles = out.map((i) => i.title);
     expect(titles).toContain("Done, Not Billed · 2");
-    expect(titles).toContain("Papers To Sort · 2");
-    expect(titles).toContain("Notes To Review · 2");
+    expect(titles).toContain("Papers to Sort · 2");
+    expect(titles).toContain("Notes to Review · 2");
   });
 
   it("the Organize pile says what it holds: notes, or papers filed there too", () => {
-    const mixed = roll([row("organize", { paper: "organize", chip: "Note To Review" }), row("organize", { paper: "organize", chip: "To File" })]);
+    const mixed = roll([row("organize", { paper: "organize", chip: "Note to Review" }), row("organize", { paper: "organize", chip: "To File" })]);
     expect(mixed[0].title).toBe(`${ORGANIZE_PILE_MIXED} · 2`);
   });
 
@@ -66,7 +67,7 @@ describe("grouping", () => {
 
   it("every kind that piles has its words, its verb and a Title Case label", () => {
     for (const d of Object.values(PILE_DEFS)) {
-      expect(d.label).toMatch(/^([A-Z][\w-]*,?)( [A-Z][\w-]*,?)*$/);
+      expect(titleCaseIn(d.label, "en"), d.label).toBe(true);
       expect(d.verb).toMatch(/^[A-Z]/);
     }
   });
@@ -89,12 +90,12 @@ describe("the sort position", () => {
 });
 
 describe("the Leads-off label", () => {
-  it("Leads To Call becomes Requests To Call Back, its verb Call Back", () => {
+  it("Leads to Call becomes Requests to Call Back, its verb Call Back", () => {
     const on = roll([row("inquiry"), row("inquiry")]);
-    expect(on[0].title).toBe("Leads To Call · 2");
+    expect(on[0].title).toBe("Leads to Call · 2");
     expect(on[0].pile?.verb).toBe("Called");
     const off = roll([row("inquiry"), row("inquiry")], { leadsOn: false });
-    expect(off[0].title).toBe("Requests To Call Back · 2");
+    expect(off[0].title).toBe("Requests to Call Back · 2");
     expect(off[0].pile?.verb).toBe("Call Back");
   });
 });
@@ -102,7 +103,7 @@ describe("the Leads-off label", () => {
 describe("real counts", () => {
   it("an exact count bigger than the rows read: the pile says it, and See All goes to the list page", () => {
     const out = roll([row("inquiry"), row("inquiry")], { counts: { leads_to_call: { total: 60 } } });
-    expect(out[0].title).toBe("Leads To Call · 60");
+    expect(out[0].title).toBe("Leads to Call · 60");
     expect(pileUnfoldsHere(out[0].pile!, out[0].children!.length)).toBe(false);
   });
 
@@ -110,7 +111,7 @@ describe("real counts", () => {
     const out = roll([row("quote_draft"), row("quote_draft"), row("quote_draft")], { counts: { estimates_not_sent: { capped: true } } });
     expect(out[0].title).toBe("Estimates Not Sent · 3+");
     expect(pileUnfoldsHere(out[0].pile!, 3)).toBe(false);
-    expect(pileTitle({ label: "Receipts Not On A Bill", count: 37, capped: true })).toBe("Receipts Not On A Bill · 37+");
+    expect(pileTitle({ label: "Receipts Not on a Bill", count: 37, capped: true })).toBe("Receipts Not on a Bill · 37+");
   });
 
   it("the read facts: an exact count only for a SQL-only read, capped for one filtered in code", () => {
@@ -157,7 +158,7 @@ describe("real counts", () => {
     expect(roll(rows(3), { counts: { done_not_billed: doneRowsCount(done(3, 240)) } })[0].title).toBe("Done, Not Billed · 3+");
   });
 
-  it("Done, Not Billed and Visits To Close Out have no list page holding their rows: a capped one unfolds every row read here", () => {
+  it("Done, Not Billed and Visits to Close Out have no list page holding their rows: a capped one unfolds every row read here", () => {
     expect(PILE_DEFS.done_not_billed.listHref).toBeNull();
     expect(PILE_DEFS.visits_to_close_out.listHref).toBeNull();
     const out = roll([row("visit_unbilled"), row("visit_unbilled"), row("job_unbilled_work")], { counts: { done_not_billed: { capped: true } } });
@@ -169,8 +170,8 @@ describe("real counts", () => {
 
   it("See All names the page the way its menu does and lands on the rows: Invoices, and the receipt files on Bills", () => {
     // /billing is titled Invoices (W1-29): no pile names a Billing page.
-    expect(PILE_DEFS.late_invoices.listLabel).toBe("See All On Invoices");
-    expect(PILE_DEFS.invoices_not_sent.listLabel).toBe("See All On Invoices");
+    expect(PILE_DEFS.late_invoices.listLabel).toBe("See All on Invoices");
+    expect(PILE_DEFS.invoices_not_sent.listLabel).toBe("See All on Invoices");
     expect(Object.values(PILE_DEFS).some((d) => /Billing/.test(d.listLabel ?? ""))).toBe(false);
     // All Bills opens with the receipt files first on ?tab=receipts (bills-receipts.tsx, W1-32).
     expect(PILE_DEFS.receipts_not_on_a_bill.listHref).toBe("/bills?tab=receipts#all-bills");

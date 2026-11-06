@@ -67,7 +67,7 @@ interface Entry {
   source?: string | null;
 }
 
-/** A touching piece of the same split shift, for Move The Split and Join Back. Its job, lunch and
+/** A touching piece of the same split shift, for Move the Split and Join Back. Its job, lunch and
  *  miles ride along so Join Back can say whose job the hours land on, and its Undo can cut the
  *  shift back where it was. */
 export interface SplitNeighbor {
@@ -91,7 +91,7 @@ interface Member {
   bill_rate?: number | null;
   /** 0286: the owner is paid by owner's draw, so his shifts carry no pay-rate override. */
   paid_by_draw?: boolean | null;
-  /** 0158: off the team. Copy To Someone Else… never offers them. */
+  /** 0158: off the team. Copy to Someone Else… never offers them. */
   active?: boolean | null;
 }
 interface JobOption {
@@ -225,7 +225,7 @@ export function EditEntryButton({
    * BOTH PIECES HAVE TO BE CLOSED. join_time_entries refuses a running shift outright ("Clock out
    * first", 0322) and sliding a cut needs an end to slide between. The `next` neighbour of a closed
    * piece IS the running clock after a Switch Job (splitNeighbors only asks that it starts where this
-   * one ends), and Join Back Into One Shift was drawn on that boundary — a button the database could
+   * one ends), and Join Back into One Shift was drawn on that boundary — a button the database could
    * never say yes to.
    */
   const closedKin = (n?: SplitNeighbor | null) => (n && n.clock_out ? { ...n, clock_out: n.clock_out } : null);
@@ -248,10 +248,10 @@ export function EditEntryButton({
   // office comes here to fix) would have been silently truncated to a same-day span on
   // save. Seeded from the stored clock_out, so opening and saving is always a no-op.
   const [endDate, setEndDate] = useState(outP.date || inP.date);
-  /* THE STORED TIMES MOVED UNDER THE FORM. Move The Split rewrites this shift's clock_in or
+  /* THE STORED TIMES MOVED UNDER THE FORM. Move the Split rewrites this shift's clock_in or
      clock_out on the server, and the refreshed `entry` arrives while this component stays mounted
      (the job page's Time tab keeps it; a billed-hours note keeps the modal open). A form still
-     holding the OLD stored times would read as unsaved (Copy To Someone Else… shut behind "Save
+     holding the OLD stored times would read as unsaved (Copy to Someone Else… shut behind "Save
      your changes first") and a Save would put the old times back, undoing the move. So when the
      stored times change and the form's times were not touched, they follow the stored row;
      times the person typed are never overwritten. */
@@ -307,7 +307,7 @@ export function EditEntryButton({
   const span = buildShiftSpan(date, startT, endT, endDate);
 
   /**
-   * A COPY TAKES THE SHIFT AS IT IS SAVED. Copy To Someone Else… (duplicateTimeEntry) reads the
+   * A COPY TAKES THE SHIFT AS IT IS SAVED. Copy to Someone Else… (duplicateTimeEntry) reads the
    * stored row, so anything changed in this form and not saved yet would NOT come along: fix
    * Brian's end time, copy to Jimmy before saving, and Jimmy gets the old end time. So while the
    * form holds unsaved changes the copy waits, and says why (Save is right there).
@@ -799,7 +799,7 @@ export function EditEntryButton({
               </p>
               {(entry.split_how === "converted" || rebuiltFromOldSplit) && (
                 <p className="text-xs text-slate-500">
-                  Rebuilt From An Old Split: this shift was split the old way and has been turned into separate entries.
+                  Rebuilt from an Old Split: this shift was split the old way and has been turned into separate entries.
                 </p>
               )}
               {boundaries.map((b) => (
@@ -816,12 +816,12 @@ export function EditEntryButton({
                       className="h-11 min-w-0 flex-1"
                     />
                     <Button type="button" variant="outline" className="h-11 shrink-0" onClick={() => moveCut(b)} disabled={pending}>
-                      Move The Split
+                      Move the Split
                     </Button>
                   </div>
                   <p className="text-xs text-slate-400">Moving the split slides the time between the two parts. Their order stays the same.</p>
                   <Button type="button" variant="ghost" className="h-11 w-full" onClick={() => joinBack(b)} disabled={pending}>
-                    <Link2 className="h-4 w-4" /> Join Back Into One Shift
+                    <Link2 className="h-4 w-4" /> Join Back into One Shift
                   </Button>
                   {joinConsequence(b) && <p className="text-xs text-amber-800">{joinConsequence(b)}</p>}
                 </div>

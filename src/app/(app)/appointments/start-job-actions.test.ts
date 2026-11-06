@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  *     goes through the Timeclock's switchJob, never a second open clock;
  *   - a tech is refused before anything is read or made;
  *   - a start in the future, or before midnight yesterday, is refused with nothing made;
- *   - "Link To J-055 Instead" is offered only for exactly one job of the same customer made on the
+ *   - "Link to J-055 Instead" is offered only for exactly one job of the same customer made on the
  *     visit's day that is not cancelled (open OR finished: Tom Goodman's J-055 was finished and
  *     invoiced before anybody came back to the visit), and the link re-asks that rule before it writes;
  *   - a switch never cuts the shift on that very job onto a duplicate (Tom Goodman as it stood);
@@ -199,7 +199,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
-describe("Start The Job And Clock In", () => {
+describe("Start the Job and Clock In", () => {
   it("makes the job through createJobFromAppointment and clocks the tapper in through the Timeclock's clockIn", async () => {
     state.open = [null, { id: "entry-1", job_id: "job-56", job_code: null, clock_in: NOON, job: null }];
     const res = await startJobFromVisit({ appointmentId: "appt-tom", clock: "in", startAt: NOON, gps: null });
@@ -228,7 +228,7 @@ describe("Start The Job And Clock In", () => {
     expect(res.message).toBe("Started J-056 for Tom Goodman and clocked you in at 3:32 PM.");
   });
 
-  it("the job alone: Start The Job never touches the clock", async () => {
+  it("the job alone: Start the Job never touches the clock", async () => {
     const res = await startJobFromVisit({ appointmentId: "appt-tom", clock: "none" });
     expect(spies.createJob).toHaveBeenCalledTimes(1);
     expect(spies.clockIn).not.toHaveBeenCalled();
@@ -264,7 +264,7 @@ describe("Start The Job And Clock In", () => {
   });
 });
 
-describe("already on the clock elsewhere: Switch To This Job, never a second open clock", () => {
+describe("already on the clock elsewhere: Switch to This Job, never a second open clock", () => {
   const running = {
     id: "entry-50",
     job_id: "job-50",
@@ -289,7 +289,7 @@ describe("already on the clock elsewhere: Switch To This Job, never a second ope
       since: "8:00 AM",
     });
     expect(res.onClock).not.toHaveProperty("whole");
-    expect(res.error).toContain("Switch To This Job");
+    expect(res.error).toContain("Switch to This Job");
     expect(spies.createJob).not.toHaveBeenCalled();
     expect(spies.clockIn).not.toHaveBeenCalled();
   });
@@ -421,7 +421,7 @@ describe("only the office starts a job", () => {
     expect(spies.link).not.toHaveBeenCalled();
   });
 
-  it("a tech's Ask The Office rings the office's bell for this visit", async () => {
+  it("a tech's Ask the Office rings the office's bell for this visit", async () => {
     const res = await askOfficeToStartJob("appt-tom");
     expect(res.ok).toBe(true);
     expect(spies.ring).toHaveBeenCalledTimes(1);
@@ -456,7 +456,7 @@ describe("only the office starts a job", () => {
   });
 });
 
-describe("Link To J-055 Instead", () => {
+describe("Link to J-055 Instead", () => {
   const j55 = {
     id: "job-55",
     job_number: "J-055",

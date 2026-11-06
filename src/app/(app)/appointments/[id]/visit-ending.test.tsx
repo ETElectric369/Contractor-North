@@ -46,9 +46,9 @@ describe("the ending doors are offered only where they apply", () => {
     const s = html({});
     expect(s).toContain("How did this one end?");
     expect(s).toContain(">Lost<");
-    expect(s).not.toContain("Nothing Came Of It"); // Erik: "just keep Lost everywhere"
+    expect(s).not.toContain("Nothing Came of It"); // Erik: "just keep Lost everywhere"
     expect(s).not.toContain(">Won<"); // a win is never typed alone: it is the job the visit became
-    expect(s).toContain("Won · Pick The Job"); // the attach door, jobs only, right on the card
+    expect(s).toContain("Won · Pick the Job"); // the attach door, jobs only, right on the card
     expect(doors(s)).toBe(2);
     for (const m of s.match(/<button[^>]*>/g) ?? []) expect(m).toContain("min-h-[44px]");
   });
@@ -67,7 +67,7 @@ describe("the ending doors are offered only where they apply", () => {
 });
 
 describe("what the visit became", () => {
-  it("the estimate is named and linked; a dead one says so (Start The Estimate returns on the Inspector)", () => {
+  it("the estimate is named and linked; a dead one says so (Start the Estimate returns on the Inspector)", () => {
     const live = html({ estimate: { id: "q1", number: "EST-0042", status: "sent", live: true } });
     expect(live).toContain('href="/quotes/q1"');
     expect(live).toContain("EST-0042");

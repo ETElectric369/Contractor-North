@@ -20,7 +20,7 @@ import { updateJobDescription, updateJobNotes } from "../actions";
  *
  * One plain line under each says which is which. Staff edit both in place (Save appears only once
  * something changed, then "Saved", the error in words on a refusal; both writers ask for the id back,
- * so a zero-row save is never called Saved). A job with no notes shows one 44px "Add A Note" that
+ * so a zero-row save is never called Saved). A job with no notes shows one 44px "Add a Note" that
  * opens the box.
  *
  * A tech READS: the save behind either box is staff-only at the policy (jobs_write) AND the action
@@ -57,7 +57,7 @@ export function JobTextBox({
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  // An empty Notes box stays one "Add A Note" button until it is asked for.
+  // An empty Notes box stays one "Add a Note" button until it is asked for.
   const [opened, setOpened] = useState(field === "description" || !!(initial ?? "").trim());
   const dirty = value !== savedValue;
 

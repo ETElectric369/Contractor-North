@@ -68,7 +68,7 @@ function DeepLinkOpener({ param, onLaunch }: { param: string; onLaunch: () => vo
  * ONE assistant, everywhere — and no button of its own: the top bar draws Nort's (W1-09).
  *
  * The voice starts from TALK TO NORT — the top bar's one-tap Nort button and the first row under
- * Search Or Ask (command-bar.tsx) both call talkToNort(), which dispatches `cn:nort-talk`; the
+ * Search or Ask (command-bar.tsx) both call talkToNort(), which dispatches `cn:nort-talk`; the
  * listener below runs launch() inside that dispatch, so the mic starts in the tap's own call stack
  * (iOS). While Nort listens, thinks or speaks, the bar's Nort button turns into the red Stop Nort
  * (topbar.tsx), so the bar still has exactly one voice control.
@@ -128,14 +128,14 @@ export function GlobalAssistant({
   }, []);
   // THE PANEL'S OPEN STATE, READABLE FROM A LISTENER ADDED ONCE. launch() now runs from a window
   // event whose listener is registered on mount; a closure over `open` would see the value from
-  // that first render forever, so a second Talk To Nort into an OPEN panel would remount the chat
+  // that first render forever, so a second Talk to Nort into an OPEN panel would remount the chat
   // instead of resuming it. The ref is written in the same breath as the state.
   const openRef = useRef(false);
   const setOpen = (v: boolean) => {
     openRef.current = v;
     setOpenState(v);
   };
-  const [voiceLaunch, setVoiceLaunch] = useState(false); // Talk To Nort → voice; command bar → text
+  const [voiceLaunch, setVoiceLaunch] = useState(false); // Talk to Nort → voice; command bar → text
   const [pendingQuery, setPendingQuery] = useState<string | null>(null); // a typed question from Cmd-K
   const [collapsed, setCollapsed] = useState(false);
   // What Nort is showing while HE parked the box as a bar (item 6) — the bar reads it. Null when
@@ -173,7 +173,7 @@ export function GlobalAssistant({
     return { x: Math.round(b.left + (window.innerWidth - b.left - b.right - b.w) / 2), y: 68 + safeAreaTop() };
   }
   // WHERE NORT PARKS THE BAR (item 6): the bottom, just above the phone's dock — the top is exactly
-  // where the spots he rings sit (the Now card, New Job, Owed To You), and a bar under the topbar
+  // where the spots he rings sit (the Now card, New Job, Owed to You), and a bar under the topbar
   // covered them (skeptic #6). The dock's own box says where its top is; a computer has no bar there.
   function parkedPos() {
     const b = panelBounds();
@@ -221,7 +221,7 @@ export function GlobalAssistant({
     const lang = voiceLang();
     armGreeting(greets, nortName, fullName, lang);
     speech.startListening(localeOf(lang));
-    // Already open → Talk To Nort just re-opened the mic; tell the panel to resume the conversation.
+    // Already open → Talk to Nort just re-opened the mic; tell the panel to resume the conversation.
     // openRef, not `open`: this runs from a listener registered once (see above).
     if (openRef.current) { window.dispatchEvent(new Event("cn:assistant-talk")); setCollapsed(false); return; }
     setPendingQuery(null);

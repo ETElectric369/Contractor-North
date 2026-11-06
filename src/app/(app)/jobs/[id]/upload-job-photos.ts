@@ -8,7 +8,7 @@ import { addDocument } from "../actions";
  * dock's quick Photo button — files a picture the exact same way:
  * prepareImageForUpload → storage upload → addDocument(category "Photo").
  * Throws on the first failure so the caller can surface it (never silent). Returns each photo's
- * storage path, in order, so a caller can put one on a task (Make It A Task, 0358).
+ * storage path, in order, so a caller can put one on a task (Make It a Task, 0358).
  */
 export async function uploadJobPhotos(orgId: string, jobId: string, files: File[]): Promise<string[]> {
   const supabase = createClient();

@@ -182,8 +182,8 @@ export function PaySheet({
         <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-1">
           <span className="min-w-0 text-xs text-slate-500">It pays off whole pay periods, oldest first.</span>
           <InfoPopup
-            title="How A Payment Lands"
-            label="About How A Payment Lands"
+            title="How a Payment Lands"
+            label="About How a Payment Lands"
             bullets={PAYMENT_LANDS_FACTS}
             className="-my-1 -mr-2"
           />

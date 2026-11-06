@@ -18,7 +18,7 @@ import { TimedOut, iconBtn, useDeadLink, useDialog } from "./portal-media";
  *   - a PDF opens in the page's own viewer, with Open Full Size beside it (a phone's browser may
  *     show a framed PDF one page at a time; its own viewer shows every page and zooms);
  *   - anything else (a 3D model, a point cloud, a file type the portal cannot draw) gets a plain
- *     Open The File link and a sentence saying what it is. THE SEAM: a 3D viewer for renderings
+ *     Open the File link and a sentence saying what it is. THE SEAM: a 3D viewer for renderings
  *     and LiDAR scans plugs in where format is "model".
  *
  * Every URL is a 10-minute signed link the server minted for exactly this file (job-view.ts), and
@@ -86,7 +86,7 @@ const action =
 function DocCard({ d, thisYear, onOpen }: { d: PortalDocument; thisYear: string; onOpen: (d: PortalDocument, el: HTMLElement) => void }) {
   const img = d.format === "image" ? d.url : null;
   const { dead, onError } = useDeadLink(img);
-  // A 3D scan spins right here (3D Scan's model, a rendering): the viewer, then Open The File.
+  // A 3D scan spins right here (3D Scan's model, a rendering): the viewer, then Open the File.
   const [spinning, setSpinning] = useState(false);
   const spins = d.format === "model" && modelKind(d.url) !== null;
   return (
@@ -119,7 +119,7 @@ function DocCard({ d, thisYear, onOpen }: { d: PortalDocument; thisYear: string;
         <div className="mt-2 flex flex-wrap gap-2">
           <button type="button" onClick={(e) => onOpen(d, e.currentTarget)} className={action}>
             <FileText className="h-4 w-4" aria-hidden />
-            <span>Open The {d.kindLabel}</span>
+            <span>Open the {d.kindLabel}</span>
           </button>
           <a href={d.url} target="_blank" rel="noopener noreferrer" className={action}>
             <ExternalLink className="h-4 w-4" aria-hidden />
@@ -130,7 +130,7 @@ function DocCard({ d, thisYear, onOpen }: { d: PortalDocument; thisYear: string;
         <div className="mt-2">
           <p className="px-1 text-sm text-slate-700">
             {spins
-              ? "A 3D scan. View it here, turn it and zoom in; on an iPhone, Open In AR puts it in the room."
+              ? "A 3D scan. View it here, turn it and zoom in; on an iPhone, Open in AR puts it in the room."
               : d.format === "model"
                 ? "A 3D file. It opens in an app that reads 3D files, or saves to your phone to open later."
                 : "This file opens in a new tab, or saves to your phone to open later."}
@@ -139,12 +139,12 @@ function DocCard({ d, thisYear, onOpen }: { d: PortalDocument; thisYear: string;
             {spins && (
               <button type="button" onClick={() => setSpinning(true)} className={action}>
                 <Box className="h-4 w-4" aria-hidden />
-                <span>View In 3D</span>
+                <span>View in 3D</span>
               </button>
             )}
             <a href={d.url} target="_blank" rel="noopener noreferrer" className={action}>
               <ExternalLink className="h-4 w-4" aria-hidden />
-              <span>Open The File</span>
+              <span>Open the File</span>
             </a>
           </div>
           {spinning && spins && <ModelViewer url={d.url} name={d.title} onClose={() => setSpinning(false)} />}

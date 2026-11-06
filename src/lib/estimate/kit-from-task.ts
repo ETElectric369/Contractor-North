@@ -199,7 +199,7 @@ export async function rememberKit(sb: SupabaseClient, value: KitFromTask, lang: 
       if (gone.error || !gone.data?.length) {
         return { ok: false, error: say(lang, words, "qs_lib_kitSavedWithoutParts", `The kit ${value.kit.name} was saved without its parts (${why}) — delete it from the Price List.`, { name: value.kit.name, why }) };
       }
-      return { ok: false, error: say(lang, words, "qs_lib_kitNotKept", `The kit was not kept (${why}) — press Save The Kit again.`, { why }) };
+      return { ok: false, error: say(lang, words, "qs_lib_kitNotKept", `The kit was not kept (${why}) — press Save the Kit again.`, { why }) };
     }
   }
   return { ok: true, id: kitId, name: value.kit.name };

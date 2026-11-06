@@ -480,8 +480,8 @@ export function PlaceRail({
                             disabled={pending}
                             onPatch={(patch) => size(i, patch)}
                           />
-                          {/* The record is one tap away in the card's ⋯ (Open The Job, Open The Visit,
-                              Open The Lead), never a second link here. */}
+                          {/* The record is one tap away in the card's ⋯ (Open the Job, Open the Visit,
+                              Open the Lead), never a second link here. */}
                         </div>
 
                         {/* Enter the phone/email ON THE SPOT — the driveway moment. Saves on Enter

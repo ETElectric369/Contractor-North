@@ -43,7 +43,7 @@ describe("at rest it draws nothing", () => {
   it("no indicator, no spinner, no words — only the anchor that finds the scroller", () => {
     const html = renderToStaticMarkup(createElement(PullToRefresh));
     expect(html).not.toContain("Refreshing");
-    expect(html).not.toContain("Pull To Refresh");
+    expect(html).not.toContain("Pull to Refresh");
     expect(html).not.toContain("animate-spin");
     expect(html).toContain('aria-hidden="true"');
   });

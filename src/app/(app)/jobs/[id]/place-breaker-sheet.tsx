@@ -123,11 +123,11 @@ export function PlaceBreakerSheet({
       <div className="space-y-4">
         <p className="text-sm text-slate-600">{groupLabel(group)}. Pick the space it goes in; each part fills in as a circuit for you to check.</p>
         <label className="block">
-          <span className="text-sm font-medium text-slate-800">Space {group.form === "quad" ? "(The Top Of The Quad)" : ""}</span>
+          <span className="text-sm font-medium text-slate-800">Space {group.form === "quad" ? "(The Top of the Quad)" : ""}</span>
           <Input
             className="mt-1 h-11"
             inputMode="numeric"
-            placeholder={panel.spaces ? `1 To ${panel.spaces}` : "Space Number"}
+            placeholder={panel.spaces ? `1 to ${panel.spaces}` : "Space Number"}
             value={spaceText}
             onChange={(e) => setSpaceText(e.target.value)}
             autoFocus

@@ -397,7 +397,7 @@ describe("a payment row inside a statement, and the one door at the foot", () =>
 
   it("the long explanation is behind the info icon, as bullets, and nothing is cut", () => {
     const html = statement(OWED);
-    expect(html).toContain('aria-label="About Earned, Paid And Owed"');
+    expect(html).toContain('aria-label="About Earned, Paid and Owed"');
     // LABEL HONESTY: Earned is unlocked hours from the last 18 months plus every locked period.
     // The word must not be allowed to claim more than the reads behind it.
     const facts = THREE_FIGURES_FACTS.join(" ");
@@ -493,7 +493,7 @@ describe("the form that records a payment", () => {
   it("the paragraph under the fields is one line plus bullets, and nothing is cut", () => {
     const html = sheet();
     expect(html).toContain("It pays off whole pay periods, oldest first.");
-    expect(html).toContain('aria-label="About How A Payment Lands"');
+    expect(html).toContain('aria-label="About How a Payment Lands"');
     expect(html).not.toContain("so a half paid week stays open until the rest of it is paid");
     const facts = PAYMENT_LANDS_FACTS.join(" ");
     expect(facts).toContain("A half paid week stays open until the rest of it is paid.");

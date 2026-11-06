@@ -115,7 +115,7 @@ export async function whichJobChoices(entryId: string, fromJobId?: string | null
       .or(`scheduled_start.gte.${dayStartIso},scheduled_end.gte.${dayStartIso}`),
     nearP,
   ]);
-  // A MOVE'S PUNCH ALREADY HAS A JOB, so it is not in Hours On No Job and the office is never
+  // A MOVE'S PUNCH ALREADY HAS A JOB, so it is not in Hours on No Job and the office is never
   // prompted about it: the line must not promise that they will pick it (which-job-choices).
   if (goingR.error) return { ok: false, isStaff, error: choicesUnavailable(moving, lang) };
 

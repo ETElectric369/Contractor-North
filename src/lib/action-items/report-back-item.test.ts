@@ -24,7 +24,7 @@ describe("the Report Back row", () => {
       waitKey: "job_report_back:j1",
     });
     const noWaits = reportBackActionItem({ id: "j1", job_number: "J-047", name: null, customer: null }, standing, false);
-    expect(noWaits.title).toBe("Tell The Customer Where It Stands");
+    expect(noWaits.title).toBe("Tell the Customer Where It Stands");
     expect(noWaits.affordances).toEqual(["open"]);
     expect(noWaits.waitKey).toBeUndefined();
   });

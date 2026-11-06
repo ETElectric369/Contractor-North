@@ -22,7 +22,7 @@ import { shelfPickerItems } from "@/app/(app)/inventory/actions";
  * ONE LINE OF A TICKET, COUNTED ONTO THE SHELF (Shop Stock, Phase 2).
  *
  * The same row on every screen that puts something on the shelf: the receipt card's Put The Rest
- * On The Shelf, the tray's Shop Stock destination and Record To Shelf on a CED document. It opens
+ * On the Shelf, the tray's Shop Stock destination and Record to Shelf on a CED document. It opens
  * already filled in from the ticket ("250 ft", from the ticket's own columns, shelfCountGuess) and
  * pre-picks an item only on an exact part number or name (suggestShelfItem). Nothing on it is
  * saved until a person confirms it; a row that has not been confirmed is not an answer.
@@ -186,7 +186,7 @@ export function ShelfTicketSheet({
                 onClick={confirmAll}
                 className="flex min-h-11 items-center rounded-lg border border-sky-300 bg-white px-3 text-sm font-medium text-sky-800 hover:bg-sky-50"
               >
-                Confirm Every Count As Shown
+                Confirm Every Count as Shown
               </button>
             )}
             {lines.map((l) =>
@@ -215,7 +215,7 @@ export function ShelfTicketSheet({
 
 /**
  * What the stock list does next. It is read when the sheet opens and forgotten when it closes, so a
- * sheet that stays on the page between openings (Add By Hand in /bills' header) reads it again the
+ * sheet that stays on the page between openings (Add by Hand in /bills' header) reads it again the
  * next time: an item made a moment ago with New Item is on the list. The last list stays shown while
  * the new one is read, so an item already picked never drops out from under the person.
  */

@@ -61,14 +61,14 @@ import { addSupplierDocuments, keepPaperwork, updatePaperwork } from "@/app/(app
 /**
  * ONE CARD FOR ONE PIECE OF PAPER, ON EVERY PAGE THAT HOLDS PAPER (0295; W1-31).
  *
- * Snap Or Note's sheet, Organize and Needs You on /bills render THIS, so a receipt is filed the
+ * Snap or Note's sheet, Organize and Needs You on /bills render THIS, so a receipt is filed the
  * same way whichever door it came in by. It is built on the Supplier Bills card grammar, so a tray
  * paper and a supplier's paper look and answer the same way:
  *
  *   Home Depot · $84.12 · It Says 13897 HONEYSUCKLE
  *   #8802-1108330 · Sep 24, 2026 · Receipt (Paid)
  *   [Open Paper]
- *   [Put It On J-011] [Another Job] [Shop Stock] [Business Cost]
+ *   [Put It on J-011] [Another Job] [Shop Stock] [Business Cost]
  *
  * Every answer is one tap that files; Undo stays in the list's done trail and the toast. Nothing is
  * preselected and nothing files by itself: the FIRST answer is what the paper itself picks (a
@@ -80,10 +80,10 @@ import { addSupplierDocuments, keepPaperwork, updatePaperwork } from "@/app/(app
  * with it showing, every other answer records a different purchase (the old Different Purchase: File
  * It Anyway, folded into the answers: pressing one without the flag would be refused).
  *
- * The rarer doors (Fix Details, Read Again, Keep It In Files, Set Aside, Delete) live on the card's
+ * The rarer doors (Fix Details, Read Again, Keep It in Files, Set Aside, Delete) live on the card's
  * ⋯. A paper the reader couldn't finish shows only the one door it needs (Read Now, or Fix Details:
  * Put The Total In); its answers appear once it has a total. A picture is asked what it is first
- * (Erik, 2026-09-24): Job Photo, Bill Or Receipt, Something Else.
+ * (Erik, 2026-09-24): Job Photo, Bill or Receipt, Something Else.
  */
 
 export type PaperRowItem = PaperItem & {
@@ -104,7 +104,7 @@ type Filed = { id: string; sentence: string };
 const TYPE_CHOICES: { value: string; label: string }[] = [
   { value: "receipt", label: "Receipt (Already Paid)" },
   { value: "bill", label: "Bill (Still Owed)" },
-  { value: "not_a_cost", label: "Not A Cost" },
+  { value: "not_a_cost", label: "Not a Cost" },
   { value: "statement", label: "Statement" },
   { value: "credit_memo", label: "Credit Memo" },
   { value: "purchase_order", label: "Purchase Order" },
@@ -112,7 +112,7 @@ const TYPE_CHOICES: { value: string; label: string }[] = [
 ];
 
 const PAID_CHOICES = [
-  { value: "paid_at_purchase", label: "Paid At The Counter" },
+  { value: "paid_at_purchase", label: "Paid at the Counter" },
   { value: "on_account", label: "On Account (Still Owed)" },
   { value: "unknown", label: "Not Sure" },
 ];
@@ -124,7 +124,7 @@ const MENU_DANGER_ROW =
 /** The section menu with no tree of its own: every row is the card's (children). */
 const CARD_MENU = { center: { label: "Actions", icon: "more" }, nodes: [] };
 
-/** A chip a person taps to take a suggestion (a Reminder, Keep As Note). 44px. */
+/** A chip a person taps to take a suggestion (a Reminder, Keep as Note). 44px. */
 const CHIP =
   "inline-flex min-h-11 items-center gap-1.5 rounded-full border border-dashed border-slate-300 bg-white px-3 text-left text-sm text-slate-700 hover:border-brand hover:text-brand disabled:opacity-50";
 
@@ -165,7 +165,7 @@ export function samePurchaseLine(state: Readiness["state"], onBooks: number): st
 }
 
 /** The ⋯ rows, per state, minus any door the card already shows (one door, one home). */
-export type PaperMenuRow = "Fix Details" | "Read Again" | "Keep It In Files" | "Set Aside" | "Delete";
+export type PaperMenuRow = "Fix Details" | "Read Again" | "Keep It in Files" | "Set Aside" | "Delete";
 export function paperMenuRows(state: Readiness["state"], hasFile: boolean, onCard: readonly PaperMenuRow[] = []): PaperMenuRow[] {
   const rows: PaperMenuRow[] = [];
   // Supplier documents are recognised from the PDF itself; a too-big or totalless paper already
@@ -174,7 +174,7 @@ export function paperMenuRows(state: Readiness["state"], hasFile: boolean, onCar
   // Never on supplier documents (the reader would overwrite what the PDF's own text said), nor on a
   // paper whose one door is already Read Now.
   if (hasFile && (state === "ready" || state === "needs_total" || state === "keep" || state === "later" || state === "picture")) rows.push("Read Again");
-  if (state === "later" || state === "supplier_documents" || state === "not_read" || state === "too_big" || state === "picture") rows.push("Keep It In Files");
+  if (state === "later" || state === "supplier_documents" || state === "not_read" || state === "too_big" || state === "picture") rows.push("Keep It in Files");
   if (state !== "later" && state !== "supplier_documents") rows.push("Set Aside");
   // Only paper this update can't file (a statement, a credit memo, a PO); last, and asked first.
   if (state === "later") rows.push("Delete");
@@ -190,7 +190,7 @@ function Thumb({ item }: { item: PaperRowItem }) {
     );
   const pdf = /\.pdf($|\?)/i.test(item.signedUrl) || /\.pdf$/i.test(String(item.file_url ?? ""));
   return (
-    <a href={item.signedUrl} target="_blank" rel="noreferrer" className="shrink-0" title="Open The Paper">
+    <a href={item.signedUrl} target="_blank" rel="noreferrer" className="shrink-0" title="Open the Paper">
       {pdf ? (
         <span className="flex h-14 w-14 items-center justify-center rounded-lg bg-slate-100">
           <FileText className="h-6 w-6 text-slate-500" />
@@ -250,14 +250,14 @@ function FixDetails({ item, onClose, onSaved }: { item: PaperRowItem; onClose: (
             {askCharge && (
               <div className="mt-2">
                 <Button variant="outline" onClick={() => save(true)} disabled={saving}>
-                  It Is A Charge
+                  It Is a Charge
                 </Button>
               </div>
             )}
           </div>
         )}
         <div>
-          <Label htmlFor={`fd-type-${item.id}`}>What Kind Of Paper</Label>
+          <Label htmlFor={`fd-type-${item.id}`}>What Kind of Paper</Label>
           <Select id={`fd-type-${item.id}`} value={type} onChange={(e) => setType(e.target.value)} className="h-11">
             {TYPE_CHOICES.map((t) => (
               <option key={t.value} value={t.value}>{t.label}</option>
@@ -283,11 +283,11 @@ function FixDetails({ item, onClose, onSaved }: { item: PaperRowItem; onClose: (
             />
           </div>
           <div>
-            <Label htmlFor={`fd-date-${item.id}`}>Date On It</Label>
+            <Label htmlFor={`fd-date-${item.id}`}>Date on It</Label>
             <Input id={`fd-date-${item.id}`} type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-11" />
           </div>
           <div>
-            <Label htmlFor={`fd-number-${item.id}`}>Number On It</Label>
+            <Label htmlFor={`fd-number-${item.id}`}>Number on It</Label>
             <Input id={`fd-number-${item.id}`} value={number} onChange={(e) => setNumber(e.target.value)} placeholder="Ticket or invoice #" className="h-11" />
           </div>
           {isCost && (
@@ -323,7 +323,7 @@ export function PaperworkRow({
    *  that remembers it). Absent: the card asks. */
   initialAnswer?: "photo" | "else" | null;
   /** Anything on the card changed on the server (a read, a set aside, a fix): a holder that isn't a
-   *  page (Snap Or Note's sheet) reads its rows again. Pages refresh themselves. */
+   *  page (Snap or Note's sheet) reads its rows again. Pages refresh themselves. */
   onChanged?: () => void;
   /** SHOP STOCK OFF (the switch board, 0352): the shelf isn't offered, and a paper marked STOCK picks
    *  nothing; its words still show ("It Says STOCK") and a person picks a job or a bucket.
@@ -337,7 +337,7 @@ export function PaperworkRow({
   const [fixing, setFixing] = useState(false);
   const [said, setSaid] = useState<{ text: string; tone: "error" | "info" } | null>(null);
   // A PICTURE is asked what it is first (Erik, 2026-09-24). Job Photo and Something Else are
-  // answered here and change nothing until an answer files it; Bill Or Receipt is answered on the
+  // answered here and change nothing until an answer files it; Bill or Receipt is answered on the
   // server (readAsCost), because it changes what the row IS.
   const [answer, setAnswer] = useState<"photo" | "else" | null>(initialAnswer);
   /** Which picker is open under the answers: Another Job's, or Business Cost's buckets. */
@@ -490,7 +490,7 @@ export function PaperworkRow({
   const unread = r.state === "not_read" || r.state === "too_big";
   const says = paperSays(item);
   const headline = costCard
-    ? `${String(item.vendor ?? "").trim() || paperTypeLabel(type)} · ${rowTotal === null ? "No Total Read" : formatCurrency(rowTotal)} · ${says ? `It Says ${says}` : "No Job Name On It"}`
+    ? `${String(item.vendor ?? "").trim() || paperTypeLabel(type)} · ${rowTotal === null ? "No Total Read" : formatCurrency(rowTotal)} · ${says ? `It Says ${says}` : "No Job Name on It"}`
     : unread
       ? String(item.title ?? "").trim() || "A Paper"
       : describePaper(item);
@@ -500,11 +500,11 @@ export function PaperworkRow({
   // A badge only when the paper needs something.
   const badge =
     r.state === "needs_total" ? (
-      <Badge tone="amber">Needs A Total</Badge>
+      <Badge tone="amber">Needs a Total</Badge>
     ) : r.state === "not_read" ? (
       <Badge tone="slate">Not Read Yet</Badge>
     ) : r.state === "too_big" ? (
-      <Badge tone="amber">Too Big To Read</Badge>
+      <Badge tone="amber">Too Big to Read</Badge>
     ) : null;
   // The state's own sentence, where the card has no answers to say it with.
   const stateSentence =
@@ -517,9 +517,9 @@ export function PaperworkRow({
   /** Why it is back in the tray: its bill was deleted, maybe as a duplicate (review of wave 2, TD5). */
   const billBack = billDeletedSaid(item);
   /** Why the ⋯ may also say a door: what is already on the card. */
-  const onCard: ("Fix Details" | "Read Again" | "Keep It In Files" | "Set Aside" | "Delete")[] = [];
+  const onCard: ("Fix Details" | "Read Again" | "Keep It in Files" | "Set Aside" | "Delete")[] = [];
   if (readAgainNamed) onCard.push("Read Again");
-  if (mode === "keep") onCard.push("Keep It In Files");
+  if (mode === "keep") onCard.push("Keep It in Files");
   const menuRows = paperMenuRows(r.state, !!item.file_url, onCard);
 
   // A BANK DOWNLOAD is one card: how it sorted, the rows that need a person, Apply / Not Now.
@@ -583,12 +583,12 @@ export function PaperworkRow({
     firstJobAnswer ? (
       <Button onClick={() => fileTo(mode === "photo" ? `photo:${firstJob.id}` : `job:${firstJob.id}`)} disabled={working || !!jobRefusal} title={jobRefusal ?? undefined}>
         {spin(`file:${mode === "photo" ? "photo" : "job"}:${firstJob.id}`) ? <Loader2 className="animate-spin" /> : null}
-        {mode === "photo" ? `Put Photo On ${firstJob.label}` : `Put It On ${firstJob.label}`}
+        {mode === "photo" ? `Put Photo on ${firstJob.label}` : `Put It on ${firstJob.label}`}
         {first.isGuess && <GuessMark />}
       </Button>
     ) : firstFor === "stock" ? (
       <Button onClick={() => fileTo("stock")} disabled={working || !!stockRefusal} title={stockRefusal ?? undefined}>
-        Record To Stock
+        Record to Stock
         {first.isGuess && <GuessMark />}
       </Button>
     ) : firstFor.startsWith("cost:") ? (
@@ -609,7 +609,7 @@ export function PaperworkRow({
     ) : null;
   const anotherJob = (
     <Button variant="outline" onClick={() => toggle("job")} disabled={working || !!jobRefusal} title={jobRefusal ?? undefined} aria-expanded={picking === "job"}>
-      {firstJobAnswer ? "Another Job" : "Pick A Job"}
+      {firstJobAnswer ? "Another Job" : "Pick a Job"}
     </Button>
   );
   const jobPicker =
@@ -623,7 +623,7 @@ export function PaperworkRow({
         onPut={(j) => fileTo(mode === "photo" ? `photo:${j.id}` : `job:${j.id}`)}
         onCancel={() => setPicking(null)}
         busy={working}
-        verb={mode === "photo" ? "Put Photo On" : "Put It On"}
+        verb={mode === "photo" ? "Put Photo on" : "Put It on"}
         refusal={jobRefusal}
       />
     ) : null;
@@ -675,7 +675,7 @@ export function PaperworkRow({
         {firstButton}
         {anotherJob}
         <Button variant="outline" onClick={() => fileTo("keep")} disabled={working || !!keepRefusal} title={keepRefusal ?? undefined}>
-          {spin("keep") ? <Loader2 className="animate-spin" /> : <Archive />} Keep It In Files
+          {spin("keep") ? <Loader2 className="animate-spin" /> : <Archive />} Keep It in Files
         </Button>
         {answer === "else" && changeAnswer}
       </div>
@@ -686,13 +686,13 @@ export function PaperworkRow({
           {suggestTask && (
             <button type="button" onClick={() => run("task", () => makeTaskFromPaper(item.id), `Added a Reminder: "${suggestTask.title}".`)} disabled={working} className={CHIP}>
               {spin("task") ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <ListTodo className="h-4 w-4 shrink-0 text-brand" />}
-              <span className="min-w-0 break-words">Add A Reminder: {suggestTask.title}</span>
+              <span className="min-w-0 break-words">Add a Reminder: {suggestTask.title}</span>
             </button>
           )}
           {suggestKeep && (
             <button type="button" onClick={() => run("note", () => keepAsNote(item.id), "Kept as a note.")} disabled={working} className={CHIP}>
               {spin("note") ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <StickyNote className="h-4 w-4 shrink-0 text-brand" />}
-              Keep As Note
+              Keep as Note
             </button>
           )}
           <span className="text-xs text-slate-500">A suggestion{p.why ? `: ${p.why}` : ""}. Nothing moves until you tap it.</span>
@@ -710,7 +710,7 @@ export function PaperworkRow({
           <Camera /> Job Photo
         </Button>
         <Button variant="outline" onClick={() => run("cost", () => readAsCost(item.id))} disabled={working}>
-          {spin("cost") ? <Loader2 className="animate-spin" /> : <Receipt />} {spin("cost") ? "Reading…" : "Bill Or Receipt"}
+          {spin("cost") ? <Loader2 className="animate-spin" /> : <Receipt />} {spin("cost") ? "Reading…" : "Bill or Receipt"}
         </Button>
         <Button variant="outline" onClick={() => setAnswer("else")} disabled={working}>
           <FileText /> Something Else
@@ -742,11 +742,11 @@ export function PaperworkRow({
       </Button>
     ) : r.state === "too_big" || r.state === "needs_total" ? (
       <Button onClick={() => setFixing(true)} disabled={working}>
-        <Pencil /> Fix Details: Put The Total In
+        <Pencil /> Fix Details: Put the Total In
       </Button>
     ) : r.state === "supplier_documents" ? (
       <Button onClick={() => run("ced", () => addSupplierDocuments(item.id), "Added to the supplier documents.")} disabled={working}>
-        {spin("ced") ? <Loader2 className="animate-spin" /> : <BookOpen />} Add To Supplier Documents
+        {spin("ced") ? <Loader2 className="animate-spin" /> : <BookOpen />} Add to Supplier Documents
       </Button>
     ) : null;
 
@@ -776,9 +776,9 @@ export function PaperworkRow({
                   {spin("read") ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <RotateCcw className="h-4 w-4 shrink-0" />} Read Again
                 </button>
               )}
-              {menuRows.includes("Keep It In Files") && (
+              {menuRows.includes("Keep It in Files") && (
                 <button type="button" className={MENU_ROW} onClick={() => run("keep", () => keepPaperwork(item.id), "Kept in files.")} disabled={working}>
-                  <Archive className="h-4 w-4 shrink-0" /> Keep It In Files
+                  <Archive className="h-4 w-4 shrink-0" /> Keep It in Files
                 </button>
               )}
               {menuRows.includes("Set Aside") && (
@@ -825,10 +825,10 @@ export function PaperworkRow({
                 {item.signedUrl ? (
                   /\.pdf($|\?)/i.test(item.signedUrl) || /\.pdf$/i.test(String(item.file_url ?? "")) ? (
                     <a href={item.signedUrl} target="_blank" rel="noopener noreferrer" className="flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
-                      Open The PDF
+                      Open the PDF
                     </a>
                   ) : (
-                    <a href={item.signedUrl} target="_blank" rel="noopener noreferrer" className="block" title="Open The Paper">
+                    <a href={item.signedUrl} target="_blank" rel="noopener noreferrer" className="block" title="Open the Paper">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={item.signedUrl} alt={item.title} className="max-h-[28rem] w-full rounded object-contain" />
                     </a>
@@ -943,7 +943,7 @@ export function PaperworkRow({
       </div>
       {shelfSheet && (
         <ShelfTicketSheet
-          title="File It To Stock"
+          title="File It to Stock"
           lines={shelfRowsOf(item).map(
             (l): ShelfCountLine => ({
               key: String(l.index),
@@ -955,7 +955,7 @@ export function PaperworkRow({
             }),
           )}
           total={rowTotal}
-          fileLabel="File It To Stock"
+          fileLabel="File It to Stock"
           onClose={() => setShelfSheet(null)}
           onFile={async (choices) => {
             const res = await fileItem(item.id, { type: "stock", lines: choices }, { differentPurchase: shelfSheet.differentPurchase });

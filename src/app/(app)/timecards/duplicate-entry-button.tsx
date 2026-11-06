@@ -22,7 +22,7 @@ type Member = {
 };
 
 /** The words on the door, wherever it is drawn. */
-export const COPY_TO_SOMEONE_ELSE = "Copy To Someone Else…";
+export const COPY_TO_SOMEONE_ELSE = "Copy to Someone Else…";
 
 /**
  * COPY THIS TIMECARD *FOR SOMEBODY* (Erik, 2026-09-18).
@@ -40,7 +40,7 @@ export const COPY_TO_SOMEONE_ELSE = "Copy To Someone Else…";
  *
  * ITS DOOR IS IN THE SHIFT'S EDITOR NOW (Wave 2). It used to be a copy icon on every Timecards
  * row, beside a pencil, on a row whose whole face already opens the editor. The row lost both; the
- * editor (edit-entry-button.tsx) draws "Copy To Someone Else…" beside Split This Shift through
+ * editor (edit-entry-button.tsx) draws "Copy to Someone Else…" beside Split This Shift through
  * `trigger`, and the picker behind it is this one, unchanged: the same list, the same toast words,
  * the same-person guard and the member-load fallback.
  */
@@ -59,7 +59,7 @@ export function DuplicateEntryButton({
   /** The org's active members, already fetched by the page for the edit modal. */
   members?: Member[];
   /** Draws the door. It is handed the function that opens the picker. Without one, a plain
-   *  outline "Copy To Someone Else…" button, 44px. */
+   *  outline "Copy to Someone Else…" button, 44px. */
   trigger?: (openPicker: () => void) => ReactNode;
 }) {
   const router = useRouter();

@@ -149,7 +149,7 @@ describe("GET /api/timeclock/long-shift", () => {
     const [org, to, n] = spies.notify[0];
     expect(org).toBe("org-1");
     expect(to).toEqual(["erik-1", "alexa-1"]);
-    expect(n).toMatchObject({ type: "long_shift", title: "Brian Is Still On The Clock", url: "/timecards?entry=entry-b" });
+    expect(n).toMatchObject({ type: "long_shift", title: "Brian Is Still on the Clock", url: "/timecards?entry=entry-b" });
     expect(n.body).toMatch(/^Clocked in Thu 8:00 AM at .+, 10 hours ago\. If the shift is over, Clock Out Brian on Timecards\. At 12 hours Brian is asked\.$/);
     expect(res).toMatchObject({ office_bells: 1, asked: 0, office_buzzes: 0, failed: 0 });
   });
@@ -195,13 +195,13 @@ describe("GET /api/timeclock/long-shift", () => {
     const res = await (await GET(req())).json();
     expect(calls.find((c) => c.table === "time_entries")!.cols).toContain("profiles:profile_id(full_name, role, active, phone, language)");
     expect(spies.push.map(([to, kind, p]) => [to, kind, p.title, p.body])).toEqual([
-      [["brian-1"], "clock_out", "Still On The Clock?", "You've been clocked in at Honeysuckle since Thu 8:00 AM. Tap to set when you stopped."],
-      [["erik-1", "alexa-1"], "long_shift", "Brian Is Still On The Clock", "Clocked in Thu 8:00 AM at Honeysuckle, 12 hours ago. Brian has been asked when the shift ended. Clock Out Brian on Timecards if you know."],
+      [["brian-1"], "clock_out", "Still on the Clock?", "You've been clocked in at Honeysuckle since Thu 8:00 AM. Tap to set when you stopped."],
+      [["erik-1", "alexa-1"], "long_shift", "Brian Is Still on the Clock", "Clocked in Thu 8:00 AM at Honeysuckle, 12 hours ago. Brian has been asked when the shift ended. Clock Out Brian on Timecards if you know."],
       [["larkspur-1"], "clock_out", "¿Sigues en el Reloj?", "Tienes entrada marcada en Honeysuckle desde jue 8:00 am. Toca para poner a qué hora paraste."],
-      [["erik-1", "alexa-1"], "long_shift", "Larkspur Is Still On The Clock", "Clocked in Thu 8:00 AM at Honeysuckle, 12 hours ago. Larkspur has been asked when the shift ended. Clock Out Larkspur on Timecards if you know."],
+      [["erik-1", "alexa-1"], "long_shift", "Larkspur Is Still on the Clock", "Clocked in Thu 8:00 AM at Honeysuckle, 12 hours ago. Larkspur has been asked when the shift ended. Clock Out Larkspur on Timecards if you know."],
     ]);
     expect(spies.notify.map(([, to, n]) => [to, n.type, n.title, n.body, n.url])).toEqual([
-      [["brian-1"], "long_shift", "Still On The Clock?", "You've been clocked in at Honeysuckle since Thu 8:00 AM. Tap to set when you stopped.", "/timeclock"],
+      [["brian-1"], "long_shift", "Still on the Clock?", "You've been clocked in at Honeysuckle since Thu 8:00 AM. Tap to set when you stopped.", "/timeclock"],
       [["larkspur-1"], "long_shift", "¿Sigues en el Reloj?", "Tienes entrada marcada en Honeysuckle desde jue 8:00 am. Toca para poner a qué hora paraste.", "/timeclock"],
     ]);
     expect(res).toMatchObject({ asked: 2, office_buzzes: 2, failed: 0 });

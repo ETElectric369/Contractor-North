@@ -76,7 +76,7 @@ export type ClockResult = {
    *  caller should ask for a stop time instead of closing at now (the Timeclock long-shift block). */
   needsTime?: boolean;
   /** A refusal because the person already has hours there: the shift in the way, so the form can
-   *  offer its door (Put This On <job> for a no-job punch, Open That Shift otherwise). */
+   *  offer its door (Put This on <job> for a no-job punch, Open That Shift otherwise). */
   clash?: OverlapClash;
   /** The time entry the punch wrote or closed (clockIn, clockOut). Also runOnce's result_id. */
   id?: string;
@@ -553,7 +553,7 @@ async function clockInInner(
   const said = offHold ? { warning: offHold } : {};
   // WHEN THE CLOCK CAN'T TELL THE JOB, THE DOOR ASKS (Erik, 2026-09-26). The punch above is saved
   // whatever happens next; `noJob` only tells the door to put one question on screen ("Which Job
-  // Are You On?", with Skip, The Office Will Pick). A punch the person gave a code (Shop, Drive)
+  // Are You On?", with Skip, the Office Will Pick). A punch the person gave a code (Shop, Drive)
   // was named on purpose and is not asked about. The door loads its own choices, so nothing here
   // reads a job list and the clock answers as fast as it always did.
   const id = (made as { id?: string } | null)?.id;
@@ -1780,7 +1780,7 @@ export async function createManualEntry(input: {
   //
   // AND THE REFUSAL HANDS BACK THE SHIFT IN THE WAY (the duplicate punches, 2026-09-26). On 9/19
   // the office billing 41 Larkspur typed Brian's 9/11 again because his punch that day had no job
-  // and the job page never showed it. The form now gets that punch, so it can offer "Put This On
+  // and the job page never showed it. The form now gets that punch, so it can offer "Put This on
   // 41 Larkspur" (the punch's own clock times) instead of a sentence with no door.
   // "Put that shift on the job" only while no invoice bills that punch: the form's door is for an
   // unbilled one, and a billed shift keeps its job (0288).
@@ -2225,7 +2225,7 @@ export async function updateTimeEntry(input: {
   /**
    * A SPLIT SHIFT IS ONE PERSON'S (audit v994 SW7; 0319 refuses it underneath). Handing one piece
    * of a split shift (or its first entry) to somebody else left one "Split from one shift" bracket
-   * across two people, with no Join Back and no Move The Split. Said here first, in the same words.
+   * across two people, with no Join Back and no Move the Split. Said here first, in the same words.
    */
   if (input.profile_id && input.profile_id !== stored.profile_id) {
     let splitShift = !!stored.split_from;
@@ -2501,7 +2501,7 @@ export async function shiftClaim(entryId: string): Promise<{ ok: true; holder: C
 }
 
 /**
- * Join Back Into One Shift, and the Undo after a split: two touching parts of one person's shift
+ * Join Back into One Shift, and the Undo after a split: two touching parts of one person's shift
  * become the first one again. The database refuses it unless both parts are billed by the same
  * lines (or neither), paid the same way and at the same rate. Office only.
  */
@@ -2519,7 +2519,7 @@ export async function joinTimeEntries(input: { left_id: string; right_id: string
 }
 
 /**
- * Move The Split: slide the time where one part ends and the next begins. Never reorders. Allowed
+ * Move the Split: slide the time where one part ends and the next begins. Never reorders. Allowed
  * on billed parts when both parts are billed by the same lines (a typo is a typo: 0261's C7 rule),
  * and the answer names every invoice whose part changed length, because that invoice keeps the
  * figure it went out with. Between parts billed differently the database refuses it (0288): the
@@ -2662,7 +2662,7 @@ export async function deleteTimeEntry(id: string): Promise<ClockResult> {
    * A split family is "the FIRST entry, and every piece whose split_from points at it" (0288,
    * lib/split-family). split_from is `on delete set null`, so deleting that first entry nulls every
    * survivor's pointer at once: the pieces still touch to the second, but splitFamilies finds no family,
-   * splitNeighbors finds no neighbours, Timecards draws neither Move The Split nor Join Back Into One
+   * splitNeighbors finds no neighbours, Timecards draws neither Move the Split nor Join Back Into One
    * Shift, and join_time_entries itself refuses them ("those two entries were not split from one shift",
    * 0320). The shift's own history is gone, with nothing deleted to explain it.
    *
@@ -2896,7 +2896,7 @@ export async function duplicateTimeEntry(
 // (the schedule did not cover that day), nothing asked which job, the job page never showed it, and
 // days later the office, billing the job, typed the day in again. The punch had the real clock
 // times all along. So wherever the office adds hours for a person and a day, the form first shows
-// what that person already has that day, and a shift on no job gets one tap: Put This On <job>.
+// what that person already has that day, and a shift on no job gets one tap: Put This on <job>.
 
 export type DayShift = {
   id: string;
@@ -2936,7 +2936,7 @@ export type DayShifts =
 /**
  * What one person already has on one day (the org's day), for the add-hours forms: Add Time Entry
  * (on Timecards and on the job's Time tab) and Log Hours. Office only. `for_job_id` is the job the
- * form would put the hours on, named back so the door can say "Put This On 41 Larkspur". The answer
+ * form would put the hours on, named back so the door can say "Put This on 41 Larkspur". The answer
  * also says where the schedule put the person that day (scheduledJob, offThatDay), which Add Time
  * Entry starts its Job field on.
  */
@@ -3091,7 +3091,7 @@ export async function putShiftOnJob(input: { entry_id: string; job_id: string })
   return { ok: true, sentence };
 }
 
-/** Undo for Put This On <job>: back to no job, only while it is still on that job. A shift an
+/** Undo for Put This on <job>: back to no job, only while it is still on that job. A shift an
  *  invoice has billed since keeps its job (0288 refuses the move, and the answer says so). */
 export async function takeShiftOffJob(input: { entry_id: string; job_id: string }): Promise<ClockResult> {
   const ctx = await requireStaff();
@@ -3113,7 +3113,7 @@ export async function takeShiftOffJob(input: { entry_id: string; job_id: string 
  * COMPANY TIME: a shift on no job that was the company's own (shop, errands, the office) is filed
  * under the company's non-billable time code, the one labor billing already leaves off invoices
  * (job_codes.billable = false; SHOP when there is one). That is the other way a no-job shift
- * leaves Hours On No Job, and it works whether or not the company shows job codes on its clock.
+ * leaves Hours on No Job, and it works whether or not the company shows job codes on its clock.
  * `undo` puts back the code it had (Undo on the toast), only while it still carries this one.
  */
 export async function fileShiftAsCompanyTime(input: {

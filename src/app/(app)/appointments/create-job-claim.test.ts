@@ -277,7 +277,7 @@ describe("createJobFromAppointment: the job's name is the street, never the visi
 
 /**
  * A FRESH LEAD'S VISIT STARTS A JOB WITH A CONTACT (209451e1). The inspection door books the visit
- * with customer_id null on purpose, so a lead → visit → Start The Job wrote jobs.customer_id = null,
+ * with customer_id null on purpose, so a lead → visit → Start the Job wrote jobs.customer_id = null,
  * stamped the lead won and minted nobody: no contact on the job, no card until money landed. Now
  * the one rule every win uses (customerForInquiry: dedup by phone / email / name, the person's own
  * address, the lead stamped won) mints the card here, and the job, the visit and the lead all carry

@@ -144,7 +144,7 @@ export function AddVendorPrice({
           <div className="col-span-2">
             <Label htmlFor={`${uid}-pick`}>{companyLabel("price_item_option", true)}</Label>
             <Select id={`${uid}-pick`} className="h-11" value={pickShown} onChange={(e) => setPick(e.target.value)}>
-              <option value="">Pick One Of Your Vendors</option>
+              <option value="">Pick One of Your Vendors</option>
               {knownVendors.map((n) => (
                 <option key={n} value={n}>
                   {n}

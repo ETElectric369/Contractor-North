@@ -125,7 +125,7 @@ describe("readinessOf / fileRefusal: nothing is filed by itself, and nothing hal
 
 /**
  * A BILL'S LINES POINT THE SAME WAY AS ITS TOTAL (audit v994 review). The sign was lined up only
- * where the reader read, so a total changed afterwards (Fix Details, It Is A Charge) left the lines
+ * where the reader read, so a total changed afterwards (Fix Details, It Is a Charge) left the lines
  * pointing the other way, and the money readers read the bill as both a return and a charge.
  */
 describe("linesPointWithTotal: the lines follow the total, both ways", () => {
@@ -139,7 +139,7 @@ describe("linesPointWithTotal: the lines follow the total, both ways", () => {
     ]);
   });
 
-  it("a positive total over negative lines (It Is A Charge on a credit memo) turns them back positive", () => {
+  it("a positive total over negative lines (It Is a Charge on a credit memo) turns them back positive", () => {
     const neg = [
       { ...HSG, unit_price: -11.83, amount: -47.32 },
       { ...TAX, unit_price: -4.26, amount: -4.26 },
@@ -276,7 +276,7 @@ describe("where it goes: only the paper picks a job (Erik, 2026-09-24)", () => {
  * the card asks. It is a button a person presses, never a preselected value.
  */
 describe("firstAnswer: the paper's own pick first, else a marked guess, else nothing", () => {
-  it("the paper names the job: Put It On that job, and the sentence says why", () => {
+  it("the paper names the job: Put It on that job, and the sentence says why", () => {
     const marked = receipt({ doc_type: "bill", proposal: { jobId: "job-11", jobFrom: "po", jobHint: "13897 HONEYSUCKLE" } });
     expect(firstAnswer(marked, ["job-11"])).toEqual({
       dest: "job:job-11",
@@ -361,7 +361,7 @@ describe("the card's words (W1-31)", () => {
       readinessOf(receipt({ doc_type: "statement", kind: "job_document" })).sentence,
     ];
     for (const b of bits) expect(b).not.toMatch(/\bFile It\b/);
-    expect(readinessOf(receipt({ doc_type: "statement", kind: "job_document" })).sentence).toContain("Snap Or Note");
+    expect(readinessOf(receipt({ doc_type: "statement", kind: "job_document" })).sentence).toContain("Snap or Note");
   });
 });
 

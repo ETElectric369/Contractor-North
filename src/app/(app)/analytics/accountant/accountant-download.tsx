@@ -11,12 +11,12 @@ import { useOpeningPeriod } from "./period-picker";
  * now") to the browser's download manager, where nobody reads them. So this fetches the file, says
  * any refusal on the card in the route's own words, and saves the file under the route's own name.
  * The mechanics — the fetch that never follows a redirect, the verdict (download-response.ts), the
- * blob link, the iOS shell's share sheet and its Save The File second tap — are useFileDownload
+ * blob link, the iOS shell's share sheet and its Save the File second tap — are useFileDownload
  * (components/download-button.tsx, cn-v1138), shared with the company export; this card keeps its
  * two doors on ONE busy state, one line of words and one kept file.
  *
  * While a newly picked period opens, all three wait, and the page keys this card on the period, so
- * a file kept for Save The File never outlives its period.
+ * a file kept for Save the File never outlives its period.
  */
 export function AccountantDownload({ xlsxHref, csvHref, xlsxName, csvName }: { xlsxHref: string; csvHref: string; xlsxName: string; csvName: string }) {
   const { busy, error, said, ready, get: fetchFile, share } = useFileDownload();
@@ -34,7 +34,7 @@ export function AccountantDownload({ xlsxHref, csvHref, xlsxName, csvName }: { x
         disabled={busy !== null || opening !== null}
         className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-brand px-4 text-sm font-medium text-white disabled:opacity-60"
       >
-        <Download className="h-4 w-4" /> {busy === "xlsx" ? "Making It…" : "Download For Your Accountant"}
+        <Download className="h-4 w-4" /> {busy === "xlsx" ? "Making It…" : "Download for Your Accountant"}
       </button>
       <button
         type="button"
@@ -42,7 +42,7 @@ export function AccountantDownload({ xlsxHref, csvHref, xlsxName, csvName }: { x
         disabled={busy !== null || opening !== null}
         className="inline-flex min-h-[44px] items-center justify-center self-start px-1 text-sm font-medium text-slate-600 underline underline-offset-2 hover:text-slate-900 disabled:opacity-60"
       >
-        {busy === "csv" ? "Making It…" : "Same Thing As CSV Files"}
+        {busy === "csv" ? "Making It…" : "Same Thing as CSV Files"}
       </button>
       {ready && (
         <button
@@ -51,7 +51,7 @@ export function AccountantDownload({ xlsxHref, csvHref, xlsxName, csvName }: { x
           disabled={busy !== null || opening !== null}
           className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
         >
-          <Download className="h-4 w-4" /> Save The File
+          <Download className="h-4 w-4" /> Save the File
         </button>
       )}
       {opening ? (

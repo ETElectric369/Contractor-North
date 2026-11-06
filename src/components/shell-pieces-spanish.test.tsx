@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CATALOGS, dict } from "@/lib/i18n";
 import { ALL_ON } from "@/lib/features";
-import { esTitleCase } from "../../tests/es-function-words";
+import { esTitleCase, titleCaseIn } from "../../tests/title-case-words";
 
 /**
  * THE OFF LINE AND THE DIRECTIONS LINK IN SPANISH (the visit-page-in-Spanish wave, cn-v1144): the two
@@ -47,7 +47,7 @@ describe("the off line speaks Spanish to a Spanish reader", () => {
   it("with no provider the English is the old one, byte for byte", () => {
     expect(en(off(true))).toContain("Panel Map</span> · Off");
     expect(en(off(true))).toContain(">Turn On<");
-    expect(en(off(false))).toContain(" · Off · Ask The Owner");
+    expect(en(off(false))).toContain(" · Off · Ask the Owner");
   });
 });
 
@@ -75,19 +75,15 @@ describe("the directions link", () => {
 
 describe("the shell keys the wave added (sh_)", () => {
   const sh = CATALOGS.find((c) => c.prefix === "sh_")!;
-  const titleCase = (s: string) =>
-    s
-      .replace(/\{\w+\}/g, " ")
-      .split(/\s+/)
-      .filter(Boolean)
-      .every((w) => /^[¿¡]?[\p{Lu}\p{N}&\/+·(—–]/u.test(w));
+  /** English Title Case through the one judge (tests/title-case-words, cn-v1148). */
+  const titleCase = (s: string) => titleCaseIn(s, "en");
 
   it("names the two screens, every English value is the literal it replaced, and each clickable is Title Case in both languages", () => {
     expect(sh.files).toContain("src/components/feature-off-line.tsx");
     expect(sh.files).toContain("src/components/nav-link.tsx");
     const replaced: Record<string, string> = {
       sh_off: "Off",
-      sh_askTheOwner: "Ask The Owner",
+      sh_askTheOwner: "Ask the Owner",
       sh_btn_turnOn: "Turn On",
       sh_btn_turningOn: "Turning On…",
       sh_openIn: "Open in…",

@@ -11,7 +11,7 @@ import { formatPhone } from "@/lib/utils";
 import { cleanEmail, looksLikeHours, phoneDigits, stateCode, type SiteFields } from "./extract";
 
 /**
- * THE ONE SMALL MODEL CALL behind Fill From Their Site. Asked only when the page's own card (JSON-LD,
+ * THE ONE SMALL MODEL CALL behind Fill from Their Site. Asked only when the page's own card (JSON-LD,
  * meta tags, tel:/mailto: links, the words on the page) left a box the person wants empty, and only
  * while Nort is switched on and the company is under its month's AI allowance (the action checks).
  *

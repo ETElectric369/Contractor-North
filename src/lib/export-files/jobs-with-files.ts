@@ -4,7 +4,7 @@ import { customerNamePart } from "@/lib/schedule-options";
 import { capturePhotoPaths, inspectionAnswerPaths, isOwnPath } from "./collect";
 
 /**
- * THE JOBS THAT HAVE FILES, NEWEST FIRST (cn-v1138, the "Files By Job" list under Your Data).
+ * THE JOBS THAT HAVE FILES, NEWEST FIRST (cn-v1138, the "Files by Job" list under Your Data).
  *
  * A job "has files" when a pointer row names one: a documents row, a task's photo, a visit's photo
  * or sheet file, or a pick's picture. The count is DISTINCT keys per job (a task photo that is also

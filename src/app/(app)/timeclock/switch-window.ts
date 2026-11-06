@@ -29,7 +29,7 @@
  *
  * ONE COPY, and every door reads it: switchJob decides the write with it, and every screen that
  * describes a switch BEFORE it happens — the Timeclock panel, the job page's switch sheet and the
- * visit card (with its Start The Job And Clock In sheet) — words its warning with it, so no screen
+ * visit card (with its Start the Job and Clock In sheet) — words its warning with it, so no screen
  * can promise a cut the server is not going to make.
  *
  * A plain module, never "use server": a client door imports it.

@@ -60,18 +60,18 @@ import { PNL_WORDS, materialsWithStock } from "@/lib/analytics/profit-and-loss";
  *                         a business bucket. ONLY THE ROLLS: the rest of a shelf ticket (its Not
  *                         Stock lines, their tax, freight, any part of the total no line covers)
  *                         has no roll behind it, so it is a business cost in Tools & Supplies, not
- *                         shelf money On The Shelf Now could never show (review of Phase 2).
+ *                         shelf money On the Shelf Now could never show (review of Phase 2).
  *                         A piece taken off the shelf later moves cost onto a job's PROFIT only; it
- *                         never adds to a month again. "On The Shelf Now" rides beside it.
+ *                         never adds to a month again. "On the Shelf Now" rides beside it.
  *   · shop stock lost   = pieces written off, counted short or sent back to the supplier, IN THE
  *                         MONTH IT HAPPENED (Phase 4: "a write-off shows in the month written off").
- *                         The cash went when the roll was bought, so that month's Put On The Shelf
- *                         gives the same dollars back: Put On The Shelf -X, Shop Stock Lost +X, and
+ *                         The cash went when the roll was bought, so that month's Put on the Shelf
+ *                         gives the same dollars back: Put on the Shelf -X, Shop Stock Lost +X, and
  *                         Left For You does not move. A supplier's credit tied to a return (0350,
- *                         Return To CED) is money back, in the credit's own month, off Shop Stock
+ *                         Return to CED) is money back, in the credit's own month, off Shop Stock
  *                         Lost: what the pieces cost minus the credit is what the company lost.
  *                         Only rolls bought on a ticket: an opening count was never a month's Put
- *                         On The Shelf, so its pieces going are never a month's loss.
+ *                         On the Shelf, so its pieces going are never a month's loss.
  *   · fuel              = bills and petty cash with no job in the Fuel bucket (0362). A business
  *                         cost like the rest, said on its OWN line and never inside Business Costs
  *                         (Erik, 2026-09-27: "lets make fuel stand out from business costs"); on the
@@ -365,7 +365,7 @@ export type OwnerMoney = {
    */
   ownerDrawSeen: string;
   /** What is on the shelf right now, at cost (every live lot's dollars left). Not a window
-   *  figure: it is the shelf as of the read, shown beside Put On The Shelf. */
+   *  figure: it is the shelf as of the read, shown beside Put on the Shelf. */
   onShelfNow: number;
 };
 
@@ -674,14 +674,14 @@ export type OwnerMoneyCostTarget = "materials" | "stock" | "stock_lost" | Busine
  * and its cents. computeOwnerMoney adds these up month by month and does nothing else with costs,
  * so a list built from them (the accountant's Costs tab) holds exactly the money the figures hold.
  *
- *   · a bill ON A JOB           -> Materials & Bills, less its rolls (a `stock` line: Put On The Shelf)
+ *   · a bill ON A JOB           -> Materials & Bills, less its rolls (a `stock` line: Put on the Shelf)
  *   · a bill with NO job        -> its bucket (a ticket bought for stock: Tools & Supplies), less its
  *                                  rolls; a supplier's credit tied to returned stock -> Shop Stock Lost
  *   · a live purchase order     -> Materials & Bills, on its order day
  *   · petty cash (not a refill) -> Materials & Bills on a job, else its bucket
  *   · a payment's card fee      -> Fees (`card_fee`: processorFees, inside Fees)
  *   · pieces written off, counted short or returned (off a roll bought on a ticket) -> Shop Stock
- *     Lost, with the same dollars taken back off Put On The Shelf that month (`movedOut`)
+ *     Lost, with the same dollars taken back off Put on the Shelf that month (`movedOut`)
  *
  * The rules are the ones spelled out at the top of this file; this is the one place they are written.
  */
@@ -711,7 +711,7 @@ export function ownerMoneyCostLines(inp: OwnerMoneyInputs, tz: string): OwnerMon
 
   // THE SHELF'S PART OF EACH TICKET (0303): its live rolls' cost.
   const shelfByBill = new Map<string, number>();
-  /** The live rolls bought on a ticket: the only ones whose cost is ever a month's Put On The Shelf. */
+  /** The live rolls bought on a ticket: the only ones whose cost is ever a month's Put on the Shelf. */
   const boughtLots = new Set<string>();
   for (const l of inp.shelfLots ?? []) {
     if (!l || l.live === false || !l.bill_id) continue;
@@ -720,11 +720,11 @@ export function ownerMoneyCostLines(inp: OwnerMoneyInputs, tz: string): OwnerMon
   }
 
   // SHOP STOCK LOST, IN THE MONTH IT HAPPENED (Phase 4). A write-off, a count short, or pieces sent
-  // back to the supplier: the dollars leave Put On The Shelf and land in Shop Stock Lost, the same
+  // back to the supplier: the dollars leave Put on the Shelf and land in Shop Stock Lost, the same
   // month, so Left For You never counts the roll twice. A supplier credit tied to a return is money
   // back, taken off Shop Stock Lost in the credit's own month (below, with the bills).
   // ONLY A ROLL BOUGHT ON A TICKET: an opening count (counted in, no receipt) was never a month's
-  // Put On The Shelf in these books, so its pieces going are never a month's loss either (the
+  // Put on the Shelf in these books, so its pieces going are never a month's loss either (the
   // shelf's value now still drops). A credit tied to such a return is still money back.
   const tiedCredits = new Set<string>();
   for (const m of inp.shelfMoves ?? []) {
@@ -739,9 +739,9 @@ export function ownerMoneyCostLines(inp: OwnerMoneyInputs, tz: string): OwnerMon
   }
 
   // MATERIALS & BILLS: exactly the job-cost inputs job profit uses - less what went on the shelf,
-  // which is Put On The Shelf in the same month (decision 1: the month the ticket is dated).
-  // THE SAME RULE FOR EVERY TICKET, shelf ticket or job ticket: Put On The Shelf is the live rolls'
-  // cost and nothing else, so Put On The Shelf - drawn - lost = On The Shelf Now holds to the cent.
+  // which is Put on the Shelf in the same month (decision 1: the month the ticket is dated).
+  // THE SAME RULE FOR EVERY TICKET, shelf ticket or job ticket: Put on the Shelf is the live rolls'
+  // cost and nothing else, so Put on the Shelf - drawn - lost = On the Shelf Now holds to the cent.
   const liveBills = (inp.bills ?? []).filter((b) => b && !b.superseded_by_bill_id);
   const withShelfPart = (b: any, day: string | null, to: OwnerMoneyCostTarget) => {
     const s = shelfByBill.get(String(b.id)) ?? 0;
@@ -761,7 +761,7 @@ export function ownerMoneyCostLines(inp: OwnerMoneyInputs, tz: string): OwnerMon
       continue;
     }
     // BUSINESS COSTS: bills with no job, in their bucket (Fuel's is said on its own line). A ticket
-    // bought for the shelf is its rolls (Put On The Shelf); whatever of it has no roll behind it (Not
+    // bought for the shelf is its rolls (Put on the Shelf); whatever of it has no roll behind it (Not
     // Stock lines, their tax, freight, a roll taken back off) is supplies the business used, in
     // Tools & Supplies - named, never "Other" (bucketOf would call the category "Shop Stock" that).
     withShelfPart(b, day, b.on_shelf === true ? "Tools & Supplies" : bucketOf(b.category));
@@ -993,7 +993,7 @@ export function computeOwnerMoney(
   }
 
   // EVERY COST, ONE LINE AT A TIME (ownerMoneyCostLines): Materials & Bills, the business buckets,
-  // the card fees, Put On The Shelf and Shop Stock Lost. The months only add them up, so the
+  // the card fees, Put on the Shelf and Shop Stock Lost. The months only add them up, so the
   // accountant's Costs list and these figures are one computation.
   const liveBills = (inp.bills ?? []).filter((b) => b && !b.superseded_by_bill_id);
   for (const l of ownerMoneyCostLines(inp, tz)) {
@@ -1887,7 +1887,7 @@ export async function readOwnerMoneyInputs(
     ),
     readEvery<any>("supplier payments", (f, t) =>
       // `reference` is what 0270 calls "Check number, confirmation code, whatever he can match to his
-      // bank", and `note` is why. Without them the accountant's Each Payment To A Supplier had no
+      // bank", and `note` is why. Without them the accountant's Each Payment to a Supplier had no
       // check number at all while Each Payment Handed Over on People did - the same question, two
       // answers, because one read asked for the column and the other didn't.
       supabase.from("supplier_payments").select("id, supplier_account_id, amount, paid_on, method, voided_at, reference, note").order("id").range(f, t),

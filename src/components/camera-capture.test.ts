@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 /**
  * THE CAMERA MODAL ON SCREEN, phase by phase ("camera was black", Erik 2026-09-24). The shutter
  * is shut until a real picture arrives; a black capture gets a sentence, never Use Photo; a
- * camera that can't open says why; "Choose A Photo Instead" is there in every state; the picker
+ * camera that can't open says why; "Choose a Photo Instead" is there in every state; the picker
  * appears when there is more than one camera.
  */
 
@@ -60,8 +60,8 @@ describe("CameraCaptureView", () => {
     const html = render("starting");
     expect(html).toContain("Waiting for the camera…");
     expect(isDisabled(button(html, "Capture"))).toBe(true);
-    expect(button(html, "Choose A Photo Instead")).not.toBeNull();
-    expect(isDisabled(button(html, "Choose A Photo Instead"))).toBe(false);
+    expect(button(html, "Choose a Photo Instead")).not.toBeNull();
+    expect(isDisabled(button(html, "Choose a Photo Instead"))).toBe(false);
     expect(html).not.toContain("Use Photo");
     // The video is mounted from the start, muted and inline, so WebKit will play it.
     expect(html).toMatch(/<video[^>]*autoplay=""[^>]*playsinline=""[^>]*muted=""/i);
@@ -86,7 +86,7 @@ describe("CameraCaptureView", () => {
     expect(html).toContain('role="alert"');
     expect(html).not.toContain("Use Photo");
     expect(button(html, "Try Again")).not.toBeNull();
-    expect(button(html, "Choose A Photo Instead")).not.toBeNull();
+    expect(button(html, "Choose a Photo Instead")).not.toBeNull();
     // A refused capture is never laid over the preview as if it were the picture.
     expect(html).not.toContain('alt="Captured"');
   });
@@ -113,7 +113,7 @@ describe("CameraCaptureView", () => {
     expect(html.replace(/&#x27;/g, "'")).toContain(line);
     expect(button(html, "Try Again")).not.toBeNull();
     expect(button(html, "Close")).not.toBeNull();
-    expect(button(html, "Choose A Photo Instead")).not.toBeNull();
+    expect(button(html, "Choose a Photo Instead")).not.toBeNull();
     expect(html).not.toContain("Use Photo");
   });
 
@@ -146,7 +146,7 @@ describe("CameraCaptureView", () => {
   it("the photo door is an image file input with no capture attribute (a file, not another camera)", () => {
     for (const phase of ["starting", "live", "encoding", "shot", "refused", "failed"] as CameraPhase[]) {
       const html = render(phase, { message: phase === "failed" || phase === "refused" ? "x" : null });
-      expect(button(html, "Choose A Photo Instead")).not.toBeNull();
+      expect(button(html, "Choose a Photo Instead")).not.toBeNull();
       const input = html.match(/<input[^>]*type="file"[^>]*>/)?.[0] ?? "";
       expect(input).toContain('accept="image/*"');
       expect(input).not.toContain("capture");
@@ -164,7 +164,7 @@ describe("CameraCaptureView", () => {
       /class="[^"]*\bshrink-0\b[^"]*items-center justify-between/, // header
       /class="relative [^"]*\bshrink-0\b/, // the video box
       /<p role="status" class="[^"]*\bshrink-0\b/, // the dark-preview line
-      /class="flex shrink-0 flex-col gap-2/, // picker + Capture + Choose A Photo Instead
+      /class="flex shrink-0 flex-col gap-2/, // picker + Capture + Choose a Photo Instead
     ]) {
       expect(html).toMatch(cls);
     }
@@ -172,7 +172,7 @@ describe("CameraCaptureView", () => {
 
   it("Title Case and 44px: the close is a labelled 44px icon, the rest are h-11 or taller", () => {
     const html = render("failed", { message: "x", cameras: TWO });
-    expect(html).toContain("Take A Photo");
+    expect(html).toContain("Take a Photo");
     const close = html.match(/<button[^>]*aria-label="Close"[^>]*>/)?.[0] ?? "";
     expect(close).toMatch(/class="[^"]*\bh-11 w-11\b/);
     for (const m of html.matchAll(/<button[^>]*class="([^"]*)"/g)) expect(m[1]).toMatch(/\bh-1[12]\b/);

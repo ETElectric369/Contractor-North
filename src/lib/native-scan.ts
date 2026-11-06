@@ -255,7 +255,7 @@ export type ArPreviewResult = { ok: true } | { ok: false; refused: string };
 /** Stage the model in the shell and open it in Quick Look; resolves when the viewer closes. */
 export async function openInAr(bytes: Uint8Array, name: string): Promise<ArPreviewResult> {
   const p = plugin();
-  if (!p?.stageFile || !p.stageChunk || !p.previewFile) return { ok: false, refused: "Open In AR needs the North app on an iPhone." };
+  if (!p?.stageFile || !p.stageChunk || !p.previewFile) return { ok: false, refused: "Open in AR needs the North app on an iPhone." };
   if (!bytes.length || bytes.length > MODEL_MAX_BYTES) return { ok: false, refused: "This model is too big to open in AR here." };
   let path = "";
   try {

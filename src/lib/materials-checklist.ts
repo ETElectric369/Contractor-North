@@ -103,12 +103,12 @@ export function tickWord(line: ChecklistLine): "Got" | "Bought" {
   return line.is_tool ? "Got" : "Bought";
 }
 
-/** How long a crew member's Tell The Office ask may be AS A LINE. The line is a thing to buy: it rides
+/** How long a crew member's Tell the Office ask may be AS A LINE. The line is a thing to buy: it rides
  *  the Materials badge, Buy Materials, the PO seed and the pick-list print, so it stays a line's
  *  length (the old task title's 120). The whole ask still reaches the office, in the bell. */
 export const ASK_LINE_MAX = 120;
 
-/** The list line a Tell The Office ask becomes: one line (newlines and runs of spaces folded), and
+/** The list line a Tell the Office ask becomes: one line (newlines and runs of spaces folded), and
  *  at most ASK_LINE_MAX characters, cut at a word where one is near and marked "…" when cut. */
 export function askLine(text: string): string {
   const one = String(text ?? "").replace(/\s+/g, " ").trim();

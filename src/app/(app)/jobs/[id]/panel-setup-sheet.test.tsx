@@ -8,7 +8,7 @@ import { renderToStaticMarkup } from "react-dom/server";
  * door table knows as chips, and the door measured once under Door Labels — Space Pitch and Label
  * Width, each blank by default with the make's size as its placeholder (an inch on a Siemens, three
  * quarters a space on an Eaton CH; 1.125 in of label on a Siemens), and a Right Side Width only
- * behind Different On The Right. A blank field is the make's default: the write clears it.
+ * behind Different on the Right. A blank field is the make's default: the write clears it.
  */
 
 vi.mock("@/components/toast", () => ({ useToast: () => () => {} }));
@@ -85,8 +85,8 @@ describe("Door Labels: the door measured once", () => {
     expect(html).toContain("Measure the label area beside the breakers once; the printed strips use it.");
     expect(placeholderOf(html, "Space Pitch")).toBe("1");
     expect(placeholderOf(html, "Label Width")).toBe("1.125");
-    expect(html).toContain("Different On The Right");
-    // The right side's own width hides behind Different On The Right.
+    expect(html).toContain("Different on the Right");
+    // The right side's own width hides behind Different on the Right.
     expect(html).not.toContain("Right Side Width");
   });
 
@@ -121,6 +121,6 @@ describe("a new panel", () => {
     const html = draw(null);
     expect(html).toContain('value="Panel 1"');
     expect(buttons(html).map((b) => b.text)).toContain("Add New Panel");
-    expect(html).not.toContain("Add The Panel");
+    expect(html).not.toContain("Add the Panel");
   });
 });

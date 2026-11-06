@@ -22,19 +22,19 @@ const calendarWordsEn = calendarWords.en;
  * so each line this wave rewrote is checked against the code that makes it true.
  */
 describe("Nort's product map after the shell wave", () => {
-  it("names Search Or Ask, not the graduation cap, and what is inside it", () => {
+  it("names Search or Ask, not the graduation cap, and what is inside it", () => {
     expect(NORT_PRODUCT_MAP).not.toMatch(/graduation cap|the cap\b/i);
     expect(NORT_PRODUCT_MAP).toContain(
-      "Search Or Ask (top bar): search anything, or ask Nort (Talk To Nort, or type); Start Here, Finish Setting Up and Show Me How live inside it (Nort off: Search, and those rows under Help in the avatar menu).",
+      "Search or Ask (top bar): search anything, or ask Nort (Talk to Nort, or type); Start Here, Finish Setting Up and Show Me How live inside it (Nort off: Search, and those rows under Help in the avatar menu).",
     );
-    // True in code: the rows exist, with those names, and Talk To Nort leads the sheet.
+    // True in code: the rows exist, with those names, and Talk to Nort leads the sheet.
     const labels = helpRows({ isStaff: true, onboarded: false, setup: {}, nortOn: true, features: ALL_ON }).map((r) => r.label);
     expect(labels).toEqual(expect.arrayContaining(["Start Here", "Show Me How"]));
     const withOpen = helpRows({ isStaff: true, onboarded: true, setup: {}, nortOn: true, features: ALL_ON }).map((r) => r.label);
     expect(withOpen.some((l) => l.startsWith("Finish Setting Up"))).toBe(true);
-    // The row's words live in the shell catalog since cn-v1138 (sh_talkToNort: "Talk To Nort" / "Hablar Con Nort").
+    // The row's words live in the shell catalog since cn-v1138 (sh_talkToNort: "Talk to Nort" / "Hablar Con Nort").
     expect(readFileSync(join(process.cwd(), "src/components/command-bar.tsx"), "utf8")).toContain('label: t("sh_talkToNort")');
-    expect(translator("en")("sh_talkToNort")).toBe("Talk To Nort");
+    expect(translator("en")("sh_talkToNort")).toBe("Talk to Nort");
   });
 
   it("puts Customers under Sales, Timecards under Money, and Office and Tools behind the initials", () => {
@@ -140,15 +140,15 @@ describe("Nort's product map after the shell wave", () => {
     expect(NORT_PRODUCT_MAP).not.toMatch(/Business Costs|Left For You|Net Profit \(before income tax\)/);
   });
 
-  it("names the Schedule's doors by the words on them: Add To Schedule, This Day, Offer Dates", () => {
+  it("names the Schedule's doors by the words on them: Add to Schedule, This Day, Offer Dates", () => {
     const line = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Schedule (/schedule)"))!;
-    for (const part of ["Add To Schedule", "This Day", "Offer Dates", "Nobody", "two hours"]) expect(line, part).toContain(part);
-    // True in code: the open spots and the day view's button say Add To Schedule, the sheet saves
+    for (const part of ["Add to Schedule", "This Day", "Offer Dates", "Nobody", "two hours"]) expect(line, part).toContain(part);
+    // True in code: the open spots and the day view's button say Add to Schedule, the sheet saves
     // with it, the block's sheet says This Day, the chips say Nobody, and a pick with no length
     // gets two hours (0370's job_takes_picked_day: 120 minutes).
     const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
     expect(src("src/components/time-grid.tsx")).toContain('addLabelProp ?? t("ag_cal_btn_addToSchedule")');
-    expect(calendarWordsEn.ag_cal_btn_addToSchedule).toBe("Add To Schedule");
+    expect(calendarWordsEn.ag_cal_btn_addToSchedule).toBe("Add to Schedule");
     expect(src("src/app/(app)/calendar/calendar-view.tsx")).toContain('<Plus className="h-4 w-4" /> {t("ag_cal_btn_addToSchedule")}');
     expect(src("src/app/(app)/schedule/add-to-schedule-sheet.tsx")).toContain('saveLabel={t("ag_rail_btn_addToSchedule")}');
     expect(src("src/app/(app)/schedule/tile-sheet.tsx")).toContain('t(dayHours ? "ag_cal_thisDayOwnHours" : "ag_cal_thisDayOnly"), { day: dw(day) }');
@@ -163,7 +163,7 @@ describe("Nort's product map after the shell wave", () => {
      them here. Each is checked the way this file checks every other line: the words Nort reads, and
      then the code that makes them true. Lane 6 (one lead link, Nort's words) is NOT in this release;
      when it lands and rewrites these lines, it keeps these facts or changes the code first. */
-  it("Add By Hand says it CAN put stock in, because now it does (W1-FU-misc B)", () => {
+  it("Add by Hand says it CAN put stock in, because now it does (W1-FU-misc B)", () => {
     const line = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Money → Bills (/bills)"))!;
     // The old claim was the opposite, and the typed sheet now disproves it.
     expect(line).not.toMatch(/never adds stock/);
@@ -202,14 +202,14 @@ describe("Nort's product map after the shell wave", () => {
 
   it("names what a past day and a dateless job now do on the Schedule (SV-actual, SV-ghost, W2-05)", () => {
     const line = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Schedule (/schedule)"))!;
-    for (const part of ["hollow", "Book This Day", "Waiting For A Day", "Undo"]) expect(line, part).toContain(part);
+    for (const part of ["hollow", "Book This Day", "Waiting for a Day", "Undo"]) expect(line, part).toContain(part);
     // Booking a worked day touches that day ONLY — the sentence promises it, the writer must keep it.
     expect(line).toContain("not the job's status, its listed day or any hold");
     // True in code: the ghost's own door, the rail's heading, and the past-only read behind it.
     const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
     expect(src("src/app/(app)/schedule/ghost-sheet.tsx")).toContain("Book This Day");
     expect(src("src/app/(app)/schedule/page.tsx")).toContain('t("nv_sched_waitingForADay")');
-    expect(nav.en.nv_sched_waitingForADay).toBe("Waiting For A Day");
+    expect(nav.en.nv_sched_waitingForADay).toBe("Waiting for a Day");
     expect(src("src/app/(app)/schedule/actions.ts")).toMatch(/export async function bookWorkedDay/);
     // bookWorkedDay never promotes: that is the whole difference from addJobDay.
     expect(src("src/app/(app)/schedule/actions.ts")).toMatch(/promote: false/);

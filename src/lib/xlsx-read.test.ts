@@ -3,7 +3,7 @@ import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { InflateTooBig, InflateUnavailable, readXlsx, sharedStringsOf, sheetRowsOf, xmlText } from "./xlsx-read";
 
 /**
- * The zero-dependency .xlsx reader behind Import A List (vendor import, Phase 1).
+ * The zero-dependency .xlsx reader behind Import a List (vendor import, Phase 1).
  *
  * Every workbook here is BUILT in the test from made-up names: a real customer's vendor file never
  * goes in this repo (it is public). The zip is written the way Excel writes it (deflated parts,

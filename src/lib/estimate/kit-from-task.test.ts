@@ -179,7 +179,7 @@ describe("rememberKit: one name, one kit; codes link to the book; no half a kit"
     );
     const r = await rememberKit(sb, value);
     expect(r.ok).toBe(false);
-    expect(r.error).toContain("press Save The Kit again");
+    expect(r.error).toContain("press Save the Kit again");
     expect(tables.kits).toEqual([]);
   });
 

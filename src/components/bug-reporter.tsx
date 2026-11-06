@@ -35,7 +35,7 @@ async function captureScreen(): Promise<Blob | null> {
   }
 }
 
-/** One-tap Report A Problem, for EVERYONE in the company (Wave 0; the insert policy always let any
+/** One-tap Report a Problem, for EVERYONE in the company (Wave 0; the insert policy always let any
  *  member file, 0082/0135). Auto-attaches the page, captured console errors, browser/viewport +
  *  reporter to each report. The recent-reports list and Mark Fixed are North's own triage, so they
  *  show only for a platform admin (`platformAdmin`); a company never sees its bug list.
@@ -164,8 +164,8 @@ export function BugReporter({
         onClick={openPanel}
         data-bug-ignore="1"
         disabled={capturing}
-        title="Report A Problem"
-        aria-label="Report A Problem"
+        title="Report a Problem"
+        aria-label="Report a Problem"
         // /content has no mobile bottom nav to clear, so the collaborator mount sits at the corner.
         // In-app the clearance must follow the SHELL rule, not a width rule: the old `sm:bottom-4`
         // dropped the FAB onto the glass bottom nav on any coarse-pointer viewport 640-1023px wide
@@ -179,7 +179,7 @@ export function BugReporter({
         {capturing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Bug className="h-5 w-5" />}
       </button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Report A Problem">
+      <Modal open={open} onClose={() => setOpen(false)} title="Report a Problem">
         <div className="space-y-4">
           {sent ? (
             <div className="flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">

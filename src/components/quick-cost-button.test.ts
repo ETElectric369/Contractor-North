@@ -5,17 +5,17 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 /**
  * TYPE IT IN: THE ONE TYPED COST SHEET (W1-23, W1-32). The job's Costs tab ⋯ opens it with the job
- * preselected; /bills' Add By Hand opens it with the job picker first. It replaced the Costs tab's
- * Add Bill sheet, /bills' Add Business Cost and its Add A Bill By Hand fold, so the rules those
+ * preselected; /bills' Add by Hand opens it with the job picker first. It replaced the Costs tab's
+ * Add Bill sheet, /bills' Add Business Cost and its Add a Bill by Hand fold, so the rules those
  * three carried are pinned here, on the one sheet:
  *   · a blank job is not a business cost, and no bucket is picked for him;
  *   · On Account (still owed) is never saved as paid;
  *   · a business cost with no Where is saved under its bucket's own name;
  *   · Shop Stock (switch on only) saves from the sheet (W1-FU-misc B): what it is, how many, in what
- *     unit and where, into stock through addStockPurchase, with the ticket's door (Snap Or Note) one
+ *     unit and where, into stock through addStockPurchase, with the ticket's door (Snap or Note) one
  *     quiet line away. It used to be only that door, and it threw away what was typed.
  *
- * NORT'S PRODUCT MAP still says Add By Hand never adds stock: lane 6 (the wave's words) rewrites that
+ * NORT'S PRODUCT MAP still says Add by Hand never adds stock: lane 6 (the wave's words) rewrites that
  * Money → Bills line and pins it in nort-product-map.test.ts. This file no longer pins the old words.
  */
 
@@ -115,7 +115,7 @@ describe("what the typed sheet hands addStockPurchase", () => {
     // Nothing typed is thrown away unless he chooses it; with nothing typed, the door just opens.
     const door = src.slice(src.indexOf("function openTheTicketDoor("), src.indexOf("function save("));
     expect(door).toContain("const typed = amount > 0 || !!where.trim() || !!billNumber.trim() || !!stockItem || !!stockName.trim() || stockPieces > 0 || !!stockUnit.trim();");
-    expect(door).toContain('if (typed && !window.confirm("Open Snap Or Note? What you typed here won\'t be saved.")) return;');
+    expect(door).toContain('if (typed && !window.confirm("Open Snap or Note? What you typed here won\'t be saved.")) return;');
     expect(door.indexOf("window.confirm")).toBeLessThan(door.indexOf("openSnapOrNote()"));
   });
 });
@@ -157,7 +157,7 @@ describe("what the typed sheet hands createBill", () => {
 
 describe("the reader failed and the typed figure was saved instead", () => {
   const LINK_WARNING =
-    "The cost is recorded, but its receipt did not get marked as billed. On the job's Costs tab it will say Not On A Bill Yet: tie it to this bill there, rather than Record As Cost (that would write a second bill).";
+    "The cost is recorded, but its receipt did not get marked as billed. On the job's Costs tab it will say Not on a Bill Yet: tie it to this bill there, rather than Record as Cost (that would write a second bill).";
 
   it("with the paper linked to the bill, the sentence says so: receipt attached", () => {
     expect(readerFallbackLine({ typedAmount: 84.1, readerError: "unreadable file" })).toBe(
@@ -192,15 +192,15 @@ describe("the reader failed and the typed figure was saved instead", () => {
 
 describe("the sheet as it is drawn", () => {
   const JOBS = [{ id: "job-011", label: "13897 Honeysuckle · J-011" }];
-  const bills = renderToStaticMarkup(createElement(QuickCostButton, { typeOnly: true, jobs: JOBS, label: "Add By Hand", icon: "none" }));
+  const bills = renderToStaticMarkup(createElement(QuickCostButton, { typeOnly: true, jobs: JOBS, label: "Add by Hand", icon: "none" }));
 
-  it("Add By Hand opens Type It In: What's It For? with the job picker first, then Business Cost", () => {
+  it("Add by Hand opens Type It In: What's It For? with the job picker first, then Business Cost", () => {
     expect(bills).toContain('data-sheet="Type It In"');
     const t = text(bills);
     expect(t).toContain("What's It For?");
     const select = bills.match(/<select[^>]*id="ti-job"[^>]*>([\s\S]*?)<\/select>/)!;
     expect(select).not.toBeNull();
-    expect(text(select[1]).trim().startsWith("Pick A Job")).toBe(true);
+    expect(text(select[1]).trim().startsWith("Pick a Job")).toBe(true);
     expect(select[1]).toContain("13897 Honeysuckle · J-011");
     const business = buttons(bills).find((b) => b.words === "Business Cost")!;
     expect(business.attrs).toContain("min-h-11");
@@ -208,10 +208,10 @@ describe("the sheet as it is drawn", () => {
   });
 
   it("no jobs yet and a jobs read that failed get different sentences (a failed read is never 'no jobs')", () => {
-    const none = text(renderToStaticMarkup(createElement(QuickCostButton, { typeOnly: true, jobs: [], label: "Add By Hand", icon: "none" })));
+    const none = text(renderToStaticMarkup(createElement(QuickCostButton, { typeOnly: true, jobs: [], label: "Add by Hand", icon: "none" })));
     expect(none).toContain("No jobs to pick from yet. A cost with no job is a Business Cost.");
     expect(none).not.toContain(JOBS_UNREAD_LINE);
-    const failed = renderToStaticMarkup(createElement(QuickCostButton, { typeOnly: true, jobs: [], jobsUnread: true, label: "Add By Hand", icon: "none" }));
+    const failed = renderToStaticMarkup(createElement(QuickCostButton, { typeOnly: true, jobs: [], jobsUnread: true, label: "Add by Hand", icon: "none" }));
     expect(text(failed)).toContain(JOBS_UNREAD_LINE);
     expect(text(failed)).not.toContain("No jobs to pick from yet");
     expect(failed).toMatch(/role="alert"/);
@@ -263,7 +263,7 @@ describe("the sheet as it is drawn", () => {
     for (const w of ["What Is It?", "How Many", "Unit"]) expect(t).toContain(w);
     const select = html.match(/<select[^>]*id="ti-item"[^>]*>([\s\S]*?)<\/select>/)!;
     const options = Array.from(select[1].matchAll(/<option[^>]*>([\s\S]*?)<\/option>/g)).map((m) => text(m[1]).trim());
-    expect(options).toEqual(["Pick An Item", "New Item", "12/2 NM-B (ft)", "Wire Nuts, Red (box)"]);
+    expect(options).toEqual(["Pick an Item", "New Item", "12/2 NM-B (ft)", "Wire Nuts, Red (box)"]);
     expect(html).not.toContain("$");
     // No name box until New Item is picked.
     expect(html).not.toContain('id="ti-item-name"');
@@ -294,10 +294,10 @@ describe("the sheet as it is drawn", () => {
 
   it("one quiet line under them: the ticket's own door, 44px and Title Case", () => {
     const html = renderToStaticMarkup(createElement(StockTicketLine, { onOpen: () => {} }));
-    expect(text(html)).toContain("Have the ticket? Snap Or Note reads every line.");
-    const door = buttons(html).find((b) => b.words === "Open Snap Or Note")!;
+    expect(text(html)).toContain("Have the ticket? Snap or Note reads every line.");
+    const door = buttons(html).find((b) => b.words === "Open Snap or Note")!;
     expect(door.attrs).toContain("min-h-11");
-    expect(STOCK_HAVE_THE_TICKET).toBe("Have the ticket? Snap Or Note reads every line.");
+    expect(STOCK_HAVE_THE_TICKET).toBe("Have the ticket? Snap or Note reads every line.");
   });
 
   it("Paid? starts on Already Paid, with On Account (Still Owed) beside it, both 44px", () => {
@@ -316,8 +316,8 @@ describe("the sheet as it is drawn", () => {
     expect(bills).toMatch(/data-save="">Save Cost</);
   });
 
-  it("the trigger is the words alone for Add By Hand, and the Costs tab's row names Type It In", () => {
-    expect(buttons(bills)[0].words).toBe("Add By Hand");
+  it("the trigger is the words alone for Add by Hand, and the Costs tab's row names Type It In", () => {
+    expect(buttons(bills)[0].words).toBe("Add by Hand");
     const costs = renderToStaticMarkup(createElement(QuickCostButton, { typeOnly: true, jobId: "job-011" }));
     expect(buttons(costs)[0].words).toBe("Type It In");
     // The job is preselected there: no picker, and the sheet says which cost it is.
@@ -334,9 +334,9 @@ describe("the sheet as it is drawn", () => {
     expect(said.filter((w) => w.includes("Receipts & Papers"))).toEqual([]);
     const mod = await import("./quick-cost-button");
     // Before a save: one door or the other, named where it is.
-    expect(mod.NO_PICKER_LINE("your photos")).toContain("Snap The Bill on the job's Costs tab");
+    expect(mod.NO_PICKER_LINE("your photos")).toContain("Snap the Bill on the job's Costs tab");
     expect(mod.NO_PICKER_LINE("your photos")).toContain("Not both");
-    // After a save: Retry Receipt, because Snap The Bill or Upload would record it again.
+    // After a save: Retry Receipt, because Snap the Bill or Upload would record it again.
     expect(mod.RETRY_HERE_LINE).toContain("tap Retry Receipt");
     expect(mod.RETRY_HERE_LINE).toContain("record the cost a second time");
     expect(src).toContain("Cost saved ✓ — but the receipt ${attachClause()}. ${RETRY_HERE_LINE}");
@@ -346,7 +346,7 @@ describe("the sheet as it is drawn", () => {
   it("the Now card's sheet is the snap sheet, as before (Add Cost, the receipt block)", () => {
     const now = renderToStaticMarkup(createElement(QuickCostButton, { jobId: "job-011", snapFirst: true }));
     expect(buttons(now)[0].words).toBe("Add Cost");
-    expect(now).toContain('data-sheet="Add A Cost"');
+    expect(now).toContain('data-sheet="Add a Cost"');
     expect(now).not.toContain('data-sheet="Type It In"');
   });
 

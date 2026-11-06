@@ -149,7 +149,7 @@ describe("the job's list, among every list on a set of jobs", () => {
   });
 });
 
-describe("a Tell The Office ask, as a line", () => {
+describe("a Tell the Office ask, as a line", () => {
   it("a short ask is the line, folded onto one line", () => {
     expect(askLine("  Two 3-gang faceplates \n need them tomorrow ")).toBe("Two 3-gang faceplates need them tomorrow");
   });

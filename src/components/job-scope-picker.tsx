@@ -14,7 +14,7 @@ import { scopeOptions, scopeSelected } from "@/lib/bill-scope";
  * from the tray or ask Nort and the same $900 of decking landed under nothing — and no screen could
  * set it afterwards.
  *
- * ONE PLACE, so four doors cannot drift: the words ("Part Of The Job"), the options, when the
+ * ONE PLACE, so four doors cannot drift: the words ("Part of the Job"), the options, when the
  * question appears at all, and what it does when the estimate can't be read all live here.
  *   · no job picked yet, or this job's estimate isn't broken into parts → NOTHING is drawn. There is
  *     nothing to ask, and an empty dropdown is a dead end.
@@ -24,7 +24,7 @@ import { scopeOptions, scopeSelected } from "@/lib/bill-scope";
  */
 /**
  * THE JOB'S PARTS, read once per screen that needs them — the picker, and the Costs tab (which only
- * says "No Part Of The Job Set" on a job that HAS parts: on a job whose estimate isn't broken into
+ * says "No Part of the Job Set" on a job that HAS parts: on a job whose estimate isn't broken into
  * parts there is no gap to name and no door to fix it, so saying it would be a dead end).
  *
  * `scopes` is null while it is still reading. `unread` is the sentence to say when it could not be
@@ -70,7 +70,7 @@ export function JobScopePicker({
   // WHAT IS CHOSEN AND WHAT IS OFFERED ARE BOTH lib/bill-scope's (item C1-3). This control used to
   // work the list out for itself — which kept a part the job no longer has (right: saving the box
   // must save what is already there) and also kept the reserved word "Uncategorized", a second
-  // spelling of "No Part Of The Job" sitting right under it. One place decides both now.
+  // spelling of "No Part of the Job" sitting right under it. One place decides both now.
   const stored = scopeSelected(value);
   const options = scopes ? scopeOptions(scopes, stored) : null;
 
@@ -86,9 +86,9 @@ export function JobScopePicker({
 
   return (
     <div className={className}>
-      <Label htmlFor={id}>Part Of The Job</Label>
+      <Label htmlFor={id}>Part of the Job</Label>
       <Select id={id} className="h-11" value={stored} onChange={(e) => onChange(e.target.value)}>
-        <option value="">No Part Of The Job</option>
+        <option value="">No Part of the Job</option>
         {options.map((s) => (
           <option key={s} value={s}>
             {s}

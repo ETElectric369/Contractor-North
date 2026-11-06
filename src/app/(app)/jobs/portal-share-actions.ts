@@ -519,11 +519,11 @@ const PLAN_NOT_IN_JOB_FOLDER = "That file isn't in this job's folder, so it can'
 const PLAN_PATH_TAKEN = "That file is already filed on this job as another paper, so it can't be filed again. Upload it again.";
 
 /**
- * FILE A PLAN ON THE JOB: the Customer Page tab's Add Plans Or Drawings (Erik: "uploading a plan
+ * FILE A PLAN ON THE JOB: the Customer Page tab's Add Plans or Drawings (Erik: "uploading a plan
  * file from a dropdown in the costs tab is the most unituitive thing ive seen on this app in a
  * while"). The browser has already put the file in the job's folder (lib/job-file-upload, the
  * same step the receipt pipeline takes); this writes its documents row, category Plan, and hands
- * back the paper so the office's Show On Portal sheet can open on it.
+ * back the paper so the office's Show on Portal sheet can open on it.
  *
  * What it never does: read the file as a receipt, write a bill or a cost, or put anything on the
  * customer's page. Showing is showPaper, pressed by a person on the sheet; Not Now keeps it an
@@ -752,7 +752,7 @@ function cardsTableMissing(err: unknown): boolean {
 
 /**
  * The link to this job's page as the customer opens it, for the office's See What They See and
- * Copy The Link. Office only: the token lives in customer_portal_access (0298), which a tech's
+ * Copy the Link. Office only: the token lives in customer_portal_access (0298), which a tech's
  * session reads nothing from, and requireStaff refuses before it is asked. The link is built on the
  * org's own public host (orgDocUrl), the same host the portal email sends.
  */

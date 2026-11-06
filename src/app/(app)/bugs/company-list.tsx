@@ -34,7 +34,7 @@ const dayWords = (n: number) => (n === 0 ? "Today" : n === 1 ? "1 Day" : `${n} D
 export function standingLine(row: Pick<CompanyRow, "reason" | "daysLeft" | "compedBy" | "trialEndsAt" | "compedUntil" | "tz">): string {
   switch (row.reason) {
     case "comped":
-      return row.compedBy === "env" ? "Comped By Env" : `Comped Until ${formatDate(row.compedUntil, row.tz)}`;
+      return row.compedBy === "env" ? "Comped by Env" : `Comped Until ${formatDate(row.compedUntil, row.tz)}`;
     case "active":
       return "Active";
     case "trial":
@@ -90,7 +90,7 @@ export function CompanyRowView({ row, onComp, onEndComp }: { row: CompanyRow; on
             <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${toneClasses(pill.tone)}`}>{pill.word}</span>
           </div>
           <div className="mt-0.5 text-sm text-slate-700">{standingLine(row)}</div>
-          {/* "Stripe Customer", not "Card On File": the customer is minted before any payment (S11). */}
+          {/* "Stripe Customer", not "Card on File": the customer is minted before any payment (S11). */}
           <div className="mt-0.5 text-xs text-slate-400">{`Since ${formatDate(row.createdAt, row.tz)}${row.stripeCustomer ? " · Stripe Customer" : ""}`}</div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">

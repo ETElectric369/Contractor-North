@@ -327,7 +327,7 @@ export async function createTriagedInquiry(
 /**
  * THE ALERT'S WORDS FOLLOW WHERE IT LANDS (the switch board, 0352). With Leads on it is a lead and
  * opens the lead list, word for word as always. With Leads off it opens My Day, where the card
- * reads "New Request From …", so the bell, the push and the email call it a request and the
+ * reads "New Request from …", so the bell, the push and the email call it a request and the
  * email's button names My Day instead of a lead list that isn't there.
  */
 export function requestAlertWords(lands: "/leads" | "/planner", cameBack = false) {
@@ -364,7 +364,7 @@ async function notifyNewLead(
     ]);
     const staffIds = ((staff ?? []) as { id: string }[]).map((s) => s.id);
     // LEADS OFF, THE REQUEST STILL LANDS (rule d): the bell, the push and the email open My Day,
-    // where it waits as "New Request From …" with Call Back, instead of the switched-off list.
+    // where it waits as "New Request from …" with Call Back, instead of the switched-off list.
     const url = requestHref(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).features);
     const money = input.intake.estimateTotal
       ? `est. $${Math.round(input.intake.estimateTotal).toLocaleString()}`

@@ -49,7 +49,7 @@ describe("tradeOffersFor: switches", () => {
     // A blank company moving to deck: the builder keys come on; its own hand-set sales_tax is not touched.
     const o = tradeOffersFor("deck", { codes: [], features: { ...blank, sales_tax: true }, hasSheet: false });
     expect(o.switches).toEqual([
-      { key: "kits", on: true, words: "Kits & Sizing By Sq Ft on" },
+      { key: "kits", on: true, words: "Kits & Sizing by Sq Ft on" },
       { key: "contracts", on: true, words: "Contracts & Lien Rights on" },
     ]);
     // A company already on deck's preset is offered nothing.

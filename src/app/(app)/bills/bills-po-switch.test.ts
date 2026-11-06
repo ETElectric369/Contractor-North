@@ -60,6 +60,6 @@ describe("purchase orders in the one list", () => {
     const html = render({ features: { ...ALL_ON, purchase_orders: false }, isOwner: false });
     expect(html).not.toContain(">New PO<");
     expect(html).toContain("PO-007");
-    expect(html).toContain("Purchase Orders</span> · Off · Ask The Owner");
+    expect(html).toContain("Purchase Orders</span> · Off · Ask the Owner");
   });
 });

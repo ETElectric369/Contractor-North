@@ -1,5 +1,5 @@
 /**
- * WHERE A SERVER-SIDE FETCH MAY GO (Fill From Their Site, 2026-09-27).
+ * WHERE A SERVER-SIDE FETCH MAY GO (Fill from Their Site, 2026-09-27).
  *
  * The server reads a page at an address a person pasted. Left alone, that is a door into the
  * network the server itself sits on: the cloud metadata service at 169.254.169.254, a database on

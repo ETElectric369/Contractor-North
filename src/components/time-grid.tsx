@@ -296,7 +296,7 @@ function TimeGridInner({
    * Never while armed (every tap on a day places then). Absent: the columns are plain, as on /timecards.
    */
   onSlotTap?: (dayStr: string, minute: number | null) => void;
-  /** The words the open spots and the "+" say ("Add To Schedule"). */
+  /** The words the open spots and the "+" say ("Add to Schedule"). */
   addLabel?: string;
 }) {
   const lang = useLang();
@@ -530,7 +530,7 @@ function TimeGridInner({
                 </button>
               );
             }
-            /* THE DAY'S "+": Add To Schedule on this day, beside the day's own tap (which drills in).
+            /* THE DAY'S "+": Add to Schedule on this day, beside the day's own tap (which drills in).
                Two sibling buttons, never one inside the other. 44 by 44: a 92px week column still leaves
                the day's label about 48px.
 
@@ -664,7 +664,7 @@ function TimeGridInner({
                   />
                 )}
 
-                {/* THE OPEN SPOTS: the column behind the blocks. A tap here is Add To Schedule at the
+                {/* THE OPEN SPOTS: the column behind the blocks. A tap here is Add to Schedule at the
                     half hour tapped; the blocks sit above it, so a tap on one is still that block. */}
                 {!placement && onSlotTap && (
                   <button

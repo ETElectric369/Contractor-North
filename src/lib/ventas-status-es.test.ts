@@ -90,7 +90,7 @@ describe("lib/leads/next-step", () => {
   const opts = { estimatesOn: true, tz: "America/Los_Angeles" };
   it("English is unchanged with no language and with 'en'", () => {
     expect(leadNextStep(base, null, "2026-11-06", opts).label).toBe("New · Call Them");
-    expect(leadNextStep({ ...base, lead_bucket: "A", site_inspection_required: true }, null, "2026-11-06", opts, "en", en).label).toBe("A · New · Call Them · Needs A Visit");
+    expect(leadNextStep({ ...base, lead_bucket: "A", site_inspection_required: true }, null, "2026-11-06", opts, "en", en).label).toBe("A · New · Call Them · Needs a Visit");
     expect(leadNextStep({ ...base, next_follow_up_at: "2026-09-20" }, null, "2026-11-06", opts).label).toBe("Call Back · Sep 20");
     expect(leadNextStep(base, VISITS_UNREAD, "2026-11-06", opts).label).toBe(VISITS_UNREAD_LABEL);
     expect(visitsUnreadLabel()).toBe(VISITS_UNREAD_LABEL);

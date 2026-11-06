@@ -342,12 +342,12 @@ export function canTieToShelfReturn(bill: { amount?: unknown; job_id?: unknown; 
   return !!bill && isReturnBill(bill.amount) && !bill.job_id && !bill.superseded_by_bill_id;
 }
 
-/** "Return To CED": the supplier named on the roll's ticket, said short (shortSupplierName), for
- *  every supplier; "Return To Supplier" for a roll with no supplier on it (Wave 0: a name regex
+/** "Return to CED": the supplier named on the roll's ticket, said short (shortSupplierName), for
+ *  every supplier; "Return to Supplier" for a roll with no supplier on it (Wave 0: a name regex
  *  hard-coded one supplier and folded a different company into it). */
 export function returnDoorLabel(supplier: string | null | undefined): string {
   const name = String(supplier ?? "").trim();
-  return name ? `Return To ${shortSupplierName(name)}` : "Return To Supplier";
+  return name ? `Return to ${shortSupplierName(name)}` : "Return to Supplier";
 }
 
 export type ShelfReturnMoney = {

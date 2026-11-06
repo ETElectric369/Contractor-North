@@ -306,7 +306,7 @@ export function PanelVisual({
   const about = [
     panel.brand || "Brand Not Set",
     panel.spaces ? `${panel.spaces} Spaces` : "Spaces Not Set",
-    panel.numbering === "bottom_up" ? "Space 1 At The Bottom" : null,
+    panel.numbering === "bottom_up" ? "Space 1 at the Bottom" : null,
   ]
     .filter(Boolean)
     .join(" · ");

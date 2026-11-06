@@ -62,7 +62,7 @@ d("The accountant's stock and tools lists, ET, replayed read-only", () => {
       for (const [title, t] of [
         ["On Hand", onHandList(inputs, w.to, TZ)],
         ["Tools Bought", toolsList(inputs, w, TZ)],
-        ["Tools Billed To Customers", toolsBilledList(inputs, TZ)],
+        ["Tools Billed to Customers", toolsBilledList(inputs, TZ)],
       ] as const) {
         console.log(`\n--- ${title}: ${t.rows.length} row(s) ---\n${toCsv(t)}`);
         expect(t.header.length).toBeGreaterThan(0);

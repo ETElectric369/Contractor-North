@@ -71,7 +71,7 @@ d("Bring In E-017 on J-011, replayed read-only against ET's live books", () => {
       // data and count the buttons). Before Bring In, on a job with no panel yet (the panel-first
       // wave): the office has Bring Them In (→ bringInEstimateCircuits) and the crew doesn't; both
       // have Add Circuit (→ addCircuit) and Add New Panel, last (→ the panel sheet); Panel 1 waits
-      // on the door, and nobody is offered the old Add The Panel.
+      // on the door, and nobody is offered the old Add the Panel.
       const panelData = {
         ok: true as const,
         panels: [],
@@ -89,7 +89,7 @@ d("Bring In E-017 on J-011, replayed read-only against ET's live books", () => {
       const office = renderToStaticMarkup(createElement(JobPanel, { jobId: J011, initial: { ...panelData, staff: true } }));
       expect(labels(office)).toContain("Bring Them In");
       expect(labels(office)).toContain("Add Circuit");
-      expect(labels(office)).not.toContain("Add The Panel");
+      expect(labels(office)).not.toContain("Add the Panel");
       expect(labels(office).at(-1)).toBe("Add New Panel");
       expect(office).toContain("E-017 Has 12 Circuits");
       const crew = renderToStaticMarkup(createElement(JobPanel, { jobId: J011, initial: { ...panelData, staff: false, estimates: [] } }));

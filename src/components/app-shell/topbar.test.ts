@@ -6,10 +6,10 @@ import { join } from "node:path";
 import type { FeatureMap } from "@/lib/features";
 
 /**
- * THE TOP BAR (W1-09, and Nort's button back, 2026-09-27): Back · logo · Search Or Ask · Nort · + ·
- * Bell · Avatar. Search Or Ask replaced the Search button and the graduation cap; Nort off, it reads
+ * THE TOP BAR (W1-09, and Nort's button back, 2026-09-27): Back · logo · Search or Ask · Nort · + ·
+ * Bell · Avatar. Search or Ask replaced the Search button and the graduation cap; Nort off, it reads
  * Search. NORT'S BUTTON is one tap (Erik: "theres not Nort button anymore" — he is an intercom, used
- * hands-busy in the truck): it runs talkToNort(), the same call Search Or Ask's Talk To Nort row
+ * hands-busy in the truck): it runs talkToNort(), the same call Search or Ask's Talk to Nort row
  * makes, and while Nort works it IS the red Stop Nort. Nort off, it isn't drawn. The Bell stays
  * whatever the switches say (Erik: it is the record of every push).
  *
@@ -77,7 +77,7 @@ beforeEach(() => {
 });
 
 describe("the top bar's controls", () => {
-  it("Nort on: Back, Search Or Ask, Nort, +, the Bell and the avatar — six, for staff and techs", () => {
+  it("Nort on: Back, Search or Ask, Nort, +, the Bell and the avatar — six, for staff and techs", () => {
     for (const p of [owner, tech]) for (const f of [ALL_ON, undefined]) expect(buttons(render(p, f))).toBe(6);
   });
 
@@ -86,7 +86,7 @@ describe("the top bar's controls", () => {
       const html = render(p, f);
       expect(buttons(html)).toBe(5);
       expect(nortTag(html)).toBeNull();
-      expect(html).not.toMatch(/Talk To Nort|Stop Nort/);
+      expect(html).not.toMatch(/Talk to Nort|Stop Nort/);
     }
   });
 
@@ -95,7 +95,7 @@ describe("the top bar's controls", () => {
     expect(render(tech, allOff)).toContain('data-x="bell"');
   });
 
-  it("no graduation cap: its rows live under Search Or Ask; Nort's host draws no control of its own", () => {
+  it("no graduation cap: its rows live under Search or Ask; Nort's host draws no control of its own", () => {
     const html = render(owner, ALL_ON, { onboarded: false, setup: {} });
     expect(html).not.toContain('data-tour="setup"');
     // "Take the walk-through" was the cap's own label for SETUP, not for the site visit — a third
@@ -109,7 +109,7 @@ describe("the top bar's controls", () => {
     expect(ga).not.toContain('aria-label="Open Nort"');
   });
 
-  it("in order: Search Or Ask, then Nort right after it, then +, the Bell and the avatar", () => {
+  it("in order: Search or Ask, then Nort right after it, then +, the Bell and the avatar", () => {
     const html = render(owner, ALL_ON);
     const at = (s: string) => html.indexOf(s);
     expect(at('data-tour="ask"')).toBeGreaterThan(-1);
@@ -119,10 +119,10 @@ describe("the top bar's controls", () => {
     expect(at('data-tour="bell"')).toBeLessThan(at('data-tour="account"'));
   });
 
-  it("the + anchor is the wrapper span around GlobalQuickAdd placement='topbar'; the ask anchor is Search Or Ask", () => {
+  it("the + anchor is the wrapper span around GlobalQuickAdd placement='topbar'; the ask anchor is Search or Ask", () => {
     const html = render(owner, ALL_ON);
     expect(html).toMatch(/<span data-tour="quickadd" class="inline-flex"><button data-x="quick-add topbar/);
-    expect(html).toMatch(/<button[^>]*data-tour="ask"[^>]*aria-label="Search Or Ask"/);
+    expect(html).toMatch(/<button[^>]*data-tour="ask"[^>]*aria-label="Search or Ask"/);
     expect(html).toContain('data-tour="bell"');
     expect(html).toContain('data-tour="account"');
   });
@@ -134,13 +134,13 @@ describe("the top bar's controls", () => {
   });
 });
 
-describe("Search Or Ask", () => {
-  it("with Nort on it reads Search Or Ask from md up, and is a 44px icon on a phone", () => {
+describe("Search or Ask", () => {
+  it("with Nort on it reads Search or Ask from md up, and is a 44px icon on a phone", () => {
     const html = render(owner, ALL_ON);
     const tag = html.match(/<button[^>]*data-tour="ask"[^>]*>/)![0];
     expect(tag).toContain("h-11 w-11");
     expect(tag).toContain("md:w-auto");
-    expect(html).toContain('<span class="hidden text-sm md:inline turned:hidden">Search Or Ask</span>');
+    expect(html).toContain('<span class="hidden text-sm md:inline turned:hidden">Search or Ask</span>');
   });
 
   it("A PHONE TURNED SIDEWAYS IS STILL A PHONE: the square, and no label", () => {
@@ -156,7 +156,7 @@ describe("Search Or Ask", () => {
     const html = render(owner, { ...ALL_ON, nort: false });
     expect(html).toMatch(/<button[^>]*data-tour="ask"[^>]*aria-label="Search"/);
     expect(html).toContain('<span class="hidden text-sm md:inline turned:hidden">Search</span>');
-    expect(html).not.toContain("Search Or Ask");
+    expect(html).not.toContain("Search or Ask");
     expect(html).not.toContain('data-x="nort-host"');
   });
 
@@ -164,14 +164,14 @@ describe("Search Or Ask", () => {
     expect(render(owner, ALL_ON)).toMatch(/<span class="hidden [^"]*md:pointer-fine:inline">⌘K<\/span>/);
   });
 
-  it("stays Search Or Ask while Nort works (the Nort button is the one that turns into Stop Nort)", () => {
+  it("stays Search or Ask while Nort works (the Nort button is the one that turns into Stop Nort)", () => {
     est.listening = true;
-    expect(render(owner, ALL_ON)).toMatch(/<button[^>]*data-tour="ask"[^>]*aria-label="Search Or Ask"/);
+    expect(render(owner, ALL_ON)).toMatch(/<button[^>]*data-tour="ask"[^>]*aria-label="Search or Ask"/);
   });
 
   it("opens the command bar", () => {
     const html = render(owner, ALL_ON);
-    expect(html).toContain('aria-label="Search Or Ask"');
+    expect(html).toContain('aria-label="Search or Ask"');
     expect(src).toContain('onClick={() => window.dispatchEvent(new Event("cn:command"))}');
   });
 });
@@ -182,13 +182,13 @@ describe("Nort's button: one tap", () => {
     (globalThis as { window?: unknown }).window = realWindow;
   });
 
-  it("is a 44px round Talk To Nort, with Nort's mark", () => {
+  it("is a 44px round Talk to Nort, with Nort's mark", () => {
     const tag = nortTag(render(owner, ALL_ON))!;
-    expect(tag).toContain('aria-label="Talk To Nort"');
-    expect(tag).toContain('title="Talk To Nort"');
+    expect(tag).toContain('aria-label="Talk to Nort"');
+    expect(tag).toContain('title="Talk to Nort"');
     expect(tag).toContain("h-11 w-11");
     expect(tag).toContain("rounded-full bg-brand");
-    // Nort's mark from before the Search Or Ask change (lucide AudioLines).
+    // Nort's mark from before the Search or Ask change (lucide AudioLines).
     expect(src).toMatch(/aria-label=\{t\("sh_talkToNort"\)\}[\s\S]{0,300}<AudioLines /);
   });
 
@@ -198,18 +198,18 @@ describe("Nort's button: one tap", () => {
     expect(nortTag(es)).toContain('title="Hablar con Nort"');
     expect(es).toMatch(/<button[^>]*data-tour="ask"[^>]*aria-label="Buscar o Preguntar"/);
     expect(es).toContain('aria-label="Volver"');
-    expect(es).not.toMatch(/Talk To Nort|Search Or Ask|aria-label="Go back"/);
+    expect(es).not.toMatch(/Talk to Nort|Search or Ask|aria-label="Go back"/);
     expect(render(tech, ALL_ON, { lang: "en" })).toBe(render(tech, ALL_ON));
     expect(byLabel(Topbar(props(tech, ALL_ON, { lang: "es" })), "Hablar con Nort")).not.toBeNull();
   });
 
-  it("calls the SAME start as Search Or Ask's Talk To Nort row: talkToNort, which fires cn:nort-talk inside the tap", () => {
+  it("calls the SAME start as Search or Ask's Talk to Nort row: talkToNort, which fires cn:nort-talk inside the tap", () => {
     const tree = Topbar(props(owner, ALL_ON));
-    const btn = byLabel(tree, "Talk To Nort")!;
+    const btn = byLabel(tree, "Talk to Nort")!;
     expect(btn).not.toBeNull();
     // One function, not a copy of it: the bar's button and the menu row share the start path.
     const row = idleRows({ isStaff: true, features: ALL_ON, setup: DONE, onboarded: true })[0];
-    expect(row.label).toBe("Talk To Nort");
+    expect(row.label).toBe("Talk to Nort");
     expect(btn.props.onClick).toBe(talkToNort);
     expect(row.run).toBe(talkToNort);
     // And the tap reaches GlobalAssistant's listener before it returns (the mic starts in-gesture).
@@ -240,7 +240,7 @@ describe("Nort's button: one tap", () => {
       expect(tag).toContain("h-11 w-11");
       expect(tag).toContain("bg-red-600");
       expect(html.match(/Stop Nort/g)?.length).toBe(2); // its aria-label and title: one button
-      expect(html).not.toContain('aria-label="Talk To Nort"');
+      expect(html).not.toContain('aria-label="Talk to Nort"');
       expect(buttons(html)).toBe(6);
     }
   });
@@ -267,7 +267,7 @@ describe("Nort's button: one tap", () => {
 describe("nothing silent: setup waiting on this person is a dot on the door that holds it", () => {
   const dot = 'data-x="setup-dot"';
 
-  it("staff not yet walked through, or with setup questions open: a dot on Search Or Ask", () => {
+  it("staff not yet walked through, or with setup questions open: a dot on Search or Ask", () => {
     expect(render(owner, ALL_ON, { onboarded: false })).toContain(dot);
     expect(render(owner, ALL_ON, { setup: { ...DONE, service_area: null } })).toContain(dot);
   });
@@ -292,7 +292,7 @@ describe("it fits a 375px phone (and a 402px one)", () => {
   const px = (cls: string, util: string) => Number(cls.match(new RegExp(`(?:^|\\s)${util}-(\\d+)(?:\\s|$)`))![1]) * 4;
 
   it("every control is a 44px square; the brand gives way first", () => {
-    const html = render(owner, ALL_ON, { branding: { name: "A Very Long Company Name Electric And Sons", logo: null } });
+    const html = render(owner, ALL_ON, { branding: { name: "A Very Long Company Name Electric and Sons", logo: null } });
     expect(html.match(/<button[^>]*aria-label="Go back"[^>]*>/)![0]).toContain("h-11 w-11");
     expect(html).toMatch(/<span class="ml-1 min-w-0 max-w-\[160px\] shrink truncate/);
     const logo = render(owner, ALL_ON, { branding: { name: "Co", logo: "/logo.png" } });
@@ -300,10 +300,10 @@ describe("it fits a 375px phone (and a 402px one)", () => {
   });
 
   it("the fixed controls, the gaps and the padding add up to no more than 375px, logo or not", () => {
-    for (const branding of [undefined, { name: "Co", logo: "/logo.png" }, { name: "A Very Long Company Name Electric And Sons", logo: null }]) {
+    for (const branding of [undefined, { name: "Co", logo: "/logo.png" }, { name: "A Very Long Company Name Electric and Sons", logo: null }]) {
       const html = render(owner, ALL_ON, { branding });
       const header = html.match(/<header class="([^"]*)"/)![1];
-      // The controls' row: the one element that holds Search Or Ask, and it never shrinks.
+      // The controls' row: the one element that holds Search or Ask, and it never shrinks.
       const rowCls = html.match(/<div class="([^"]*)"><i data-x="nort-host"/)![1];
       expect(rowCls).toContain("shrink-0");
       // Every tap target in the row is 44px: the bar's own buttons say so here, and the +, the Bell
@@ -317,7 +317,7 @@ describe("it fits a 375px phone (and a 402px one)", () => {
         ["src/components/app-shell/notification-bell.tsx", /className="relative flex h-11 w-11 /],
         ["src/components/account-menu.tsx", /className="relative flex h-11 w-11 /],
       ] as const) expect(readFileSync(join(process.cwd(), file), "utf8")).toMatch(re);
-      const controls = buttons(row); // Search Or Ask, Nort, +, Bell, avatar
+      const controls = buttons(row); // Search or Ask, Nort, +, Bell, avatar
       expect(controls).toBe(5);
       // The header's own children: Back, the brand (when there is one), the spacer, the row.
       const headerKids = 3 + (branding ? 1 : 0);

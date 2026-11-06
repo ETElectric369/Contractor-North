@@ -5,7 +5,7 @@ import { duplicateTicketGroups, isOpenDuplicateGroup, type NameWorkBill } from "
  * BOTH ARE REAL (0400 bills.both_real_at; cn-v1137). The same ticket filed to two jobs is a question
  * — and "two identical runs a month apart" is one of its answers. A pair whose copies ALL carry the
  * stamp is answered and is not asked again; a half-stamped pair (a third copy scanned since, or one
- * stamp lost) still asks; a pair he answered with Keep It On keeps its row as before.
+ * stamp lost) still asks; a pair he answered with Keep It on keeps its row as before.
  */
 const copy = (id: string, job: string, over: Partial<NameWorkBill> = {}): NameWorkBill => ({
   id,
@@ -52,7 +52,7 @@ describe("duplicateTicketGroups and the both-real stamp", () => {
     expect(three.groups.map((g) => g.copies.map((c) => c.billId))).toEqual([["a", "c"], ["b", "c"]]);
   });
 
-  it("a pair he answered with Keep It On keeps its row, answered, whatever the stamp says", () => {
+  it("a pair he answered with Keep It on keeps its row, answered, whatever the stamp says", () => {
     const { groups } = duplicateTicketGroups({
       bills: [copy("a", "13 Larkspur"), copy("b", "41 Bayberry", { superseded_by_bill_id: "a" })],
     });

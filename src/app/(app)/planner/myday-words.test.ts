@@ -93,7 +93,7 @@ describe("the Now card", () => {
     expect(s).toContain("¿En qué trabajo estás?");
     expect(s).toContain("Estás en el reloj, pero esta marcación aún no tiene trabajo.");
     expect(s.match(/Elegir el Trabajo/g)).toHaveLength(1);
-    expect(s).not.toContain("Pick The Job");
+    expect(s).not.toContain("Pick the Job");
   });
 
   it("the crew pulse in Spanish: En el Reloj, 3 de 4, sin trabajo aún, desde; a failed read is said in Spanish", () => {
@@ -106,7 +106,7 @@ describe("the Now card", () => {
     expect(es(createElement(NowCard, { open: null, job: null, userId: "u1", crew: null }))).toContain("No se pudo leer quién está en el reloj — recarga para intentar de nuevo.");
     expect(es(createElement(NowCard, { open: null, job: null, userId: "u1", crew: { on: 1, of: 3, rows: [] } }))).toContain("Solo tú.");
     const e = en(createElement(NowCard, { open: null, job: null, userId: "u1", crew }));
-    expect(e).toContain("On The Clock");
+    expect(e).toContain("On the Clock");
     expect(e).toContain("3 of 4");
     expect(e).toContain("since 6:30 AM");
   });
@@ -138,8 +138,8 @@ describe("Tasks & Reminders", () => {
     expect(s).toContain("En J-055 Larkspur Panel");
     expect(s).toMatch(/<button[^>]*>(?:(?!<\/button>)[\s\S])*Agregar<\/button>/);
     const e = en(createElement(AddReminderLine, { jobs: JOBS, todayStr: TODAY }));
-    expect(e).toContain('placeholder="Add A Reminder Or Task…"');
-    expect(e).toContain("No Job: A Reminder For Me");
+    expect(e).toContain('placeholder="Add a Reminder or Task…"');
+    expect(e).toContain("No Job: A Reminder for Me");
     expect(e).toContain("On J-055 Larkspur Panel");
   });
 
@@ -161,8 +161,8 @@ describe("Tasks & Reminders", () => {
   it("English is byte-for-byte what it was", () => {
     const html = en(createElement(YourList, { rows: [row({ focus_date: "2026-09-25", due_date: TODAY })], subtasks: [], todayStr: TODAY, doneToday: 1, restCount: 4 }));
     expect(html).toContain("Tasks &amp; Reminders");
-    expect(html).toContain("All Reminders · 4 More For You");
-    expect(html).toContain("Carried From Yesterday");
+    expect(html).toContain("All Reminders · 4 More for You");
+    expect(html).toContain("Carried from Yesterday");
     expect(html).toContain('aria-label="1 of 2 done today"');
     expect(html).toContain(">Today<");
     expect(html).not.toContain("Nothing urgent today.");
@@ -171,7 +171,7 @@ describe("Tasks & Reminders", () => {
   });
 
   it("the pure words take a language: the later row, the moved sentence, the carried day", () => {
-    expect(laterRow("in_a_week", TODAY)).toEqual({ label: "In A Week", due: "2026-10-03" });
+    expect(laterRow("in_a_week", TODAY)).toEqual({ label: "In a Week", due: "2026-10-03" });
     expect(laterRow("in_a_week", TODAY, "es")).toEqual({ label: "En una Semana", due: "2026-10-03" });
     expect(laterRow("someday", TODAY, "es")).toEqual({ label: "Algún Día (Quitar Fecha)", due: null });
     const plain = { focus_date: null, priority: 0, category: "operations" };

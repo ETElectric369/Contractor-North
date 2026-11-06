@@ -42,8 +42,8 @@ import { parseShelf, parseTakes, type JobTake, type ShelfRow } from "@/lib/stock
  *    back, never a cost.
  *
  * Phase 2 wires the doors that put a roll ON the shelf (shelveLines: the receipt card, the tray,
- * Record To Shelf) and the office's Count It. Phase 3 wires the door that takes a piece OFF it:
- * Took From Stock (src/app/(app)/materials/took-from-stock.tsx and stock-actions.ts, through
+ * Record to Shelf) and the office's Count It. Phase 3 wires the door that takes a piece OFF it:
+ * Took from Stock (src/app/(app)/materials/took-from-stock.tsx and stock-actions.ts, through
  * takeFromStock / undoTake below), and the job's takes list (jobTakes, 0344).
  *
  * This is deliberately NOT a "use server" module (same reason as bill-itemisation.ts): the pure
@@ -52,7 +52,7 @@ import { parseShelf, parseTakes, type JobTake, type ShelfRow } from "@/lib/stock
 
 /* ════════════════════════════════════════════════════════════════════════════════════════════
    THE PURE PART lives in src/lib/shelf-plan.ts (Phase 2): the tray row, the receipt card and the
-   Record To Shelf sheet are client components and need the same unit guess and item match the
+   Record to Shelf sheet are client components and need the same unit guess and item match the
    server uses, and this file is server-only. Re-exported here so every existing import holds.
    ════════════════════════════════════════════════════════════════════════════════════════════ */
 
@@ -82,7 +82,7 @@ export type ShelveResult = { ok: true; lots: ShelvedLot[]; billId: string } | { 
 
 /**
  * PUT ONE TICKET'S ROLLS ON THE SHELF: the one server door every Phase 2 screen goes through (the
- * receipt card, the tray, Record To Shelf).
+ * receipt card, the tray, Record to Shelf).
  *
  *   1. read the ticket's lines, and the rolls already on the shelf from it;
  *   2. an item named new is matched first, exactly (part number, then name, never fuzzy), so the
@@ -218,7 +218,7 @@ export async function putOnShelf(input: ShelfPick): Promise<ShelfResult> {
   return { ok: true, id: res.lots[0].lotId, lot: res.lots[0] };
 }
 
-/** Why a roll off a ticket bought for the shelf has no Take It Off The Shelf. */
+/** Why a roll off a ticket bought for the shelf has no Take It Off the Shelf. */
 export const SHELF_TICKET_ROLL_STAYS =
   "This roll came in on a ticket bought for stock, so there's no job for it to go back to. Undo that ticket from the tray to take it back, or Count It if the pieces are gone.";
 

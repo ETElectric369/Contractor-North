@@ -191,7 +191,7 @@ export function defineShelfPhase2Suite(connect: () => Promise<SqlClient>) {
     expect(typeof appliedHere).toBe("boolean");
   });
 
-  it("Put The Rest On The Shelf on Honeysuckle's 8/19 coil, 0 used: the job is billed $0, the shelf holds 250 ft at $180.17, and the job's cost drops by exactly that", async () => {
+  it("Put the Rest on the Shelf on Honeysuckle's 8/19 coil, 0 used: the job is billed $0, the shelf holds 250 ft at $180.17, and the job's cost drops by exactly that", async () => {
     if (!needs()) return;
     await step(async () => {
       const t = await honeysuckle819(jobA);

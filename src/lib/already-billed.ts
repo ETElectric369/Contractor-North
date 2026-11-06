@@ -24,7 +24,7 @@
  *                     was written, and the sent date would have ticked 76 days of unbilled work; and
  *                     only as many as the line has room for beside the hours it already holds
  *   askUsedAll        Pinyon Sage's question, only when Shop Stock is on and the line is less than the
- *                     receipt's cost ($110 against $186.93): "Did J-010 Use All Of It?"
+ *                     receipt's cost ($110 against $186.93): "Did J-010 Use All of It?"
  */
 
 import { lumpLineRule, isHoursUnit } from "@/lib/invoice-math";
@@ -215,7 +215,7 @@ export function noJobHandsShown(inv: { job_id?: string | null; status?: string |
 }
 
 /**
- * THE INVOICE PAGE'S WAY IN for hours on no job (Already Billed: Hours On No Job): this invoice has
+ * THE INVOICE PAGE'S WAY IN for hours on no job (Already Billed: Hours on No Job): this invoice has
  * no job, went out (not a draft, a void or a deposit) and has a line of work typed or changed by hand
  * that could hold hours. Without it, hours taken back off with Not Billed After All could be marked
  * again only from a Needs You row, which lives three days.
@@ -247,7 +247,7 @@ export function lineLabel(inv: Pick<AbInvoice, "invoice_number">, line: Pick<AbL
 }
 
 /**
- * PINYON SAGE'S QUESTION: "Did J-010 Use All Of It?" Only when Shop Stock is on, the receipt has
+ * PINYON SAGE'S QUESTION: "Did J-010 Use All of It?" Only when Shop Stock is on, the receipt has
  * lines to shelve, and the line that charged for it is less than what the receipt cost ($110 against
  * $186.93: Erik kept 3 GFCIs). The shelf has to come first: once a sent invoice bills a receipt, the
  * shelf refuses it (0328), so No opens the shelf card and comes back to Mark.
@@ -453,7 +453,7 @@ export const NEEDS_UPDATE = "Already Billed needs an update to the app's databas
 /**
  * THE BILL'S OWN ROW (Bills → All Bills, Erik: "the Already Billed could connect to the bill on that
  * screen too"). A bill on a job that no invoice holds gets Already Billed where the job's sheet could
- * hold it (a charge, or a supplier return); a bill a person marked says Billed By Hand On INV-x with
+ * hold it (a charge, or a supplier return); a bill a person marked says Billed by Hand on INV-x with
  * Not Billed After All. A bill any invoice holds otherwise (an import, or its order billed: the
  * importer skips a receipt whose order is billed) gets nothing, and so does a $0.00 one.
  *
@@ -566,7 +566,7 @@ export function jobAlreadyBilledDoors(input: {
 }
 
 /**
- * THE JOB'S HOURS A PERSON MARKED, per line: "Billed By Hand On INV-059: 5 h · Not Billed After All".
+ * THE JOB'S HOURS A PERSON MARKED, per line: "Billed by Hand on INV-059: 5 h · Not Billed After All".
  * `entries` are the job's closed shifts (clock_in, clock_out, lunch_minutes).
  */
 export function hoursByHand(

@@ -65,9 +65,9 @@ describe("the site visit is an Inspection", () => {
     expect(nav.en.nv_page_inspections).toBe("Inspections");
     // The button's words come from lib/words/inspections since cn-v1146; the catalog pins the English.
     expect(page).toContain('buttonLabel={t("ip_btn_bookAnInspection")}');
-    expect(inspectionsWords.en.ip_btn_bookAnInspection).toBe("Book An Inspection");
+    expect(inspectionsWords.en.ip_btn_bookAnInspection).toBe("Book an Inspection");
     expect(FEATURES.find((f) => f.key === "leads")?.label).toBe("Leads & Inspections");
-    expect(PILE_DEFS.inspections_to_write_up).toMatchObject({ label: "Inspections To Write Up", listLabel: "See All Inspections" });
+    expect(PILE_DEFS.inspections_to_write_up).toMatchObject({ label: "Inspections to Write Up", listLabel: "See All Inspections" });
   });
 
   it("a new inspection's stock title is the word and who it's with", () => {
@@ -141,7 +141,7 @@ describe("the site visit is an Inspection", () => {
     expect(read("src/lib/words/shell.ts")).toContain('sh_help_againNort: "Setup from the top. Change anything you told Nort."');
     expect(read("src/lib/onboarding/help-rows.ts")).toContain('t("sh_help_againNort")');
     const s = read("src/components/setup-interview.tsx");
-    expect(s).toContain("Take setup again from Search Or Ask and tell me your trade");
+    expect(s).toContain("Take setup again from Search or Ask and tell me your trade");
     expect(s).toContain(">This setup</strong>");
     // Setup used to call ITSELF a walk-through — a third noun for the same word, in the one place a
     // brand-new company reads first.
@@ -331,8 +331,8 @@ describe("the old word cannot come back", () => {
       expect(isDatabaseName(s), s).toBe(true);
     }
     for (const s of [
-      "Book A Walk-Through",
-      "Walk-Throughs To Write Up",
+      "Book a Walk-Through",
+      "Walk-Throughs to Write Up",
       "your walk-through sheet written",
       "Mark Walk-Through Done",
       "Only the office can change the walk-through.",

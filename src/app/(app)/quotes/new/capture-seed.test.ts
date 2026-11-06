@@ -10,7 +10,7 @@ import { join } from "node:path";
  */
 const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
 
-describe("Start The Estimate seeds the typed rows", () => {
+describe("Start the Estimate seeds the typed rows", () => {
   const src = read("src/app/(app)/quotes/new/page.tsx");
   it("reads the capture tolerantly, puts the typed rows AFTER the scope picks, and the measures into the scope text", () => {
     expect(src).toContain("typedCapture = parseInspectorCapture((appt as any).capture);");
@@ -22,7 +22,7 @@ describe("Start The Estimate seeds the typed rows", () => {
   });
 });
 
-describe("Start The Job lists the typed rows on the job", () => {
+describe("Start the Job lists the typed rows on the job", () => {
   const src = read("src/app/(app)/appointments/actions.ts");
   it("selects the capture (projection law), writes through the one list writer, and says what could not be listed", () => {
     // The capture and the sheet's tasks are read by the ONE visit read (lib/appointments/visit-work,

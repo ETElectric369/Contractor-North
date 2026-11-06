@@ -55,9 +55,9 @@ describe("Open Vendors is staff only", () => {
 /**
  * OPEN VENDORS NEVER THROWS TYPED WORK AWAY WITHOUT ASKING. The form is inline (not a guarded
  * sheet) and lives only in this page's state, so leaving for the Vendors tab loses it. Someone
- * adding a supplier pastes its site, Fill From Their Site fills the boxes, they read "Suppliers ...
+ * adding a supplier pastes its site, Fill from Their Site fills the boxes, they read "Suppliers ...
  * live in Price List › Vendors" and tap Open Vendors: they are asked first, the same way Type It
- * In's Open Snap Or Note asks. A form with nothing in it just goes.
+ * In's Open Snap or Note asks. A form with nothing in it just goes.
  */
 describe("Open Vendors asks before leaving typed work", () => {
   const empty: Form = { name: "", category: "Building Department", contact: "", phone: "", email: "", website: "", address: "", notes: "" };
@@ -71,7 +71,7 @@ describe("Open Vendors asks before leaving typed work", () => {
     const boxes: (keyof Form)[] = ["name", "contact", "phone", "email", "website", "address", "notes"];
     for (const k of boxes) expect(formHasWork({ ...empty, [k]: "x" }, empty)).toBe(true);
     expect(formHasWork({ ...empty, category: "Inspector" }, empty)).toBe(true);
-    // Fill From Their Site's usual answer.
+    // Fill from Their Site's usual answer.
     expect(formHasWork({ ...empty, website: "acme-supply.example", name: "Acme Supply", phone: "(530) 555-0150", address: "1 Main St" }, empty)).toBe(true);
   });
 

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// Send To QuickBooks shows only when THIS company has connected (Wave 0): qboConfigured only says
+// Send to QuickBooks shows only when THIS company has connected (Wave 0): qboConfigured only says
 // North can reach Intuit, so every company's invoice menu offered it, connected or not.
 const state = vi.hoisted(() => ({ calls: 0, row: null as { realm_id: string | null } | null, error: null as unknown, orgs: [] as string[] }));
 vi.mock("@/lib/supabase/server", () => ({

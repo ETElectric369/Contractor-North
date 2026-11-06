@@ -36,7 +36,7 @@ import { AutoClockoutPrompt } from "./auto-clockout-prompt";
 import { ClockStartPicker } from "./clock-start-picker";
 import { NewJobInline } from "./new-job-inline";
 import { DailyReportDebrief } from "./daily-report-debrief";
-import { esTitleCase } from "../../../../tests/es-function-words";
+import { esTitleCase, titleCaseIn } from "../../../../tests/title-case-words";
 
 const ROOT = process.cwd();
 const src = (f: string) => readFileSync(join(ROOT, f), "utf8");
@@ -91,7 +91,7 @@ describe("the catalog names the clock's client side", () => {
   it("the English is what the clock said before (the tests that read rendered English stay green)", () => {
     expect(en.tc_offline).toBe("No connection — your entry is kept, try again when you have bars.");
     expect(en.tc_noJobSelected).toBe("No job selected");
-    expect(en.tc_clockOutWithDetails).toBe("Clock Out With Details…");
+    expect(en.tc_clockOutWithDetails).toBe("Clock Out with Details…");
     expect(en.tc_confirmClockOut).toBe("Confirm & Clock Out");
     expect(en.tc_techJobNote).toBe(
       "Your job comes from today's crew assignment. Nothing assigned? Clock in anyway — you'll be asked which job, or skip and the office picks it.",
@@ -100,12 +100,12 @@ describe("the catalog names the clock's client side", () => {
     expect(en.tc_myTimecard).toBe("My timecard");
     expect(en.tc_weekTotal).toBe("Week total");
     expect(en.tc_myPayPeriod).toBe("My pay period");
-    expect(en.tc_nortEndOfDay).toBe("Nort — End Of Day");
+    expect(en.tc_nortEndOfDay).toBe("Nort — End of Day");
     expect(en.tc_savedSplit).toBe("Saved. The shift is split into 2 entries.");
-    expect(en.tc_startingNowPick).toBe("Starting Now · Pick A Different Time");
+    expect(en.tc_startingNowPick).toBe("Starting Now · Pick a Different Time");
     // The only English that moved: the picker's two template-literal doors, now Title Case like every button.
-    expect(en.tc_roundedTo).toBe("Rounded To {time} · Tap For Now");
-    expect(en.tc_startingNowRound).toBe("Starting Now · Round Back To {time}");
+    expect(en.tc_roundedTo).toBe("Rounded to {time} · Tap for Now");
+    expect(en.tc_startingNowRound).toBe("Starting Now · Round Back to {time}");
   });
 
   it("the glossary's exact words are the Spanish on the doors", () => {
@@ -140,18 +140,18 @@ describe("the panel", () => {
     expect(enHtml).toContain("Clock In");
   });
 
-  it("clocked in on no job, staff: Pick The Job, Clock Out and More Options read in Spanish", () => {
+  it("clocked in on no job, staff: Pick the Job, Clock Out and More Options read in Spanish", () => {
     const html = inLang("es", createElement(TimeclockPanel, { ...props, openEntry: openPunch, isStaff: true, lang: "es" }));
     expect(html).toContain("Esta marcación aún no tiene trabajo.");
     expect(html).toContain(">Elegir el Trabajo</button>");
     expect(html).toContain("Entrada marcada — Sin trabajo elegido");
     expect(html).toContain("Marcar Salida");
     expect(html).toContain("Más Opciones");
-    expect(html).not.toContain("Pick The Job");
+    expect(html).not.toContain("Pick the Job");
     expect(html).not.toContain("More Options");
     const enHtml = inLang("en", createElement(TimeclockPanel, { ...props, openEntry: openPunch, isStaff: true, lang: "en" }));
     expect(enHtml).toContain("No job on this punch yet.");
-    expect(enHtml).toContain(">Pick The Job</button>");
+    expect(enHtml).toContain(">Pick the Job</button>");
     expect(enHtml).toContain("Clocked in — No job selected");
     expect(enHtml).toContain("More Options");
   });
@@ -192,8 +192,8 @@ describe("the start-time picker", () => {
     expect(start).toContain('aria-label="Fecha de inicio"');
   });
 
-  it("in English: Starting Now · Pick A Different Time, Stop date / Stop time, the forgot-to-clock-in caption", () => {
-    expect(inLang("en", createElement(ClockStartPicker, { onChange: () => {}, staff: true, tz: TZ }))).toContain("Starting Now · Pick A Different Time");
+  it("in English: Starting Now · Pick a Different Time, Stop date / Stop time, the forgot-to-clock-in caption", () => {
+    expect(inLang("en", createElement(ClockStartPicker, { onChange: () => {}, staff: true, tz: TZ }))).toContain("Starting Now · Pick a Different Time");
     const stop = inLang("en", createElement(ClockStartPicker, { onChange: () => {}, staff: true, startExpanded: true, fieldLabel: "Stop", tz: TZ }));
     expect(stop).toContain('aria-label="Stop date"');
     expect(stop).toContain('aria-label="Stop time"');
@@ -207,7 +207,7 @@ describe("the start-time picker", () => {
       for (const key of ["tc_roundedTo", "tc_startingNowRound", "tc_startingNow"]) {
         const label = dict(lang)[key].replace("{time}", "7:00 AM");
         if (lang === "es") expect(esTitleCase(label), `${lang}:${key} "${label}"`).toBe(true); // Spanish: the significant words (cn-v1147)
-        else for (const w of label.split(/\s+/)) if (/\p{L}/u.test(w)) expect(w, `${lang}:${key} "${label}"`).toMatch(/^\p{Lu}/u);
+        else expect(titleCaseIn(label, "en"), `${lang}:${key} "${label}"`).toBe(true); // the one judge (cn-v1148)
       }
     }
   });
@@ -243,12 +243,12 @@ describe("Nort's end-of-day debrief", () => {
     expect(html).toContain("Omitir");
     expect(html).toContain("Ya marcaste salida. Antes de irte, dos preguntas rápidas para la oficina.");
     expect(html).not.toContain("File Report");
-    expect(html).not.toContain("End Of Day");
+    expect(html).not.toContain("End of Day");
   });
 
   it("open, in English: what it said", () => {
     const html = inLang("en", createElement(DailyReportDebrief, { open: true, onClose: () => {} }));
-    expect(html).toContain("Nort — End Of Day");
+    expect(html).toContain("Nort — End of Day");
     expect(html).toContain("What did you do today?");
     expect(html).toContain("What materials do you need tomorrow?");
     expect(html).toContain('placeholder="What got done today, in plain words…"');

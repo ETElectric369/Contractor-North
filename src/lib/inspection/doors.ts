@@ -252,7 +252,7 @@ export function inspectorDoors(ctx: InspectorDoorContext): Record<string, NortDo
     },
   };
   doors["insp-measures"] = {
-    label: "Add A Measurement to the visit (not on a task)",
+    label: "Add a Measurement to the visit (not on a task)",
     fields: ["label", "value", "unit"],
     add: addRow(null),
   };
@@ -320,7 +320,7 @@ export function inspectorDoors(ctx: InspectorDoorContext): Record<string, NortDo
       },
     };
     doors[`task-measure-${id}`] = {
-      label: `Add A Measurement to ${taskWord(t0)}`,
+      label: `Add a Measurement to ${taskWord(t0)}`,
       fields: ["label", "value", "unit"],
       add: addRow(id),
     };

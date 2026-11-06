@@ -498,7 +498,7 @@ describe("invoices with no bill", () => {
    * THE WRONG COLOUR RETURN. 8802-1107230 is five light almond USB receptacles Erik sent straight
    * back; 8802-1107337 is CED taking the $225.47 off again, and its own PDF names its parent
    * ("ORIGINAL INVOICE(S): 1107230"). Both are open, both name ARR 106, and no bill covers the
-   * invoice - so before this rule the list offered "Record It As A Bill" on merchandise he does
+   * invoice - so before this rule the list offered "Record It as a Bill" on merchandise he does
    * not have, one tap from a customer's job. The ivory replacement beside it, 8802-1107338, is a
    * real purchase and must stay.
    */

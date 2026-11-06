@@ -117,16 +117,16 @@ export const words: WordCatalog = {
     "sh_dock_y-settings": "Your Settings",
     "sh_dock_y-handbook": "Handbook",
     "sh_dock_tl-all": "Calculators & Tools",
-    "sh_dock_lp-pick": "Pick A Plan",
+    "sh_dock_lp-pick": "Pick a Plan",
     "sh_dock_lp-settings": "Settings",
-    "sh_dock_lp-accountant": "Download For Your Accountant",
+    "sh_dock_lp-accountant": "Download for Your Accountant",
     "sh_dock_lp-export": "Download Everything",
     sh_home: "Home",
     sh_sectionPages: "{section} pages",
     sh_close: "Close",
 
-    // ── Search Or Ask (command-bar.tsx) ──
-    sh_talkToNort: "Talk To Nort",
+    // ── Search or Ask (command-bar.tsx) ──
+    sh_talkToNort: "Talk to Nort",
     sh_sayItOutLoud: "Say it out loud",
     sh_reminders: "Reminders",
     sh_organize: "Organize",
@@ -149,19 +149,19 @@ export const words: WordCatalog = {
     sh_kind_invoice: "Invoice",
     sh_kind_appointment: "Appointment",
 
-    // ── The help rows (lib/onboarding/help-rows: under Search Or Ask with Nort on, under Help in the account menu with Nort off) ──
+    // ── The help rows (lib/onboarding/help-rows: under Search or Ask with Nort on, under Help in the account menu with Nort off) ──
     sh_help_startHere: "Start Here",
     sh_help_startHereNort: "Nort shows you around, out loud, and asks what he needs.",
     sh_help_startHereQuiet: "A few questions about the business, and where everything lives.",
     sh_help_finish: "Finish Setting Up · {n} Left",
     sh_help_finishSub: "Still missing: {list}.",
     sh_help_showMeHow: "Show Me How",
-    sh_help_again: "Take The Setup Again",
+    sh_help_again: "Take the Setup Again",
     sh_help_againNort: "Setup from the top. Change anything you told Nort.",
     sh_help_againQuiet: "The setup questions from the top. Change any answer.",
 
     // ── The + (global-quick-add.tsx: a tech's + is the paper door itself; the office's verbs are nv_add_ in lib/words/nav.ts) ──
-    sh_snapOrNote: "Snap Or Note",
+    sh_snapOrNote: "Snap or Note",
     sh_quickAdd: "Quick Add",
 
     // ── The Bell (notification-bell.tsx) ──
@@ -177,7 +177,7 @@ export const words: WordCatalog = {
     sh_goBack: "Go back",
     sh_back: "Back",
     sh_company: "Company",
-    sh_searchOrAsk: "Search Or Ask",
+    sh_searchOrAsk: "Search or Ask",
     sh_search: "Search",
     sh_searchOrAskNort: "Search or ask Nort",
     sh_setupWaitingInside: " — setup is waiting inside",
@@ -243,13 +243,13 @@ export const words: WordCatalog = {
     sh_push_long_shift: "A crew clock running {hours} hours",
     sh_pushHelp_long_shift: "Buzzes when somebody on your crew has been clocked in that long, so you can clock them out.",
     sh_push_daily_report: "Daily reports from crew leads",
-    sh_push_booked: "A Customer Picked A Time",
+    sh_push_booked: "A Customer Picked a Time",
     sh_pushHelp_booked: "When a customer picks one of the times you sent them, it goes on the schedule and buzzes you.",
     sh_push_tap_to_pay: "Tap to Pay on iPhone",
     sh_pushHelp_tap_to_pay: "A card declined on Tap to Pay on iPhone (it buzzes even if you saw it on screen), and the one-time launch announcement.",
-    sh_push_billing: "Billing And Your Plan",
+    sh_push_billing: "Billing and Your Plan",
     sh_pushHelp_billing: "Your trial's last days, a declined card, and when a plan ends. Owners and admins only.",
-    sh_push_bug_watch: "Bug Watch: Blockers And The Monday Digest",
+    sh_push_bug_watch: "Bug Watch: Blockers and the Monday Digest",
     sh_pushHelp_bug_watch: "North's own team only: a page the moment something platform-wide breaks, and the Monday morning digest.",
     sh_pushNotSupportedApp: "This version of the app can't do notifications yet — update North from TestFlight.",
     sh_pushNotSupportedBrowser: "This browser doesn't support push notifications.",
@@ -301,7 +301,7 @@ export const words: WordCatalog = {
     // ── Nort speaks first (nort-greeting.tsx) ──
     sh_nortSpeaksFirst: "Nort speaks first",
     sh_nortSpeaksFirstHow:
-      "When you tap Talk To Nort, he says hello the moment the mic is live — so you know you can talk. If he’s holding something for you he names it and asks whether you want it now. Off, he stays quiet until you speak and asks about what he’s holding in his first reply instead.",
+      "When you tap Talk to Nort, he says hello the moment the mic is live — so you know you can talk. If he’s holding something for you he names it and asks whether you want it now. Off, he stays quiet until you speak and asks about what he’s holding in his first reply instead.",
     sh_nortGreetsYouAs: "Nort greets you as",
     sh_yourFirstName: "Your first name",
 
@@ -319,7 +319,7 @@ export const words: WordCatalog = {
     sh_passkeyFinishFailed: "Couldn't finish enrollment.",
     sh_cancelled: "Cancelled.",
     sh_passkeySetupFailed: "Couldn't set up the passkey.",
-    sh_waitingForTap: "Waiting For Your Tap…",
+    sh_waitingForTap: "Waiting for Your Tap…",
     sh_addAnotherPasskey: "Add Another Passkey",
     sh_setUpPasskey: "Set Up Face ID / Passkey",
 
@@ -334,7 +334,7 @@ export const words: WordCatalog = {
     //    directions link (nav-link.tsx: the first tap asks which maps app). A clickable key here is sh_btn_, Title
     //    Case in both languages (the visit-page-in-Spanish wave, cn-v1144). ──
     sh_off: "Off",
-    sh_askTheOwner: "Ask The Owner",
+    sh_askTheOwner: "Ask the Owner",
     sh_btn_turnOn: "Turn On",
     sh_btn_turningOn: "Turning On…",
     sh_openIn: "Open in…",

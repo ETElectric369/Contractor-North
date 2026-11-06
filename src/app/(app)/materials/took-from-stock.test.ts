@@ -116,7 +116,7 @@ describe("the number pad", () => {
   });
 });
 
-describe("Took From Stock and the Shop Stock switch (0352)", () => {
+describe("Took from Stock and the Shop Stock switch (0352)", () => {
   const take: JobTake = {
     drawGroup: "g1",
     takenAt: "2026-09-24T17:00:00Z",
@@ -139,12 +139,12 @@ describe("Took From Stock and the Shop Stock switch (0352)", () => {
 
   it("on / not passed: today's door, the button and the takes", () => {
     expect(door({ canTake: true })).toBe(door());
-    expect(buttons(door()).map((b) => b.text)).toContain("Took From Stock");
+    expect(buttons(door()).map((b) => b.text)).toContain("Took from Stock");
   });
 
-  it("off: no Took From Stock button, and the takes already made stay listed with their Undo", () => {
+  it("off: no Took from Stock button, and the takes already made stay listed with their Undo", () => {
     const off = door({ canTake: false });
-    expect(buttons(off).map((b) => b.text)).not.toContain("Took From Stock");
+    expect(buttons(off).map((b) => b.text)).not.toContain("Took from Stock");
     expect(textOf(off)).toContain("Brian took 60 ft of 12/2 NM-B");
     expect(buttons(off).map((b) => b.text)).toContain("Undo");
   });
@@ -214,7 +214,7 @@ describe("the job's takes", () => {
   it("a takes read that failed says so in the list's place, never an empty list (audit v1018)", () => {
     for (const staff of [false, true]) {
       const html = list([], staff, true);
-      expect(textOf(html)).toContain("Taken From Stock");
+      expect(textOf(html)).toContain("Taken from Stock");
       expect(textOf(html)).toContain("Couldn't read what's been taken for this job just now. Reload before taking more.");
     }
   });
@@ -296,7 +296,7 @@ describe("in Spanish (cn-v1138)", () => {
     const texts = buttons(door).map((b) => b.text);
     expect(texts).toContain("Tomado del Inventario");
     expect(texts).toContain("Deshacer");
-    expect(texts).not.toContain("Took From Stock");
+    expect(texts).not.toContain("Took from Stock");
     expect(texts).not.toContain("Undo");
     expect(textOf(door)).toContain("Lo Tomado del Inventario");
   });
@@ -305,7 +305,7 @@ describe("in Spanish (cn-v1138)", () => {
     expect(sheetIn("en")).toBe(sheet());
     expect(sheetIn("en", { step: { kind: "count", row: SHELF[0] }, entry: "6" })).toBe(sheet({ step: { kind: "count", row: SHELF[0] }, entry: "6" }));
     expect(doorIn("en")).toBe(renderToStaticMarkup(createElement(TookFromStock, { jobId: "j1", takes: [base], viewerIsStaff: false })));
-    expect(buttons(doorIn("en")).map((b) => b.text)).toEqual(expect.arrayContaining(["Took From Stock", "Undo"]));
-    expect(textOf(doorIn("en"))).toContain("Taken From Stock");
+    expect(buttons(doorIn("en")).map((b) => b.text)).toEqual(expect.arrayContaining(["Took from Stock", "Undo"]));
+    expect(textOf(doorIn("en"))).toContain("Taken from Stock");
   });
 });

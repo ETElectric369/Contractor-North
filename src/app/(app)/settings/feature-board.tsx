@@ -15,7 +15,7 @@ import { applyTradeCodes, applyTradeSwitches, setEstimatingMode, setFeature, set
 /**
  * SETTINGS > FEATURES: THE SWITCH BOARD (0352). One row per switch, sub-switches nested under their
  * parent. A Title Case name, one plain line, and for the owner a 44px switch; everyone else reads
- * the state and "Ask The Owner" (only the owner can move a switch, and a switch that can't save for
+ * the state and "Ask the Owner" (only the owner can move a switch, and a switch that can't save for
  * this person must not render as one).
  *
  * A switch hides doors only, and the page says so where it matters:
@@ -234,7 +234,7 @@ function Row({
         </div>
       ) : (
         <span className="shrink-0 text-right text-xs text-slate-500">
-          {isOn ? "On" : `Off${saved}${askOwner ? " · Ask The Owner" : ""}`}
+          {isOn ? "On" : `Off${saved}${askOwner ? " · Ask the Owner" : ""}`}
         </span>
       )}
     </div>
@@ -311,7 +311,7 @@ export async function cardCall<T extends { ok: boolean }>(call: () => Promise<T>
  *                  differ, the inspection sheet when there is none — and each says what it did, or
  *                  why it did not, in place. A failed offers read is said in their place.
  *   How You Price  Research or Catalog, one line each saying what the estimator does in that mode;
- *                  the owner moves it, everyone else reads it with Ask The Owner, as on the board.
+ *                  the owner moves it, everyone else reads it with Ask the Owner, as on the board.
  *                  A refused or thrown move goes back to the value the server last confirmed.
  */
 function TradeCard({
@@ -440,7 +440,7 @@ function TradeCard({
             Change My Trade
           </Button>
         ) : (
-          askOwner && <span className="shrink-0 text-xs text-slate-500">Ask The Owner</span>
+          askOwner && <span className="shrink-0 text-xs text-slate-500">Ask the Owner</span>
         )}
       </div>
       {offersError && <div className="bg-slate-50/60 px-4 py-3 text-xs text-red-600">{offersError}</div>}
@@ -470,7 +470,7 @@ function TradeCard({
           ) : (
             <span className="shrink-0 text-right text-xs text-slate-500">
               {mode === "catalog" ? "Catalog" : "Research"}
-              {askOwner ? " · Ask The Owner" : ""}
+              {askOwner ? " · Ask the Owner" : ""}
             </span>
           )}
         </div>

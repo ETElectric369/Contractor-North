@@ -16,7 +16,7 @@ import { setPaymentSchedule, requestNextPayment } from "../../billing/actions";
 type Row = { label: string; percent: number };
 
 /**
- * REQUEST NEXT PAYMENT, ONE DOOR (W1-19). The schedule card below and the Overview's Left To Bill
+ * REQUEST NEXT PAYMENT, ONE DOOR (W1-19). The schedule card below and the Overview's Left to Bill
  * card both ask for the next payment; this is the one click behind both (requestNextPayment on the
  * server), so the two can never answer differently. A refusal says why in `error`, and one that
  * names the open draft carries it as a toast's Open door; a new or refreshed draft is opened with the

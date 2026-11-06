@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
- * THE READ'S OWN ROUTE (W1-30). Snap Or Note is in the top bar of every page, and a server action
+ * THE READ'S OWN ROUTE (W1-30). Snap or Note is in the top bar of every page, and a server action
  * runs under the page's own time; this route gives a read started anywhere its 60 seconds. It is the
  * office's (a paper carries prices), and it reads one paper by id inside the caller's company.
  */

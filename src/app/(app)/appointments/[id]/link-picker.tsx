@@ -74,7 +74,7 @@ export function LinkPicker({
   linked: { kind: LinkTarget["kind"]; name: string } | null;
   /** The address typed on this visit — used to offer matches without anyone typing twice. */
   seed: string;
-  /** Only these kinds are offered (the ending card's "Won · Pick The Job" is jobs only). null: all three. */
+  /** Only these kinds are offered (the ending card's "Won · Pick the Job" is jobs only). null: all three. */
   kinds?: LinkTarget["kind"][] | null;
   /** The words on the closed picker's one button; left out, the catalog's "Connect this to a lead, customer or job". */
   openLabel?: string;

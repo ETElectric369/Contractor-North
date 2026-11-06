@@ -170,7 +170,7 @@ describe("waitOnCredit", () => {
     );
     const res = await waitOnCredit(HAZELNUT.id);
     expect(res).toEqual({ ok: false, error: WAIT_NEEDS_UPDATE });
-    expect(WAIT_NEEDS_UPDATE).toMatch(/^Waiting On A Credit needs one database update\./);
+    expect(WAIT_NEEDS_UPDATE).toMatch(/^Waiting on a Credit needs one database update\./);
   });
 });
 

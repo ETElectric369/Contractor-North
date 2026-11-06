@@ -20,7 +20,7 @@ import { downloadVerdict, expectedType, type DownloadWant } from "@/lib/download
  * IN THE iOS SHELL a blob link can't save (WebKit in the app has no download manager, see
  * shell-save.ts and the media lightbox), so the file goes to the share sheet (Save to Files, Mail,
  * AirDrop). The sheet only opens while the tap is still warm, and making the file takes a moment:
- * if the sheet says the tap went cold, the file is kept and one more tap, Save The File, opens it
+ * if the sheet says the tap went cold, the file is kept and one more tap, Save the File, opens it
  * with nothing in between. A phone that can't share files is told so, in words.
  *
  * SIGNED OUT, OR NOT THE FILE: the fetch never follows a redirect (the middleware's answer to a
@@ -29,8 +29,8 @@ import { downloadVerdict, expectedType, type DownloadWant } from "@/lib/download
  */
 
 export const MAKING_IT = "Making It…";
-export const SAVE_THE_FILE = "Save The File";
-export const READY_WORDS = "It's ready. Tap Save The File to choose where it goes.";
+export const SAVE_THE_FILE = "Save the File";
+export const READY_WORDS = "It's ready. Tap Save the File to choose where it goes.";
 export const SHARE_REFUSED_WORDS = "Couldn't open the share sheet. Open North in Safari, or on a computer, and download it there.";
 export const CANT_HAND_OVER_WORDS = "This phone can't hand the file over from inside the app. Open North in Safari, or on a computer, and download it there.";
 export const CONNECTION_DROPPED_WORDS = "The download didn't come through: the connection dropped. Try again.";
@@ -162,7 +162,7 @@ const VARIANTS = {
 } as const;
 
 /**
- * One file door: the button, Save The File when the shell kept the file, and the words under it.
+ * One file door: the button, Save the File when the shell kept the file, and the words under it.
  * `want` is what the route answers (a zip unless said otherwise), judged before anything is saved.
  */
 export function DownloadButton({

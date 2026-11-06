@@ -7,7 +7,7 @@ import { join } from "node:path";
 /**
  * THE SETUP HOST (W1-09): the graduation cap's screens with no button of their own, mounted ONCE in
  * the app layout and opened by the setup rows through cn:setup — so closing the sheet a row sat in
- * (Search Or Ask, or the avatar menu) never kills a running lesson.
+ * (Search or Ask, or the avatar menu) never kills a running lesson.
  */
 vi.mock("@/components/setup-interview", () => ({ SetupInterview: () => createElement("i", { "data-x": "interview" }) }));
 vi.mock("@/components/tour/tour-driver", () => ({ TourDriver: () => createElement("i", { "data-x": "driver" }) }));

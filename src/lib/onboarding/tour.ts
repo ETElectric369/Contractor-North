@@ -21,7 +21,7 @@ import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
  *
  * ── FOUR RULES THIS SCRIPT OBEYS ────────────────────────────────────────────────────────────
  *
- * NORT FIRST. Step one points at Search Or Ask, where Nort lives, and step one is a QUESTION he
+ * NORT FIRST. Step one points at Search or Ask, where Nort lives, and step one is a QUESTION he
  * answers out loud, because every other thing in this app is easier once you know the assistant is
  * real and listening. The old version put five text boxes first, which teaches that Nort is a garnish.
  *
@@ -193,14 +193,14 @@ export const stepWords = (s: TourStep, nortOn: boolean): { title: string; say: L
  * the loop (recap, tone, done). The teaching became LESSONS: named, self-contained, offered ONCE
  * on the surface each explains (the why-lines lesson at the playbook editor — the one thing
  * "nobody is going to figure out without holding their hand"), and replayable forever from Show
- * Me How (under Search Or Ask; under Help, behind the initials, with Nort off). A lesson that lives
+ * Me How (under Search or Ask; under Help, behind the initials, with Nort off). A lesson that lives
  * next to the button it describes goes stale LOUDLY, which is the whole point of the move.
  */
 export const TOUR: TourStep[] = [
   // ── 1. MEET NORT. A question, out loud, before anything else. ───────────────────────────────
   {
     key: "hello",
-    // Search Or Ask (topbar.tsx): Talk To Nort is its first row, so that button is where he lives.
+    // Search or Ask (topbar.tsx): Talk to Nort is its first row, so that button is where he lives.
     anchor: "ask",
     route: "/planner",
     title: "This is Nort",
@@ -209,13 +209,13 @@ export const TOUR: TourStep[] = [
     // "down here" sends people tapping a button that can't respond.
     say: (c) =>
       c.first
-        ? `Hey ${c.first} — I'm Nort. I live in that button up there, Search Or Ask, on every screen in here. ` +
+        ? `Hey ${c.first} — I'm Nort. I live in that button up there, Search or Ask, on every screen in here. ` +
           // "your trade as …", never "as <trade>": the words can be the key's ("painter"), which
           // needs an article, or a company's own ("Construction"), which can't take one.
           `I've already got you as ${c.first}${c.city ? ` out of ${c.city}` : ""}${c.trade ? `, and your trade as ${c.trade}` : ""}. ` +
           `Press the Talk button down here and say hello, just so you can hear how this works. ` +
           `Say a different name and I'll take that instead.`
-        : "Hi — I'm Nort. I live in that button up there, Search Or Ask, on every screen in here. " +
+        : "Hi — I'm Nort. I live in that button up there, Search or Ask, on every screen in here. " +
           "Press the Talk button down here and tell me your name and what you do, the way you'd tell " +
           "a person. Type it instead if you'd rather — I'm not fussy.",
     ask: "full_name",
@@ -330,7 +330,7 @@ export const TOUR: TourStep[] = [
     // how an answer changes), and Show Me How holds the lessons. Show Me How does not replay the
     // setup, so the line doesn't say it does.
     say:
-      "That's the whole thing. Tap Search Or Ask any time — Take The Setup Again replays this and " +
+      "That's the whole thing. Tap Search or Ask any time — Take the Setup Again replays this and " +
       "changes anything you told me, and Show Me How has the rest. Let's get you a job in here.",
     next: "Done",
   },
@@ -357,7 +357,7 @@ export const lessonOn = (l: Lesson, features: FeatureMap | null | undefined): bo
 /**
  * DOES THE ESTIMATE READ WHY LINES? Not today. This lesson used to say "when I write the estimate,
  * your why line is what tells me where that answer lands in the price", and nothing on the estimate
- * path reads one: Start The Estimate hands the estimator "label: answer" only
+ * path reads one: Start the Estimate hands the estimator "label: answer" only
  * (lib/playbook/answers factsForEstimatorByProvenance), and Generate Line Items reads the separate
  * "How Nort writes an estimate" text. Where a why line IS read today: the inspection fill
  * (lib/playbook/hear, "where the answer lands") and the grey line under each question on the
@@ -500,12 +500,12 @@ export const LESSONS: Lesson[] = [
   {
     key: "topbar",
     anchor: "quickadd",
-    title: "Plus, Search Or Ask, the bell",
+    title: "Plus, Search or Ask, the bell",
     // Plus names no customer and no task (lane 3 takes those rows off it this release); the bell
     // is the record of every notice, not "what's waiting on you" (that is Needs You, on My Day).
     say:
       "Plus is where new work starts — a job, an appointment, an invoice, or a paper to snap — from any screen. " +
-      "Search Or Ask finds your jobs, customers, estimates, invoices and appointments by name or " +
+      "Search or Ask finds your jobs, customers, estimates, invoices and appointments by name or " +
       "number, and you can ask me anything there. " +
       "And the bell keeps your notices, whether or not you switch on phone notifications.",
     plain: {
@@ -649,7 +649,7 @@ export const LESSONS: Lesson[] = [
     title: "Writing it up",
     say: (c) =>
       (leadsOn(c)
-        ? "Back in the truck you press Start The Estimate, and the answers from that inspection are " +
+        ? "Back in the truck you press Start the Estimate, and the answers from that inspection are " +
           "already in it, in your own words, taken as given rather than read back to you. Anything you " +
           "priced standing on site is already a line. "
         : "It starts with the estimate: tap Plus, then New Estimate, and pick the customer. ") +
@@ -660,7 +660,7 @@ export const LESSONS: Lesson[] = [
     plain: {
       say: (c) =>
         (leadsOn(c)
-          ? "Back in the truck you press Start The Estimate, and the answers from that inspection are " +
+          ? "Back in the truck you press Start the Estimate, and the answers from that inspection are " +
             "already in it, in your own words, taken as given rather than read back to you. Anything you " +
             "priced standing on site is already a line. "
           : "It starts with the estimate: tap Plus, then New Estimate, and pick the customer. ") +
@@ -676,15 +676,15 @@ export const LESSONS: Lesson[] = [
     title: "They say yes",
     // TRUE TO THE JOB PAGE (Wave 1): the job's one clock is the dock's Clock In at the top (W1-20;
     // named by the words on it, never its TIME slot name or the Time tab, which no longer clocks), and the Costs
-    // tab's Snap The Bill runs the receipt pipeline (lib/receipt-capture), which writes the bill or
+    // tab's Snap the Bill runs the receipt pipeline (lib/receipt-capture), which writes the bill or
     // leaves the paper filed on the job. A filed paper no bill holds comes to Needs You as Receipts
-    // Not On A Bill (lib/action-items/receipts-not-on-a-bill; a staff row, so "the office's"): that is
+    // Not on a Bill (lib/action-items/receipts-not-on-a-bill; a staff row, so "the office's"): that is
     // the old "pile", by its own name.
     say: (c) =>
       jobStarts(c) +
       "Then it " +
       "starts collecting: tap Clock In at the top of the job and the hours land on it; on its Costs " +
-      "tab, Snap The Bill on a supply house receipt and I read it and write it on as a cost. One I " +
+      "tab, Snap the Bill on a supply house receipt and I read it and write it on as a cost. One I " +
       "can't read stays filed on the job and comes to the office's Needs You as a receipt not on a bill " +
       "yet, rather than a guess.",
     plain: {
@@ -692,7 +692,7 @@ export const LESSONS: Lesson[] = [
         jobStarts(c) +
         "Then it " +
         "starts collecting: tap Clock In at the top of the job and the hours land on it; on its Costs " +
-        "tab, Snap The Bill on a supply house receipt and it's read and written on as a cost. One that " +
+        "tab, Snap the Bill on a supply house receipt and it's read and written on as a cost. One that " +
         "can't be read stays filed on the job and comes to the office's Needs You as a receipt not on a " +
         "bill yet, rather than a guess.",
     },

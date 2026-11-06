@@ -63,9 +63,9 @@ export const words: WordCatalog = {
     us_added: "Added — it shows on the ring within a minute.",
 
     // The two notices (builder U2's cron step), once a month each.
-    us_notice80Title: "Usage: 80% Of This Month",
+    us_notice80Title: "Usage: 80% of This Month",
     us_notice80Body: "Most of this month's usage is used. It resets {date}. Nothing stops: past 100%, Nort and the estimator run lighter until then.",
-    us_notice100Title: "Usage: Used Up For This Month",
+    us_notice100Title: "Usage: Used Up for This Month",
     us_notice100Body: "This month's usage is used up, so Nort and the estimator run on the lighter model until {date}. Add usage or upgrade in Settings › Getting Paid.",
     // The email's button under both notices (the billing family's words).
     us_noticeOpenSettings: "Open Settings",

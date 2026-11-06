@@ -119,7 +119,7 @@ export interface SupplierPaperIdentity {
 export const NO_SUPPLIER_NAME_GROUP = "\u0000no-supplier-name";
 
 /** What the screen calls that group. Title Case, his words, no glossary. */
-export const NO_SUPPLIER_NAME_LABEL = "No Supplier Name On The Paper";
+export const NO_SUPPLIER_NAME_LABEL = "No Supplier Name on the Paper";
 
 export interface SupplierIdentityIndex {
   /** aliasKey(alias) -> account id. The exact string, which is what the database is unique on. */
@@ -322,7 +322,7 @@ export function paperDisagrees(input: {
 /**
  * THE STATUS WORD, which the database derives from the number per purchase (0383): 'paid' when
  * nothing is open on the bill and the corrections under it. This is for the CONTROL that writes the
- * column (the Mark Paid / Mark On Account tap writes the word; the trigger writes the number from
+ * column (the Mark Paid / Mark on Account tap writes the word; the trigger writes the number from
  * it), and for a row's face, which must say what the tap will do. A figure wants `isStillOwed`.
  */
 export function isPaidBill(paper: { status?: string | null } | null | undefined): boolean {
@@ -339,7 +339,7 @@ export function flipBoughtHow(paper: { status?: string | null } | null | undefin
  *
  * Three states, from the one number: paid in full, part-paid (the figures, so he can see the
  * balance), on account. "Settled · <supplier> Says" retired with 0383: the supplier's closed paper
- * over an open bill of ours is a Reconcile row, never a badge; "Settled At The Counter" retired with
+ * over an open bill of ours is a Reconcile row, never a badge; "Settled at the Counter" retired with
  * it, because a bill paid by a cheque against the account was never settled at any counter.
  */
 export function billSettledLabel(
@@ -350,7 +350,7 @@ export function billSettledLabel(
   if (!isStillOwed(paper)) return "Paid";
   const amount = money(paper?.amount);
   const paid = paper?.amountPaid === undefined || paper?.amountPaid === null ? 0 : money(paper.amountPaid);
-  if (amount > 0.005 && paid > 0.005 && paid < amount - 0.005) return `Part-Paid ${formatMoney(paid)} Of ${formatMoney(amount)}`;
+  if (amount > 0.005 && paid > 0.005 && paid < amount - 0.005) return `Part-Paid ${formatMoney(paid)} of ${formatMoney(amount)}`;
   return "On Account";
 }
 
@@ -366,7 +366,7 @@ export function billSettledTone(paper: StillOwedShape): "green" | "amber" {
  * naming the payment to undo. The face says the deed.
  */
 export function boughtHowFace(paper: { status?: string | null }): string {
-  return isPaidBill(paper) ? "Mark On Account" : "Mark Paid";
+  return isPaidBill(paper) ? "Mark on Account" : "Mark Paid";
 }
 
 // ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -482,7 +482,7 @@ export interface BoughtNotSettled {
  * "Unpaid" or "Owed" beside a supplier balance, and a bare "$10,000 Unpaid" over "$5,000 Owed" is
  * the screen telling a man he owes two different amounts.
  */
-export const BOUGHT_NOT_SETTLED_LABEL = "Bought On Account, Not Squared Up Yet";
+export const BOUGHT_NOT_SETTLED_LABEL = "Bought on Account, Not Squared Up Yet";
 
 /**
  * QUESTION (b): WHAT DID I BUY AND NOT SETTLE YET.
@@ -520,7 +520,7 @@ export function whatIBoughtNotSettled(input: {
 
 /** The words for question (a). The workbook's tab had them right first: it names whose claim the
  *  figure is, which is the one thing that makes it checkable against a portal. */
-export const SUPPLIER_OWED_LABEL = "Owed To Suppliers";
+export const SUPPLIER_OWED_LABEL = "Owed to Suppliers";
 
 /** How one line's figure was reached, so a screen or a workbook column can say it per row. */
 export type SupplierOwedHow =

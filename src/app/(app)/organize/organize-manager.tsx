@@ -70,7 +70,7 @@ const KIND_META: Record<string, { label: string; icon: any; tone: "green" | "amb
 
 /**
  * ORGANIZE: where papers wait until someone files them (Needs Attention), and what was filed or set
- * aside (Archive). Papers come in through Snap Or Note (the page header's button, or + anywhere);
+ * aside (Archive). Papers come in through Snap or Note (the page header's button, or + anywhere);
  * this page no longer has a capture card of its own (W1-30: one paper door).
  */
 export function OrganizeManager({
@@ -93,7 +93,7 @@ export function OrganizeManager({
   const [notePick, setNotePick] = useState<Record<string, string>>({});
 
   const tray = items.filter((i) => i.status === "needs_review");
-  // ONE INBOX, ONE ACTION (0295): every paper in the tray renders the SAME card Snap Or Note and
+  // ONE INBOX, ONE ACTION (0295): every paper in the tray renders the SAME card Snap or Note and
   // Needs You on /bills render, and files through the same answers. A note keeps its own card,
   // because what matters on a note is the words on it.
   const trayPapers = tray.filter((i) => i.kind !== "note");
@@ -187,7 +187,7 @@ export function OrganizeManager({
   }
 
   /** A NOTE in the tray: its words, then where it goes. Papers use PaperworkRow instead. Picking a
-   *  job only picks; Keep It On The Job is the press (the dropdown used to file the moment it
+   *  job only picks; Keep It on the Job is the press (the dropdown used to file the moment it
    *  changed). Archive is the safe inline remove. */
   function AttentionCard({ item }: { item: OrganizedItemRow }) {
     const meta = KIND_META[item.kind] ?? KIND_META.job_document;
@@ -224,9 +224,9 @@ export function OrganizeManager({
   }
 
   /**
-   * THE SUGGESTION, KEPT ON THE NOTE (Erik, audit v994 PR2). A note typed in Snap Or Note is read
+   * THE SUGGESTION, KEPT ON THE NOTE (Erik, audit v994 PR2). A note typed in Snap or Note is read
    * once as it is saved (W1-30), and what that look suggests rides here as a chip: a person taps Add
-   * A Reminder or Keep As Note, the toast says what happened, and Undo takes it back. Nothing moves
+   * A Reminder or Keep as Note, the toast says what happened, and Undo takes it back. Nothing moves
    * until then. (The card's own AI Suggest button is gone: the look happens once, on arrival.)
    */
   function SuggestChips({ item }: { item: OrganizedItemRow }) {
@@ -259,12 +259,12 @@ export function OrganizeManager({
         {task && (
           <button type="button" className={chip} disabled={pending} onClick={() => act(() => makeTaskFromPaper(item.id), `Added a Reminder: "${task.title}".`)}>
             <ListTodo className="h-4 w-4 shrink-0 text-brand" />
-            <span className="min-w-0 break-words">Add A Reminder: {task.title}</span>
+            <span className="min-w-0 break-words">Add a Reminder: {task.title}</span>
           </button>
         )}
         {keep && (
           <button type="button" className={chip} disabled={pending} onClick={() => act(() => keepAsNote(item.id), "Kept as a note.")}>
-            <StickyNote className="h-4 w-4 shrink-0 text-brand" /> Keep As Note
+            <StickyNote className="h-4 w-4 shrink-0 text-brand" /> Keep as Note
           </button>
         )}
         <span className="text-xs text-slate-500">A suggestion{p.why ? `: ${p.why}` : ""}. Nothing moves until you tap it.</span>
@@ -281,8 +281,8 @@ export function OrganizeManager({
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         <span className="flex min-w-0 items-center gap-1.5">
           <Briefcase className="h-4 w-4 shrink-0 text-slate-400" />
-          <Select value={pick} onChange={(e) => setPick(e.target.value)} disabled={pending} className="h-11 w-48" aria-label="Pick A Job">
-            <option value="">Pick A Job…</option>
+          <Select value={pick} onChange={(e) => setPick(e.target.value)} disabled={pending} className="h-11 w-48" aria-label="Pick a Job">
+            <option value="">Pick a Job…</option>
             {jobs.filter((j) => j.status !== "complete").map((j) => (
               <option key={j.id} value={j.id}>{jobLabel(j)}</option>
             ))}
@@ -296,7 +296,7 @@ export function OrganizeManager({
           </Select>
         </span>
         <Button variant="outline" onClick={() => pick && file(item, { type: "job", jobId: pick })} disabled={pending || !pick}>
-          <Check /> Keep It On The Job
+          <Check /> Keep It on the Job
         </Button>
         <Button variant="outline" onClick={() => setEditing(item)} disabled={pending}>
           <Pencil /> Edit
@@ -330,13 +330,13 @@ export function OrganizeManager({
               the paper never sits in the tray over a bill that is still live. */}
           <button onClick={() => restore(item)} disabled={pending} className="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700" title={
               item.source === "job"
-                ? "Undo Record As Cost (The Receipt Stays On The Job)"
+                ? "Undo Record as Cost (The Receipt Stays on the Job)"
                 : proposalOf(item).filed?.how === "bank_download"
                   ? "Undo This Download (Everything It Wrote Comes Off)"
                   : item.bill_id || item.job_id || item.tied_bill_id
-                    ? "Undo Filing (Back To Needs Attention)"
-                    : "Back To Needs Attention"
-            } aria-label={item.source === "job" ? "Undo Record As Cost" : "Back To Needs Attention"}>
+                    ? "Undo Filing (Back to Needs Attention)"
+                    : "Back to Needs Attention"
+            } aria-label={item.source === "job" ? "Undo Record as Cost" : "Back to Needs Attention"}>
             <RotateCcw className="h-4 w-4" />
           </button>
           <button onClick={() => setEditing(item)} disabled={pending} className="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Edit Details" aria-label="Edit Details">

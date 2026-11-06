@@ -1,5 +1,5 @@
 /** The Resources categories, in the order the form lists them. Its own module (not the "use client"
- *  manager) so the server can read it too: Fill From Their Site lets the model pick one of these.
+ *  manager) so the server can read it too: Fill from Their Site lets the model pick one of these.
  *
  *  RESOURCES IS THE ONE HOME FOR THE PEOPLE A JOB ANSWERS TO (W2-13): building departments,
  *  inspectors, permit portals, utilities, the fire marshal, engineers. The crew reads it too (a tech

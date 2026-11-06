@@ -12,7 +12,7 @@
  *   an entry        lands on the day and minutes the company's clock gives it (lib/tz, the same pair
  *                   timeEntryGridSpan uses); an overnight shift splits at midnight and its tail is drawn
  *                   on the next day from minute 0 (display only, instead of the 1440 clamp);
- *   no job          never guessed onto a block (it stays on Timecards and on Needs You's Hours On No Job);
+ *   no job          never guessed onto a block (it stays on Timecards and on Needs You's Hours on No Job);
  *   today too       today draws what has happened so far (Erik, 2026-10-03: "schedule isn't showing
  *                   today's timecard entries", built 2026-10-26); a punch still RUNNING draws from its
  *                   in to now and reads "on the clock since 8", never "never clocked out"; a block on
@@ -431,7 +431,7 @@ export function blockSentence(
      never guessed onto a block), so a helper who clocked in with no job — the Skip on "Which Job Are
      You On?", anyone not rostered on the job — is invisible here. "Nobody clocked in" would name a
      real person as absent while /timecards shows their hours that day and Needs You counts them under
-     Hours On No Job. The block's own truth is narrower, and it is the one said. */
+     Hours on No Job. The block's own truth is narrower, and it is the one said. */
   if (!a.people.length) return `${head} · ${say(lang, words, "ag_noTimeClocked", "No time clocked to this job")}`;
   const tail: string[] = [];
   const by = (min: number, key: string, en: string) => say(lang, words, key, `${durShort(min)} ${en}`, { d: durShort(min) });

@@ -64,8 +64,8 @@ describe("a task line on the editor", () => {
     expect((html.match(/placeholder="how many"/g) ?? []).length).toBe(2);
     expect((html.match(/placeholder="price\?"/g) ?? []).length).toBe(2);
     expect(html).toContain('aria-label="Remove This Part"');
-    expect(html).toContain("Add A Part");
-    expect(text(html)).toContain("Add Labor At Another Rate");
+    expect(html).toContain("Add a Part");
+    expect(text(html)).toContain("Add Labor at Another Rate");
     // The first row is the task's labor: it never offers to leave.
     expect(html).not.toContain('aria-label="Remove This Labor"');
     expect(text(html)).toContain("Parts $480.00");
@@ -151,7 +151,7 @@ describe("a task line on the editor", () => {
     const line = { ...taskLine, unit_price: 615, detail: { ...taskLine.detail, labor: [{ label: null, person_id: "gone", hours: 1, rate: 135, rate_from: "rule" as const }] } };
     const html = builder({ seededLines: [line], people });
     expect(html).toContain('value="person:gone"');
-    expect(text(html)).toContain("Someone No Longer On The Team");
+    expect(text(html)).toContain("Someone No Longer on the Team");
     expect(text(html)).toContain("quoted at $135.00/h · the rule says $145.00/h now");
   });
 
@@ -203,25 +203,25 @@ describe("a task line on the editor", () => {
   it("a line without a breakdown renders exactly as before, with the one door to become a task", () => {
     const plain = builder({ seededLines: [{ description: "Permit", quantity: 1, unit: "ea", unit_price: 250 }] });
     expect(plain).not.toContain('placeholder="hours?"');
-    expect(plain).not.toContain("Add A Part");
-    expect(text(plain)).toContain("Make This A Task");
+    expect(plain).not.toContain("Add a Part");
+    expect(text(plain)).toContain("Make This a Task");
     expect(builder({ seededLines: [{ description: "Permit", quantity: 1, unit: "ea", unit_price: 250, detail: null }] })).toBe(plain);
     // A task line already is one.
-    expect(text(builder({ seededLines: [taskLine] }))).not.toContain("Make This A Task");
+    expect(text(builder({ seededLines: [taskLine] }))).not.toContain("Make This a Task");
   });
 });
 
-describe("Add A Task and Make This A Task", () => {
+describe("Add a Task and Make This a Task", () => {
   const src = read("src/app/(app)/quotes/estimate-editor.tsx");
-  it("both buttons are on the screen, Title Case, beside Add A Line — on both pages", () => {
+  it("both buttons are on the screen, Title Case, beside Add a Line — on both pages", () => {
     for (const html of [builder(), saved()]) {
       const t = text(html);
-      expect(t).toContain("Add A Task");
-      expect(t).toContain("Add A Line");
+      expect(t).toContain("Add a Task");
+      expect(t).toContain("Add a Line");
       expect(t).not.toMatch(/\bAdd\s*<\/button>/);
     }
   });
-  it("Add A Task starts from emptyTaskDetail at the rule's rate under Tasks and focuses the name; Make This A Task goes through taskFromLine and is written at once", () => {
+  it("Add a Task starts from emptyTaskDetail at the rule's rate under Tasks and focuses the name; Make This a Task goes through taskFromLine and is written at once", () => {
     // The render cannot press the buttons (no DOM), so the two doors are pinned at the source; the
     // writes they reach (addLine, commitLine) are driven in use-quote-writes.test.ts.
     expect(src).toContain("const detail = emptyTaskDetail(rule);");
@@ -264,10 +264,10 @@ describe("the rate reaches the editor through the one rule", () => {
   });
 });
 
-describe("the paper switch (Labor And Parts On The Paper)", () => {
+describe("the paper switch (Labor and Parts on the Paper)", () => {
   it("sits by the totals on both pages, seeded from the row, and goes through the one header write", () => {
     const t = text(builder({ companyEstimateFormat: "tasks" }));
-    expect(t).toContain("Labor And Parts On The Paper");
+    expect(t).toContain("Labor and Parts on the Paper");
     expect(t).toContain("Company Default · Off");
     expect(text(builder({ companyEstimateFormat: "detailed" }))).toContain("Company Default · On");
     const stored = saved({ estimate_format: "detailed" }, [], {}, { companyEstimateFormat: "tasks" });
@@ -278,7 +278,7 @@ describe("the paper switch (Labor And Parts On The Paper)", () => {
     expect(src).toContain('estimateFormat: q.estimate_format === "tasks" || q.estimate_format === "detailed" ? q.estimate_format : null,');
     expect(src).toContain('commitField("estimateFormat");');
     // Only while the estimate is still editable — the lock's own words say why a sent one is not.
-    expect(text(saved({}, [], { lock: { reason: "A signed contract." } }))).not.toContain("Labor And Parts On The Paper");
+    expect(text(saved({}, [], { lock: { reason: "A signed contract." } }))).not.toContain("Labor and Parts on the Paper");
     // The new page no longer adopts a draft into the browser: a lead's draft is OPENED where it lives.
     const page = read("src/app/(app)/quotes/new/page.tsx");
     expect(page).toContain("if (existing?.id) redirect(`/quotes/${existing.id}`);");
@@ -286,10 +286,10 @@ describe("the paper switch (Labor And Parts On The Paper)", () => {
   });
 });
 
-describe("Remember As A Kit (W4)", () => {
+describe("Remember as a Kit (W4)", () => {
   it("a task line offers the door; a line built from a kit names the kit and its units instead", () => {
     const html = builder({ seededLines: [taskLine] });
-    expect(text(html)).toContain("Remember As A Kit");
+    expect(text(html)).toContain("Remember as a Kit");
     const kitLabor = [{ ...rule, hours: 14 }];
     const fromKit = builder({
       seededLines: [{ ...taskLine, description: "Footings ×7", unit_price: 2510, detail: { ...taskLine.detail, labor: kitLabor, units: 7, kit_id: "k1" } }],
@@ -300,7 +300,7 @@ describe("Remember As A Kit (W4)", () => {
     expect(fromKit).toContain('value="7"');
     expect(text(fromKit)).toContain("footing");
     expect(text(fromKit)).toContain("your hours stand; the kit’s parts follow the units");
-    expect(text(fromKit)).not.toContain("Remember As A Kit");
+    expect(text(fromKit)).not.toContain("Remember as a Kit");
     const gone = builder({
       seededLines: [{ ...taskLine, description: "Footings ×7", unit_price: 2510, detail: { ...taskLine.detail, labor: kitLabor, units: 7, kit_id: "k1" } }],
       taskKits: [],
@@ -310,12 +310,12 @@ describe("Remember As A Kit (W4)", () => {
   });
 
   it("a plain line has no door, and the company's Kits switch off hides it", () => {
-    expect(text(builder({ seededLines: [{ description: "Permit", quantity: 1, unit: "ea", unit_price: 250 }] }))).not.toContain("Remember As A Kit");
-    expect(text(builder({ seededLines: [taskLine], kitsOn: false }))).not.toContain("Remember As A Kit");
+    expect(text(builder({ seededLines: [{ description: "Permit", quantity: 1, unit: "ea", unit_price: 250 }] }))).not.toContain("Remember as a Kit");
+    expect(text(builder({ seededLines: [taskLine], kitsOn: false }))).not.toContain("Remember as a Kit");
   });
 });
 
-describe("A NOTE UNDER A LINE (cn-v1137): the description's lines after the head, behind Add A Note / Edit Note", () => {
+describe("A NOTE UNDER A LINE (cn-v1137): the description's lines after the head, behind Add a Note / Edit Note", () => {
   const src = read("src/app/(app)/quotes/task-breakdown.tsx");
 
   it("the box holds the head only, the note's lines read under it, and the door says Edit Note", () => {
@@ -324,17 +324,17 @@ describe("A NOTE UNDER A LINE (cn-v1137): the description's lines after the head
     expect(html).not.toContain('value="Panel upgrade, 200A\n');
     expect(html).toContain("<li>Includes the permit</li><li>Two-day job</li>");
     expect(text(html)).toContain("Edit Note");
-    expect(text(html)).not.toContain("Add A Note");
+    expect(text(html)).not.toContain("Add a Note");
   });
 
-  it("a line with no note offers Add A Note, once per line and never on a task's parts", () => {
+  it("a line with no note offers Add a Note, once per line and never on a task's parts", () => {
     const plain = builder({ seededLines: [{ description: "Permit", quantity: 1, unit: "ea", unit_price: 250 }] });
-    expect(text(plain)).toContain("Add A Note");
+    expect(text(plain)).toContain("Add a Note");
     expect(text(plain)).not.toContain("Edit Note");
-    expect((plain.match(/Add A Note/g) ?? []).length).toBe(1);
+    expect((plain.match(/Add a Note/g) ?? []).length).toBe(1);
     // A task line has two part boxes (the same LineDescInput): still one door, the line's.
     const task = builder({ seededLines: [taskLine] });
-    expect((task.match(/Add A Note|Edit Note/g) ?? []).length).toBe(1);
+    expect((task.match(/Add a Note|Edit Note/g) ?? []).length).toBe(1);
     expect(src).toContain('placeholder={t("qb_part")}\n              className={box}\n              value={m.name}\n              noteDoor={false}');
   });
 

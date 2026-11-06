@@ -204,7 +204,7 @@ export function papersOnNoAccount(input: {
       unnamed.total = r2(unnamed.total + amount);
       continue;
     }
-    // A BUSINESS COST SAVED WITH NO WHERE used to be dropped here when it was settled: Add By Hand
+    // A BUSINESS COST SAVED WITH NO WHERE used to be dropped here when it was settled: Add by Hand
     // puts the bucket's own name in the supplier field ("Fuel"), and offering to give "Fuel" its own
     // supplier account is a door to nothing. That clause is gone because the open test above already
     // drops every settled paper, which is every paper it ever reached — one rule in one place rather
@@ -273,9 +273,9 @@ export function unassignedTotals(unfiled: ReadonlyMap<string, UnfiledSpelling>):
 }
 
 export interface SupplierNameWork {
-  /** "These spellings are one account" — Accept And File Them There / Not The Same. */
+  /** "These spellings are one account" — Accept and File Them There / Not the Same. */
   proposals: SupplierMergeProposal[];
-  /** "I cannot tell" — Join Them Onto One Account / Keep Them Separate. */
+  /** "I cannot tell" — Join Them onto One Account / Keep Them Separate. */
   questions: SupplierCandidateQuestion[];
   /** Everything left, each with the one door it needs: Give It Its Own Account. */
   loose: SupplierSpelling[];
@@ -294,7 +294,7 @@ export interface SupplierNameWork {
  * spelling appears twice with two buttons doing one thing.
  *
  * A LONE SPELLING WITH NO RELATIVE IS NOT PROPOSED: on a proposal card, Accept would make it an
- * account of its own and so would "Not The Same". It falls through to `loose`, which gives it one
+ * account of its own and so would "Not the Same". It falls through to `loose`, which gives it one
  * row and one button.
  */
 export function supplierNameWork(input: {
@@ -342,7 +342,7 @@ export function supplierNameWork(input: {
       return { alias: g.alias, bills: g.bills, total: g.total, unpaid: g.unpaid, settledSiblings: g.settledSiblings };
     });
     proposals.push({
-      // THE ID IS THE SPELLINGS, as JSON. "Not The Same" hands the server nothing but this one
+      // THE ID IS THE SPELLINGS, as JSON. "Not the Same" hands the server nothing but this one
       // string, so the string has to carry what it is about — and JSON rather than a separator
       // because a supplier name is free text a scanner wrote and will eventually contain whatever
       // character we picked. The action re-checks every spelling against his own unfiled bills
@@ -403,7 +403,7 @@ export function supplierNameWork(input: {
   // ── EVERY OTHER SPELLING, WITH THE DOOR IT NEVER HAD ──────────────────────────────────────
   // A SPELLING THAT ALREADY HAS A DOOR DOES NOT GET A SECOND ONE. "Keep Them Separate" up there and
   // "Give It Its Own Account" down here are the same write wearing two sentences, and two buttons
-  // doing one thing is the trap the proposals avoid by not offering "Not The Same" on a group of
+  // doing one thing is the trap the proposals avoid by not offering "Not the Same" on a group of
   // one. (A spelling can be in a proposal AND in a question — "are these four one account?" and "is
   // that fifth one theirs too?" are two different questions — and that is fine, because those two
   // rows offer genuinely different outcomes.)

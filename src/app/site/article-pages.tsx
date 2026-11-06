@@ -190,7 +190,7 @@ export async function ArticlePage({ org, post, base, nav }: { org: PublicOrg; po
             className="mt-3 inline-flex items-center gap-2 rounded-lg px-6 py-3 text-base font-semibold text-white"
             style={{ backgroundColor: brand }}
           >
-            Get A Free Estimate <ArrowRight className="h-5 w-5" />
+            Get a Free Estimate <ArrowRight className="h-5 w-5" />
           </Link>
         </div>
       </main>

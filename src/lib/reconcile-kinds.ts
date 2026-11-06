@@ -96,7 +96,7 @@ export interface ReconcileKindDef {
  */
 export const RECONCILE_KINDS: Record<ReconcileKind, ReconcileKindDef> = {
   "supplier-gap": {
-    heading: "What You Bought, And What They Say You Owe",
+    heading: "What You Bought, and What They Say You Owe",
     anchor: "supplier-gap",
     ours: "Your own tickets, still bought on account and not squared up",
     theirs: "What that supplier's own papers say is still open",
@@ -108,7 +108,7 @@ export const RECONCILE_KINDS: Record<ReconcileKind, ReconcileKindDef> = {
   "they-call-it-paid": {
     // ONE NUMBER PER BILL (0383): a bill is paid when its own number says so. The supplier's closed
     // paper over a bill still open here is the one place the two books disagree about a bill, and
-    // the doors that settle it write the number: Mark Paid on the bill, or Record A Payment with
+    // the doors that settle it write the number: Mark Paid on the bill, or Record a Payment with
     // that bill's box checked. Neither press lives here.
     heading: "They Call It Paid, Your Bill Is Open",
     anchor: "they-call-it-paid",
@@ -126,7 +126,7 @@ export const RECONCILE_KINDS: Record<ReconcileKind, ReconcileKindDef> = {
     order: 3,
   },
   "same-supplier-or-two": {
-    heading: "Same Supplier, Or Two?",
+    heading: "Same Supplier, or Two?",
     anchor: "same-supplier-or-two",
     ours: "A spelling off a receipt the matcher will not rule on",
     theirs: "An account that may be the same company, or may not",
@@ -138,7 +138,7 @@ export const RECONCILE_KINDS: Record<ReconcileKind, ReconcileKindDef> = {
     // section listed thirty-three register purchases already settled and already categorised and
     // offered to open a supplier account with each one, while /bills' door above it said "1 Bill".
     // A paper paid at the till has ONE record and belongs in neither.
-    heading: "Papers Not On A Supplier Account Yet",
+    heading: "Papers Not on a Supplier Account Yet",
     anchor: "not-on-an-account",
     ours: "A paper still open, under the name typed on it",
     theirs: "No supplier account holding the other half of it",
@@ -146,7 +146,7 @@ export const RECONCILE_KINDS: Record<ReconcileKind, ReconcileKindDef> = {
     order: 5,
   },
   "same-ticket-two-jobs": {
-    heading: "The Same Ticket On Two Jobs",
+    heading: "The Same Ticket on Two Jobs",
     anchor: "same-ticket-two-jobs",
     ours: "One job's costs, carrying this ticket",
     theirs: "Another job's costs, carrying the very same ticket",

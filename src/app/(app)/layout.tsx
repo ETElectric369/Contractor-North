@@ -181,7 +181,7 @@ export default async function AppLayout({
   })();
   const [org, platformAdmin, teammates, hasPettyCash] = await Promise.all([
     orgP,
-    // North's own team (0176): Bug Watch in the avatar menu, and triage inside Report A Problem.
+    // North's own team (0176): Bug Watch in the avatar menu, and triage inside Report a Problem.
     // In this first stage, beside the org read, so it costs no extra hop; false on any failure.
     isPlatformAdmin(supabase),
     // CREW & PAYROLL IS QUIET UNTIL A SECOND PERSON (the switch board, rule j): how many active
@@ -235,7 +235,7 @@ export default async function AppLayout({
   //
   // THE DOORS A LAPSED COMPANY KEEPS (cn-v1137, lib/lapse-doors): the owner or an admin on Settings,
   // /subscribe or the accountant's export is NOT redirected — the shell is drawn with a red bar and
-  // Pick A Plan, so the fix is one tap away and the books are never held by the bill. Everyone
+  // Pick a Plan, so the fix is one tap away and the books are never held by the bill. Everyone
   // else, every other path, and a request whose path header is missing go to /subscribe, carrying
   // a billing_error that landed them here. The path and query are middleware's two headers; the
   // headers() read happens only inside this branch, so a standing company pays nothing for it.
@@ -269,7 +269,7 @@ export default async function AppLayout({
 
   const branding = { name: org?.name ?? null, logo: org?.logo_url ?? null };
   // WHAT THE COMPANY STILL HASN'T SAID ABOUT ITSELF, in the setup playbook's own keys — read off
-  // the settings this layout already loaded, so the setup rows (Search Or Ask's, or Help's with
+  // the settings this layout already loaded, so the setup rows (Search or Ask's, or Help's with
   // Nort off) and their dot cost no query.
   // The trade comes through the ONE reader (lib/org-trade): the words, else the sign-up key's own
   // words, so a company that picked its trade at sign-up is never asked it again.
@@ -426,7 +426,7 @@ export default async function AppLayout({
         <Topbar profile={(profile as Profile) ?? null} lang={profile.language} branding={branding} setup={setup} onboarded={onboarded} platformAdmin={platformAdmin} features={doors} bugCount={bugCount} lapsed={lapsed} />
         {/* THE RED BAR of a lapsed company on one of its open doors (cn-v1137): the words from the
             one access rule, the one action, and the door the lapsed notice promised stays open —
-            Download For Your Accountant (skeptic #43, S7). Only an owner/admin ever sees the shell
+            Download for Your Accountant (skeptic #43, S7). Only an owner/admin ever sees the shell
             lapsed. */}
         {lapseBar && (
           <div className="no-print flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-red-600 px-4 py-2 text-center text-sm font-medium text-white">
@@ -435,13 +435,13 @@ export default async function AppLayout({
               href="/subscribe"
               className="inline-flex min-h-8 items-center rounded-md bg-white px-3 text-xs font-semibold text-red-700 hover:bg-red-50"
             >
-              Pick A Plan
+              Pick a Plan
             </Link>
             <Link
               href="/analytics/accountant"
               className="inline-flex min-h-8 items-center rounded-md border border-white/70 px-3 text-xs font-semibold text-white hover:bg-red-700"
             >
-              Download For Your Accountant
+              Download for Your Accountant
             </Link>
           </div>
         )}
@@ -506,7 +506,7 @@ export default async function AppLayout({
           </Turned>
         </main>
       </div>
-      {/* Search Or Ask's sheet: with nothing typed, Talk To Nort and (staff) the setup rows. */}
+      {/* Search or Ask's sheet: with nothing typed, Talk to Nort and (staff) the setup rows. */}
       <CommandBar isStaff={isStaff} features={doors} setup={setup} onboarded={onboarded} hasPettyCash={hasPettyCash} lapsed={lapsed} />
       {/* The setup screens (the tour, the questions, a lesson), mounted ONCE here and opened by the
           setup rows through cn:setup, so closing the sheet a row sat in never kills a lesson. */}
@@ -522,7 +522,7 @@ export default async function AppLayout({
           intro card (Apple 3.1–3.3). Both render nothing and no-op on the web. */}
       <TapToPayWarmup />
       <TapToPayAwareness />
-      {/* Report A Problem is everyone's (Wave 0): a tech hits the bugs first. */}
+      {/* Report a Problem is everyone's (Wave 0): a tech hits the bugs first. */}
       <BugReporter orgId={profile.org_id} platformAdmin={platformAdmin} />
       {/* WHERE THE COMPANY IS, for every address box (lib/place-bias). Streamed behind the shell:
           on a cache miss this waits on Google up to 2.5 s, and a page is never held for that —

@@ -203,7 +203,7 @@ describe("a pile's count is the count of its rows, not the whole population (the
     expect(query).toContain("quoteNoAnswerFilter(todayStr, QUOTE_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS, true)");
     expect(query).toContain("quoteNoAnswerFilter(todayStr, QUOTE_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS, false)");
     expect(query).toMatch(/\.gt\("follow_up_at", todayStr\)/);
-    // A won estimate past the read is its job's Jobs Needing A Day row: never a "1+" pile of wins.
+    // A won estimate past the read is its job's Jobs Needing a Day row: never a "1+" pile of wins.
     expect(query).not.toContain("counts.won_needs_a_day = codeCount(acceptedR)");
   });
 });

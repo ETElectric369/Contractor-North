@@ -52,7 +52,7 @@ import type { CircuitKind, CircuitProgress, CircuitReadPatch, JobCircuit, JobPan
  * THE PANEL TAB'S SERVER DOORS (Panel plan, phases 1-2; migration 0333).
  *
  * WHO: Erik's decision 1 (2026-09-25, "go for all"). The crew and the office share every circuit
- * door — add, relabel, set the space, Planned / Roughed / Done, Verified On Site, Take Off with Undo,
+ * door — add, relabel, set the space, Planned / Roughed / Done, Verified on Site, Take Off with Undo,
  * Keep / Not This — because the crew are the ones standing at the panel and nothing here carries a
  * price. Only the office brings circuits in from an estimate (requireStaff, re-checked here, and the
  * database refuses source 'estimate' from anyone else). Taking a panel off a job is the office's in
@@ -255,14 +255,14 @@ async function ringPanelChange(m: Member, jobId: string): Promise<void> {
 // ── reading ─────────────────────────────────────────────────────────────────────────────────────
 
 export type PanelEstimate = EstimateOffer;
-/** A job photo for Read A Photo. `path` is where it is filed (the job's own folder), so a photo just
+/** A job photo for Read a Photo. `path` is where it is filed (the job's own folder), so a photo just
  *  taken on the card is found by the path its upload returned, never by "the newest one". */
 export type PanelPhoto = { id: string; name: string | null; created_at: string; url: string | null; path?: string | null };
 
 type PhotoDoc = { id: string; name: string | null; created_at: string; file_url: string | null };
 
 /**
- * The job's photos for Read A Photo, newest first, each with a short-lived link (an hour). Every
+ * The job's photos for Read a Photo, newest first, each with a short-lived link (an hour). Every
  * live panel's own photo (job_panels.photo_document_id) is always among them, however old, so the
  * card can offer it first; the card shows them one at a time.
  */
@@ -306,7 +306,7 @@ async function photosOf(m: Member, jobId: string): Promise<PanelPhoto[] | Fail> 
   return rows.map((r) => ({ id: r.id, name: r.name, created_at: r.created_at, url: r.file_url ? (urls.get(r.file_url) ?? null) : null, path: r.file_url }));
 }
 
-/** The photos again, after Take A New One on the Panel tab's Read A Photo filed a new one. */
+/** The photos again, after Take a New One on the Panel tab's Read a Photo filed a new one. */
 export async function loadPanelPhotos(jobId: string): Promise<{ ok: true; photos: PanelPhoto[] } | Fail> {
   const m = await member();
   if ("error" in m) return m;
@@ -326,12 +326,12 @@ export type PanelLoad =
       /** The job's photos, newest first, each with a short-lived thumbnail link, so the person SEES
        *  which photo a read will send before the tap. */
       photos: PanelPhoto[];
-      /** For Take A Photo on the Panel tab: the job's folder is <org>/<job>/ (uploadJobPhotos). */
+      /** For Take a Photo on the Panel tab: the job's folder is <org>/<job>/ (uploadJobPhotos). */
       orgId: string;
       /** Reads left on this job today: the panel photo (everyone) and the plans (the office). */
       photoReadsLeft: number | null;
       planReadsLeft: number | null;
-      /** The office only: the Plan papers Read Circuits From The Plans can read (this job's, and
+      /** The office only: the Plan papers Read Circuits from the Plans can read (this job's, and
        *  its customer's that aren't on another job yet). Never sent to a tech. */
       plans: { id: string; name: string | null; created_at: string; onCustomer: boolean }[];
       people: Record<string, string>;
@@ -381,7 +381,7 @@ export async function loadJobPanel(jobId: string): Promise<PanelLoad> {
   ]);
 
   const ids = [...new Set(circuits.flatMap((c) => [c.verified_by, c.updated_by]).filter(Boolean))] as string[];
-  // The viewer rides along, so a mark they make now ("Verified On Site By Brian") has its name.
+  // The viewer rides along, so a mark they make now ("Verified on Site By Brian") has its name.
   const people: Record<string, string> = { [m.userId]: m.name };
   if (ids.length) {
     const { data: ps } = await m.supabase.from("profiles").select("id, full_name").in("id", ids);
@@ -404,7 +404,7 @@ export async function loadJobPanel(jobId: string): Promise<PanelLoad> {
 
 /** The Plan papers the office can read circuits from: this job's, then its customer's that sit on
  *  no job (the estimator's Upload Plans keeps them on the customer). Newest first. NEVER the app's
- *  own circuit map: Save As Circuit Map files the printed directory as a Plan (its file always ends
+ *  own circuit map: Save as Circuit Map files the printed directory as a Plan (its file always ends
  *  "-Circuit_Map.pdf", panel-portal-actions), and reading it back would spend a read to find the
  *  list already on the list. */
 async function findPlans(m: Member, job: JobRow): Promise<{ id: string; name: string | null; created_at: string; onCustomer: boolean }[]> {
@@ -457,7 +457,7 @@ export type PanelSaveResult =
  * is what the editor was looking at for the fields it changes (see matchSeen).
  *
  * THE FIRST PANEL TAKES THE CIRCUITS ALREADY ON THE LIST. Circuits listed before anyone looked in
- * the box (Bring In, Keep All, Add A Circuit, then a panel added: J-011's planned order) have no
+ * the box (Bring In, Keep All, Add a Circuit, then a panel added: J-011's planned order) have no
  * panel. With one panel on the job there is no picker to attach them, so the job's only panel
  * adopts them here, and from then on the door shows them and the No Stab refusal covers them. One
  * the database won't place (a kept circuit on a space this panel marks No Stab) stays panel-less,
@@ -527,7 +527,7 @@ export async function savePanel(
 
 // ── circuits ────────────────────────────────────────────────────────────────────────────────────
 
-/** Add A Circuit: a person typed it, so it counts at once (kept, source hand). */
+/** Add a Circuit: a person typed it, so it counts at once (kept, source hand). */
 export async function addCircuit(jobId: string, input: Record<string, unknown>): Promise<RowResult<JobCircuit> & MadePanel> {
   const m = await member();
   if ("error" in m) return m;
@@ -632,7 +632,7 @@ export async function advanceProgress(circuitId: string, from: CircuitProgress):
   return r;
 }
 
-/** Verified On Site: who and when are stamped by the database from the session, never sent. */
+/** Verified on Site: who and when are stamped by the database from the session, never sent. */
 export async function markVerified(circuitId: string, verified: boolean): Promise<RowResult<JobCircuit>> {
   const m = await member();
   if ("error" in m) return m;
@@ -1103,7 +1103,7 @@ async function officeBreakerExtras(m: Member, jobId: string): Promise<{ tickets:
 }
 
 /**
- * Add To Materials (the crew and the office): the missing breaker goes on the job's ONE materials
+ * Add to Materials (the crew and the office): the missing breaker goes on the job's ONE materials
  * list as a line to buy, with its part number, so the next count reads a code. It goes through the
  * same two doors material.addLine wraps (ensureJobMaterialList + addMaterialItem): the list is found
  * or started, a tech's line carries no money, and a crew addition rings the office.
@@ -1130,7 +1130,7 @@ export async function addBreakerToMaterials(
   return { ok: true, id: added.id, listId: list.id, words: `${qty} x ${description}` };
 }
 
-/** The Undo of Add To Materials: that one line, by its id. */
+/** The Undo of Add to Materials: that one line, by its id. */
 export async function removeBreakerFromMaterials(jobId: string, itemId: string, listId: string): Promise<{ ok: true } | Fail> {
   const m = await member();
   if ("error" in m) return m;
@@ -1151,7 +1151,7 @@ const BRAND_WORDS: Record<string, string> = {
 };
 
 /**
- * Add To Price Book (the office only, never silent): a breaker code the tickets or the card name
+ * Add to Price Book (the office only, never silent): a breaker code the tickets or the card name
  * that the book doesn't have yet (Q115, Q2020, Q21530CT, Q22020CT on ET's book). The person sees and
  * can change the cost before it is written; the ticket's each-price is only what the box starts at.
  */
@@ -1192,7 +1192,7 @@ export async function addBreakerToPriceBook(input: {
   return { ok: true, row, words: `Added ${code} to your price book at ${formatCurrency(row.buy_price)}.` };
 }
 
-/** The Undo of Add To Price Book: the row leaves the book (archived, the book's own Undo). */
+/** The Undo of Add to Price Book: the row leaves the book (archived, the book's own Undo). */
 export async function takeBreakerOutOfPriceBook(id: string): Promise<{ ok: true } | Fail> {
   const m = await office();
   if ("error" in m) return m;
@@ -1220,7 +1220,7 @@ export type PlaceResult =
   | Fail;
 
 /**
- * Place From What Was Bought (the crew and the office): a bought breaker goes in at a space, and each
+ * Place from What Was Bought (the crew and the office): a bought breaker goes in at a space, and each
  * of its pole groups becomes a circuit on the panel. A person has already picked, part by part,
  * which circuit on the list it is (or A New Circuit), and tapped to confirm; this writes exactly
  * that. An existing circuit only moves if it still has no space and is still that size, so a
@@ -1328,8 +1328,8 @@ export type ReadResult =
     } & MadePanel)
   | (Fail & { readsLeft?: number | null });
 
-const AI_NOT_SET_UP = "Reading isn't available right now. Add the circuits by hand with Add A Circuit.";
-const SPENT = "This month's AI budget is used up. Add the circuits by hand with Add A Circuit; it resets next month.";
+const AI_NOT_SET_UP = "Reading isn't available right now. Add the circuits by hand with Add a Circuit.";
+const SPENT = "This month's AI budget is used up. Add the circuits by hand with Add a Circuit; it resets next month.";
 
 /** The model's failure as plain words: a missing key is the server's, anything else is one read. */
 function readFailure(e: unknown, what: string): Fail {

@@ -8,7 +8,7 @@ import type { Answers } from "@/lib/playbook/types";
 
 /**
  * THE HELP ROWS — what the graduation cap held, as rows (W1-09). The cap left the top bar; its
- * four doors live under Search Or Ask with Nort on (command-bar.tsx) and under Help in the avatar
+ * four doors live under Search or Ask with Nort on (command-bar.tsx) and under Help in the avatar
  * menu with Nort off (account-menu.tsx). One builder, so the two can't drift, and one host
  * (components/setup-host.tsx) that opens what a row asks for, so closing the sheet a row sat in
  * never kills a running lesson.
@@ -16,7 +16,7 @@ import type { Answers } from "@/lib/playbook/types";
  *   Start Here                 this PERSON hasn't been walked through (profiles.onboarded_at)
  *   Finish Setting Up · N Left the COMPANY still has N setup questions open (never a total)
  *   Show Me How                the lessons whose switch is on
- *   Take The Setup Again       always: the replay, and how an answer changes
+ *   Take the Setup Again       always: the replay, and how an answer changes
  *
  * Staff only, as the cap was: techs have no setup to run.
  *
@@ -31,7 +31,7 @@ export type SetupRequest = "tour" | "questions" | "finish" | `lesson:${string}`;
 
 /** The window event SetupHost listens for; its detail is a SetupRequest. */
 export const SETUP_EVENT = "cn:setup";
-/** Talk To Nort's window event. NEW, on purpose: cn:assistant-talk already means "resume" inside the
+/** Talk to Nort's window event. NEW, on purpose: cn:assistant-talk already means "resume" inside the
  *  open panel. GlobalAssistant runs launch() inside this event's dispatch. */
 export const NORT_TALK_EVENT = "cn:nort-talk";
 

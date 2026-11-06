@@ -84,7 +84,7 @@ export interface SuppliersCardActions {
   tieToBill?: SupplierInvoiceActions["tieToBill"];
   shelfLines?: SupplierInvoiceActions["shelfLines"];
   recordToShelf?: SupplierInvoiceActions["recordToShelf"];
-  /** Stop Waiting on the folded Waiting On A Credit line (0346). */
+  /** Stop Waiting on the folded Waiting on a Credit line (0346). */
   stopWaitingOnCredit?: SupplierInvoiceActions["stopWaitingOnCredit"];
 }
 
@@ -163,7 +163,7 @@ export function supplierChecks(input: {
   return out;
 }
 
-/** The slate line under Record A Payment: what is open, what he has sent, and what of it is ahead. */
+/** The slate line under Record a Payment: what is open, what he has sent, and what of it is ahead. */
 export function paymentLine(input: {
   account: Pick<SupplierAccountRow, "name">;
   balance: ReturnType<typeof supplierBalance>;
@@ -194,7 +194,7 @@ const ACCOUNT_MENU = { center: { label: "Actions", icon: "more" }, nodes: [] };
  *
  * WAVE B, "IT LOOKS LIKE ONE BIG RUN-ON SENTENCE": each account is ONE LINE (its name, what it says
  * is owed, and "N To Check" when something needs checking) that opens to its detail (W1-33: one
- * number, one button, one "Check These"): Record A Payment first, one slate line of the model's own
+ * number, one button, one "Check These"): Record a Payment first, one slate line of the model's own
  * arithmetic, Check These (N), its bills, its payments, and, for a supplier whose own papers are
  * loaded, those papers as short folded lists (SupplierPaperLists). Edit Account is on the detail's
  * ⋯, and the names its receipts are filed under are read in that sheet. The balance is said once,
@@ -262,8 +262,8 @@ export function SuppliersCard({
   /** Papers a person said wait on a credit (0346), not back yet: one folded line under their supplier. */
   waitingOnCredit?: SupplierPaperCard[];
   /**
-   * MY DAY'S DOOR (/bills?pay=<account>): "Pay CED $5,174.62 By Oct 10" lands here with this
-   * account's Record A Payment sheet already open. The same sheet, the same write; nothing new.
+   * MY DAY'S DOOR (/bills?pay=<account>): "Pay CED $5,174.62 by Oct 10" lands here with this
+   * account's Record a Payment sheet already open. The same sheet, the same write; nothing new.
    */
   payOn?: string | null;
   /**
@@ -488,7 +488,7 @@ export function SuppliersCard({
     setPayFor(account);
   }
 
-  // MY DAY'S DOOR OPENS THE SHEET, ONCE. The same gate as the account row's Record A Payment button
+  // MY DAY'S DOOR OPENS THE SHEET, ONCE. The same gate as the account row's Record a Payment button
   // (a balance to pay down), and a door that cannot open says why instead of doing nothing. The
   // `pay` param comes off the address afterwards so a refresh after recording does not reopen it.
   const payOnHandled = useRef<string | null>(null);
@@ -509,7 +509,7 @@ export function SuppliersCard({
     if (account && canPay) {
       // WAVE B: the sheet opens INSIDE the account's own detail. The supplier line (a folded
       // <details>) opens around it, so closing the sheet leaves him on that account's numbers, its
-      // one Record A Payment, and its papers - not on a row of closed lines.
+      // one Record a Payment, and its papers - not on a row of closed lines.
       openFoldsTo(`supplier-invoices-${account.id}`);
       openPay(account);
     } else {
@@ -574,8 +574,8 @@ export function SuppliersCard({
     });
   }
 
-  /** "In All Bills below", as a door that opens the ledger fold (FoldOpener), never a phantom: its
-   *  own line, 44px tall, saying what it opens (Open In All Bills on a check). */
+  /** "in All Bills below", as a door that opens the ledger fold (FoldOpener), never a phantom: its
+   *  own line, 44px tall, saying what it opens (Open in All Bills on a check). */
   const seeAllInAllBills = (label: string) => (
     <a href="#all-bills" className="flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
       {label}
@@ -592,7 +592,7 @@ export function SuppliersCard({
           ) : (
             (accounts.length > 0 || unfiled > 0.005) && (
               <span className="text-sm font-semibold tabular-nums text-slate-900">
-                {totalOwed <= 0.005 ? "Square With Everyone" : `${formatCurrency(totalOwed)} Owed`}
+                {totalOwed <= 0.005 ? "Square with Everyone" : `${formatCurrency(totalOwed)} Owed`}
               </span>
             )
           )}
@@ -666,15 +666,15 @@ export function SuppliersCard({
             className="mb-2 flex min-h-11 items-center justify-between gap-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 hover:bg-amber-100"
           >
             <span className="min-w-0">
-              {formatCurrency(notOnAccount.total)} On {notOnAccount.papers} {notOnAccount.papers === 1 ? "Bill" : "Bills"} With No
+              {formatCurrency(notOnAccount.total)} on {notOnAccount.papers} {notOnAccount.papers === 1 ? "Bill" : "Bills"} with No
               Supplier Account
               {notOnAccount.unnamed > 0
-                ? ` · ${notOnAccount.unnamed} With No Supplier Name`
+                ? ` · ${notOnAccount.unnamed} with No Supplier Name`
                 : ""}
               {/* A CREDIT AMONG THEM IS NOT IN THAT FIGURE, and the door says so - otherwise the
                   money reads as spread across every bill it names, including one that is money back. */}
               {notOnAccount.credits > 0.005
-                ? ` · Plus A ${formatCurrency(notOnAccount.credits)} Credit Not In That Figure`
+                ? ` · Plus a ${formatCurrency(notOnAccount.credits)} Credit Not in That Figure`
                 : ""}
             </span>
             <span className="shrink-0 font-medium">File It</span>
@@ -687,7 +687,7 @@ export function SuppliersCard({
               className="mb-2 flex min-h-11 items-center justify-between gap-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 hover:bg-amber-100"
             >
               <span className="min-w-0">
-                {formatCurrency(unassigned.total)} On {unassigned.bills} {unassigned.bills === 1 ? "Bill" : "Bills"} With No Supplier Account
+                {formatCurrency(unassigned.total)} on {unassigned.bills} {unassigned.bills === 1 ? "Bill" : "Bills"} with No Supplier Account
               </span>
               <span className="shrink-0 font-medium">File It</span>
             </a>
@@ -792,7 +792,7 @@ export function SuppliersCard({
                         {/* ONE AMBER NUMBER: what this account asks him to check (its money is in
                             each check's own row). Nothing at 0. */}
                         {checks.length > 0 && (
-                          <span className="block truncate text-xs font-medium text-amber-700">{checks.length} To Check</span>
+                          <span className="block truncate text-xs font-medium text-amber-700">{checks.length} to Check</span>
                         )}
                       </span>
                       <span className="shrink-0 text-right">
@@ -800,7 +800,7 @@ export function SuppliersCard({
                         {unread ? (
                           <span className="text-sm font-semibold text-amber-800">Couldn&apos;t Total</span>
                         ) : owed === null ? (
-                          <span className="text-sm font-semibold text-slate-500">Paid At The Register</span>
+                          <span className="text-sm font-semibold text-slate-500">Paid at the Register</span>
                         ) : owed > 0.005 ? (
                           <span className="text-2xl font-bold tabular-nums text-slate-900">{formatCurrency(owed)}</span>
                         ) : owed < -0.005 ? (
@@ -822,10 +822,10 @@ export function SuppliersCard({
                       {/* THE DETAIL'S TOP (W1-33): one button, one line of arithmetic, one fold of
                           checks. The ⋯ at the right holds Edit Account. */}
                       <div className="flex items-start gap-2">
-                        {/* THE ONE Record A Payment. A register supplier has no balance to pay down. */}
+                        {/* THE ONE Record a Payment. A register supplier has no balance to pay down. */}
                         {owed !== null ? (
                           <Button className="h-12 flex-1" onClick={() => openPay(account)} disabled={pending}>
-                            Record A Payment
+                            Record a Payment
                           </Button>
                         ) : (
                           <span className="flex-1" />
@@ -886,7 +886,7 @@ export function SuppliersCard({
                                     {c.bills.length > LIST_LIMIT && (
                                       <p className="text-xs">…and {c.bills.length - LIST_LIMIT} more, in All Bills.</p>
                                     )}
-                                    {seeAllInAllBills("Open In All Bills")}
+                                    {seeAllInAllBills("Open in All Bills")}
                                   </>
                                 )}
                                 {(c.kind === "register_on_account" || c.kind === "register_open_papers") && (
@@ -898,7 +898,7 @@ export function SuppliersCard({
                                     </p>
                                     {/* One door for both register checks: the first one carries it. */}
                                     {c.kind === "register_open_papers" && checks.some((x) => x.kind === "register_on_account") ? (
-                                      <p className="text-xs">Turn On A Running Balance, above, answers this one too.</p>
+                                      <p className="text-xs">Turn On a Running Balance, above, answers this one too.</p>
                                     ) : actions.setOnAccount ? (
                                       <Button
                                         variant="outline"
@@ -912,10 +912,10 @@ export function SuppliersCard({
                                           )
                                         }
                                       >
-                                        Turn On A Running Balance
+                                        Turn On a Running Balance
                                       </Button>
                                     ) : (
-                                      seeAllInAllBills("Open In All Bills")
+                                      seeAllInAllBills("Open in All Bills")
                                     )}
                                   </>
                                 )}
@@ -934,7 +934,7 @@ export function SuppliersCard({
 
                       {shownBills.length > 0 && (
                         <div className="mt-3">
-                          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">What The Balance Is Made Of</h3>
+                          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">What the Balance Is Made Of</h3>
                           <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
                             {shownBills.map((b) => (
                               <li key={b.id} className="flex items-start justify-between gap-3 px-3 py-2">
@@ -961,7 +961,7 @@ export function SuppliersCard({
                             ))}
                           </ul>
                           {hiddenBills > 0 &&
-                            seeAllInAllBills(`See The Other ${hiddenBills}, ${formatCurrency(hiddenBillTotal)}, In All Bills`)}
+                            seeAllInAllBills(`See the Other ${hiddenBills}, ${formatCurrency(hiddenBillTotal)}, in All Bills`)}
                         </div>
                       )}
 

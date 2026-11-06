@@ -55,7 +55,7 @@ const dataRowCount = (t: CsvTable) => t.rows.length - (t.summaryRows ?? 0);
 
 describe("the CSV: plain column names, and nothing a spreadsheet would run", () => {
   it("every list's header row is exactly its plain column names", () => {
-    expect(HEADERS.on_hand).toEqual(["Item", "Unit", "On Hand", "Cost On Hand", "Date Bought", "Supplier", "Ticket Number", "Note"]);
+    expect(HEADERS.on_hand).toEqual(["Item", "Unit", "On Hand", "Cost on Hand", "Date Bought", "Supplier", "Ticket Number", "Note"]);
     expect(HEADERS.tools).toEqual(["Date", "Supplier", "Ticket Number", "What", "Cost", "Filed As", "Job Number"]);
     const lists: [keyof typeof HEADERS, CsvTable][] = [
       ["on_hand", onHandList(inputs(), SEPT.to, TZ)],
@@ -142,7 +142,7 @@ describe("Tools: Tools & Supplies tickets, and tools the company kept off other 
 
   it("a tool billed to the customer is not the company's: it is on the report-only list, with its invoice, never changed", () => {
     const b = toolsBilledList(inputs(), TZ);
-    expect(b.header).toEqual(["Date", "Supplier", "Job Number", "Job", "What", "Billed To Customer (At Cost)", "Invoice"]);
+    expect(b.header).toEqual(["Date", "Supplier", "Job Number", "Job", "What", "Billed to Customer (At Cost)", "Invoice"]);
     expect(b.rows).toEqual([["2026-06-12", "The Home Depot", "J-002", "The SuperHawg Job", "MKE 18V GEN2 SUPERHAWG", 400, "INV-050"]]);
     const t = toolsList(inputs(), { from: "2026-06-01", to: "2026-06-30" }, TZ);
     expect(t.rows.some((r) => String(r[3]).includes("SUPERHAWG"))).toBe(false);

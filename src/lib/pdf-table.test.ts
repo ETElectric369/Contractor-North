@@ -27,7 +27,7 @@ const money = (right: number, y: number, str: string, page = 0): PositionedItem 
 //           x420 OPEN AMOUNT  x502 ORIG AMOUNT
 // a paper:  x29 age  x51 date  x105 code  x127 reference  x212 po  money ending at 496 and 577
 // a credit: a TRAILING minus on the discount, the open amount and the original amount
-// the foot: TOTAL DUE | CURRENT / 1 - 30 | PAST DUE 31 - 60 | PAST DUE 61 - 90 | PAST DUE Over 90,
+// the foot: TOTAL DUE | CURRENT / 1 - 30 | PAST DUE 31 - 60 | PAST DUE 61 - 90 | PAST DUE over 90,
 //           then a row of five amounts right-aligned under those labels.
 
 const HEADINGS: [number, string][] = [
@@ -61,7 +61,7 @@ const FOOTER: [number, string][] = [
   [150, "CURRENT / 1 - 30"],
   [261, "PAST DUE 31 - 60"],
   [372, "PAST DUE 61 - 90"],
-  [481, "PAST DUE Over 90"],
+  [481, "PAST DUE over 90"],
 ];
 /** The paper's own aging footer: the four buckets add to the TOTAL DUE, and so do its nine papers. */
 const FOOTER_AMOUNTS = ["2,723.72", "742.61", "1,480.06", "501.05", "0.00"];

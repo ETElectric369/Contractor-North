@@ -163,11 +163,11 @@ describe("the clock button", () => {
 
 describe("the task list", () => {
   const base = { jobId: "j1", orgId: "o1", tasks: [], viewerId: "u1", viewerIsStaff: false, tz: "America/Los_Angeles", nowIso: "2026-09-26T19:00:00Z", stamps: true, doneOpen: false };
-  it("the Add line reads Agregar una Tarea… / Agregar for a Spanish tech, Add A Task… / Add for an English one", () => {
+  it("the Add line reads Agregar una Tarea… / Agregar for a Spanish tech, Add a Task… / Add for an English one", () => {
     const r = both(JobTaskList, base as never);
     expect(r.es).toContain(`placeholder="${es.jb_addATaskPh}"`);
     expect(text(r.es)).toContain("Agregar");
-    expect(r.en).toContain('placeholder="Add A Task…"');
+    expect(r.en).toContain('placeholder="Add a Task…"');
     expect(text(r.en)).toContain("Add");
     expect(text(r.en)).not.toContain("Agregar");
   });
@@ -189,7 +189,7 @@ describe("the photos tab", () => {
     expect(text(r.en)).toContain("Photo");
     expect(text(r.en)).not.toContain("Foto");
   });
-  it("Make It A Task's sheet saves with Agregar Tarea and asks Qué hay que hacer; English Add Task", () => {
+  it("Make It a Task's sheet saves with Agregar Tarea and asks Qué hay que hacer; English Add Task", () => {
     const r = both(PhotoTaskSheet, { jobId: "j1", photoPath: "o1/j1/p.jpg", previewUrl: null, onClose: () => {} });
     expect(text(r.es)).toContain(es.jb_addTask);
     expect(text(r.es)).toContain(es.jb_whatNeedsDoing);
@@ -203,7 +203,7 @@ describe("the papers", () => {
   it("empty, the receipts fold says Aún no hay recibos; English No receipts yet", () => {
     const r = both(JobDocuments, { orgId: "o1", jobId: "j1", docs: [] });
     expect(text(r.es)).toContain("Aún no hay recibos");
-    expect(text(r.en)).toContain("No receipts yet. Use Snap The Bill above.");
+    expect(text(r.en)).toContain("No receipts yet. Use Snap the Bill above.");
     expect(text(r.en)).not.toContain("recibos");
   });
 });
@@ -234,7 +234,7 @@ describe("the description and the notes", () => {
     const n = both(JobTextBox, { jobId: "j1", field: "notes", value: null });
     expect(text(n.es)).toContain("Notas");
     expect(text(n.es)).toContain(es.jb_addANote);
-    expect(text(n.en)).toContain("Add A Note");
+    expect(text(n.en)).toContain("Add a Note");
   });
 });
 

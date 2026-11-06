@@ -128,7 +128,7 @@ describe("no door writes the condition out a second time", () => {
 /**
  * ONE DOOR, ON THE PAGE NAMED FOR THE JOB (Erik: "this should be in reconcile too i imagine"). The
  * drop door moved off /analytics rather than being copied onto Reconcile: two doors to one intake is
- * how one of them goes stale. Snap Or Note is a different thing and stays — it is THE one paper door
+ * how one of them goes stale. Snap or Note is a different thing and stays — it is THE one paper door
  * (W1-30) and takes photos and PDFs as well.
  */
 describe("the statement door has exactly one home", () => {

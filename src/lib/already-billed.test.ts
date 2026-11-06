@@ -144,7 +144,7 @@ describe("which lines can hold it", () => {
   });
 });
 
-describe("Did J-010 Use All Of It?", () => {
+describe("Did J-010 Use All of It?", () => {
   it("asked when Shop Stock is on, the receipt has lines, and the line is less than its cost ($110 against $186.93)", () => {
     expect(askUsedAll({ shopStock: true, billHasLines: true, billCost: 186.93, lineTotal: 110 })).toBe(true);
   });
@@ -413,7 +413,7 @@ describe("the bill's own row on /bills (Erik: 'the Already Billed could connect 
     const doors = billAlreadyBilledDoors({ bills: [b({ id: "ps", job_id: "j-010", amount: 186.93 })], reach, hands: new Map(), claimed: new Set() });
     expect(doors).toEqual({ ps: { kind: "open", jobId: "j-010", what: "CED ps" } });
   });
-  it("Billed By Hand On INV-x with its way back on a bill a person marked", () => {
+  it("Billed by Hand on INV-x with its way back on a bill a person marked", () => {
     const doors = billAlreadyBilledDoors({
       bills: [b({ id: "ps", job_id: "j-010" })],
       reach,
@@ -484,7 +484,7 @@ describe("hours on NO job (TTUSD on INV-055, Ben Ebenezer on INV-058)", () => {
     expect(noJobCanHoldHours([{ ...INV055, job_id: "j-010" }])).toBe(false);
     expect(noJobCanHoldHours([{ ...INV055, lines: [line({ id: "imp", line_total: 500, import_source: "labor", unit: "hr", quantity: 5 })] }])).toBe(false);
   });
-  it("the invoice page's way in (Already Billed: Hours On No Job): a sent invoice with no job and a line of work typed by hand; never a draft, a void, a deposit, a job's invoice or one with only a fee", () => {
+  it("the invoice page's way in (Already Billed: Hours on No Job): a sent invoice with no job and a line of work typed by hand; never a draft, a void, a deposit, a job's invoice or one with only a fee", () => {
     const row = { id: "inv-55", invoice_number: "INV-055", status: "paid", invoice_kind: "standard", job_id: null, created_at: "2026-08-08T18:00:00Z" };
     const jp = { id: "jp", description: "Labor - JP Prince", quantity: 23, unit: "hr", unit_price: 95, line_total: 2185, import_source: null, edited: false, line_kind: null };
     const fee = { ...jp, id: "fee", description: "Card fee", quantity: 1, unit: "ea", unit_price: 12, line_total: 12, line_kind: "other" };
@@ -495,7 +495,7 @@ describe("hours on NO job (TTUSD on INV-055, Ben Ebenezer on INV-058)", () => {
     expect(invoiceCanHoldNoJobHours({ ...row, job_id: "j-010" }, [jp])).toBe(false);
     expect(invoiceCanHoldNoJobHours(row, [fee])).toBe(false);
   });
-  it("the invoice page shows its Hours On No Job, Billed By Hand Here only on an invoice with no job that isn't void (a void one's Not Billed After All could only fail)", () => {
+  it("the invoice page shows its Hours on No Job, Billed by Hand Here only on an invoice with no job that isn't void (a void one's Not Billed After All could only fail)", () => {
     expect(noJobHandsShown({ job_id: null, status: "sent" })).toBe(true);
     expect(noJobHandsShown({ job_id: null, status: "paid" })).toBe(true);
     expect(noJobHandsShown({ job_id: null, status: "void" })).toBe(false);

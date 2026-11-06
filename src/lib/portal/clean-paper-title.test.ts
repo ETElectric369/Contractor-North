@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { cleanPaperTitle } from "./doc-kinds";
 
 /**
- * The title a new plan starts with on the Show On Portal sheet: its file name cleaned, or the
+ * The title a new plan starts with on the Show on Portal sheet: its file name cleaned, or the
  * fallback when the name is camera noise. A suggestion a person reads before anything shows.
  */
 const FB = "Plan, Sep 25, 2026";

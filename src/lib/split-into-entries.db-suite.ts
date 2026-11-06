@@ -788,7 +788,7 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
       });
     });
 
-    it("a void holder that differs between the pieces is called void by Join Back and Move The Split", async () => {
+    it("a void holder that differs between the pieces is called void by Join Back and Move the Split", async () => {
       if (!needs("0313")) return;
       await step(async () => {
         // Cut first (nothing billed), then the afternoon billed on job B and that invoice voided.

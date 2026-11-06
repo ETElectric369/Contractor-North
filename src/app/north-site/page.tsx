@@ -41,7 +41,7 @@ export default function NorthHome() {
             href={mailto("Invite request")}
             className="inline-flex h-12 items-center rounded-full bg-[#1a2b4a] px-6 text-[15px] font-semibold text-white shadow-sm hover:bg-[#233963]"
           >
-            Ask For An Invite
+            Ask for an Invite
           </a>
           <a href="/support" className="inline-flex min-h-11 items-center text-[15px] font-medium text-[#1a2b4a] underline decoration-[#1b9488] decoration-2 underline-offset-4">
             Get Help

@@ -217,13 +217,13 @@ describe("Waiting For The Shelf: suggested, never moved", () => {
       linelessPapers: [{ id: "p", title: "CED ticket", words: "STOCK" }],
     });
     expect(w.map((x) => [x.key, x.kind, x.door])).toEqual([
-      ["line:142", "part_billed", "Put The Rest In Stock"],
-      ["line:tw", "container", "Put The Rest In Stock"],
-      ["doc:si", "stock_document", "Record To Stock"],
-      ["doc:si2", "stock_document", "Record To Stock"],
+      ["line:142", "part_billed", "Put the Rest in Stock"],
+      ["line:tw", "container", "Put the Rest in Stock"],
+      ["doc:si", "stock_document", "Record to Stock"],
+      ["doc:si2", "stock_document", "Record to Stock"],
       ["paper:p", "lineless_paper", "Read Again"],
     ]);
-    // Record To Shelf lives in the supplier's Not In Your Books fold: the door lands there.
+    // Record to Shelf lives in the supplier's Not in Your Books fold: the door lands there.
     expect(w[2].href).toBe("/bills#supplier-not-in-books-acct-ced");
     expect(w[3].href).toBe("/bills");
     expect(w[0].why).toContain("None of its $111.60 is billed to the customer");
@@ -232,11 +232,11 @@ describe("Waiting For The Shelf: suggested, never moved", () => {
     expect(w[4].why).toContain("Read it again so its lines come with it");
   });
   /**
-   * AUDIT v1018, CLASS 14: the door used to send every STOCK paper to Not In Your Books, which only
+   * AUDIT v1018, CLASS 14: the door used to send every STOCK paper to Not in Your Books, which only
    * lists a paper /bills would (not one from before the books line, on a Needs You card, or set
    * aside for a credit). Now each lands where its own buttons are, or says why there are none.
    */
-  it("Record To Shelf only where the fold holds the paper; anywhere else, its own door or words", () => {
+  it("Record to Shelf only where the fold holds the paper; anywhere else, its own door or words", () => {
     const d = (id: string, home?: "not_in_books" | "on_card" | "waiting" | "before_books" | "unchecked") => ({
       id,
       number: `8802-${id}`,
@@ -247,13 +247,13 @@ describe("Waiting For The Shelf: suggested, never moved", () => {
     });
     const w = waitingForShelf({ lines: [], stockDocuments: [d("fold", "not_in_books"), d("card", "on_card"), d("wait", "waiting"), d("old", "before_books"), d("lost", "unchecked")] });
     expect(w.map((x) => [x.key, x.door, x.href])).toEqual([
-      ["doc:fold", "Record To Stock", "/bills#supplier-not-in-books-acct-ced"],
+      ["doc:fold", "Record to Stock", "/bills#supplier-not-in-books-acct-ced"],
       ["doc:card", "Open Needs You", "/bills#needs-you"],
-      ["doc:wait", "Open Waiting On A Credit", "/bills#supplier-waiting-credit-acct-ced"],
+      ["doc:wait", "Open Waiting on a Credit", "/bills#supplier-waiting-credit-acct-ced"],
       ["doc:old", null, null],
-      ["doc:lost", "Open It On Bills", "/bills#supplier-invoices-acct-ced"],
+      ["doc:lost", "Open It on Bills", "/bills#supplier-invoices-acct-ced"],
     ]);
-    expect(w[3].why).toContain("from before your books here began, so Bills has no Record To Stock for it");
+    expect(w[3].why).toContain("from before your books here began, so Bills has no Record to Stock for it");
     expect(w[4].why).toContain("Couldn't check your books just now");
   });
 

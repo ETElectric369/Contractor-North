@@ -51,7 +51,7 @@ export function shouldGuardBack(g: { dirty: boolean; confirmDiscard: boolean }):
 /**
  * NESTED OVERLAYS: ONE BACK CLOSES ONE SHEET, THE TOP ONE.
  *
- * A row's ⋯ sheet opens Move To Another Day or Edit Details above itself. Every open Modal used to
+ * A row's ⋯ sheet opens Move to Another Day or Edit Details above itself. Every open Modal used to
  * listen for popstate and close on it, so one Back closed both; and the child's own clean-up (its
  * history.back() after Cancel) arrived at the sheet underneath as a Back, so cancelling the child
  * closed the sheet too, and a half-filled form in it went with it.

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * The one small model call behind Fill From Their Site, and the guard on its answer. The model is a
+ * The one small model call behind Fill from Their Site, and the guard on its answer. The model is a
  * scripted client (no paid call, no internet) and the meter is stubbed. Every organization, number
  * and address is made up.
  */

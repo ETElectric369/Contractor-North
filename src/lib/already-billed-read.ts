@@ -3,11 +3,11 @@
  * migration 0357's mark_already_billed / unmark_already_billed. Nothing here writes.
  *
  *   readHandClaimsForJob   which of a job's rows a person marked as billed, and on which line: the
- *                          Costs tab's "Billed By Hand On INV-00023 · Not Billed After All"
+ *                          Costs tab's "Billed by Hand on INV-00023 · Not Billed After All"
  *   loadAlreadyBilledSheet what the sheet offers for one cost (a receipt, an order, a take, or the
  *                          job's open hours): the eligible bills and their lines, the drafts it can't
  *                          use and why, and for hours the open shifts
- *   alreadyBilledOffer     the supplier-paper card's done-line question, "Already Billed On INV-x?",
+ *   alreadyBilledOffer     the supplier-paper card's done-line question, "Already Billed on INV-x?",
  *                          or null when no bill on the job could have charged for the paper
  *   readAlreadyBilledReach where the sheet can work, for many jobs at once (the paper cards' door,
  *                          the bills ledger's rows, the Costs tab), and what the jobs' bills hold
@@ -535,7 +535,7 @@ const NO_JOB_UNCLAIMED = "Couldn't tell which hours on no job are already billed
  * THE SHIFTS ON NO JOB OPEN TO MARK: closed, not empty, never the company's own time code, and no
  * live invoice holds them. The newest NO_JOB_SHEET_CAP, plus `want` (the ones a door names, always).
  * `capped`: the read came back full, so older ones aren't here. The sheet lists these; the invoice
- * page shows its Already Billed: Hours On No Job only when there are some (a door onto nothing to
+ * page shows its Already Billed: Hours on No Job only when there are some (a door onto nothing to
  * mark is a dead end). A lost read says so, never an empty list.
  */
 export async function readOpenNoJobShifts(
@@ -607,7 +607,7 @@ export async function loadNoJobHoursSheet(
   supabase: Db,
   orgId: string,
   pressed: string[],
-  /** The invoice the door stood on (its page's Already Billed: Hours On No Job): offered first. */
+  /** The invoice the door stood on (its page's Already Billed: Hours on No Job): offered first. */
   opts: { invoiceId?: string | null } = {},
 ): Promise<Loaded> {
   const want = [...new Set((pressed ?? []).map((x) => String(x ?? "")).filter(Boolean))].slice(0, IN_CHUNK);

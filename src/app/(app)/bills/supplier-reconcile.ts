@@ -875,7 +875,7 @@ export function invoicesNeedingBill(
   let reversedTotal = 0;
 
   /**
-   * A RETURN IS NOT A MISSING BILL (2026-09-19, wiring "Record It As A Bill").
+   * A RETURN IS NOT A MISSING BILL (2026-09-19, wiring "Record It as a Bill").
    *
    * Erik ordered five light almond USB receptacles on 8802-1107230, sent them back, and CED wrote
    * 8802-1107337 to take the $225.47 straight off again: "skip the returns for the wrong color".
@@ -891,7 +891,7 @@ export function invoicesNeedingBill(
    * walk back onto this list with a live button on it.
    */
   // The pair on the total, plus a purchase a person said waits on a credit whose credit has come in
-  // whichever state CED left the two: taken back, never Record It As A Bill. One set, built by
+  // whichever state CED left the two: taken back, never Record It as a Bill. One set, built by
   // `takenBackPurchaseIds`, because the "needs a job" pile asks the same question about the same
   // papers and must not answer it differently.
   const reversed = takenBackPurchaseIds(invoices ?? []);
@@ -1041,7 +1041,7 @@ export interface SupplierPaperCard {
    * ALREADY BILLED (0357, Erik: "on supplier bills on my day inside needs action should also be a
    * button for already charged"): the one job the paper names or the matcher guesses (onJob, or the
    * suggestion), when a bill that went out on it could hold this paper's cost. The card's Already
-   * Billed On J-010 files the paper there (the same guards as Put It On) and opens the sheet to pick
+   * Billed On J-010 files the paper there (the same guards as Put It on) and opens the sheet to pick
    * the line. Set by withAlreadyBilledDoors (supplier-papers.ts); absent: no such door.
    */
   alreadyBilledOn?: PaperJob;
@@ -1117,7 +1117,7 @@ export { shortSupplierName } from "@/lib/supplier-name";
  *   · Dated on or after the line (`since`, June 8 for ET). Undated counts.
  *
  * The matcher SUGGESTS and a person DECIDES: "one" becomes the first button, never preselected;
- * "ask" becomes chips; "weak" and "blank" say Pick A Job.
+ * "ask" becomes chips; "weak" and "blank" say Pick a Job.
  *
  * WAITING ON A CREDIT (0346) is not a card while it waits: a person said a credit memo is coming,
  * and there is no answer to give until it does (supplierPapersWaitingOnCredit lists those, folded
@@ -1136,7 +1136,7 @@ export function supplierPaperNeeds(
 
 /**
  * THE PAPERS WAITING ON A CREDIT, not yet back (0346): the same cards supplierPaperNeeds would
- * draw, for the one folded "Waiting On A Credit" line under their supplier on /bills. Nothing a
+ * draw, for the one folded "Waiting on a Credit" line under their supplier on /bills. Nothing a
  * person set aside vanishes.
  */
 export function supplierPapersWaitingOnCredit(

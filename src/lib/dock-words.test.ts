@@ -3,7 +3,7 @@ import { DOCK, LAPSED_DOCK, visibleDock, type DockNode } from "@/lib/dock";
 import { dockLabel, dockTileLabel } from "@/lib/dock-words";
 import { dict } from "@/lib/i18n";
 import { ALL_ON } from "@/lib/features";
-import { esTitleCase } from "../../tests/es-function-words";
+import { esTitleCase, titleCaseIn } from "../../tests/title-case-words";
 
 /**
  * THE DOCK'S WORDS IN THE PERSON'S LANGUAGE (cn-v1138; the office's rows too since cn-v1139).
@@ -20,9 +20,9 @@ const row = (id: string): DockNode => {
   throw new Error(`no dock row ${id}`);
 };
 const section = (key: string) => [...DOCK, LAPSED_DOCK].find((s) => s.key === key)!;
-/** Erik's law for a clickable: every word begins with a capital, a digit or a symbol (English; Spanish is judged by
- *  tests/es-function-words esTitleCase, the significant words, since cn-v1147). */
-const titleCase = (s: string) => s.split(/\s+/).every((w) => /^[\p{Lu}\p{N}&]/u.test(w));
+/** Erik's law for a clickable, English, through the one judge (tests/title-case-words, cn-v1148); Spanish is judged by
+ *  esTitleCase, the significant words, since cn-v1147. */
+const titleCase = (s: string) => titleCaseIn(s, "en");
 
 describe("dockLabel", () => {
   it("a tech's row in Spanish; in English it is the row's own label, byte for byte", () => {

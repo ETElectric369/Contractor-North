@@ -35,7 +35,7 @@ function onPhone() {
   );
 }
 
-/** The title the Show On Portal sheet starts with: the file's name cleaned, or "Plan, Sep 25, 2026"
+/** The title the Show on Portal sheet starts with: the file's name cleaned, or "Plan, Sep 25, 2026"
  *  when the name is camera noise (IMG_1234, photo-1727…). A suggestion; the person edits it. */
 export function startingTitle(paper: Pick<JobPaper, "name" | "category" | "createdAt"> | null | undefined): string {
   if (!paper) return "";
@@ -48,7 +48,7 @@ export function startingTitle(paper: Pick<JobPaper, "name" | "category" | "creat
  *
  * Erik: "ill have a new circuit map to update the one made from the plan scans that should post on
  * the portal too". So any job paper (a plan, a permit, a circuit map, a drawing, a rendering, a
- * scan, a photo) can be put on the page with Show On Portal, and a newer file can be marked as
+ * scan, a photo) can be put on the page with Show on Portal, and a newer file can be marked as
  * replacing an older one: the customer then sees only the newest, and the older one stays here
  * under Earlier Versions with who showed it, who replaced it, and when. Live, as the rest of the
  * page: no publish step; every change says so and offers Undo. Receipts, bills and supplier
@@ -61,9 +61,9 @@ export function startingTitle(paper: Pick<JobPaper, "name" | "category" | "creat
  * plans live: Upload File (PDFs or pictures, several at once, or dropped on the button) or Take
  * Photo (the phone's camera; the in-app camera on a computer). Each file goes up the same way a
  * receipt's does (lib/job-file-upload) and is filed as a Plan by filePlan, which never reads it as
- * a receipt and never writes a cost. Then the Show On Portal sheet opens on the first one with its
+ * a receipt and never writes a cost. Then the Show on Portal sheet opens on the first one with its
  * title suggested from the file's name, and NOTHING is on the customer's page until the person
- * presses Show On Portal; Not Now keeps it an office plan. The filing says so and offers Undo.
+ * presses Show on Portal; Not Now keeps it an office plan. The filing says so and offers Undo.
  * The Costs tab's uploader says Plans live here and links with ?plans=add, which opens this door.
  */
 export function PapersCard({
@@ -103,7 +103,7 @@ export function PapersCard({
   const history = useMemo(() => paperHistory(shares), [shares]);
   const who_ = (id: string | null) => (id && ready?.people[id]) || "the office";
 
-  // The Costs tab's Show On Portal: open this paper's sheet once, when the list is here.
+  // The Costs tab's Show on Portal: open this paper's sheet once, when the list is here.
   useEffect(() => {
     const id = params.get("paper");
     if (!ready || deepLinked.current || !id) return;
@@ -184,7 +184,7 @@ export function PapersCard({
     else toast(gone.length === 1 ? "Removed. That file is off the job." : `Removed. Those ${gone.length} files are off the job.`, "success");
   }
 
-  /** File each one on the job as a Plan, then open the Show On Portal sheet on the first. */
+  /** File each one on the job as a Plan, then open the Show on Portal sheet on the first. */
   async function addPlans(files: File[]) {
     if (!files.length || filing) return;
     setFiling(true);
@@ -349,7 +349,7 @@ export function PapersCard({
       <h4 className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">This Job&apos;s Papers</h4>
       {notUpPapers.length === 0 && !showPhotos ? (
         <p className="mt-1 text-sm text-slate-500">
-          Nothing else to show. Add a plan, a permit or a drawing with Add Plans Or Drawings above, and it appears here.
+          Nothing else to show. Add a plan, a permit or a drawing with Add Plans or Drawings above, and it appears here.
         </p>
       ) : null}
       <ul className="mt-1 space-y-2">
@@ -369,7 +369,7 @@ export function PapersCard({
                 </div>
               </div>
               <Button className="mt-2" variant="outline" onClick={() => setSheet({ paperId: p.id, mode: "show" })} disabled={pending || !!p.refusal}>
-                {s ? <RotateCcw className="h-4 w-4" /> : <Globe className="h-4 w-4" />} {s ? "Put Back On Portal" : "Show On Portal"}
+                {s ? <RotateCcw className="h-4 w-4" /> : <Globe className="h-4 w-4" />} {s ? "Put Back on Portal" : "Show on Portal"}
               </Button>
             </li>
           );
@@ -377,7 +377,7 @@ export function PapersCard({
       </ul>
       {notUpPhotos.length ? (
         <Button variant="ghost" className="mt-2" onClick={() => setShowPhotos((v) => !v)}>
-          {showPhotos ? "Hide The Photos" : `Show A Photo Here Too (${notUpPhotos.length})`}
+          {showPhotos ? "Hide the Photos" : `Show a Photo Here Too (${notUpPhotos.length})`}
         </Button>
       ) : null}
 
@@ -417,7 +417,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div id="portal-papers" className="scroll-mt-20 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <h3 className="flex items-center gap-2 text-base font-semibold text-slate-900">
-        <DraftingCompass className="h-4 w-4 text-[rgb(var(--glass-ink))]" /> Plans And Drawings
+        <DraftingCompass className="h-4 w-4 text-[rgb(var(--glass-ink))]" /> Plans and Drawings
       </h3>
       {children}
     </div>
@@ -448,16 +448,16 @@ export function AddPlansDoor({
   onDrop: (files: File[]) => void;
 }) {
   return (
-    <DropTarget onFiles={onDrop} accept={PLAN_ACCEPT} disabled={filing} label="Drop Plans Or Drawings" className="mt-3">
+    <DropTarget onFiles={onDrop} accept={PLAN_ACCEPT} disabled={filing} label="Drop Plans or Drawings" className="mt-3">
       <Button className="w-full sm:w-auto" onClick={onOpen} disabled={filing} aria-expanded={adding}>
         {filing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-        {filing ? "Filing…" : "Add Plans Or Drawings"}
+        {filing ? "Filing…" : "Add Plans or Drawings"}
       </Button>
       {adding ? (
         <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
           <p className="text-sm text-slate-600">
             PDFs or pictures, several at once. Each is filed on this job as a plan. Nothing goes on {who}&apos;s page until you press
-            Show On Portal.
+            Show on Portal.
           </p>
           <div className="mt-2 flex flex-col gap-2 sm:flex-row">
             <Button variant="outline" className="w-full sm:w-auto" onClick={onUpload} disabled={filing}>
@@ -500,7 +500,7 @@ export function PaperSheet({
   paper: JobPaper | null;
   share: SharedPaperRow | null;
   mode: "show" | "edit";
-  /** Just filed through Add Plans Or Drawings: the sheet says so, and its way out is Not Now. */
+  /** Just filed through Add Plans or Drawings: the sheet says so, and its way out is Not Now. */
   fresh?: boolean;
   shares: SharedPaperRow[];
   who: string;
@@ -543,7 +543,7 @@ export function PaperSheet({
     <Modal
       open
       onClose={onClose}
-      title={mode === "edit" ? "On The Portal" : "Show On Portal"}
+      title={mode === "edit" ? "On the Portal" : "Show on Portal"}
       size="sm"
       footer={
         <ModalActions
@@ -551,7 +551,7 @@ export function PaperSheet({
           onSave={save}
           saving={saving}
           cancelLabel={fresh ? "Not Now" : "Cancel"}
-          saveLabel={mode === "edit" ? "Save" : "Show On Portal"}
+          saveLabel={mode === "edit" ? "Save" : "Show on Portal"}
           disabled={!title.trim()}
         />
       }
@@ -559,7 +559,7 @@ export function PaperSheet({
       <div className="space-y-4">
         {fresh ? (
           <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-            Filed on this job as a plan. It goes on {who}&apos;s page only when you press Show On Portal. Not Now keeps it with the
+            Filed on this job as a plan. It goes on {who}&apos;s page only when you press Show on Portal. Not Now keeps it with the
             office.
           </p>
         ) : null}
@@ -608,7 +608,7 @@ export function PaperSheet({
         <p className="text-xs text-slate-500">
           {mode === "edit"
             ? `${who} sees the change as soon as you save.`
-            : `It shows on ${who}'s page when you press Show On Portal, with its title and date.`}
+            : `It shows on ${who}'s page when you press Show on Portal, with its title and date.`}
         </p>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         {saving ? <Loader2 className="h-4 w-4 animate-spin text-slate-400" /> : null}

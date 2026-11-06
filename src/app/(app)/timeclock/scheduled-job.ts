@@ -29,7 +29,7 @@ import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
  * (windowCoversDay), the same rule the "Which Job Are You On?" sheet already used.
  *
  * AND A GAP DAY IS NOT A JOB DAY (release v1030). The window is the fallback ONLY for a job with no
- * segment rows at all. Add To Schedule and a customer's date picks put a day beside a job's other
+ * segment rows at all. Add to Schedule and a customer's date picks put a day beside a job's other
  * days, and its window (their first-to-last mirror) spans the days between; read as the job's days,
  * a gap day landed a punch, and Add Time Entry's preselect, on the older job instead of the one
  * booked that day. Same statuses, same order otherwise.

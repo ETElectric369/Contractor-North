@@ -15,7 +15,7 @@ import { addCircuit } from "../panel-actions";
  * FILL AN OPEN LINE (the panel-first wave, P1): a tap on an open line of the door opens this sheet,
  * the way a tap on the schedule board opens a person's day. What it feeds, the amps (the common
  * sizes as chips, any other typed), the FORM of the breaker, and the work; Keep writes it with
- * Add A Circuit, on this space.
+ * Add a Circuit, on this space.
  *
  *   Single   one handle, the whole space.
  *   Tandem   two handles in this space, A over B: this tap fills one half, the other stays open.
@@ -106,7 +106,7 @@ export function lineProblems(
   return { block: hard ? `${hard.message} Pick another form.` : null, warn: soft ? soft.message : null };
 }
 
-/** The Add A Circuit write for this line. The panel is the drawn one (null on a stand-in Panel 1:
+/** The Add a Circuit write for this line. The panel is the drawn one (null on a stand-in Panel 1:
  *  the server makes the real Panel 1 with it). */
 export function linePayload(panel: Pick<JobPanel, "id">, v: LineValues, d: LineDraft): Record<string, unknown> {
   const a = v.amps.trim();
@@ -125,7 +125,7 @@ export function linePayload(panel: Pick<JobPanel, "id">, v: LineValues, d: LineD
 export type SendLineResult = { ok: true; row: JobCircuit; panel?: JobPanel; adopted?: { ids: string[]; panelId: string } } | { ok: false; error: string };
 
 /** Keep: the fields checked the way the server checks them (the same words, before the trip), the
- *  door checked, then Add A Circuit. */
+ *  door checked, then Add a Circuit. */
 export async function sendLine(
   jobId: string,
   panel: JobPanel,

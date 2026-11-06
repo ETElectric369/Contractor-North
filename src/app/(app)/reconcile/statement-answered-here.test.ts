@@ -9,7 +9,7 @@ import { answeredOnReconcile } from "@/lib/paperwork";
  * ── A STATEMENT IS ANSWERED WHERE IT IS DROPPED (2026-10-03) ───────────────────────────────────
  *
  * Erik: "so it still doesnt make sense to me that all this reconcile stuff is on the bills page." He
- * dropped a supplier statement into Bring In A Statement on /reconcile and then had to walk to /bills
+ * dropped a supplier statement into Bring In a Statement on /reconcile and then had to walk to /bills
  * to press Apply on it — a merry-go-round for one paper, with the answer on a different page from the
  * question.
  *
@@ -179,7 +179,7 @@ describe("which screen answers a paper is one rule", () => {
    * ── AND BOTH PAGES READ THE SAME WINDOW OF THE TRAY (review, 2026-10-03) ────────────────────
    *
    * The rule was shared and the window was not: Bills read the 200 newest waiting papers and counted
-   * every statement among them as "A Statement Is Waiting On Reconcile", while this page read the 100
+   * every statement among them as "A Statement Is Waiting on Reconcile", while this page read the 100
    * newest papers of EVERY kind and only then filtered. With more than a hundred newer notes, receipts
    * and pictures in the tray, a statement at rank 101–200 was pointed at by Bills and drawn by neither
    * page — answerable nowhere, where before this release Bills answered it itself.
@@ -200,7 +200,7 @@ describe("which screen answers a paper is one rule", () => {
   /**
    * ── AND MY DAY'S OWN ROW OPENS THE PAGE THAT ANSWERS IT (review, 2026-10-03) ─────────────────
    *
-   * "Bank Download To Sort" still opened /bills#sort-these — a Needs You card whose only content about a
+   * "Bank Download to Sort" still opened /bills#sort-these — a Needs You card whose only content about a
    * download is a pointer line — so Open landed him one tap short of the thing he tapped for. Erik, in
    * this repo's own comments: "i dont want people to have to jump on a merry go round to do shit." Every
    * viewer who sees the row can open Reconcile: both gates are `isStaffRole`, and the row needs
@@ -216,7 +216,7 @@ describe("which screen answers a paper is one rule", () => {
 });
 
 describe("the statement he dropped is answered on the page he dropped it on", () => {
-  it("its card is inside Bring In A Statement, with the Apply, and no second home of its own", () => {
+  it("its card is inside Bring In a Statement, with the Apply, and no second home of its own", () => {
     const card = sectionOf(html, "bring-in-a-statement");
     expect(countDoors(doorsIn(card), "Apply")).toBe(1);
     // ONE HOME: the card that arrives is the answer to the intake card, so it is inside it. An Apply
@@ -238,8 +238,8 @@ describe("the statement he dropped is answered on the page he dropped it on", ()
    */
   it("the lead names the statement instead of printing an all-clear over it", () => {
     const lead = textOf(sectionOf(html, "reconcile-lead"));
-    expect(lead).toContain("1 Statement Waiting On You");
-    expect(lead).toContain("waiting under Bring In A Statement below");
+    expect(lead).toContain("1 Statement Waiting on You");
+    expect(lead).toContain("waiting under Bring In a Statement below");
     expect(lead).not.toContain("Nothing Disagrees Right Now");
     expect(lead).not.toContain("Nothing here is waiting on you");
   });

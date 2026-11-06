@@ -94,7 +94,7 @@ export function visitPlace(a: { location?: string | null; jobs?: { address?: str
  *   on         on it (the default);
  *   off        an 'off' row that day: dimmed and struck through, "<Name> · Off That Day";
  *   elsewhere  a 'job' row for another job that day: dimmed, "<Name> · On <job words> That Day".
- * `departed`: no longer on the active team, still drawn and named ("<Name> · No Longer On The Team").
+ * `departed`: no longer on the active team, still drawn and named ("<Name> · No Longer on the Team").
  */
 export type CrewChip = {
   id: string;
@@ -161,7 +161,7 @@ export function crewChips(
     const c: CrewChip = { id, initials: initialsOf(name), name };
     if (departed) {
       c.departed = true;
-      c.title = say(lang, words, "ag_chipGone", `${name} · No Longer On The Team`, { name });
+      c.title = say(lang, words, "ag_chipGone", `${name} · No Longer on the Team`, { name });
     }
     const r = rowOf.get(id);
     if (r?.kind === "off") {

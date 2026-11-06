@@ -16,7 +16,7 @@ const OPEN_KEY = "jobs.completed.open";
  * The default /jobs view's "Completed" shelf (owner spec 2026-07-20): finished jobs
  * don't hide behind a link anymore — they sit collapsed at the BOTTOM of the list
  * under a count + chevron header, each row wearing its billing tag (To Be Invoiced /
- * Pending / Partial / Paid In Full — derived server-side by jobBillingStatus, the
+ * Pending / Partial / Paid in Full — derived server-side by jobBillingStatus, the
  * AR-shared SSOT). `total` may exceed rows.length — the list is capped newest-first
  * and says so honestly.
  */

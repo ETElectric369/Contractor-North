@@ -13,7 +13,7 @@ import { applyPick, type FoundField, type LookupChoice } from "./vendor-lookup-m
  * a PREVIEW: every row with a guessed Kind and trade, plain-word notes, and a tick.
  *
  * THE APP SUGGESTS, A PERSON DECIDES. Everything here is a guess, labelled as one, and changeable:
- *   · Kind comes from a keyword table on the name and is always shown as "Guessed From The Name".
+ *   · Kind comes from a keyword table on the name and is always shown as "Guessed from the Name".
  *     A name it can't read is Not Sorted, never forced into a kind.
  *   · "Already Have" is an EXACT match (vendorKey, the same key the one-per-name index uses).
  *   · "Same Company?" is a FUZZY match (matchSupplierNames: legal forms and punctuation stripped,
@@ -484,9 +484,9 @@ export function rowsToAdd(rows: PreviewRow[], existing: ExistingVendor[]): {
     });
 }
 
-/** "29 Names In Vendors.xlsx", with what was left out said too. */
+/** "29 Names in Vendors.xlsx", with what was left out said too. */
 export function previewHeading(count: number, fileName: string, headerSkipped: boolean, overCap: number): { title: string; detail: string | null } {
-  const title = `${count} Name${count === 1 ? "" : "s"} In ${fileName}`;
+  const title = `${count} Name${count === 1 ? "" : "s"} in ${fileName}`;
   const bits: string[] = [];
   if (headerSkipped) bits.push("The heading row was left out.");
   if (overCap) bits.push(`Only the first ${IMPORT_MAX_ROWS} rows are shown; ${overCap} more were left out. Split the file to add them.`);

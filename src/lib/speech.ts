@@ -7,7 +7,7 @@
  * the mic just never started. Because the recognizer was owned by <AssistantChat>, which isn't even
  * mounted at the first tap, there was no way to start it in-gesture from the tap that opens Nort.
  *
- * This holds the recognizer at MODULE level so the Talk To Nort tap (the first row under Search Or
+ * This holds the recognizer at MODULE level so the Talk to Nort tap (the first row under Search Or
  * Ask: cn:nort-talk → global-assistant launch()) can call startListening() SYNCHRONOUSLY,
  * in-gesture, before the chat panel mounts. The panel, once mounted,
  * registers the result handler and subscribes to the listening state. Off-gesture re-listen (desktop is

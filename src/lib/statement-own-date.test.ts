@@ -112,7 +112,7 @@ describe("the date a statement calls its own", () => {
 
   it("reads an 'as of' title cell, wherever the words sit in it", () => {
     expect(tableStatementDate([["Statement as of 09/25/26"], ["Reference", "Amount", "Open Balance"]], 1)).toBe("2026-09-25");
-    expect(tableStatementDate([["Open Items As Of 09/25/26"], ["Reference", "Amount", "Open Balance"]], 1)).toBe("2026-09-25");
+    expect(tableStatementDate([["Open Items as of 09/25/26"], ["Reference", "Amount", "Open Balance"]], 1)).toBe("2026-09-25");
   });
 
   /** A paper that prints both gives the one it calls its OWN, never the other date box beside it. */

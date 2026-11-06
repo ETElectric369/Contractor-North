@@ -134,7 +134,7 @@ describe("the week", () => {
 
   it("an upcoming block carries its crew as that day leaves it: off struck through, someone who left named", () => {
     expect(html).toContain("Brian Cole · Off That Day");
-    expect(html).toContain("Dana Whitfield · No Longer On The Team");
+    expect(html).toContain("Dana Whitfield · No Longer on the Team");
     expect(html).toContain(pillColorForPerson("p-erik").dot);
   });
 
@@ -179,7 +179,7 @@ describe("the day drill", () => {
     const html = render("day", PAST3);
     expect(html).toContain("Worked, Not Booked");
     expect(html).toContain("5 Pine Rd · Kim Hale — Brian 11:04 AM–1:46 PM");
-    expect(html).toMatch(/<a[^>]*href="\/jobs\/j-ghost"[^>]*>Open The Job<\/a>/);
+    expect(html).toMatch(/<a[^>]*href="\/jobs\/j-ghost"[^>]*>Open the Job<\/a>/);
     expect(html).toContain("Book This Day");
   });
 

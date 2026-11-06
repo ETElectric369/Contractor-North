@@ -205,9 +205,9 @@ export function EditPriceItemButton({ item, sizingAvailable = false, measurement
                       setPerLf(m === "lf" ? perLf || 1 : 0);
                     }}
                   >
-                    <option value="fixed">Fixed Quantity — Typed On The Estimate</option>
-                    <option value="sqft">Per Sq Ft Of The Job</option>
-                    <option value="lf">Per Linear Ft Of The Job</option>
+                    <option value="fixed">Fixed Quantity — Typed on the Estimate</option>
+                    <option value="sqft">Per Sq Ft of the Job</option>
+                    <option value="lf">Per Linear Ft of the Job</option>
                     {measurements.filter((m) => !m.builtIn).map((m) => (
                       <option key={m.key} value={`m:${m.key}`}>
                         Per {m.label}{m.unit ? ` (${m.unit})` : ""}

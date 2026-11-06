@@ -245,7 +245,7 @@ export const words: WordCatalog = {
     cs_didntGoThroughStill: "That didn't go through. Your punch is saved, {still}.",
     cs_done: "Done",
     cs_leaveItWhereItIs: "Leave It Where It Is",
-    cs_skipOfficeWillPick: "Skip, The Office Will Pick",
+    cs_skipOfficeWillPick: "Skip, the Office Will Pick",
     cs_appPutPunchOnMove: "The app put this punch on {label}. Tap the job you're really on and the whole punch moves.",
     cs_theJobItPicked: "the job it picked",
     cs_clockedInTapJob: "You're clocked in. Tap the job you're on and the whole punch goes on it.",
@@ -258,7 +258,7 @@ export const words: WordCatalog = {
     cs_appChoseHere: "Clocked in at {label} — you're here. Change it if you're somewhere else.",
     cs_becauseHere: " because you're at it",
     cs_appChoseSay: "Your punch is on {label}. The app picked that{because}. If you were somewhere else, tell me the right job and I'll move this whole punch while it's this fresh — or move it yourself on My Day's Now card or on Timeclock (tap {change}), or the office moves it on Timecards.",
-    cs_changeTheJob: "Change The Job",
+    cs_changeTheJob: "Change the Job",
     // ── a billed shift ──
     cs_billedPartMoved: "{invoice} bills {before} of this shift and that part now reads {after}. The invoice keeps its figure; adjust it by hand if the customer should pay for the difference.",
     cs_claimedMoveRefusal: "{invoice} already bills this shift — void or adjust that invoice before moving its hours to another job. Nothing was changed.",

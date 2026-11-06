@@ -32,7 +32,7 @@ type SubscribeOrg = BillingOrg & {
  * who holds the key, by name.
  *
  * WHO LANDS HERE (cn-v1140): the plan card's Upgrade door sends a trial or a lapsed company here, so
- * a standing company is no longer bounced to /planner — a trial reads "Pick A Plan", a lapsed
+ * a standing company is no longer bounced to /planner — a trial reads "Pick a Plan", a lapsed
  * company its reason, and an ACTIVE live subscriber the one door that switches a plan (the portal).
  * Only a comped company (the column or the env list) and an install with billing off have nothing
  * to pick, and go home. Each plan card posts its tier AND its cadence: monthly, or yearly at the
@@ -176,7 +176,7 @@ export default async function SubscribePage({
                         )}
                         {annual && (
                           <Button type="submit" name="cadence" value="annual" variant="outline" className="mt-2 w-full">
-                            Yearly At ${plan.annual}/mo
+                            Yearly at ${plan.annual}/mo
                           </Button>
                         )}
                       </form>
@@ -206,12 +206,12 @@ export default async function SubscribePage({
             </p>
           )}
 
-          {/* THE DOOR THE LAPSED NOTICE PROMISED (skeptic #43, S7): "Download For Your Accountant stays
+          {/* THE DOOR THE LAPSED NOTICE PROMISED (skeptic #43, S7): "Download for Your Accountant stays
               open" — so the page the wall lands on links it, for the people the wall lets through. */}
           {org && isAdmin && (
             <p className="mt-4">
               <a href="/analytics/accountant" className="inline-flex min-h-11 items-center justify-center text-sm font-medium text-brand hover:underline">
-                Download For Your Accountant
+                Download for Your Accountant
               </a>
             </p>
           )}
@@ -229,14 +229,14 @@ export default async function SubscribePage({
 
 /**
  * The headline: a lapsed company's reason (cn-v1137 subscribeHeadline); a standing company's door —
- * "Pick A Plan" for a trial (or any standing company with no live Stripe subscription), "Change Your
+ * "Pick a Plan" for a trial (or any standing company with no live Stripe subscription), "Change Your
  * Plan" for an active live subscriber (the portal is the door), and the reason's own words for a
  * card in its grace window ("Your Plan Needs Attention": the portal, to update the card).
  */
 function headlineFor(state: AccessState, portal: boolean): string {
   if (!state.active) return subscribeHeadline(state.reason);
   if (state.reason === "grace") return subscribeHeadline(state.reason);
-  return portal ? "Change Your Plan" : "Pick A Plan";
+  return portal ? "Change Your Plan" : "Pick a Plan";
 }
 
 // Never index auth/utility chrome — on a tenant's custom domain this page previously leaked a

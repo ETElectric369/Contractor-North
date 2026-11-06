@@ -7,7 +7,7 @@ import { pnlLines } from "@/lib/analytics/profit-and-loss";
 
 /**
  * STOCK SAYS STOCK (Erik, 2026-09-27: "we need to uniform our inventory talk to stock and inventory
- * instead of shelf"). Buttons say Put The Rest In Stock, Take It Out Of Stock and Record To Stock;
+ * instead of shelf"). Buttons say Put the Rest in Stock, Take It Out of Stock and Record to Stock;
  * labels say In Stock; sentences, toasts, empty states, the accountant's notes and Nort's prompt and
  * tool descriptions say stock. The feature's name is Shop Stock.
  *
@@ -73,10 +73,10 @@ describe("no screen, toast or Nort line says shelf", () => {
   });
 
   it("the rule catches the old words and lets code and a person's own words through", () => {
-    for (const s of ["Put The Rest On The Shelf", "Take It Off The Shelf", "Record To Shelf", "On The Shelf", "Nothing on the shelf yet", "the shelf's record", "Shelf ticket", "a shelved roll", "Shelf"]) {
+    for (const s of ["Put the Rest on the Shelf", "Take It Off the Shelf", "Record to Shelf", "On the Shelf", "Nothing on the shelf yet", "the shelf's record", "Shelf ticket", "a shelved roll", "Shelf"]) {
       expect(saysShelf(s), s).toBe(true);
     }
-    for (const s of ["shelf", "unshelve", "shelf:", "panel.loadPanelBreakers.shelf", "on_shelf", "shelf_for_crew", "list_shelf", "isShelfTicket", "Put The Rest In Stock", `off the shelf ${THEIR_WORDS}`]) {
+    for (const s of ["shelf", "unshelve", "shelf:", "panel.loadPanelBreakers.shelf", "on_shelf", "shelf_for_crew", "list_shelf", "isShelfTicket", "Put the Rest in Stock", `off the shelf ${THEIR_WORDS}`]) {
       expect(saysShelf(s), s).toBe(false);
     }
   });
@@ -89,7 +89,7 @@ describe("no screen, toast or Nort line says shelf", () => {
   it("the Money by Month chart has no stock-bought bar, and the Owner's Draw card no line of its own for it", () => {
     // Both lay the profit and loss out with stock bought inside Materials & Bills (profit-and-loss.ts).
     const chart = readFileSync(join(ROOT, "src/lib/analytics/money-chart.ts"), "utf8");
-    expect(chart).not.toMatch(/Put On The Shelf/);
+    expect(chart).not.toMatch(/Put on the Shelf/);
     expect(chart).toContain("const CHART_PNL = { stockInMaterials: true } as const;");
     expect(Object.values(SERIES_LINE)).not.toContain("stock_bought");
     const card = readFileSync(join(ROOT, "src/app/(app)/analytics/left-for-card.tsx"), "utf8");

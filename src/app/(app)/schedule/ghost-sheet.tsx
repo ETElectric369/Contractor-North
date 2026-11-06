@@ -23,7 +23,7 @@ import type { Lang } from "@/lib/locale";
  *   Book This Day   the day becomes a real block of the job at the hours actually worked
  *                   (bookWorkedDay: the day added and nothing else; the status, the listed day and any
  *                   hold never move), a toast with Undo (that one day comes off again);
- *   Open The Job    the job.
+ *   Open the Job    the job.
  *
  * NEVER NAGS: no badge, count, Needs You row, push or banner; nothing is saved without the tap; closing
  * changes nothing. The day drill carries the same as a dashed "Worked, Not Booked" row (its 44px doors
@@ -115,7 +115,7 @@ export function useBookWorkedDay(jobId: string, day: string, opts?: { onBooked?:
 
 const DOOR = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-4 text-sm font-medium";
 
-/** The ghost's two doors: Book This Day (the office; on a past day — today's says when instead) and Open The Job. 44px each. */
+/** The ghost's two doors: Book This Day (the office; on a past day — today's says when instead) and Open the Job. 44px each. */
 function GhostDoors({ jobId, canEdit, pending, onBook, today = false }: { jobId: string; canEdit: boolean; pending: boolean; onBook: () => void; today?: boolean }) {
   const t = translator(useLang());
   return (

@@ -48,8 +48,8 @@ describe("every question the tour asks is a real one", () => {
 
   it("NORT IS THE FIRST THING, and he asks rather than tells", () => {
     // Erik: "people need to know how Nort works first and foremost". The old version opened with
-    // five text boxes, which teaches that the assistant is a garnish. His home is Search Or Ask now
-    // (W1-09: Talk To Nort is its first row), so that is what the first step points at.
+    // five text boxes, which teaches that the assistant is a garnish. His home is Search or Ask now
+    // (W1-09: Talk to Nort is its first row), so that is what the first step points at.
     expect(TOUR[0].anchor).toBe("ask");
     expect(TOUR[0].ask).toBeTruthy();
   });
@@ -82,7 +82,7 @@ describe("the why-line lesson is actually in here", () => {
 
 describe("it points at things that exist", () => {
   // Anchors the SHELL carries, so they're reachable from any route (topbar.tsx, dock.tsx,
-  // account-menu.tsx). `ask` is Search Or Ask (W1-09: it replaced Nort's button, the search button
+  // account-menu.tsx). `ask` is Search or Ask (W1-09: it replaced Nort's button, the search button
   // and the graduation cap, so `nort`, `search` and `setup` are gone). `settings-link` is the
   // Settings item INSIDE the account menu — it is not on the settings page, it is the door to it,
   // which is the whole point. `account-menu` is the PANEL behind the initials — in the shell,
@@ -175,7 +175,7 @@ describe("it points at things that exist", () => {
     // code and all the things"
     const anchored = ALL_STEPS.map((s) => s.anchor);
     // "account-menu" since the merge — the initials are still pointed at, as the opened panel.
-    // "ask" since W1-09 — Nort's button is Search Or Ask.
+    // "ask" since W1-09 — Nort's button is Search or Ask.
     for (const a of ["ask", "dock", "account-menu"]) expect(anchored).toContain(a);
     const said = spoken(STRANGER).join(" ").toLowerCase();
     expect(said).toContain("qr code");
@@ -433,7 +433,7 @@ describe("no claim in the onboarding promises something the code does not do", (
 
   it("says the estimate reads why lines ONLY when the estimator really does", () => {
     // "when I write the estimate, your why line is what tells me where that answer lands" was
-    // false: Start The Estimate hands the estimator "label: answer" and nothing else. The switch is
+    // false: Start the Estimate hands the estimator "label: answer" and nothing else. The switch is
     // held to the estimator's own output, so making it read why lines fails here until the lesson
     // is flipped with it.
     const why = "Sets the trip count, which is the labor line.";
@@ -577,7 +577,7 @@ describe("the tour reads the switches", () => {
     const words = runWords(off("leads"));
     expect(words).not.toMatch(/\blead\b/i);
     expect(words).not.toMatch(/inspection/i);
-    expect(words).not.toContain("Start The Estimate");
+    expect(words).not.toContain("Start the Estimate");
     expect(words).toContain("tap Plus, then New Estimate");
     expect(words).toContain("You mark the estimate accepted and the job builds itself — same customer, same site address, plus a work order");
     expect(words).toContain("You typed that address once, on the estimate,");
@@ -597,7 +597,7 @@ describe("the tour reads the switches", () => {
     expect(words).toContain("You typed that address once, on the phone call, and it was still with you at the invoice");
     expect(words).toContain("same with the numbers off the inspection and the hours off the clock. So you're not typing it four times");
     expect(words).toContain("if there's an accepted estimate, that estimate IS the bill");
-    expect(words).toContain("Back in the truck you press Start The Estimate");
+    expect(words).toContain("Back in the truck you press Start the Estimate");
   });
 
   it("Estimates off: no run-estimate; everything on: the whole run, as before", () => {
@@ -636,27 +636,27 @@ describe("the tour reads the switches", () => {
     expect(sayOf(findStep("settings").say, STRANGER)).toContain("(Your people have their own page: Office, behind your initials.)");
   });
 
-  it("the top bar step: Plus starts new work, Search Or Ask finds and asks, the bell keeps your notices", () => {
+  it("the top bar step: Plus starts new work, Search or Ask finds and asks, the bell keeps your notices", () => {
     const bar = findStep("topbar");
     const on = sayOf(stepWords(bar, true).say, STRANGER);
     const plainWords = sayOf(stepWords(bar, false).say, STRANGER);
-    // The + holds Snap Or Note first (W1-30), so the sentence names a paper to snap too (W1-32 words).
+    // The + holds Snap or Note first (W1-30), so the sentence names a paper to snap too (W1-32 words).
     expect(on).toContain("Plus is where new work starts — a job, an appointment, an invoice, or a paper to snap — from any screen.");
-    expect(on).toContain("Search Or Ask finds your jobs, customers, estimates, invoices and appointments by name or number, and you can ask me anything there.");
+    expect(on).toContain("Search or Ask finds your jobs, customers, estimates, invoices and appointments by name or number, and you can ask me anything there.");
     expect(on).toContain("And the bell keeps your notices, whether or not you switch on phone notifications.");
     expect(plainWords).toContain("Search finds your jobs");
-    expect(plainWords).not.toMatch(/ask me|Search Or Ask/);
+    expect(plainWords).not.toMatch(/ask me|Search or Ask/);
     // Plus names no customer and no task (those rows leave it this release), and the magnifying
     // glass and "what's waiting on you" (that's Needs You) are gone from the bell's line.
     for (const t of [on, plainWords]) expect(t).not.toMatch(/a customer|a task|magnifying glass|waiting on you/);
   });
 
-  it("the done step points at Search Or Ask and names the rows that are really in it", () => {
+  it("the done step points at Search or Ask and names the rows that are really in it", () => {
     const done = findStep("done");
     expect(done.anchor).toBe("ask");
     const said = sayOf(done.say, STRANGER);
-    expect(said).toContain("Tap Search Or Ask any time");
-    expect(said).toContain("Take The Setup Again replays this");
+    expect(said).toContain("Tap Search or Ask any time");
+    expect(said).toContain("Take the Setup Again replays this");
     expect(said).toContain("Show Me How");
     // Show Me How holds the lessons, not the setup: the line must not claim it replays this.
     expect(said).not.toContain("Show Me How replays");

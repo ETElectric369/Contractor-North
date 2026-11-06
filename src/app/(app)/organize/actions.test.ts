@@ -395,9 +395,9 @@ describe("billJobReceipt — the link row IS the idempotency", () => {
 describe("billJobReceipt — a paper whose number is already on the books is FILED with that bill", () => {
   /**
    * J-013 "ARR #56" (2026-09-30): one live bill, no supplier papers, and the Costs badge said 3 with
-   * the receipts fold reading "Not On A Bill Yet". The second photo of the same CED ticket got
+   * the receipts fold reading "Not on a Bill Yet". The second photo of the same CED ticket got
    * "Already on the books" and NO row, so the job page called it loose forever: counted on the chip,
-   * flagged on its line, and its Record As Cost only ever answered the same sentence. Now the photo
+   * flagged on its line, and its Record as Cost only ever answered the same sentence. Now the photo
    * is tied to the bill it names (tied_bill_id, the Same Purchase: Tie Them row), so it reads "On
    * that bill" and leaves the count; Different Purchase still writes its own bill and drops the tie.
    */

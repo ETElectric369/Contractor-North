@@ -62,7 +62,7 @@ function fileBullets(todayYmd: string, through: string): string[] {
  * mid-month day would quietly pull in the whole month). The page shows the two figures that matter,
  * the top and the bottom line of the Summary's profit and loss, Revenue and Net Profit, by the
  * profit and loss's own rows and words (profit-and-loss.ts), then one button, Download
- * For Your Accountant, and one small link, Same Thing As CSV Files. The Shop Stock page links here.
+ * For Your Accountant, and one small link, Same Thing as CSV Files. The Shop Stock page links here.
  *
  * OFFICE ONLY (requireStaff; a tech is sent to My Day). The totals follow the owner's switch: an
  * office viewer the owner hasn't shared the owner's money with sees no totals, and the file leaves them
@@ -125,7 +125,7 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
             href="/analytics"
             className="inline-flex min-h-[44px] items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
-            Back To Analytics
+            Back to Analytics
           </Link>
         </PageHeader>
 
@@ -195,7 +195,7 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
         </Card>
 
         <Card className="mb-4 p-4">
-          {/* Keyed on the period too: a file kept for Save The File (or a line about it) belongs to the
+          {/* Keyed on the period too: a file kept for Save the File (or a line about it) belongs to the
               period it was made for, and a new period starts the card fresh. */}
           <AccountantDownload
             key={period.key}
@@ -212,7 +212,7 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
             <p className="flex-1 text-xs text-slate-500">
               {TAB_NAMES.length} tabs: {TAB_NAMES.join(", ")}. Summary is the profit and loss; the rest are the rows behind it, itemized.
             </p>
-            <InfoPopup title="What Is In The File" label="About What Is In The File" bullets={fileBullets(todayYmd, through)} className="-mt-3 -mr-2" />
+            <InfoPopup title="What Is in the File" label="About What Is in the File" bullets={fileBullets(todayYmd, through)} className="-mt-3 -mr-2" />
           </div>
           {/* The books are the accountant's file; every record the company has is the export door on
               Settings › Getting Paid (cn-v1138) — one link, where the owner is already looking for files. */}

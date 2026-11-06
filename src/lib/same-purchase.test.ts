@@ -163,7 +163,7 @@ describe("billsCoveredByDocuments", () => {
     expect([...covered].sort()).toEqual(["fef38cb9", "tray-1"]);
   });
 
-  it("never by a long number under another spelling: that would drop a real purchase from Purchases Not In Your Books", () => {
+  it("never by a long number under another spelling: that would drop a real purchase from Purchases Not in Your Books", () => {
     const docs: SupplierDoc[] = [{ id: "si-1", invoice_number: "8802-1109000", supplier_account_id: CED, total: 400, invoice_date: "2026-09-12" }];
     const unfiled: LedgerBill = { ...trayTicket, supplier: "Some Other Supply", supplier_account_id: null };
     expect([...billsCoveredByDocuments([unfiled], docs, [], aliases)]).toEqual([]);
@@ -241,7 +241,7 @@ describe("a bill and the corrections under it are one purchase", () => {
 
 /**
  * THE SAME PURCHASE AT ANOTHER PRICE (Erik, 2026-10-04: the counter priced a fixture at $0.00 and
- * CED's invoice came to $95.99 more). Nothing within tolerance used to mean Record It As A Bill was
+ * CED's invoice came to $95.99 more). Nothing within tolerance used to mean Record It as a Bill was
  * the only door: a second full bill on the job. Now the uncovered tickets on that job are offered,
  * and the door is Correct This Bill.
  */

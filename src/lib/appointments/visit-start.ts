@@ -54,7 +54,7 @@ export function visitDay(startsAt: string | null | undefined, tz: string, nowMs:
  *
  * WHY FINISHED COUNTS (Tom Goodman, as it stands now): Erik made J-055 by hand the afternoon of the
  * visit, worked it, FINISHED it and sent INV-079. An open-only rule stopped offering J-055 the moment
- * it was finished, and the card went back to leading with Start The Job And Clock In: a duplicate
+ * it was finished, and the card went back to leading with Start the Job and Clock In: a duplicate
  * job, on a visit that was already over.
  */
 const LINKABLE = new Set<string>([...ACTIVE_JOB_STATUSES, "complete", "invoiced"]);
@@ -76,7 +76,7 @@ export function jobIsFinished(status: string | null | undefined): boolean {
  * after they end (every one of ET's scheduled visits was in the past), so Matt Warren's visit, linked
  * to the finished J-045 and ended 2026-09-02, still led with Clock In On J-045. WHY NOT THE END TIME
  * ITSELF: the Tom Goodman visit ran an hour and the work went on all afternoon; a visit whose hour
- * has passed but whose day has not is exactly when Start The Job And Clock In is wanted.
+ * has passed but whose day has not is exactly when Start the Job and Clock In is wanted.
  */
 export function visitIsOver(
   visit: { status?: string | null; starts_at?: string | null; ends_at?: string | null },
@@ -108,7 +108,7 @@ export function visitDayBounds(day: string, tz: string): { start: string; end: s
 }
 
 /**
- * The one job to offer as "Link To J-055 Instead", or null.
+ * The one job to offer as "Link to J-055 Instead", or null.
  *
  * `jobs` are the SAME customer's jobs (the caller filters by customer and org). Offered only when
  * exactly one of them still stands (linkableStatus: open or finished, not cancelled) AND was made on

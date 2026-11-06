@@ -20,7 +20,7 @@
  *   - today's: the day is not over and the crew may still put it on the job.
  *
  * One read for both places that show it: the Timecards Fix These box (each shift, with its doors)
- * and Needs You (one rolled-up line, "Hours On No Job · 17", that opens it).
+ * and Needs You (one rolled-up line, "Hours on No Job · 17", that opens it).
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { hoursBetween } from "@/lib/utils";
@@ -176,7 +176,7 @@ export function companyTimeCode(codes: { code?: string | null; billable?: boolea
 // On 9/19 the office billing 41 Larkspur looked at the job's Time tab, found no 9/11 hours and typed
 // the day again: Brian's own 9/11 punch was in the book on no job, and the job page never showed
 // it. So the job's Time tab lists the shifts on no job that its crew clocked around its days, each
-// with "Put This On <job>": the same shifts Hours On No Job lists (this file's rule), cut to this
+// with "Put This on <job>": the same shifts Hours on No Job lists (this file's rule), cut to this
 // job's people and dates, today's included.
 
 /** At most this many on one job's Time tab, newest first. */

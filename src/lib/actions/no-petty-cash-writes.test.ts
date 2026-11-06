@@ -6,7 +6,7 @@ import { AGENT_WRITE_ALLOWED, agentWriteToolsForRole } from "./agent-tools";
 
 /**
  * NORT STOPS WRITING PETTY CASH (W1-34). A cash purchase is a cost like any other (a paid bill on its
- * job), and a bank's ATM line is Cash Taken Out (Not A Cost). So the write left Nort's tools, the
+ * job), and a bank's ATM line is Cash Taken Out (Not a Cost). So the write left Nort's tools, the
  * registry and its entity together, and the prompt that sent a bought item to it names bill.create:
  * a tool the prompt names that no longer exists would be a door Nort walks into. Reading petty cash
  * (list_petty_cash) stays: every entry already written still counts.

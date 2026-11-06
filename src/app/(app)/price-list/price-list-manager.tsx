@@ -433,7 +433,7 @@ export function PriceListManager({
                   variant="outline"
                   onClick={() => update({ chips: activeChips.has("shifted") ? prefs.chips.filter((c) => c !== "shifted") : [...prefs.chips, "shifted"] })}
                 >
-                  {activeChips.has("shifted") ? "Show The Whole List" : `Show Just These ${shifted.length}`}
+                  {activeChips.has("shifted") ? "Show the Whole List" : `Show Just These ${shifted.length}`}
                 </Button>
               </div>
             </div>
@@ -461,7 +461,7 @@ export function PriceListManager({
                   variant="outline"
                   onClick={() => update({ chips: activeChips.has("costiscode") ? prefs.chips.filter((c) => c !== "costiscode") : [...prefs.chips, "costiscode"] })}
                 >
-                  {activeChips.has("costiscode") ? "Show The Whole List" : `Show Just These ${costIsCode.length}`}
+                  {activeChips.has("costiscode") ? "Show the Whole List" : `Show Just These ${costIsCode.length}`}
                 </Button>
               </div>
             </div>
@@ -501,7 +501,7 @@ export function PriceListManager({
             />
           )}
           <Button size="sm" onClick={() => void addSelectedToKit()} disabled={addingToKit || (!kitTarget && !newKitName.trim())}>
-            <Plus className="h-3.5 w-3.5" /> Add To Kit
+            <Plus className="h-3.5 w-3.5" /> Add to Kit
           </Button>
           <Button size="sm" variant="outline" onClick={() => setSelected(new Set())}>
             Clear

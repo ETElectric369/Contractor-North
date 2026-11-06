@@ -2,8 +2,8 @@
  * WHAT A READER SAW, AS SUGGESTIONS (Panel plan, phase 4; honed in the panel-first wave). Pure: no
  * database, no model.
  *
- * Three things read circuits for a job and none of them decides anything: Read A Photo (the crew
- * and the office), Read Circuits From The Plans (the office), and Nort ("add a 20 amp for the
+ * Three things read circuits for a job and none of them decides anything: Read a Photo (the crew
+ * and the office), Read Circuits from the Plans (the office), and Nort ("add a 20 amp for the
  * garage freezer").
  *
  * THE PHOTO READS SPACES, SO IT LANDS IN THEM (landRead, below). Every line it read becomes a
@@ -17,7 +17,7 @@
  * three ways against the job's list:
  *
  *   SAME     the circuit is already on the list, the same words and the same size: nothing is
- *            written, and the count of them is said ("2 Already On Your List").
+ *            written, and the count of them is said ("2 Already on Your List").
  *   DIFFERS  the reader matched ONE circuit on the list and something about it differs: the door
  *            words ("Panel Says Mini Fridge, Your List Says Fridge"), the space, or the amps. That
  *            becomes a LABEL CHECK: a suggestion that names the circuit it is about (flag_for),
@@ -40,13 +40,13 @@ import { belongsToPanel, slotsMeet } from "./held";
 
 export type ReaderSource = "photo" | "plan" | "nort";
 
-/** Erik's cap on Read A Photo for the crew: three reads per job per day (a few cents each); the
+/** Erik's cap on Read a Photo for the crew: three reads per job per day (a few cents each); the
  *  office isn't held to it (the company's monthly AI budget still is). Here, not in the reader, so
  *  the card can say it without pulling the model code into a page. */
 export const PHOTO_READS_PER_JOB_PER_DAY = 3;
 /** The one sentence a tech reads when the day's photo reads are used up. */
 export const PHOTO_CAP_WORDS = `${PHOTO_READS_PER_JOB_PER_DAY} photo reads a day on this job — ask the office for more.`;
-/** The office's cap on Read Circuits From The Plans: five per job per day. */
+/** The office's cap on Read Circuits from the Plans: five per job per day. */
 export const PLAN_READS_PER_JOB_PER_DAY = 5;
 /** The one sentence when the day's plan reads are used up. */
 export const PLAN_CAP_WORDS = `${PLAN_READS_PER_JOB_PER_DAY} plan reads a day on this job — the next one opens tomorrow.`;
@@ -435,14 +435,14 @@ export function readerSuggestions(input: {
   return out;
 }
 
-/** "Read 9. 6 New Suggestions, 1 Label Check, 2 Already On Your List." */
+/** "Read 9. 6 New Suggestions, 1 Label Check, 2 Already on Your List." */
 export function readerSummary(what: string, read: number, o: ReaderOutcome): string {
   if (read === 0) return `Nothing on ${what} could be read as a circuit.`;
   const newOnes = o.drafts.length - o.flagged;
   const bits = [
     newOnes ? `${newOnes} New Suggestion${newOnes === 1 ? "" : "s"}` : null,
     o.flagged ? `${o.flagged} Label Check${o.flagged === 1 ? "" : "s"}` : null,
-    o.same ? `${o.same} Already On Your List` : null,
+    o.same ? `${o.same} Already on Your List` : null,
     o.already ? `${o.already} Already Suggested` : null,
     o.setAside ? `${o.setAside} You Set Aside Before` : null,
   ].filter(Boolean);
@@ -547,7 +547,7 @@ export function landRead(
 }
 
 /** "Read 34 lines, 18 new — Keep All or tap each one. 16 already match the panel." The one sentence
- *  of state under Read A Photo. */
+ *  of state under Read a Photo. */
 export function landedWords(read: number, l: Landing): string {
   if (read === 0) return "Nothing readable in that photo — try one straight on with the door open.";
   const n = l.toWrite.length;
@@ -631,5 +631,5 @@ export function panelFacts(
 }
 
 // The inspection's own panel answer (brand, amps, the one-box condition) is read on the inspection
-// itself since cn-v1141: the Panel tab's "About The Panel" hints that carried it were retired at
+// itself since cn-v1141: the Panel tab's "About the Panel" hints that carried it were retired at
 // Erik's ask in the panel-first wave, and their reader (inspectionSaid) went with them.

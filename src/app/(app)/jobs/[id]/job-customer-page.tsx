@@ -59,7 +59,7 @@ const byDates = (a: StretchRow, b: StretchRow) =>
 
 /** `portalOn` = the Customer Portal switch (0352). Off, the tab opens only from a link, under the Off
  *  line: what the office set up stays here to read and edit, but the doors OUT to the customer's
- *  page (See What They See, Copy The Link, Show Customer on the Photos tab) aren't drawn, because
+ *  page (See What They See, Copy the Link, Show Customer on the Photos tab) aren't drawn, because
  *  that page says "Ask your contractor" until the switch is back on. Omitted = on (as before). */
 export function JobCustomerPage({
   jobId,
@@ -150,7 +150,7 @@ export function JobCustomerPage({
             </p>
             {portalOn && (
               <Link href={`/jobs/${jobId}?tab=photos`} className="mt-2 inline-flex min-h-[44px] items-center gap-1 text-sm font-semibold text-brand">
-                Go To Photos <ChevronRight className="h-4 w-4" />
+                Go to Photos <ChevronRight className="h-4 w-4" />
               </Link>
             )}
           </div>
@@ -187,7 +187,7 @@ function LinkCard({ link, who, jobId }: { link: LinkState | null; who: string; j
           <p className="mt-2 text-sm text-red-700">
             {who} has no link yet, so there is nothing to open or copy.{" "}
             <Link href={`/crm/${link.customerId}`} className="font-semibold underline">
-              Make One On Their Contact Page
+              Make One on Their Contact Page
             </Link>
             .
           </p>
@@ -195,7 +195,7 @@ function LinkCard({ link, who, jobId }: { link: LinkState | null; who: string; j
           <p className="mt-2 text-sm text-red-700">
             Their link is turned off, so it opens to &ldquo;This link was turned off.&rdquo;{" "}
             <Link href={`/crm/${link.customerId}`} className="font-semibold underline">
-              Turn It On From Their Contact Page
+              Turn It On from Their Contact Page
             </Link>
             .
           </p>
@@ -235,7 +235,7 @@ function LinkCard({ link, who, jobId }: { link: LinkState | null; who: string; j
             }}
             title={link.enabled ? "Copy the link to this job's page" : "Turn the link on first"}
           >
-            <Copy className="h-4 w-4" /> Copy The Link
+            <Copy className="h-4 w-4" /> Copy the Link
           </Button>
         </div>
       </div>
@@ -296,7 +296,7 @@ function StretchesCard({
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <h3 className="text-base font-semibold text-slate-900">Stretches Of Work</h3>
+      <h3 className="text-base font-semibold text-slate-900">Stretches of Work</h3>
       <p className="mt-1 text-sm text-slate-600">
         Name each stretch and its dates, like Rough-in, Jul 14 to Aug 10. {who} sees each stretch with its days, the payments made
         in it or at its end, and the balance after it. With none named, it is one list called All Work.

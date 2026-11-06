@@ -13,8 +13,8 @@ import {
  * THE SHOP SHELF'S PURE HALF (Shop Stock; moved out of stock-ledger.ts in Phase 2).
  *
  * Everything here is arithmetic and vocabulary, with no database and no session, so the three
- * screens that put things on the shelf (the receipt card's Put The Rest On The Shelf, the tray's
- * Shop Stock destination, and Record To Shelf on a CED document) show a person exactly the figure
+ * screens that put things on the shelf (the receipt card's Put the Rest on the Shelf, the tray's
+ * Shop Stock destination, and Record to Shelf on a CED document) show a person exactly the figure
  * the server is about to write, from the same function. src/lib/stock-ledger.ts re-exports all of
  * it, so the server half and the tests keep importing from one place.
  *
@@ -563,7 +563,7 @@ export type WaitingLineIn = {
   hasLot: boolean;
   billDate?: string | null;
   /** The sent or paid invoice that already bills this receipt (or the order it delivered), as
-   *  "INV-069 (paid)". The receipt card has no Put The Rest On The Shelf there, so neither does this. */
+   *  "INV-069 (paid)". The receipt card has no Put the Rest on the Shelf there, so neither does this. */
   heldBy?: string | null;
 };
 
@@ -596,7 +596,7 @@ const dollars = (n: number) => `$${(Math.round(n * 100) / 100).toFixed(2)}`;
 export function waitingForShelf(input: {
   lines: WaitingLineIn[];
   /** `accountId`: the supplier account it is on, so the door lands on that supplier's Not In Your
-   *  Books list on /bills (the only home of Record To Shelf), not the top of the page. */
+   *  Books list on /bills (the only home of Record to Shelf), not the top of the page. */
   stockDocuments?: {
     id: string;
     number: string;
@@ -606,8 +606,8 @@ export function waitingForShelf(input: {
     /** The supplier account's name, for the title ("CED 8802-1108330"); "Supplier" without one. */
     supplier?: string | null;
     /**
-     * Where it stands on /bills (supplierPaperHomes, audit v1018 class 14): Record To Shelf is only
-     * offered when the supplier's Not In Your Books fold holds it. "unchecked": that reading
+     * Where it stands on /bills (supplierPaperHomes, audit v1018 class 14): Record to Shelf is only
+     * offered when the supplier's Not in Your Books fold holds it. "unchecked": that reading
      * failed. Absent reads as the fold.
      */
     home?: "not_in_books" | "on_card" | "waiting" | "before_books" | "unchecked";
@@ -634,7 +634,7 @@ export function waitingForShelf(input: {
           billed === 0
             ? `None of its ${dollars(cost)} is billed to the customer, and the job still carries all of it.${held}`
             : `The customer is billed ${dollars(billed)} of its ${dollars(cost)}, and the job still carries the rest.${held}`,
-        ...door("Put The Rest In Stock"),
+        ...door("Put the Rest in Stock"),
       });
       continue;
     }
@@ -652,13 +652,13 @@ export function waitingForShelf(input: {
         : counted
           ? `Its description counts what's in it, and all ${dollars(cost)} of it is billed to that job.`
           : `The ticket read ${Number(l.quantity)} on it, which is usually a box or a coil, and all ${dollars(cost)} is billed to that job.`) + held,
-      ...door("Put The Rest In Stock"),
+      ...door("Put the Rest in Stock"),
     });
   }
   for (const d of input.stockDocuments ?? []) {
     const title = `${d.supplier ? shortSupplierName(d.supplier) : "Supplier"} ${d.number}, ${dollars(Number(d.total) || 0)}`;
     const base = { key: `doc:${d.id}`, kind: "stock_document" as const, title };
-    // A DOOR ONLY WHERE THE BUTTON IS (audit v1018, class 14): the fold that holds Record To Shelf
+    // A DOOR ONLY WHERE THE BUTTON IS (audit v1018, class 14): the fold that holds Record to Shelf
     // lists a paper only when /bills would (supplierPaperHomes). Anywhere else, the door goes where
     // this paper's own buttons are, or the card says why there is none.
     if (d.home === "on_card") {
@@ -670,14 +670,14 @@ export function waitingForShelf(input: {
         ...base,
         why: `"${d.words}" is written on it, and it's set aside on Bills waiting on a credit.`,
         href: d.accountId ? `/bills#supplier-waiting-credit-${d.accountId}` : "/bills",
-        door: "Open Waiting On A Credit",
+        door: "Open Waiting on a Credit",
       });
       continue;
     }
     if (d.home === "before_books") {
       out.push({
         ...base,
-        why: `"${d.words}" is written on it, but it's from before your books here began, so Bills has no Record To Stock for it. If its roll is still in stock, add the roll by hand.`,
+        why: `"${d.words}" is written on it, but it's from before your books here began, so Bills has no Record to Stock for it. If its roll is still in stock, add the roll by hand.`,
         href: null,
         door: null,
       });
@@ -688,17 +688,17 @@ export function waitingForShelf(input: {
         ...base,
         why: `"${d.words}" is written on it. Couldn't check your books just now, so it may already be recorded; its supplier's own lists on Bills say.`,
         href: d.accountId ? `/bills#supplier-invoices-${d.accountId}` : "/bills",
-        door: "Open It On Bills",
+        door: "Open It on Bills",
       });
       continue;
     }
     out.push({
       ...base,
       why: `"${d.words}" is written on it, and no bill covers it yet.`,
-      // Record To Shelf lives two folds deep (the supplier's line, then Not In Your Books):
+      // Record to Shelf lives two folds deep (the supplier's line, then Not in Your Books):
       // FoldOpener opens both. With no account, the page's own top is the best it can do.
       href: d.accountId ? `/bills#supplier-not-in-books-${d.accountId}` : "/bills",
-      door: "Record To Stock",
+      door: "Record to Stock",
     });
   }
   for (const p of input.linelessPapers ?? []) {

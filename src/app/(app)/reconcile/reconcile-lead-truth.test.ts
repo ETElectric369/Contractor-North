@@ -248,7 +248,7 @@ describe("nothing is claimed off a read that did not land", () => {
     expect(lead(html)).toContain("Couldn't Check Everything Just Now");
     expect(lead(html)).toContain("nothing below is counted");
     expect(lead(html)).not.toContain("No money gap");
-    expect(lead(html)).not.toContain("Nothing To Sort Out Right Now");
+    expect(lead(html)).not.toContain("Nothing to Sort Out Right Now");
   });
 
   it("a named failed read inside that one read is said in the lead too, with no all-clear", async () => {
@@ -330,7 +330,7 @@ describe("a lost figures read does not invent work", () => {
     expect(html, "nothing is unfiled, so there is nothing to propose").not.toContain(
       `id="${RECONCILE_KINDS["supplier-names"].anchor}"`,
     );
-    expect(textOf(html)).not.toContain("Not The Same");
+    expect(textOf(html)).not.toContain("Not the Same");
     expect(lead(html)).toMatch(/Couldn't read/);
   });
 });
@@ -391,7 +391,7 @@ describe("the all-clear is scoped to what this page counted", () => {
     expect(words).toContain("drop it in below");
     expect(words).not.toContain("Nothing for you to do here");
     expect(words).not.toMatch(/Nothing is waiting on you/);
-    expect(textOf(html)).toContain("Drop A Bank Or Supplier Statement");
+    expect(textOf(html)).toContain("Drop a Bank or Supplier Statement");
   });
 
   it("and the page reads the queue in exactly one place, which is what lets the lead speak of it", async () => {

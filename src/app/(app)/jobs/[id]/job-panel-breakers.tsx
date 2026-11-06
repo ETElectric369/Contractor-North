@@ -30,9 +30,9 @@ import { PlaceBreakerSheet } from "./place-breaker-sheet";
  * Breakers section makes no sense and is confusing." So the card says ONE thing, computed from the
  * count (breakerSay in lib/panel/breakers), each with its one door:
  *
- *   "Short one 2P 20A (Bath Floor Heat) — Add To Materials"   the missing breakers go on the job's
+ *   "Short one 2P 20A (Bath Floor Heat) — Add to Materials"   the missing breakers go on the job's
  *                                                             one materials list, with Undo;
- *   "2 bought breakers not placed yet — Place Them"           opens Place From What Was Bought;
+ *   "2 bought breakers not placed yet — Place Them"           opens Place from What Was Bought;
  *   "All breakers accounted for."
  *
  * (a shortfall and breakers waiting to go in are both said when both are true: buying and placing
@@ -52,7 +52,7 @@ const card = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 
 type PriceForm = { code: string; value: string; supplier: string | null };
 
-/** One line Add To Materials writes (addBreakerToMaterials' input). */
+/** One line Add to Materials writes (addBreakerToMaterials' input). */
 export type MaterialsOrder = { part: string | null; description: string; qty: number };
 
 /** Everything on the card, drawn from a load and the tab's live circuits. Render-only: the doors
@@ -76,7 +76,7 @@ export function BreakersCardView({
   busy?: string | null;
   priceForm?: PriceForm | null;
   onAddToMaterials?: (part: string | null, description: string, qty: number) => void;
-  /** The line's Add To Materials: every order the shortfall needs, in one tap with one Undo.
+  /** The line's Add to Materials: every order the shortfall needs, in one tap with one Undo.
    *  Without it, each order goes through onAddToMaterials. */
   onAddAllToMaterials?: (orders: MaterialsOrder[]) => void;
   onPlace?: (g: HaveGroup) => void;
@@ -97,7 +97,7 @@ export function BreakersCardView({
   const book = useMemo(() => new Map((office?.prices ?? []).map((p) => [p.code, p])), [office]);
   const off = busy !== null;
 
-  /** The office's line under a part number: its price in the book, or Add To Price Book. */
+  /** The office's line under a part number: its price in the book, or Add to Price Book. */
   const bookLine = (code: string | null, fromTicket?: OfficeTicketLine | null) => {
     if (!office || !code) return null;
     const key = normalisePartNumber(code)!;
@@ -147,7 +147,7 @@ export function BreakersCardView({
           onClick={() => onPriceForm?.({ code: key, value: fromTicket?.each != null ? fromTicket.each.toFixed(2) : "", supplier: fromTicket?.supplier ?? null })}
           className="min-h-[44px] font-semibold text-[rgb(var(--glass-ink))] disabled:opacity-50"
         >
-          Add To Price Book
+          Add to Price Book
         </button>
       </div>
     );
@@ -186,7 +186,7 @@ export function BreakersCardView({
               </p>
               {short.orders.length > 0 && (
                 <Button onClick={() => addShort(short.orders)} disabled={off}>
-                  {busy === "mat:short" ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackagePlus className="h-4 w-4" />} Add To Materials
+                  {busy === "mat:short" ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackagePlus className="h-4 w-4" />} Add to Materials
                 </Button>
               )}
             </div>
@@ -250,14 +250,14 @@ export function BreakersCardView({
             <>
               {/* HAVE: what came on the job's tickets, which ticket and what it cost. */}
               <div className="mt-3">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Came For This Job</div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Came for This Job</div>
                 {c.bought.length === 0 ? (
                   <p className="mt-1 text-sm text-slate-500">No breakers on this job&apos;s tickets yet.</p>
                 ) : (
                   <ul className="mt-1 divide-y divide-slate-100">
                     {c.bought.map((g) => {
                       const tix = ticketsFor(g);
-                      const from = [...new Set(tix.map((t) => [t.bill_number ?? "A Ticket With No Number", t.supplier].filter(Boolean).join(", ")))];
+                      const from = [...new Set(tix.map((t) => [t.bill_number ?? "A Ticket with No Number", t.supplier].filter(Boolean).join(", ")))];
                       const each = tix.find((t) => t.each != null) ?? null;
                       return (
                         <li key={g.key} className="flex items-start gap-2 py-2">
@@ -293,7 +293,7 @@ export function BreakersCardView({
                   {c.unreadable.map((u) => (
                     <li key={`${u.credit ? "credit" : "read"}:${u.description}`} className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
                       <span className="min-w-0 break-words">
-                        {u.credit ? "A Credit On A Ticket" : "Can't Read This Breaker"}: {u.description} ({u.qty}). {u.reason}
+                        {u.credit ? "A Credit on a Ticket" : "Can't Read This Breaker"}: {u.description} ({u.qty}). {u.reason}
                       </span>
                     </li>
                   ))}
@@ -311,7 +311,7 @@ export function BreakersCardView({
 
               {/* EACH ORDER ON ITS OWN, with the book beside it; or swap a twin for a quad. */}
               {c.orders.map((o) => {
-                const onTheList = o.alsoOn.some((w) => w.startsWith("On The List"));
+                const onTheList = o.alsoOn.some((w) => w.startsWith("On the List"));
                 const name = o.part ?? `${o.short.poles}P ${o.short.amps}A Breaker`;
                 return (
                   <div key={`${o.short.poles}|${o.short.amps}|${o.short.kind ?? ""}`} className="mt-2 space-y-1">
@@ -322,7 +322,7 @@ export function BreakersCardView({
                     ))}
                     <Button className="w-full" variant="outline" onClick={() => onAddToMaterials?.(o.part, o.description, o.qty)} disabled={off}>
                       {busy === `mat:${o.part ?? o.description}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackagePlus className="h-4 w-4" />}
-                      {onTheList ? `Add Another ${name} To Materials` : `Add ${o.qty > 1 ? `${countWord(o.qty)} ` : ""}${name} To Materials`}
+                      {onTheList ? `Add Another ${name} to Materials` : `Add ${o.qty > 1 ? `${countWord(o.qty)} ` : ""}${name} to Materials`}
                     </Button>
                     {bookLine(o.part)}
                   </div>
@@ -355,7 +355,7 @@ export function BreakersCardView({
                     onClick={() => onAddToMaterials?.(s.get.part, `${s.get.part} Quad 1P ${s.get.outer}A + 1P ${s.get.outer}A + 2P ${s.get.inner}A Breaker`, 1)}
                     disabled={off}
                   >
-                    {busy === `mat:${s.get.part}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackagePlus className="h-4 w-4" />} Add {s.get.part} To Materials
+                    {busy === `mat:${s.get.part}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackagePlus className="h-4 w-4" />} Add {s.get.part} to Materials
                   </Button>
                   {bookLine(s.get.part)}
                 </div>
@@ -366,7 +366,7 @@ export function BreakersCardView({
           {/* THE LIST AND THE SHELF: shown beside the count, never added into it. */}
           {c.onList.length > 0 && (
             <div className="mt-3">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">On The List, Not Bought Yet</div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">On the List, Not Bought Yet</div>
               <ul className="mt-1 space-y-1">
                 {c.onList.map((g) => (
                   <li key={g.key} className="text-sm text-slate-700">
@@ -385,7 +385,7 @@ export function BreakersCardView({
             <ul className="mt-2 space-y-1">
               {c.listUnreadable.map((u) => (
                 <li key={u.description} className="text-xs text-amber-800">
-                  On The List, Can&apos;t Read This Breaker: {u.description}. {u.reason}
+                  On the List, Can&apos;t Read This Breaker: {u.description}. {u.reason}
                 </li>
               ))}
             </ul>

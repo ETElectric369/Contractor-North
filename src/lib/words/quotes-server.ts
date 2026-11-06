@@ -36,7 +36,7 @@ export const words: WordCatalog = {
     qs_lib_calcUnknownSize: 'Unknown wire size "{size}".',
     qs_lib_calcBoxOutsideTable: "NEC 314.16 volume allowances only cover 14–6 AWG; {size} is outside the table.",
 
-    // ── lib/estimate/kit-from-task: Remember As A Kit ──
+    // ── lib/estimate/kit-from-task: Remember as a Kit ──
     qs_lib_kitNoName: "Give the kit a name.",
     qs_lib_kitHoursWho: "Give {who} its hours first — a kit remembers your hours per unit.",
     qs_lib_kitHours: "Give the task its hours first — a kit remembers your hours per unit.",
@@ -58,7 +58,7 @@ export const words: WordCatalog = {
     qs_lib_kitNotSaved: "Could not save the kit.",
     qs_lib_kitPartsSaved: "only {n} of {total} parts were saved",
     qs_lib_kitSavedWithoutParts: "The kit {name} was saved without its parts ({why}) — delete it from the Price List.",
-    qs_lib_kitNotKept: "The kit was not kept ({why}) — press Save The Kit again.",
+    qs_lib_kitNotKept: "The kit was not kept ({why}) — press Save the Kit again.",
 
     // ── lib/estimate/sync-job-tasks: the job's list follows the estimate ──
     qs_lib_taskJobUnread: "That job could not be read.",

@@ -126,7 +126,7 @@ describe("the Costs tab: a bill opens its own receipt", () => {
   });
 
   it("a bill typed in with no paper draws no door", () => {
-    expect(typed).not.toContain("Open the");
+    expect(typed).not.toContain("Open the receipt"); // its Open the Bill link is the row's own, not a paper door
   });
 
   it("a paper whose link couldn't be made says so instead of a dead tap", () => {
@@ -151,19 +151,19 @@ describe("the Costs tab: Receipts & Papers", () => {
 
   it("a receipt on no bill is counted on the fold's line, holds the fold open, and says so on its row", () => {
     expect(html).toMatch(/^<details[^>]*open=""/);
-    expect(text(html)).toContain("Receipts & Papers · 1 Not On A Bill Yet");
+    expect(text(html)).toContain("Receipts & Papers · 1 Not on a Bill Yet");
     expect(text(row("loose-receipt"))).toContain("Not on a bill yet.");
-    expect(text(row("loose-receipt"))).toContain("Record As Cost");
+    expect(text(row("loose-receipt"))).toContain("Record as Cost");
   });
 
-  it("a receipt that made a bill says which, and offers no second Record As Cost", () => {
+  it("a receipt that made a bill says which, and offers no second Record as Cost", () => {
     expect(text(row("ced-ticket"))).toContain("On the CED bill #8802-1106969.");
-    expect(text(row("ced-ticket"))).not.toContain("Record As Cost");
+    expect(text(row("ced-ticket"))).not.toContain("Record as Cost");
     expect(text(row("ced-ticket"))).not.toContain("Not on a bill yet");
   });
 
   it("what the Photos tab holds is folded last, still here for the pencil, with the door to Photos", () => {
-    const at = html.indexOf("Photos And Plans On The Photos Tab");
+    const at = html.indexOf("Photos and Plans on the Photos Tab");
     expect(at).toBeGreaterThan(html.indexOf("loose-receipt.jpg"));
     const tail = html.slice(at);
     for (const id of ["panel", "plan-pic", "phone-pic"]) expect(tail).toContain(`${id}.jpg`);
@@ -177,7 +177,7 @@ describe("the Costs tab: Receipts & Papers", () => {
     const s2 = sortJobPapers([inv], [], BILLS.map((b) => b.id));
     const html2 = r(JobDocuments, { orgId: "org1", jobId: "j1", docs: [inv], photoTabIds: [], billOf: {}, looseIds: (s2.loose ?? []).map((d) => d.id) });
     expect(html2).not.toMatch(/^<details[^>]*open=""/);
-    expect(text(html2)).not.toContain("Not On A Bill");
+    expect(text(html2)).not.toContain("Not on a Bill");
     expect(text(html2)).not.toContain("Not on a bill yet");
     expect(text(html2)).toContain("supplier-inv.pdf");
   });
@@ -185,17 +185,17 @@ describe("the Costs tab: Receipts & Papers", () => {
   it("nothing on no bill: the fold starts closed and its line counts nothing", () => {
     const closed = r(JobDocuments, { ...props, looseIds: [] });
     expect(closed).not.toMatch(/^<details[^>]*open=""/);
-    expect(text(closed)).not.toContain("Not On A Bill");
+    expect(text(closed)).not.toContain("Not on a Bill");
   });
 
-  it("the links couldn't be read: no paper is called loose, Record As Cost stays on every receipt, and it says so", () => {
+  it("the links couldn't be read: no paper is called loose, Record as Cost stays on every receipt, and it says so", () => {
     const lost = r(JobDocuments, { ...props, billOf: {}, looseIds: null, tieNote: "Couldn't check which papers made which bill just now. Reload to try again." });
     // The bills draw no Receipt door then, so the sentence saying why is never folded out of sight.
     expect(lost).toMatch(/^<details[^>]*open=""/);
-    expect(text(lost)).not.toContain("Not On A Bill");
+    expect(text(lost)).not.toContain("Not on a Bill");
     expect(text(lost)).toContain("Couldn't check which papers made which bill just now.");
     const lostRows = lost.split(/<li[ >]/).slice(1);
-    for (const id of ["ced-ticket", "loose-receipt"]) expect(text(lostRows.find((x) => x.includes(`${id}.jpg`))!)).toContain("Record As Cost");
+    for (const id of ["ced-ticket", "loose-receipt"]) expect(text(lostRows.find((x) => x.includes(`${id}.jpg`))!)).toContain("Record as Cost");
   });
 });
 
@@ -203,7 +203,7 @@ describe("the Costs tab: Receipts & Papers", () => {
  * A LOOSE RECEIPT CAN SAY "IT IS THAT BILL" (d1ff7c5a). A bill typed by hand with its receipt
  * uploaded apart, or a paper the reader answered "already on the books" for, sat "Not on a bill
  * yet" beside the very bill it made, with only another paid read or a second bill as doors. Now the
- * row carries Already On A Bill: <the job's bills> + Tie It, and the reader's answer carries Same
+ * row carries Already on a Bill: <the job's bills> + Tie It, and the reader's answer carries Same
  * Purchase: It's That Bill when the bill is on this job. Both write linkReceiptToBill's one tie.
  */
 describe("the Costs tab: a loose receipt ties itself to the bill it is", () => {
@@ -224,10 +224,10 @@ describe("the Costs tab: a loose receipt ties itself to the bill it is", () => {
   const rows = html.split(/<li[ >]/).slice(1);
   const row = (id: string) => rows.find((x) => x.includes(`${id}.jpg`))!;
 
-  it("the Not on a bill yet row: Already On A Bill, a 44px picker of the job's bills, and a 44px Tie It", () => {
+  it("the Not on a bill yet row: Already on a Bill, a 44px picker of the job's bills, and a 44px Tie It", () => {
     const loose = row("loose-receipt");
     expect(text(loose)).toContain("Not on a bill yet.");
-    expect(text(loose)).toContain("Already On A Bill:");
+    expect(text(loose)).toContain("Already on a Bill:");
     const picker = loose.match(/<select([^>]*)>([\s\S]*?)<\/select>/);
     expect(picker).not.toBeNull();
     expect(picker![1]).toMatch(/\bh-11\b/);
@@ -237,15 +237,15 @@ describe("the Costs tab: a loose receipt ties itself to the bill it is", () => {
     const tie = buttons(loose).find((b) => b.words === "Tie It");
     expect(tie).toBeDefined();
     expect(tie!.attrs).toContain("min-h-11");
-    // Record As Cost stays: a receipt that really is new is still read into its own bill.
-    expect(text(loose)).toContain("Record As Cost");
+    // Record as Cost stays: a receipt that really is new is still read into its own bill.
+    expect(text(loose)).toContain("Record as Cost");
   });
 
   it("a receipt already on a bill, and a job with no bills, draw no tie door", () => {
-    expect(text(row("ced-ticket"))).not.toContain("Already On A Bill");
+    expect(text(row("ced-ticket"))).not.toContain("Already on a Bill");
     expect(buttons(row("ced-ticket")).some((b) => b.words === "Tie It")).toBe(false);
     for (const none of [r(JobDocuments, { ...props, bills: [] }), r(JobDocuments, { ...props, bills: null })]) {
-      expect(text(none)).not.toContain("Already On A Bill");
+      expect(text(none)).not.toContain("Already on a Bill");
       expect(text(none)).not.toContain("Tie It");
       expect(text(none)).toContain("Not on a bill yet.");
     }
@@ -264,7 +264,7 @@ describe("the Costs tab: a loose receipt ties itself to the bill it is", () => {
     expect(src).toContain('note(d.id, { text: res.error ?? t("jb_tieDidntSave"), done: false, tone: "fail" });');
   });
 
-  it("Snap The Bill's line offers the same door for a paper the reader matched to a bill of this job (source)", () => {
+  it("Snap the Bill's line offers the same door for a paper the reader matched to a bill of this job (source)", () => {
     const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-cost-capture.tsx"), "utf8");
     expect(src).toContain('const sameBillId = out.kind === "already" && out.samePurchase && out.sameOnThisJob ? out.sameBillId : undefined;');
     expect(src).toContain("say(p.id, p.name, sentence, out.tone, differentDoc, sameBillId);");
@@ -274,15 +274,15 @@ describe("the Costs tab: a loose receipt ties itself to the bill it is", () => {
 });
 
 /**
- * ONE WAY TO ADD A COST (W1-23). The Costs tab's header is one primary Snap The Bill and a 44px ⋯,
- * More Ways To Add A Cost: Upload (many at once, its own input) and Type It In (the one typed
+ * ONE WAY TO ADD A COST (W1-23). The Costs tab's header is one primary Snap the Bill and a 44px ⋯,
+ * More Ways to Add a Cost: Upload (many at once, its own input) and Type It In (the one typed
  * sheet). Receipts & Papers is the job's filed list, with no uploader of its own.
  */
 describe("the Costs tab: one way to add a cost", () => {
   const html = r(JobCostCapture, { orgId: "org1", jobId: "j1", billsTotal: 318.09, nortOn: true });
 
-  it("Snap The Bill is the one primary door, and the job's total is no longer its header", () => {
-    const snap = buttons(html).filter((b) => b.words === "Snap The Bill");
+  it("Snap the Bill is the one primary door, and the job's total is no longer its header", () => {
+    const snap = buttons(html).filter((b) => b.words === "Snap the Bill");
     expect(snap).toHaveLength(1);
     expect(snap[0].attrs).toMatch(/\bh-11\b/);
     expect(text(html)).not.toContain("Costs ·");
@@ -300,14 +300,14 @@ describe("the Costs tab: one way to add a cost", () => {
     expect(library[0]).toContain("application/pdf");
   });
 
-  it("the ⋯ is a 44px button named More Ways To Add A Cost, holding Upload and Type It In", () => {
-    const more = buttons(html).find((b) => /aria-label="More Ways To Add A Cost"/.test(b.attrs))!;
+  it("the ⋯ is a 44px button named More Ways to Add a Cost, holding Upload and Type It In", () => {
+    const more = buttons(html).find((b) => /aria-label="More Ways to Add a Cost"/.test(b.attrs))!;
     expect(more).toBeDefined();
     expect(more.attrs).toMatch(/\bh-11 w-11\b/);
     const rows = buttons(html).map((b) => b.words);
     expect(rows).toContain("Upload");
     expect(rows).toContain("Type It In");
-    expect(rows).toContain("File A Paper (Not A Cost)");
+    expect(rows).toContain("File a Paper (Not a Cost)");
     // Its rows stay mounted while it is shut (hidden), so the sheet Type It In opens never unmounts.
     expect(html).toMatch(/<div hidden=""[^>]*>[\s\S]*Upload[\s\S]*Type It In/);
     // No other add door on the header: no Add Cost, no Add Bill.
@@ -346,11 +346,11 @@ describe("the Costs tab: one way to add a cost", () => {
       expect(sentence).toBe(notACostSentence(category));
       expect(sentence).toContain("It isn't a cost, so it wasn't read.");
       // Nort names the same door.
-      expect((await import("@/lib/nort-product-map")).NORT_PRODUCT_MAP).toContain("File A Paper (Not A Cost), which files a plan, permit or other paper on the job");
-      expect(sentence).not.toMatch(/cost manually|Record As Cost/);
+      expect((await import("@/lib/nort-product-map")).NORT_PRODUCT_MAP).toContain("File a Paper (Not a Cost), which files a plan, permit or other paper on the job");
+      expect(sentence).not.toMatch(/cost manually|Record as Cost/);
     }
     expect(notACostSentence("Plan")).toBe("Filed on the job as a Plan. It isn't a cost, so it wasn't read.");
-    // Upload and Snap The Bill stay costs: filed as a Receipt (no category) and read.
+    // Upload and Snap the Bill stay costs: filed as a Receipt (no category) and read.
     capture.mockReset();
     capture.mockResolvedValueOnce({ kind: "billed", docId: "d2", tone: "ok", sentence: "Bill created.", vendor: null, amount: 1, lineCount: 1, warning: null });
     await capturePaper({ orgId: "org1", jobId: "j1", file, nortOn: true });
@@ -365,20 +365,20 @@ describe("the Costs tab: one way to add a cost", () => {
     expect(docs).not.toContain('type="file"');
   });
 
-  it("empty, it points at Snap The Bill; with the portal off it adds where a plan goes", () => {
+  it("empty, it points at Snap the Bill; with the portal off it adds where a plan goes", () => {
     const office = r(JobDocuments, { orgId: "org1", jobId: "j1", docs: [], plansDoor: true, looseIds: [] });
-    expect(text(office)).toContain("No receipts yet. Use Snap The Bill above.");
-    expect(text(office)).not.toContain("File A Paper (Not A Cost)");
+    expect(text(office)).toContain("No receipts yet. Use Snap the Bill above.");
+    expect(text(office)).not.toContain("File a Paper (Not a Cost)");
     // The plans door keeps its gate (office, Customer Portal on), a 44px link.
     const plans = office.match(/<a[^>]*href="\/jobs\/j1\?tab=customer&amp;plans=add"[^>]*>([\s\S]*?)<\/a>/);
     expect(plans).not.toBeNull();
     expect(plans![0]).toContain("min-h-11");
-    expect(text(plans![1]).trim()).toBe("Plan Or Drawing? Add It On The Customer Page");
+    expect(text(plans![1]).trim()).toBe("Plan or Drawing? Add It on the Customer Page");
     const portalOff = r(JobDocuments, { orgId: "org1", jobId: "j1", docs: [], plansDoor: false, looseIds: [] });
     // Never through Upload: that files a plan as a Receipt and reads it (review of W1-23).
-    expect(text(portalOff)).toContain("No receipts yet. Use Snap The Bill above. A plan, permit or other paper? Tap ⋯ and File A Paper (Not A Cost).");
+    expect(text(portalOff)).toContain("No receipts yet. Use Snap the Bill above. A plan, permit or other paper? Tap ⋯ and File a Paper (Not a Cost).");
     expect(text(portalOff)).not.toContain("Use Upload");
-    expect(portalOff).not.toContain("Add It On The Customer Page");
+    expect(portalOff).not.toContain("Add It on the Customer Page");
   });
 });
 

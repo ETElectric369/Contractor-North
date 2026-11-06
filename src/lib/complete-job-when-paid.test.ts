@@ -237,7 +237,7 @@ describe("a paid bill never ends a job with its work off every bill", () => {
     expect(say).toContain("J-002");
     expect(say).toContain("Marla Finch");
     expect(say).toContain("NOT finished yet");
-    expect(say).toContain("This Is The Last Bill");
+    expect(say).toContain("This Is the Last Bill");
   });
 
   it("every hour and receipt already on a bill: the paid bill finishes the T&M job, and says nothing extra", async () => {

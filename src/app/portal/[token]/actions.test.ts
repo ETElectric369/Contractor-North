@@ -249,7 +249,7 @@ describe("the Customer Portal switch (0352, rule f)", () => {
   });
 });
 
-describe("Sign Out On This Device", () => {
+describe("Sign Out on This Device", () => {
   it("ends the session by its hash and clears the cookie on the link's path", async () => {
     requestCookie = "c".repeat(64);
     rpc.mockResolvedValue({ data: true, error: null });

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { jobRowLabel, pickRows, restoredPick, routePick, showsTaxRate, RECENT_JOBS, type PickJob } from "./new-invoice-pick";
 
 /**
- * NEW INVOICE ON /BILLING ASKS ONE QUESTION (W1-28): "Which Job Or Customer?". What the list shows
+ * NEW INVOICE ON /BILLING ASKS ONE QUESTION (W1-28): "Which Job or Customer?". What the list shows
  * for what is typed, and what a pick runs, pinned here.
  */
 

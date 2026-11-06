@@ -9,7 +9,7 @@ import { words as nav } from "@/lib/words/nav";
  * TIMECARDS, CUT DOWN (Wave 2, W2-02). No approver nobody asks, no approval settings nothing reads,
  * no pencil and no copy icon on a row the whole of which already opens the shift, no "manual" badge
  * on every hand-typed row. Nothing silent and no dead end: the editor says where a shift's time came
- * from, and Copy To Someone Else… lives in it.
+ * from, and Copy to Someone Else… lives in it.
  */
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
@@ -149,7 +149,7 @@ describe("one door per row: the row opens the shift, and only a running clock ke
   it("an offline punch still says so on the row, and the words open the editor too", () => {
     const html = renderRow(row({ source: "offline" }));
     expect(html).toMatch(/>Offline</);
-    expect(html).toContain("Time Came From The Phone");
+    expect(html).toContain("Time Came from the Phone");
     expect(html).toContain('title="Punched with no signal, so the time came from the phone"');
   });
 
@@ -204,13 +204,13 @@ describe("the editor says where the time came from (0168), in words and never a 
   });
 });
 
-describe("Copy To Someone Else… lives in the editor, beside Split", () => {
+describe("Copy to Someone Else… lives in the editor, beside Split", () => {
   it("a closed shift's editor draws it as a secondary 44px button beside Split This Shift; Delete stays the one red action", () => {
     const html = renderEditor(entry({ source: "manual" }));
-    expect(html).toMatch(/<button[^>]*class="[^"]*border-slate-300[^"]*h-11[^"]*"[^>]*>(?:(?!<\/button>).)*Copy To Someone Else…<\/button>/);
+    expect(html).toMatch(/<button[^>]*class="[^"]*border-slate-300[^"]*h-11[^"]*"[^>]*>(?:(?!<\/button>).)*Copy to Someone Else…<\/button>/);
     // In the tools box, right after Split This Shift, not in the footer.
     const split = html.indexOf("Split This Shift");
-    const copy = html.indexOf("Copy To Someone Else…");
+    const copy = html.indexOf("Copy to Someone Else…");
     expect(split).toBeGreaterThan(0);
     expect(copy).toBeGreaterThan(split);
     expect(copy).toBeLessThan(html.indexOf("Worked two jobs, or drove part of it?"));
@@ -219,7 +219,7 @@ describe("Copy To Someone Else… lives in the editor, beside Split", () => {
 
   it("a running clock's sheet has no copy: only a closed shift can be copied", () => {
     const html = renderEditor(entry({ clock_out: null, status: "open", source: "manual" }));
-    expect(html).not.toContain("Copy To Someone Else…");
+    expect(html).not.toContain("Copy to Someone Else…");
   });
 
   it("the picker behind it is the one that was on the row: same person guarded, same action, same fallback", () => {
@@ -237,7 +237,7 @@ describe("Copy To Someone Else… lives in the editor, beside Split", () => {
 
   it("with no trigger of its own, the picker's door is the same labelled button", () => {
     const html = renderToStaticMarkup(createElement(DuplicateEntryButton, { id: "e1", profileId: "brian-1", members }));
-    expect(html).toMatch(/<button[^>]*class="[^"]*h-11[^"]*"[^>]*>(?:(?!<\/button>).)*Copy To Someone Else…<\/button>/);
+    expect(html).toMatch(/<button[^>]*class="[^"]*h-11[^"]*"[^>]*>(?:(?!<\/button>).)*Copy to Someone Else…<\/button>/);
   });
 
   it("a form holding unsaved changes asks for Save first, since a copy takes the shift as it's saved", () => {
@@ -268,7 +268,7 @@ describe("Copy To Someone Else… lives in the editor, beside Split", () => {
   });
 
   it("a moved split's new times reach an editor that stays open, unless the person typed their own", () => {
-    // Brian's shift, 7:00 AM to 3:30 PM Pacific; Move The Split ends it at 2:00 PM.
+    // Brian's shift, 7:00 AM to 3:30 PM Pacific; Move the Split ends it at 2:00 PM.
     const before = formTimesOf("2026-09-22T14:00:00Z", "2026-09-22T22:30:00Z");
     const after = formTimesOf("2026-09-22T14:00:00Z", "2026-09-22T21:00:00Z");
     expect(before.endT).not.toBe(after.endT);

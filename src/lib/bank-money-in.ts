@@ -148,7 +148,7 @@ export function channelLabel(key: string): string {
  *
  * ONLY A BRAND'S OWN NAME IS HERE. "ONLINE TRANSFER FROM …" names no channel: it is equally a swept
  * Venmo balance, the owner putting money in, and a customer's bank transfer - which is exactly the
- * $7,714.09 deposit Erik was offered a bare "Already Counted Or Not Income" on. Such a line stays
+ * $7,714.09 deposit Erik was offered a bare "Already Counted or Not Income" on. Such a line stays
  * UNNAMED and gets no reason at all, which is the honest answer and is why this list stays short.
  *
  * THESE WORDS ARE ALSO THE APP'S ONE PROCESSOR WORD LIST (processorWordsRe below): bank-download.ts's
@@ -501,7 +501,7 @@ export function moneyInChannels(input: {
 /**
  * WHY THE APP THINKS A DEPOSIT IS ALREADY IN THE BOOKS - the channel's own figures, or nothing.
  *
- * Erik, on a $7,714.09 deposit offered "Already Counted Or Not Income": the guess asked him to take its
+ * Erik, on a $7,714.09 deposit offered "Already Counted or Not Income": the guess asked him to take its
  * word for it. A guess with no reason is a guess you can only trust; a guess with its working is one you
  * can check. "Your card payments and this account's payouts agree over these weeks" is a real reason;
  * "it looks like a deposit" is not, so where the statement's words name no channel this answers null and

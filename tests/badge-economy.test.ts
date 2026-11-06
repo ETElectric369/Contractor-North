@@ -100,7 +100,7 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(querySrc).toContain("const noJobReachP: Promise<boolean> = noJobP.then(");
     expect(querySrc.indexOf("const noJobReachP")).toBeLessThan(querySrc.indexOf("await Promise.all(["));
     expect(querySrc.match(/readNoJobHoursReach\(supabase, orgId, \[\]\)/g)).toHaveLength(1);
-    expect(querySrc).not.toContain('kind: "time_stray",\n      title: `Hours On No Job');
+    expect(querySrc).not.toContain('kind: "time_stray",\n      title: `Hours on No Job');
     expect(KIND_STREAM.time_stray).toBe("today");
     expect(AFFORDANCES.time_stray).toEqual(["open"]);
   });
@@ -142,8 +142,8 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     const read = { data: rows, count: 83 };
     for (const fact of [sqlCount(read), codeCount(read), codeCount({ data: rows }, LIMIT)]) {
       const [pile] = rollUpPiles(rows, { todayStr: "2026-09-27", isStaff: true, counts: { leads_to_call: fact } });
-      expect(pile.title).not.toBe(`Leads To Call · ${LIMIT}`);
-      expect(pile.title).toMatch(/^Leads To Call · (83|50\+)$/);
+      expect(pile.title).not.toBe(`Leads to Call · ${LIMIT}`);
+      expect(pile.title).toMatch(/^Leads to Call · (83|50\+)$/);
     }
     // Every piled feeder in the build hands over a real count (its exact count or its cap).
     for (const name of Object.keys(PILE_DEFS) as PileName[]) expect(querySrc, name).toContain(`counts.${name} =`);

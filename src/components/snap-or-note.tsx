@@ -318,7 +318,7 @@ async function oneStaff(id: number, file: File, orgId: string) {
     return;
   }
   if (!(type === "application/pdf" || pdfByName || isImage))
-    return say(id, name, "Not added: Snap Or Note takes PDFs, photos, and a supplier's list or a bank download (Excel, CSV or OFX).", "error");
+    return say(id, name, "Not added: Snap or Note takes PDFs, photos, and a supplier's list or a bank download (Excel, CSV or OFX).", "error");
   if (file.size > MAX_FILE) return say(id, name, "Not added: it is over 15 MB. Save a smaller copy and add it again.", "error");
 
   say(id, name, "Checking…", "busy");
@@ -384,7 +384,7 @@ async function oneStaff(id: number, file: File, orgId: string) {
   }
   remember(id, added.id);
   if (!added.needsRead) {
-    return say(id, name, added.line ?? "Supplier documents found in it. Press Add To Supplier Documents on its card.", added.line?.includes("didn't add up") ? "warn" : "ok");
+    return say(id, name, added.line ?? "Supplier documents found in it. Press Add to Supplier Documents on its card.", added.line?.includes("didn't add up") ? "warn" : "ok");
   }
   say(id, name, "Reading…", "busy");
   // SAVED IS SAVED (audit v994, SI4): the row is in; a reader that never answers is a paper waiting
@@ -429,7 +429,7 @@ async function oneTechPhoto(id: number, file: File, jobId: string | null | undef
     const why = out.sentence.split(" — ")[0].trim().replace(/\.$/, "");
     if (id > floor) put({ pending: [...store.pending.filter((x) => x.id !== id), { id, file, name }] });
     const reason = why ? `${why[0].toLowerCase()}${why.slice(1)}` : "the connection dropped";
-    return say(id, name, `Not sent: ${reason}. It's waiting above: tap Put It On ${job.label} again when you have a bar or two.`, "error");
+    return say(id, name, `Not sent: ${reason}. It's waiting above: tap Put It on ${job.label} again when you have a bar or two.`, "error");
   }
   say(id, name, `Filed On ${job.label} For The Office.`, "ok");
 }
@@ -664,7 +664,7 @@ export function SnapOrNoteButton({ variant = "primary" }: { variant?: "primary" 
   const busy = useSnapBusy();
   return (
     <Button variant={variant} onClick={openSnapOrNote}>
-      {busy ? <Loader2 className="animate-spin" /> : <Camera />} Snap Or Note
+      {busy ? <Loader2 className="animate-spin" /> : <Camera />} Snap or Note
     </Button>
   );
 }
@@ -770,7 +770,7 @@ export function SnapOrNoteSheet({ isStaff, onClose }: { isStaff: boolean; onClos
     <>
       {/* Only typed words can be lost by closing: files, lines and a tech's waiting photos live in the
           queue, not in the sheet, and are all still here when it opens again. */}
-      <Modal open onClose={onClose} title="Snap Or Note" size="lg" dirty={note.trim().length > 0}>
+      <Modal open onClose={onClose} title="Snap or Note" size="lg" dirty={note.trim().length > 0}>
         <div
           className="relative space-y-3"
           onDragOver={(e) => {
@@ -842,16 +842,16 @@ export function SnapOrNoteSheet({ isStaff, onClose }: { isStaff: boolean; onClos
               // NO maxLength: a browser trims an over-long paste without a word, and this box is
               // the one place a month of pasted supplier invoices goes in (the importer reads them
               // all; the server takes far more than any paste).
-              placeholder="Type A Note…"
-              aria-label="Type A Note"
+              placeholder="Type a Note…"
+              aria-label="Type a Note"
               className="max-h-40 min-h-11 flex-1 overflow-y-auto"
             />
             <Button
               type="button"
               size="icon"
               variant={dictation.recording ? "destructive" : "outline"}
-              aria-label={dictation.recording ? "Stop Listening" : "Say A Note"}
-              title={dictation.recording ? "Stop Listening" : "Say A Note"}
+              aria-label={dictation.recording ? "Stop Listening" : "Say a Note"}
+              title={dictation.recording ? "Stop Listening" : "Say a Note"}
               onClick={() => (dictation.recording ? dictation.stop() : void dictation.start())}
             >
               {dictation.recording ? <Square /> : <Mic />}
@@ -896,7 +896,7 @@ export function SnapOrNoteSheet({ isStaff, onClose }: { isStaff: boolean; onClos
                     onChange={(e) => setJobFor((m) => ({ ...m, [p.id]: e.target.value }))}
                     className="min-h-11"
                   >
-                    <option value="">— Pick The Job —</option>
+                    <option value="">— Pick the Job —</option>
                     {jobs.map((j) => (
                       <option key={j.id} value={j.id}>
                         {j.label}
@@ -912,7 +912,7 @@ export function SnapOrNoteSheet({ isStaff, onClose }: { isStaff: boolean; onClos
                 )}
                 <div className="flex flex-wrap gap-2">
                   <Button disabled={!job} onClick={() => void sendTechPhoto(p.id, job?.id ?? null)}>
-                    {job ? `Put It On ${job.label}` : "Put It On This Job"}
+                    {job ? `Put It on ${job.label}` : "Put It on This Job"}
                   </Button>
                   <Button variant="ghost" onClick={() => dropPendingPhoto(p.id)}>
                     <X /> Don&apos;t Send

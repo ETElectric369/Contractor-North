@@ -24,7 +24,7 @@ export type JobPaperView = {
   /** /bills has it on a Needs You card (onNeedsYouIds, the cards' own rule). A paper on no card
    *  (before the books line, reversed by a credit memo, $0.00) links to the supplier's own line. */
   onNeedsYou: boolean;
-  /** Set aside on /bills for a credit (0346): folded under its supplier's Waiting On A Credit. A
+  /** Set aside on /bills for a credit (0346): folded under its supplier's Waiting on a Credit. A
    *  waiting paper has NO Record door here (audit v1018, class 4): a person decided on /bills. */
   waitingOnCredit?: boolean;
   /** The day the wait began, and who the credit is from ("CED"), for its one sentence. */
@@ -41,7 +41,7 @@ function paperOnBills(paper: JobPaperView): string {
 /**
  * NAMED ON A PAPER, NOT RECORDED YET (Erik, 2026-09-25: "i think theres a bill missing from this").
  * The supplier's own invoices that name this job and are in nobody's books (job-papers.ts), each
- * with the /bills page's own door: Record It As A Bill. A paper filed nowhere is filed on this job
+ * with the /bills page's own door: Record It as a Bill. A paper filed nowhere is filed on this job
  * first (setSupplierInvoiceJob), because the paper names it and a person pressed the button here;
  * the record then runs every check it runs on /bills (already in the books, returned, the lines)
  * and its own sentence is shown, whatever it says. When it asks a question only the /bills card
@@ -57,7 +57,7 @@ export function JobPaperList({ jobId, papers }: { jobId: string; papers: JobPape
       <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
         <FileWarning className="h-4 w-4 text-amber-500" />
         <span>
-          Named On A Paper, Not Recorded Yet
+          Named on a Paper, Not Recorded Yet
           {papers && <span className="font-normal text-slate-500"> · {papers.length} · {formatCurrency(total)}</span>}
         </span>
       </div>
@@ -69,7 +69,7 @@ export function JobPaperList({ jobId, papers }: { jobId: string; papers: JobPape
         <>
           <WhyFold className="px-5">
             <p>
-              The supplier billed these to this job and they are on no cost list yet, so no invoice has them. Record It As A Bill files the paper on this job and puts its cost here, at the supplier&apos;s own line prices.
+              The supplier billed these to this job and they are on no cost list yet, so no invoice has them. Record It as a Bill files the paper on this job and puts its cost here, at the supplier&apos;s own line prices.
             </p>
           </WhyFold>
           <ul className="divide-y divide-slate-100">
@@ -101,7 +101,7 @@ function WaitingRow({ paper }: { paper: JobPaperView }) {
         </div>
         <span className="font-medium text-slate-800">{formatCurrency(paper.total)}</span>
         <Link href={paperOnBills(paper)} className="inline-flex min-h-11 items-center font-medium text-brand hover:underline">
-          Open It On Bills
+          Open It on Bills
         </Link>
       </div>
     </li>
@@ -150,7 +150,7 @@ function PaperRow({ jobId, paper }: { jobId: string; paper: JobPaperView }) {
         </div>
         <span className="font-medium text-slate-800">{formatCurrency(paper.total)}</span>
         <Button type="button" variant="outline" onClick={record} disabled={pending}>
-          {pending ? "Recording It…" : "Record It As A Bill"}
+          {pending ? "Recording It…" : "Record It as a Bill"}
         </Button>
       </div>
       {refusal && (
@@ -163,7 +163,7 @@ function PaperRow({ jobId, paper }: { jobId: string; paper: JobPaperView }) {
             href={paperOnBills(paper)}
             className="inline-flex min-h-11 items-center font-medium text-brand hover:underline"
           >
-            Open It On Bills
+            Open It on Bills
           </Link>
         </div>
       )}

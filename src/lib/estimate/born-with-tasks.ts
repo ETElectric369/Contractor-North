@@ -25,7 +25,7 @@ export { PLANNED_MINUTES_MAX } from "./task-lines";
  * ── THE RULES ─────────────────────────────────────────────────────────────────────────────────
  *
  *  - ONE RULE, THREE DOORS. The office's accept (createJobFromQuote), the customer's own Accept link
- *    (finishPublicAcceptance) and Start The Job on a visit (createJobFromAppointment) all call the
+ *    (finishPublicAcceptance) and Start the Job on a visit (createJobFromAppointment) all call the
  *    same two functions here: a pure reader that says what is born, and bornTasks that writes it.
  *  - ONLY A TASK IS A TASK. A line whose detail coerces (coerceTaskDetail) is a task; a plain line
  *    (a legacy estimate, a hand-typed material) is not, and is born exactly as before.
@@ -205,7 +205,7 @@ export function tasksFromLines(rows: ReadonlyArray<LineRow>): Birth {
 }
 
 /**
- * WHAT A VISIT'S TASKS GIVE BIRTH TO (no estimate in between: Start The Job on the inspection).
+ * WHAT A VISIT'S TASKS GIVE BIRTH TO (no estimate in between: Start the Job on the inspection).
  * The Inspector's TaskValue: his name, his hours, his parts by words and/or code. A part's cost is
  * unknown here (nothing priced it), so the list asks for it.
  */

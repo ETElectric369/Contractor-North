@@ -56,7 +56,7 @@ import { PanelVisual, movePlan, panelVisualModel, type VisualNote } from "./pane
  * 34 circuits", tabs only when a job has several, Edit Panel); the photo read; THE DOOR (panel-
  * visual: two columns facing each other, odd left, even right, filled by a tap like the schedule
  * board); the Breakers line; every circuit as a list (By Space, By Area, By Size) with the Planned /
- * Roughed / Done chip and Add A Circuit under it; what came off; the printed labels; and Add New
+ * Roughed / Done chip and Add a Circuit under it; what came off; the printed labels; and Add New
  * Panel, last. A job never says it has no panel: Panel 1 is made by the server with its first
  * circuit (lib/panel/ensure-panel), and until then the door shows Panel 1 waiting. A new panel is
  * only ever made by Add New Panel at the bottom; a write that made Panel 1 hands it back, and it is
@@ -75,7 +75,7 @@ const QUICK_KEY = (jobId: string) => `cn-panel-quick-add:${jobId}`;
 type Quick = { room: string; amps: string; poles: string; work: CircuitWork };
 const QUICK_DEFAULT: Quick = { room: "", amps: "20", poles: "1", work: "new" };
 
-/** What Add A Circuit carries to the next add: the room and the amps only. A 2-pole (the floor heat,
+/** What Add a Circuit carries to the next add: the room and the amps only. A 2-pole (the floor heat,
  *  the dryer) and an Existing or Reused circuit are one-offs: carried forward, the next three 120 V
  *  outlets went in as 2-poles (J-011, 2026-09-25). Every add starts on 1-pole and New. */
 export function carryQuick(v: Partial<Quick> | null | undefined): Quick {
@@ -175,7 +175,7 @@ export function listGroups(kept: JobCircuit[], sort: ListSort, panels: Pick<JobP
     return [...out.filter((g) => g.title !== NO_AMPS), ...out.filter((g) => g.title === NO_AMPS)];
   }
   const order = new Map(panels.map((p, i) => [p.id, i]));
-  const name = (id: string | null) => panels.find((p) => p.id === id)?.name ?? (panels.length === 1 ? panels[0].name : "On The Panel");
+  const name = (id: string | null) => panels.find((p) => p.id === id)?.name ?? (panels.length === 1 ? panels[0].name : "On the Panel");
   const placed = kept
     .filter((c) => c.space != null)
     .sort(
@@ -539,7 +539,7 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
     return (
       <li key={c.id} data-suggested="" className="my-1 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-500">
-          <span className="font-medium text-slate-600">{aboutId ? `Label Check: ${about ? circuitName(about) : "A Circuit On Your List"}` : circuitLine(c)}</span>
+          <span className="font-medium text-slate-600">{aboutId ? `Label Check: ${about ? circuitName(about) : "A Circuit on Your List"}` : circuitLine(c)}</span>
           {from && <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-500 ring-1 ring-slate-200">{from}</span>}
           {!aboutId && c.space != null && (
             <span className="text-[11px]">
@@ -768,8 +768,8 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
 
       {/* ADD A CIRCUIT: remembers the room and amps you used last, so sixteen twenties go in as
           sixteen lines of "what it feeds" and a tap. Poles and New/Existing reset to 1-pole and New. */}
-      <form onSubmit={quickAdd} className={card} aria-label="Add A Circuit">
-        <h3 className="text-base font-semibold text-slate-900">Add A Circuit</h3>
+      <form onSubmit={quickAdd} className={card} aria-label="Add a Circuit">
+        <h3 className="text-base font-semibold text-slate-900">Add a Circuit</h3>
         <div className="mt-2 grid grid-cols-[minmax(0,1fr)_5.5rem_4.5rem] gap-2">
           <label className="min-w-0">
             <span className="sr-only">Room</span>
@@ -838,7 +838,7 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
       {takenOff.length + checksDone.length > 0 && (
         <section className={card} aria-label="Taken Off">
           <button type="button" onClick={() => setShowOff((v) => !v)} className="flex min-h-[44px] w-full items-center justify-between text-left text-sm font-semibold text-slate-700">
-            <span>Taken Off Or Set Aside ({takenOff.length + checksDone.length})</span>
+            <span>Taken Off or Set Aside ({takenOff.length + checksDone.length})</span>
             {showOff ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </button>
           {showOff && (
@@ -857,7 +857,7 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
               {checksDone.map((c) => {
                 const about = circuits.find((x) => x.id === c.source_row?.flag_for) ?? null;
                 const used = labelCheckApplied(about, c.source_row?.use);
-                const name = about ? circuitName(about) : "A Circuit On Your List";
+                const name = about ? circuitName(about) : "A Circuit on Your List";
                 return (
                   <li key={c.id} className="flex items-center justify-between gap-2 py-1">
                     <span className="min-w-0 text-sm text-slate-500">

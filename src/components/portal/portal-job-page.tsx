@@ -23,7 +23,7 @@ import { docPlace, withPlace } from "@/lib/doc-place";
  *
  * LABOR AND MATERIALS, APART (Erik, 2026-09-24, on Andrew's page: "there is no simple breakdown
  * separating time and material right at the top, its all mixed in"). The money card leads with
- * Labor (and its hours) and Materials as two lines that add up to Billed To Date, then Paid and the
+ * Labor (and its hours) and Materials as two lines that add up to Billed to Date, then Paid and the
  * Balance; the stretches, each day, the work not billed yet and the bill itself keep the same two
  * headings (and any other kind of line under its own, only when there is one). One rule decides
  * which line is which everywhere: line-kind, from what the line stored, and for a typed line the
@@ -51,7 +51,7 @@ export function PortalJobPage({
 }: {
   view: PortalJobView;
   homeHref: string;
-  /** Under the page (0331: Sign Out On This Device). */
+  /** Under the page (0331: Sign Out on This Device). */
   footer?: React.ReactNode;
 }) {
   const { org, job, ledger } = view;
@@ -66,13 +66,13 @@ export function PortalJobPage({
   // running total that is "not a bill yet" too, so the work outside them is "not added yet".
   const notIn = view.running
     ? { nav: "Not Added Yet", title: "Work Not Added Yet", total: "Not Added Yet" }
-    : { nav: "Not Billed Yet", title: "Work Not On A Bill Yet", total: "Not Billed Yet" };
+    : { nav: "Not Billed Yet", title: "Work Not on a Bill Yet", total: "Not Billed Yet" };
 
   const sections: { id: string; label: string; icon: React.ReactNode }[] = [
-    ...(hasWork ? [{ id: "work", label: "Work And Payments", icon: <Clock className="h-4 w-4" aria-hidden /> }] : []),
+    ...(hasWork ? [{ id: "work", label: "Work and Payments", icon: <Clock className="h-4 w-4" aria-hidden /> }] : []),
     ...(unbilled ? [{ id: "unbilled", label: notIn.nav, icon: <CircleDollarSign className="h-4 w-4" aria-hidden /> }] : []),
     ...(view.picks.length ? [{ id: "picks", label: "Picks", icon: <Palette className="h-4 w-4" aria-hidden /> }] : []),
-    ...(view.documents.length ? [{ id: "plans", label: "Plans And Drawings", icon: <DraftingCompass className="h-4 w-4" aria-hidden /> }] : []),
+    ...(view.documents.length ? [{ id: "plans", label: "Plans and Drawings", icon: <DraftingCompass className="h-4 w-4" aria-hidden /> }] : []),
     ...(view.panels.length ? [{ id: "panel", label: "Panel", icon: <Zap className="h-4 w-4" aria-hidden /> }] : []),
     ...(view.photos.length ? [{ id: "photos", label: "Photos", icon: <Camera className="h-4 w-4" aria-hidden /> }] : []),
     ...(bills.length ? [{ id: "bills", label: bills.length === 1 ? "The Bill" : "Bills", icon: <Receipt className="h-4 w-4" aria-hidden /> }] : []),
@@ -83,7 +83,7 @@ export function PortalJobPage({
       {/* Live, and the photo and file links last 10 minutes: an open or restored page reads again. */}
       <PortalKeepFresh asOf={view.asOf} />
       <a href={homeHref} className="mb-3 inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-1 text-sm font-medium text-[rgb(var(--glass-ink))] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[rgb(var(--glass-ink))]">
-        <ArrowLeft className="h-4 w-4" aria-hidden /> All Your Jobs And Papers
+        <ArrowLeft className="h-4 w-4" aria-hidden /> All Your Jobs and Papers
       </a>
 
       {/* The job, and when this was read. */}
@@ -121,7 +121,7 @@ export function PortalJobPage({
       {hasWork ? (
         <PortalSection
           id="work"
-          title={onlyAllWork ? "Work And Payments" : "Stretches Of Work And Payments"}
+          title={onlyAllWork ? "Work and Payments" : "Stretches of Work and Payments"}
           icon={<Clock className="h-4 w-4" />}
         >
           <p className="mb-2 px-1 text-sm text-slate-700">
@@ -158,7 +158,7 @@ export function PortalJobPage({
       ) : null}
 
       {view.documents.length ? (
-        <PortalSection id="plans" title="Plans And Drawings" icon={<DraftingCompass className="h-4 w-4" />}>
+        <PortalSection id="plans" title="Plans and Drawings" icon={<DraftingCompass className="h-4 w-4" />}>
           <p className="mb-2 px-1 text-sm text-slate-700">
             The plans, permits and drawings for this job. When {org.name} updates one, you see the newest version here.
           </p>
@@ -226,7 +226,7 @@ function MoneyCard({
             deposit or tax and leaves out work not on a bill, stated on its own line below. So it
             never wears the work-to-date name. */}
         <dl data-portal-money className="text-base">
-          <SplitRows split={ledger.split} total={ledger.workTotal} totalLabel={view.running ? "Running Total" : "Billed To Date"} />
+          <SplitRows split={ledger.split} total={ledger.workTotal} totalLabel={view.running ? "Running Total" : "Billed to Date"} />
           <div className="flex items-baseline justify-between gap-3 py-0.5">
             <dt className="text-slate-700">Paid</dt>
             <dd className="shrink-0 font-semibold tabular-nums text-emerald-800">{formatCurrency(ledger.paidTotal)}</dd>
@@ -262,7 +262,7 @@ function MoneyCard({
                 rel="nofollow"
                 className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-[rgb(var(--glass-ink))] px-5 py-2.5 text-center text-base font-semibold text-white shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[rgb(var(--glass-ink))]"
               >
-                View And Pay {b.number ?? "The Bill"} ({formatCurrency(b.balance)} due)
+                View and Pay {b.number ?? "The Bill"} ({formatCurrency(b.balance)} due)
                 <ChevronRight className="h-4 w-4" aria-hidden />
               </a>
             ))}
@@ -322,7 +322,7 @@ function UnbilledSplit({ unbilled, totalLabel }: { unbilled: NonNullable<PortalJ
             ) : null}
             {unbilled.returnsCredit > 0.005 ? (
               <li className="flex justify-between gap-3 px-3 py-2">
-                <span className="font-medium text-slate-900">Returns To Credit</span>
+                <span className="font-medium text-slate-900">Returns to Credit</span>
                 <span className="tabular-nums text-emerald-800">−{formatCurrency(unbilled.returnsCredit)}</span>
               </li>
             ) : null}
@@ -383,7 +383,7 @@ function BillCard({ b, place, explainBalance }: { b: PortalInvoice; place: strin
         {b.payToken ? (
           <div className="flex justify-end p-2 sm:mb-2 sm:p-0">
             <a href={withPlace(`/i/${b.payToken}`, place)} rel="nofollow" className={chip}>
-              {b.balance > 0.005 ? "View And Pay" : "Open On Its Own Page"}
+              {b.balance > 0.005 ? "View and Pay" : "Open on Its Own Page"}
               <ChevronRight className="h-4 w-4" aria-hidden />
             </a>
           </div>

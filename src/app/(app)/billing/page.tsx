@@ -173,7 +173,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
   );
   // ONE INVOICE, ONE ROW. A revised bill with money owed used to sit in Revised AND in Sent, so
   // the board listed it twice. It lives in Revised now (the verb it needs first is "send the
-  // corrected copy"), and Sent shows the rest. Owed To You still reads `unpaid`, so every open
+  // corrected copy"), and Sent shows the rest. Owed to You still reads `unpaid`, so every open
   // invoice is counted exactly once.
   const resendIds = new Set(needsResend.map((i) => String(i.id)));
   const awaiting = unpaid.filter((i) => !resendIds.has(String(i.id)));
@@ -217,7 +217,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
       <Card className="mb-4" data-tour="owed-to-you">
         <CardContent className="py-4">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="text-sm font-medium text-slate-600">Owed To You</span>
+            <span className="text-sm font-medium text-slate-600">Owed to You</span>
             <span className="text-2xl font-bold tabular-nums text-slate-900">{owesAnything ? money(owed) : "$0"}</span>
           </div>
           {pipeline.overdueTotal > 0.005 && (
@@ -359,7 +359,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
       {/* STAGE 2B — sent, then changed: the copy in their inbox is not this one.
           Exclusive now, like every other stage: a revised bill with money owed sits only in
           Revised, which carries its due date and its days late, and the Sent lane below leaves it
-          out and says how many it left out. Owed To You still counts it once, from `unpaid`.
+          out and says how many it left out. Owed to You still counts it once, from `unpaid`.
           Amber on purpose: the same colour as the banner on the invoice's own page, so the board
           and the page can never look like they are talking about two different problems. */}
       {needsResend.length > 0 && (
@@ -441,7 +441,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
         >
           {waitingOpen ? <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" /> : <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />}
           <span className="min-w-0 flex-1 font-semibold text-slate-900">
-            Waiting To Be Billed
+            Waiting to Be Billed
             <span className="font-normal text-slate-600"> · Time &amp; material work no invoice holds yet, oldest first</span>
           </span>
         </Link>

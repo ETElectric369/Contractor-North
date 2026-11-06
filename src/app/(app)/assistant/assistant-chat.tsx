@@ -487,7 +487,7 @@ export function AssistantChat({
   useEffect(() => { estimatorStore.setCard(card); }, [card]);
   useEffect(() => { estimatorStore.setSpeaking(speaking); }, [speaking]);
   useEffect(() => { estimatorStore.setStreaming(streaming); }, [streaming]);
-  // Publish listening too, so Search Or Ask turns into the red Stop Nort whenever the mic is hot
+  // Publish listening too, so Search or Ask turns into the red Stop Nort whenever the mic is hot
   // (not just while thinking/talking) — the bar's one voice control while Nort works.
   useEffect(() => { estimatorStore.setListening(listening); }, [listening]);
   // Tear the voice session down on unmount (close), so a live recognizer + any in-flight speech
@@ -540,7 +540,7 @@ export function AssistantChat({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Talk To Nort (the first row under Search Or Ask) is the ONLY way the voice starts now (no in-panel
+  // Talk to Nort (the first row under Search or Ask) is the ONLY way the voice starts now (no in-panel
   // mic). When the panel is already open, its tap ALREADY (re)started the mic in-gesture (cn:nort-talk →
   // launch → speech.startListening) — here we just enter voice mode + point the next transcript at a
   // normal spoken turn.
@@ -783,13 +783,13 @@ export function AssistantChat({
     return () => cancelAnimationFrame(raf);
   }, [voiceMode]);
 
-  // Voice-first: the Talk To Nort tap ALREADY started the mic in-gesture (cn:nort-talk → global-assistant
+  // Voice-first: the Talk to Nort tap ALREADY started the mic in-gesture (cn:nort-talk → global-assistant
   // launch → speech.startListening) — iOS only honors a start inside the gesture. So here we just enter
   // voice mode (do NOT start the mic from this post-commit effect; iOS would reject it).
   useEffect(() => {
     if (!autoStart) return;
     setVoiceMode(true);
-    // The mic was started in-gesture by the Talk To Nort tap. If it took, mirror "listening". The stream
+    // The mic was started in-gesture by the Talk to Nort tap. If it took, mirror "listening". The stream
     // backend narrates its own start ("Connecting to the mic…", then ready, blocked, or not
     // answering), and onStatus replays the line it is on, so writing over it here is what left
     // "Tap the mic to answer" on screen in a panel that has no mic button. Only the fallback
@@ -872,12 +872,12 @@ export function AssistantChat({
         confirmRef.current = rec.confirm;
         setPendingConfirm(rec.confirm);
       }
-      // Opened by Talk To Nort: the turn is read out, as it would have been. With a proposal
+      // Opened by Talk to Nort: the turn is read out, as it would have been. With a proposal
       // waiting, what gets read is the read-back — and the mic re-opens for yes or no, the same
       // explicit human answer the live path waits for.
       if (autoStart) {
         const spoken = lines.map((l) => l.content).join(" ").replace(/\s*\[[^\]]*\]\s*$/, "");
-        // DROP THE MIC BEFORE SPEAKING, as the live paths do (the cn-v980 crackle fix). Talk To Nort
+        // DROP THE MIC BEFORE SPEAKING, as the live paths do (the cn-v980 crackle fix). Talk to Nort
         // opened the mic in its tap, so it can still be recording a turn when this missed reply
         // lands — and say() only drops a mic that is BETWEEN turns (voice-stream setMuted), so on
         // iOS 27 this one reply played through a live capture and crackled. A live reply never
@@ -1481,7 +1481,7 @@ export function AssistantChat({
       ) : null}
       {/* GLASS: a clean command box — the ESTIMATOR summary + its line items, the live status line,
           a one-line text box, then one line per conversation turn expanding down. No header/footer
-          chrome; Talk To Nort (under Search Or Ask) starts the voice and the top bar's Stop Nort
+          chrome; Talk to Nort (under Search or Ask) starts the voice and the top bar's Stop Nort
           ends it, and the panel handle moves/collapses it. */}
       {glass && (
         <div className="flex min-h-0 flex-1 flex-col">
@@ -1530,7 +1530,7 @@ export function AssistantChat({
                   reads as a reply that isn't coming. */}
               {/* Wraps when it isn't a live reply (review of the 09-23 wave): at 375px one truncated
                   line holds about 48 characters, which cut the try-again line (then "Tap the Nort
-                  button up top…", now "Tap Talk To Nort to try again, or type below.") off every
+                  button up top…", now "Tap Talk to Nort to try again, or type below.") off every
                   mic failure line. The streaming readout stays one line. */}
               <span className={`text-sm text-slate-500 ${streaming ? "truncate" : "line-clamp-3 break-words"}`}>
                 {streaming ? fillText(t("nt_streamLine"), { elapsed: elapsedStr, tokens: String(tokens), status: statusText }) : statusText}
@@ -1745,7 +1745,7 @@ export function AssistantChat({
         </div>
       ) : glass ? null : voiceMode ? (
           // Voice mode (full page only) — chat-style. It listens / thinks / talks; the big mic is
-          // "your turn". In the glass drawer the voice starts from Talk To Nort (under Search Or Ask)
+          // "your turn". In the glass drawer the voice starts from Talk to Nort (under Search or Ask)
           // and stops at the top bar's Stop Nort.
           <div className="flex flex-col items-center gap-2 border-t border-slate-100 p-4">
             <VoiceWave active={listening || speaking} />

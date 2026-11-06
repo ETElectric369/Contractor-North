@@ -15,7 +15,7 @@ import { loadPanelPortal, setPanelOnPortal, type CircuitMapShown, type PanelPort
  * Customer Page tab renders for staff alone, and setPanelOnPortal is requireStaff (0333's guard
  * refuses anyone else too).
  *
- * One switch per job, "Show The Panel On Their Page", OFF until the office turns it on (Erik's
+ * One switch per job, "Show the Panel on Their Page", OFF until the office turns it on (Erik's
  * decision 2), so a half-finished rough-in list never shows up live by itself. Under it, exactly
  * what the customer reads, drawn by the same renderer and from the same safe shape as their page:
  * so the office never guesses what "on" will show. Turning it on or off says so and offers Undo.
@@ -43,7 +43,7 @@ export function PanelCardView({ who, jobId, panels, preview, circuitMap, busy, o
         <>
           <p className="mt-1 text-sm text-slate-600">This job has no panel yet. Add it on the Panel tab first, then it can go on {who}&apos;s page.</p>
           <Link href={`/jobs/${jobId}?tab=panel`} className="mt-2 inline-flex min-h-[44px] items-center gap-1 text-sm font-semibold text-brand">
-            Go To Panel <ChevronRight className="h-4 w-4" />
+            Go to Panel <ChevronRight className="h-4 w-4" />
           </Link>
         </>
       ) : (
@@ -56,7 +56,7 @@ export function PanelCardView({ who, jobId, panels, preview, circuitMap, busy, o
             disabled={busy}
             className="mt-2 flex min-h-[44px] w-full items-center justify-between gap-3 rounded-lg px-1 text-left text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-60"
           >
-            <span>Show The Panel On Their Page</span>
+            <span>Show the Panel on Their Page</span>
             {busy ? (
               <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
             ) : (
@@ -85,8 +85,8 @@ export function PanelCardView({ who, jobId, panels, preview, circuitMap, busy, o
       )}
       <p className="mt-3 px-1 text-sm text-slate-600">
         {circuitMap
-          ? `On their Plans And Drawings: "${circuitMap.title}", shown ${formatDate(circuitMap.sharedAt)}. Save As Circuit Map on the Panel tab puts a newer one in its place.`
-          : "No circuit map on their page yet. Save As Circuit Map on the Panel tab puts the printed directory there."}
+          ? `On their Plans and Drawings: "${circuitMap.title}", shown ${formatDate(circuitMap.sharedAt)}. Save as Circuit Map on the Panel tab puts a newer one in its place.`
+          : "No circuit map on their page yet. Save as Circuit Map on the Panel tab puts the printed directory there."}
       </p>
     </div>
   );

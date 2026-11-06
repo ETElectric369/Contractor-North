@@ -289,7 +289,7 @@ export function StopClockSheet({
                 router.push(`/timecards?entry=${stillOpenId}`, { scroll: false });
               }}
             >
-              Open The Running Shift
+              Open the Running Shift
             </Button>
           )}
           <Button type="button" className="h-11 w-full" onClick={stopIt} disabled={busy || !valid}>
@@ -381,7 +381,7 @@ export function StopClockSheet({
           </Button>
           {showWorkEnd && (
             <Button type="button" variant="outline" className="h-11" onClick={() => fill(workEndMs)}>
-              End Of Work Day ({splitClock(workEndMs, tz)})
+              End of Work Day ({splitClock(workEndMs, tz)})
             </Button>
           )}
         </div>

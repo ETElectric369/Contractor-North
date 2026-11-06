@@ -347,7 +347,7 @@ export function SplitShiftSheet({
                 className="h-11 w-full"
                 aria-label="Job for the second part"
               >
-                <option value="">Pick A Job</option>
+                <option value="">Pick a Job</option>
                 {pick.startsWith("job:") && !shownJobs.some((j) => `job:${j.id}` === pick) && rightLabel && (
                   <option value={pick}>{rightLabel}</option>
                 )}
@@ -416,7 +416,7 @@ function PieceCard({
         <Scissors className="h-3.5 w-3.5 shrink-0 text-slate-300" aria-hidden />
         <span className="tabular-nums text-slate-600">{span}</span>
       </div>
-      <div className={`mt-1 truncate text-sm font-semibold ${label ? "text-slate-900" : "text-slate-400"}`}>{label ?? "Pick A Job"}</div>
+      <div className={`mt-1 truncate text-sm font-semibold ${label ? "text-slate-900" : "text-slate-400"}`}>{label ?? "Pick a Job"}</div>
       {children}
       {(lunch > 0 || miles > 0) && (
         <div className="mt-2 flex flex-wrap gap-2">

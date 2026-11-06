@@ -47,7 +47,7 @@ export function FuelTrendCard({ trend }: { trend: FuelTrend }) {
       </div>
       <p className="mt-1 text-3xl font-bold tabular-nums text-slate-900" aria-live="polite">
         {week ? dollars(week.cents) : dollars(trend.avgWeekCents)}
-        <span className="ml-1 text-base font-medium text-slate-500">{week ? `Week Of ${weekLabel(week.start)}` : "/ week"}</span>
+        <span className="ml-1 text-base font-medium text-slate-500">{week ? `Week of ${weekLabel(week.start)}` : "/ week"}</span>
       </p>
 
       <div className="mt-3 overflow-x-auto overscroll-x-contain" dir="rtl">

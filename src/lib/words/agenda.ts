@@ -45,8 +45,8 @@ export const words: WordCatalog = {
     ag_btn_done: "Done",
     ag_btn_move: "Move",
     ag_btn_undo: "Undo",
-    ag_btn_openTheJob: "Open The Job",
-    ag_btn_openTheVisit: "Open The Visit",
+    ag_btn_openTheJob: "Open the Job",
+    ag_btn_openTheVisit: "Open the Visit",
     ag_btn_workedNotBooked: "Worked, Not Booked",
 
     // ── The sheet's own words (components/ui/modal-words: one spelling) ──
@@ -69,7 +69,7 @@ export const words: WordCatalog = {
 
     // ── The crew on a block (block-info) ──
     ag_unnamed: "Unnamed",
-    ag_chipGone: "{name} · No Longer On The Team",
+    ag_chipGone: "{name} · No Longer on the Team",
     ag_chipOff: "{name} · Off That Day",
     ag_chipOnOther: "{name} · On {job} That Day",
     ag_chipOnAnother: "{name} · On Another Job That Day",

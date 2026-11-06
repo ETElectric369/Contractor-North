@@ -75,7 +75,7 @@ export function ItemSheet({
                   disabled={writes.busy.has(item.id)}
                   onClick={() => void writes.makeDefault(item.id, null, chosen.id)}
                 >
-                  <Check className="h-4 w-4" /> Use The Item&rsquo;s Price
+                  <Check className="h-4 w-4" /> Use the Item&rsquo;s Price
                 </Button>
               )}
             </div>

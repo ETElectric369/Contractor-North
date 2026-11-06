@@ -18,9 +18,9 @@ import {
  * preview's row and on a vendor's card.
  *
  * Each choice is labelled with its place and lists only the details the guard kept, each with its
- * own "Found On <site>" link to the page it came from. Use This One, None Of These, and for nothing
+ * own "Found On <site>" link to the page it came from. Use This One, None of These, and for nothing
  * found, Leave Blank. A choice is shown as picked for the person only when it was the only one found
- * (and the name isn't a person's); it says so, and None Of These is right there.
+ * (and the name isn't a person's); it says so, and None of These is right there.
  */
 export function LookupChoices({
   name,
@@ -58,7 +58,7 @@ export function LookupChoices({
         {answer.near ? ` near ${answer.near}` : ""}. Found On means that page&apos;s words show it, not that it&apos;s been checked. Not Confirmed means the page was named but its words weren&apos;t quoted, so it isn&apos;t ticked unless you tick it.
         {answer.dropped > 0 && ` ${answer.dropped} detail${answer.dropped === 1 ? " was" : "s were"} left out because no page backed ${answer.dropped === 1 ? "it" : "them"} up.`}
       </p>
-      {autoPicked && pickedId && <p className="text-xs font-medium text-slate-700">Picked because it&apos;s the only one found. Change it with None Of These.</p>}
+      {autoPicked && pickedId && <p className="text-xs font-medium text-slate-700">Picked because it&apos;s the only one found. Change it with None of These.</p>}
       <ul className="space-y-2" role="radiogroup" aria-label={`Choices for ${name}`}>
         {answer.choices.map((c) => {
           const on = c.id === pickedId;
@@ -92,7 +92,7 @@ export function LookupChoices({
                   rel="noopener noreferrer"
                   className="inline-flex min-h-11 items-center gap-1.5 text-sm text-slate-700 hover:text-slate-900"
                 >
-                  <MapPin className="h-4 w-4" /> View On Map
+                  <MapPin className="h-4 w-4" /> View on Map
                 </a>
               )}
             </li>
@@ -100,7 +100,7 @@ export function LookupChoices({
         })}
       </ul>
       <Button variant="ghost" onClick={onNone}>
-        None Of These
+        None of These
       </Button>
     </div>
   );

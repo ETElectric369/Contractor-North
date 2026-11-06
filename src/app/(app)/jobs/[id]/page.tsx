@@ -216,7 +216,7 @@ export default async function JobDetailPage({
         // now nets a receipt down to what it can BILL - the snacks and the shop stock come off - and
         // MaterialBill.bill_line_items is optional, so a row that arrives without them silently
         // bills its whole amount exactly as it always did. job-financials went through
-        // readJobBillsWithLines; this read did not, so the hub's Work To Date and the draw modal
+        // readJobBillsWithLines; this read did not, so the hub's Work to Date and the draw modal
         // that opens from it disagreed by $12.22 on the Wexley job while both claimed to be the
         // same number. The projection law, on the one figure the two screens share.
         // supplier_account_id, supplier_invoice_number, notes and is_statement ride along for the one
@@ -569,7 +569,7 @@ export default async function JobDetailPage({
         )
       : Promise.resolve(null as Awaited<ReturnType<typeof readJobStock>> | null),
     // ALREADY BILLED (0357): which of the job's rows a person marked as billed, and on which line,
-    // for "Billed By Hand On INV-x · Not Billed After All". Staff only, on EVERY job whatever its
+    // for "Billed by Hand on INV-x · Not Billed After All". Staff only, on EVERY job whatever its
     // billing type: a mark can sit on a fixed-price job New Invoice bills from its actuals (J-010
     // Pinyon Sage), and the way back has to be there wherever a mark is. A lost read is logged and
     // SAID (handsNote below): the marks and their Not Billed After All can't be shown, and marked
@@ -770,7 +770,7 @@ export default async function JobDetailPage({
 
   // PUNCHES WITH NO JOB near this job (the duplicate punches, 2026-09-26): its crew's closed,
   // job-less, unbilled shifts from the day before its first day to two days after its last, for
-  // the office's Put This On door on the Time tab. Office only. Null = the read failed (said).
+  // the office's Put This on door on the Time tab. Office only. Null = the read failed (said).
   // STARTED HERE, awaited below: it is up to three round trips one after another (codes, entries,
   // claims), and everything it needs is known by now, so it runs beside the shelf, takes, document
   // and split reads instead of after them on every office open of this page.
@@ -933,7 +933,7 @@ export default async function JobDetailPage({
   const jobCodesEnabled = getOrgSettings((org as any)?.settings).timeclock_job_codes;
   // THE SWITCH BOARD (0352): which of this company's features are on, and whether the viewer is the
   // one person who can turn a switch back on (the Off line's Turn On). A switch hides DOORS on this
-  // page (New Estimate, New PO, Took From Stock, the Inspector...), never a read: every money figure
+  // page (New Estimate, New PO, Took from Stock, the Inspector...), never a read: every money figure
   // above (open POs, payment milestones, the shelf) is computed exactly as it was.
   const switches = { features: getOrgSettings((org as any)?.settings).features, isOwner: (meRow as any)?.role === "owner" };
   const on = (k: FeatureKey) => featureOn(switches.features, k);
@@ -988,7 +988,7 @@ export default async function JobDetailPage({
   const isDrawBilled = (invoices ?? []).some(
     (i: any) => isDrawKind(i.invoice_kind) && i.status !== "void",
   );
-  // THE OVERVIEW'S ONE FIGURE ON A JOB BILLED BY ITS CONTRACT (W1-19): Left To Bill, from the same
+  // THE OVERVIEW'S ONE FIGURE ON A JOB BILLED BY ITS CONTRACT (W1-19): Left to Bill, from the same
   // figures above (the contract, what went out on sent bills) or the schedule's own status, the one
   // PaymentScheduleCard shows. Staff only (the card is never mounted for a tech).
   const scheduleView = (paymentMilestones ?? []).length ? scheduleStatus((paymentMilestones ?? []) as Milestone[], contractTotal) : null;
@@ -1010,7 +1010,7 @@ export default async function JobDetailPage({
       quotes: (quotes ?? []) as any[],
       invoices: (invoices ?? []) as any[],
       milestoneCount: ((paymentMilestones as any) ?? []).length,
-      // Approved change orders: Bill The Change Orders once the estimate's bill is out.
+      // Approved change orders: Bill the Change Orders once the estimate's bill is out.
       changeOrders: (changeOrders ?? []) as { status?: string | null; amount?: number | null }[],
     }),
     worked: workedToDate,
@@ -1126,7 +1126,7 @@ export default async function JobDetailPage({
   // (fada712a: J-013 had 1 bill and said 3). The hours not billed yet are NOT a count here: they are
   // said in words on the tab ("Also not billed yet: Xh of time") beside the door that bills them, and
   // a "1" that is no row could never be found. The loose receipts are the Receipts & Papers fold's own
-  // "N Not On A Bill Yet" (the same paperSort.loose it is handed below); they are the job's documents,
+  // "N Not on a Bill Yet" (the same paperSort.loose it is handed below); they are the job's documents,
   // never supplier_invoices, so they can't double a paperView.
   // J-013 (0b742620, 2026-09-29): one live bill, no papers, and the chip said 3. The chip counts only
   // the pile ids the tab draws (a bill, an order, a take from stock — lib/job-cost-groups
@@ -1166,7 +1166,7 @@ export default async function JobDetailPage({
   //
   // 0326: the same rows now hold every paper shown (plans, circuit maps, drawings too), with a soft
   // remove. `portalPapers` tells the Costs tab's document list which papers are up, so each row can
-  // say "On The Portal" or offer Show On Portal (null before 0326: no control).
+  // say "On the Portal" or offer Show on Portal (null before 0326: no control).
   // staleSharedIds: of the photos shown, the ones whose file changed after they were shown, which
   // the customer's page has quietly stopped showing (audit v994 PL4, 0323); the tile says so.
   let sharedPhotoIds: string[] | null = null;
@@ -1175,7 +1175,7 @@ export default async function JobDetailPage({
   // Does the Customer Page tab hold anything: a paper shown, a stretch or a pick, live. Only read
   // where the tab is the office's and switched on; a failed read counts as holding.
   let customerPageHolds = true;
-  // Customer Portal off (the switch board): no Show Customer / Show On Portal, so no read for them.
+  // Customer Portal off (the switch board): no Show Customer / Show on Portal, so no read for them.
   if (viewerIsStaff && on("customer_portal")) {
     const liveCount = (table: "job_stretches" | "job_picks") =>
       supabase
@@ -1832,7 +1832,7 @@ export default async function JobDetailPage({
       // only show whats open"): the Not Billed Yet pile (the Unbilled card's own verdict, so the chip
       // is the pile the tab leads with) plus the supplier papers naming this job that are in nobody's
       // books yet (Named On A Paper; one set aside waiting on a credit is decided, so not counted),
-      // plus the job's own receipts on no bill yet (Receipts & Papers' "Not On A Bill Yet"). Every
+      // plus the job's own receipts on no bill yet (Receipts & Papers' "Not on a Bill Yet"). Every
       // one is a row on the tab; the hours not billed yet are said in words beside their door, never
       // a made-up 1. A fixed-price job has no Not Billed Yet pile, so only its unrecorded papers and
       // loose receipts count.
@@ -1907,7 +1907,7 @@ export default async function JobDetailPage({
               separate). The job's filing cabinet, folded: every paper that isn't on the Photos tab,
               each saying which bill it made, and a receipt on no bill says so and holds the fold
               open. Receipt pictures left the Photos grid for their bills; this is where any a bill
-              doesn't hold still show. Record As Cost is the retry, as before. The plans door points
+              doesn't hold still show. Record as Cost is the retry, as before. The plans door points
               at the Customer Page tab: Customer Portal's (the switch board). */}
           <Card>
             <JobDocuments
@@ -1921,7 +1921,7 @@ export default async function JobDetailPage({
               billOf={billOfPaper}
               looseIds={paperSort.loose ? paperSort.loose.map((d: any) => String(d.id)) : null}
               tieNote={paperTies ? null : t("jb_couldntCheckPapers")}
-              // A loose receipt's Already On A Bill → Tie It (d1ff7c5a): the job's live bills, said
+              // A loose receipt's Already on a Bill → Tie It (d1ff7c5a): the job's live bills, said
               // the way the rows say them ("the CED bill #8802-…"). The office only.
               bills={viewerIsStaff ? liveBillIds.map((id) => ({ id, label: billWords(id) })) : null}
             />
@@ -2020,7 +2020,7 @@ export default async function JobDetailPage({
           {/* TOOK FROM STOCK (Phase 3): one button, the same for the crew and the office, and under
               it who took what off the shelf for this job, with Undo until an invoice bills it. It
               counts on the job the moment it is tapped (Erik's decision 3). No price, for anyone. */}
-          {/* Shop Stock off (the switch board): no Took From Stock button, but the takes already on
+          {/* Shop Stock off (the switch board): no Took from Stock button, but the takes already on
               this job stay listed with their Undo. */}
           <TookFromStock jobId={j.id} takes={takes.takes} viewerIsStaff={viewerIsStaff} readFailed={!!takes.error} canTake={on("shop_stock")} />
           <ItemEditor
@@ -2099,14 +2099,14 @@ export default async function JobDetailPage({
           {/* Lead with the INVOICES (this is the Invoices tab) — the contract / payment
               schedule / lien cards live below, since they're supporting deal-to-cash context. */}
           {/* ONE NEW INVOICE (W1-24). The Progress Payment hub beside it is gone: its draw builder is
-              the New Invoice sheet (Deposit / Part Of The Estimate / Bill The Work So Far), and its
+              the New Invoice sheet (Deposit / Part of the Estimate / Bill the Work So Far), and its
               Record a Payment left this tab for each open bill's Get Paid below. Every prop is a fact
               this page already read; what one tap does is lib/actuals-draw newInvoiceRoute. Staff only
               (a tech never sees this tab, and never a price). */}
           {viewerIsStaff && (
             <div className="flex justify-end">
-              {/* The page's facts, computed once (newInvoiceProps): the Overview's Left To Bill card
-                  mounts the same button with the same props, opened on Part Of The Estimate. */}
+              {/* The page's facts, computed once (newInvoiceProps): the Overview's Left to Bill card
+                  mounts the same button with the same props, opened on Part of the Estimate. */}
               <NewInvoiceButton {...newInvoiceProps} />
             </div>
           )}

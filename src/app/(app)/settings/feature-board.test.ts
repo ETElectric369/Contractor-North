@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 /**
  * SETTINGS > FEATURES, rendered (the switch board, 0352). What a person actually sees: one row per
  * switch with sub-switches nested, Title Case names, a 44px switch for the owner and a read-only
- * state with "Ask The Owner" for everyone else, "Off · N saved" when a switched-off feature holds
+ * state with "Ask the Owner" for everyone else, "Off · N saved" when a switched-off feature holds
  * records, and the one-line confirm naming what stops.
  */
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
@@ -20,6 +20,7 @@ vi.mock("./features-actions", () => ({
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { titleCaseIn } from "../../../../tests/title-case-words";
 import {
   FeatureBoard,
   MODE_LINES,
@@ -73,10 +74,10 @@ describe("the board", () => {
       expect(b).toMatch(/\bh-11\b/);
       expect(b).toMatch(/\bmin-w-11\b/);
       const label = b.match(/aria-label="([^"]+)"/)![1].replace(/&amp;/g, "&");
-      for (const w of label.split(" ")) if (w !== "&") expect(w[0], label).toMatch(/[A-Z]/);
+      expect(titleCaseIn(label, "en"), label).toBe(true); // the one judge (cn-v1148)
     }
     expect(sw.filter((b) => b.includes('aria-checked="false"'))).toHaveLength(2);
-    expect(sw.find((b) => b.includes("Kits &amp; Sizing"))).toContain('aria-label="Turn On Kits &amp; Sizing By Sq Ft"');
+    expect(sw.find((b) => b.includes("Kits &amp; Sizing"))).toContain('aria-label="Turn On Kits &amp; Sizing by Sq Ft"');
     expect(sw.find((b) => b.includes("Estimates"))).toContain('aria-label="Turn Off Estimates"');
   });
 
@@ -94,7 +95,7 @@ describe("the board", () => {
     expect(html).not.toContain("<button");
     const t = text(html);
     expect(t).toContain("Only the owner can turn features on or off.");
-    expect(t).toContain("Off · 3 saved · Ask The Owner");
+    expect(t).toContain("Off · 3 saved · Ask the Owner");
     expect(t.match(/\nOn\n/g)?.length).toBe(FEATURE_KEYS.length - 1);
   });
 
@@ -103,7 +104,7 @@ describe("the board", () => {
     expect(switches(html)).toHaveLength(0);
     const t = text(html);
     expect(t).toContain("Features need an update from North before they can be changed.");
-    expect(t).not.toContain("Ask The Owner"); // the owner is not told to ask themselves
+    expect(t).not.toContain("Ask the Owner"); // the owner is not told to ask themselves
   });
 
   it("anyone but the owner reads a sub-switch as Off while its parent is off; the owner's switch keeps what is stored", () => {
@@ -115,7 +116,7 @@ describe("the board", () => {
     };
     const staff = referralsRow(render({ isOwner: false, features: m, counts: { referrals: 2 } }));
     expect(staff).toContain("Off while Leads & Inspections is off.");
-    expect(staff).toContain("Off · 2 saved · Ask The Owner");
+    expect(staff).toContain("Off · 2 saved · Ask the Owner");
     expect(staff.split("\n")).not.toContain("On");
     // The owner's switch is the stored value, so turning Leads back on brings Referrals back as it was.
     const owner = switches(render({ features: m }));
@@ -175,7 +176,7 @@ describe("Your Trade & Pricing, the top card (cn-v1135)", () => {
     // The card tells the truth about the key: what follows it at once, and what is only offered.
     expect(t).toContain(TRADE_FOLLOWS_LINE);
     expect(t).not.toMatch(/nothing moves on its own|changes nothing else|Nothing else moved/i);
-    expect(t).not.toContain("Ask The Owner");
+    expect(t).not.toContain("Ask the Owner");
   });
 
   it("anyone but the owner reads the trade and the mode, with no button, and is told who can change them", () => {
@@ -184,7 +185,7 @@ describe("Your Trade & Pricing, the top card (cn-v1135)", () => {
     const t = text(html);
     expect(t).toContain("Your Trade: Plumbing");
     expect(t).not.toContain("Change My Trade");
-    expect(t).toContain("Catalog · Ask The Owner");
+    expect(t).toContain("Catalog · Ask the Owner");
     expect(t).toContain(MODE_LINES.catalog);
   });
 
@@ -195,7 +196,7 @@ describe("Your Trade & Pricing, the top card (cn-v1135)", () => {
     const t = text(html);
     expect(t).toContain("Your Trade: Plumbing");
     expect(t).toMatch(/\nResearch\n/);
-    expect(t).not.toContain("Ask The Owner");
+    expect(t).not.toContain("Ask the Owner");
   });
 
   it("a company with no key reads Not Listed; the ten trades are the sign-up menu's rows in its order", () => {

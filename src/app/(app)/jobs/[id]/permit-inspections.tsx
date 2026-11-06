@@ -161,7 +161,7 @@ export function PermitInspections({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1">
           <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Inspections</span>
-          <InfoPopup title="How Inspections On A Permit Work" label="About Inspections On A Permit" bullets={HOW_IT_WORKS} />
+          <InfoPopup title="How Inspections on a Permit Work" label="About Inspections on a Permit" bullets={HOW_IT_WORKS} />
         </div>
         {canWrite && (
           <Button size="sm" variant="outline" className="min-h-11" onClick={() => setForm(form?.kind === "book" && !form.id ? null : { kind: "book", id: null })}>
@@ -182,7 +182,7 @@ export function PermitInspections({
 
       {/* THE ISSUING AUTHORITY'S OWN VISIT, IN ONE TAP (J-012, 2026-10-15: the Town of Truckee permit
           had a TTPUD row and no Truckee row; Erik marked "the permit inspection" passed on the permit's
-          status, which carries nothing forward). Not booked yet — Passed or Change The Booking follow. */}
+          status, which carries nothing forward). Not booked yet — Passed or Change the Booking follow. */}
       {canWrite && missing && addedFor !== missing && (
         <div className="mt-1">
           <Button
@@ -199,7 +199,7 @@ export function PermitInspections({
               );
             }}
           >
-            <Plus className="h-3.5 w-3.5" /> Add The {missing} Inspection
+            <Plus className="h-3.5 w-3.5" /> Add the {missing} Inspection
           </Button>
         </div>
       )}
@@ -280,7 +280,7 @@ export function PermitInspections({
                         size="icon-sm"
                         variant="ghost"
                         aria-label={`Change the booking for ${r.authority}`}
-                        title="Change The Booking"
+                        title="Change the Booking"
                         onClick={() => setForm(form?.kind === "book" && form.id === r.id ? null : { kind: "book", id: r.id })}
                       >
                         <Pencil aria-hidden />
@@ -399,7 +399,7 @@ function BookingForm({
           <Input id={`id-${id}`} className="h-11" type="date" value={day} onChange={(e) => setDay(e.target.value)} />
         </div>
         <div>
-          <Label htmlFor={`iw-${id}`}>Part Of The Day</Label>
+          <Label htmlFor={`iw-${id}`}>Part of the Day</Label>
           <Select id={`iw-${id}`} className="h-11" value={win} onChange={(e) => setWin(e.target.value)}>
             <option value="">Not Said</option>
             {INSPECTION_WINDOWS.map(([v, l]) => (

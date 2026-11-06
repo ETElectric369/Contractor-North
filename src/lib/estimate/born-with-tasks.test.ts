@@ -47,7 +47,7 @@ describe("tasksFromLines — what an accepted estimate gives birth to", () => {
     ]);
   });
 
-  it("a note under the line (Add A Note: the description's second line) is not part of the task's title (skeptic #43, S6)", () => {
+  it("a note under the line (Add a Note: the description's second line) is not part of the task's title (skeptic #43, S6)", () => {
     const b = tasksFromLines([
       line("a", "Hang the fan\nCustomer supplies the fan", 0, detail(1)),
       line("b", "Footings ×2\nUse the 10-inch tubes\nNorth side first", 1, detail(2)),
@@ -176,7 +176,7 @@ const visit = (id: string, name: string, hours: number | null, extra: Partial<Ta
   ...extra,
 });
 
-describe("tasksFromVisit — Start The Job on an inspection", () => {
+describe("tasksFromVisit — Start the Job on an inspection", () => {
   it("his tasks in his order, keyed by the task's own id, ' ×N' for a per-unit task like the estimate line", () => {
     const b = tasksFromVisit([visit("t1", "Set panel", 4), visit("t2", "Footings", 1, { units: 7 }), visit("t3", "Trim out", null, { units: 1 })]);
     expect(b.tasks).toEqual([

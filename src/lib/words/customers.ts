@@ -107,8 +107,8 @@ export const words: WordCatalog = {
     // ── New Customer (crm/new-customer-button) ──
     cu_btn_newCustomer: "New Customer",
     cu_btn_createCustomer: "Create Customer",
-    cu_btn_addFromMyContacts: "Add From My Contacts",
-    cu_importVcf: "Import A .vcf",
+    cu_btn_addFromMyContacts: "Add from My Contacts",
+    cu_importVcf: "Import a .vcf",
     cu_autofillTip: "Tip: type the person's name and pick them when your browser offers the card — then press {autofill} on the card itself.",
     cu_autofill: "AutoFill",
     cu_namePlaceholder: "Customer or contact name",
@@ -131,10 +131,10 @@ export const words: WordCatalog = {
     cu_alreadyInBook: "({n} already in the book)",
     cu_mapNameFirst: "Map the Name column first.",
     cu_btn_adding: "Adding…",
-    cu_btn_addFromContacts: "Add From Contacts",
+    cu_btn_addFromContacts: "Add from Contacts",
     cu_iphoneVcfTitle: "iPhone: open a contact → Share Contact → Save to Files, then pick it here",
     cu_btn_importCustomers: "Import Customers",
-    cu_btn_importAContact: "Import A Contact",
+    cu_btn_importAContact: "Import a Contact",
     cu_iphoneVcfHint: "iPhone: open a contact → Share → Save to Files, then pick the .vcf here. For one person it's quicker to hit New Customer and tap the name field — your phone offers your contacts there and fills the whole card.",
     cu_btn_importRows: "Import {n} Rows",
     cu_btn_done: "Done",
@@ -164,10 +164,10 @@ export const words: WordCatalog = {
     cu_noName: "(no name)",
     cu_noContactInfo: "no contact info",
     cu_addedOn: " · added {date}",
-    cu_btn_mergeIntoKept: "Merge {n} Into Kept",
+    cu_btn_mergeIntoKept: "Merge {n} into Kept",
 
     // ── A customer's page (crm/[id]) ──
-    cu_btn_backToCustomers: "Back To Customers",
+    cu_btn_backToCustomers: "Back to Customers",
     cu_btn_tabDetails: "Details",
     cu_btn_newInvoice: "New Invoice",
     cu_btn_deleteCustomer: "Delete Customer",
@@ -223,8 +223,8 @@ export const words: WordCatalog = {
     cu_signOutTitle: "Every device signed in to their page will need a new code",
     cu_noDeviceSignedIn: "No device is signed in",
     cu_btn_seeWhatTheySee: "See What They See",
-    cu_btn_copyTheLink: "Copy The Link",
-    cu_btn_emailItToThem: "Email It To Them",
+    cu_btn_copyTheLink: "Copy the Link",
+    cu_btn_emailItToThem: "Email It to Them",
     cu_btn_newLink: "New Link",
     cu_btn_turnOff: "Turn Off",
     cu_btn_turnOn: "Turn On",
@@ -233,7 +233,7 @@ export const words: WordCatalog = {
     cu_makeNewLinkTitle: "Make a New Link for {name}?",
     cu_btn_makeNewLink: "Make New Link",
     cu_newLinkBody: "The link {name} has now stops working at once, and every device signed in to it is signed out. Anyone who opens it sees “This link was turned off.”",
-    cu_newLinkWorks: "The new link works right away. Send it with Copy The Link or Email It To Them.",
+    cu_newLinkWorks: "The new link works right away. Send it with Copy the Link or Email It to Them.",
 
     // ── Edit Customer (crm/[id]/edit-customer-button; also jobs/[id] and the estimate's customer card) ──
     cu_btn_edit: "Edit",
@@ -243,11 +243,11 @@ export const words: WordCatalog = {
     cu_optDefault: "— Default —",
     cu_markupPct: "{pct}% markup",
 
-    // ── This Is A Duplicate… (crm/[id]/merge-customer-button) ──
+    // ── This Is a Duplicate… (crm/[id]/merge-customer-button) ──
     cu_pickToMerge: "Pick a customer to merge into.",
     cu_mergeConfirm: "Merge \"{name}\" into \"{target}\"? All of {name}'s jobs, estimates, invoices, links, credits, and inquiries move over, then {name} is permanently deleted. This can't be undone.",
     cu_theSelectedCustomer: "the selected customer",
-    cu_btn_thisIsADuplicate: "This Is A Duplicate…",
+    cu_btn_thisIsADuplicate: "This Is a Duplicate…",
     cu_mergeTitle: "Merge {name} into…",
     cu_btn_mergeDelete: "Merge & Delete",
     cu_mergeExplainer: "Use this to fold a duplicate into the real record. Everything attached to {who} moves to the customer you pick, then {name} is deleted.",

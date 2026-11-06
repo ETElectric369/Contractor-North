@@ -43,7 +43,7 @@ export default function NorthSupport() {
         <p>
           Forgot your password? Tap <strong>Forgot Password?</strong> on the sign-in screen. North is invite-only, so a new
           account starts with an invite from your company. If your company doesn&apos;t use North yet,{" "}
-          <a href={mailto("Invite request")}>Ask Us For An Invite</a>.
+          <a href={mailto("Invite request")}>Ask Us for an Invite</a>.
         </p>
       </Section>
 
@@ -83,7 +83,7 @@ export default function NorthSupport() {
 
       <Section title="Privacy">
         <p>
-          What North collects, why, and who handles it: <a href="/privacy">Read The Privacy Policy</a>.
+          What North collects, why, and who handles it: <a href="/privacy">Read the Privacy Policy</a>.
         </p>
       </Section>
     </>

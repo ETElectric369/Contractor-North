@@ -103,16 +103,16 @@ describe("Permits & Inspections on the job's Permits tab", () => {
     expect(html).toContain(">Passed</button>");
     expect(html).toContain(">Failed</button>");
     expect(html).not.toContain("Record Inspection Status");
-    expect(html).toContain(`Add The ${TOWN} Inspection`);
+    expect(html).toContain(`Add the ${TOWN} Inspection`);
     // The permit's own select never offers what its rows say; what they wrote shows, disabled.
     expect(html).not.toContain('<option value="passed"');
     expect(html).toContain("Inspection scheduled (from its inspections)");
     // Not offered: a permit not issued yet, one that is closed, or one whose town already has a row.
     for (const status of ["applied", "closed", "passed"]) {
-      expect(r(JobPermits, { jobId: "j1", permits: [{ ...issued[0], status }], inspections: ttpudOnly, todayStr: "2026-10-15" })).not.toContain(`Add The ${TOWN} Inspection`);
+      expect(r(JobPermits, { jobId: "j1", permits: [{ ...issued[0], status }], inspections: ttpudOnly, todayStr: "2026-10-15" })).not.toContain(`Add the ${TOWN} Inspection`);
     }
-    expect(r(JobPermits, { jobId: "j1", permits: issued, inspections: booked, todayStr: "2026-10-14" })).not.toContain(`Add The ${TOWN} Inspection`);
-    expect(r(JobPermits, { jobId: "j1", permits: issued, inspections: ttpudOnly, todayStr: "2026-10-15", canAdd: false })).not.toContain(`Add The ${TOWN} Inspection`);
+    expect(r(JobPermits, { jobId: "j1", permits: issued, inspections: booked, todayStr: "2026-10-14" })).not.toContain(`Add the ${TOWN} Inspection`);
+    expect(r(JobPermits, { jobId: "j1", permits: issued, inspections: ttpudOnly, todayStr: "2026-10-15", canAdd: false })).not.toContain(`Add the ${TOWN} Inspection`);
     // A written-up visit offers Change It (its undo lives in that form), never Passed again.
     const done = [visit({ position: 1, scheduled_for: "2026-10-14", result: "passed", result_on: "2026-10-14" })];
     const after = r(JobPermits, { jobId: "j1", permits: issued, inspections: done, todayStr: "2026-10-15" });
@@ -144,14 +144,14 @@ describe("Permits & Inspections on the job's Permits tab", () => {
   });
 });
 
-describe("Shop Stock: Took From Stock", () => {
+describe("Shop Stock: Took from Stock", () => {
   const takes = [{ drawGroup: "g1", takenAt: "2026-09-20T17:00:00Z", itemId: "i1", item: "12/2 NM-B", unit: "ft", qty: 60, short: 0, back: 0, who: "Brian", mine: false, billedOn: null }];
   it("on (the default): the button, for the crew and the office", () => {
-    for (const viewerIsStaff of [true, false]) expect(r(TookFromStock, { jobId: "j1", takes: [], viewerIsStaff })).toContain("Took From Stock");
+    for (const viewerIsStaff of [true, false]) expect(r(TookFromStock, { jobId: "j1", takes: [], viewerIsStaff })).toContain("Took from Stock");
   });
   it("off: no button; the job's takes stay listed", () => {
     const html = r(TookFromStock, { jobId: "j1", takes, viewerIsStaff: true, canTake: false });
-    expect(html).not.toMatch(/<button[^>]*>(?:(?!<\/button>)[\s\S])*Took From Stock/);
+    expect(html).not.toMatch(/<button[^>]*>(?:(?!<\/button>)[\s\S])*Took from Stock/);
     expect(html).toContain("12/2 NM-B");
   });
 });

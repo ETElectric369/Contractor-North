@@ -12,7 +12,7 @@
 
 import { translator, type Lang } from "./i18n";
 
-/** The glass panel's controls: Talk To Nort (the first row under Search Or Ask; the panel has no
+/** The glass panel's controls: Talk to Nort (the first row under Search or Ask; the panel has no
  *  mic of its own) and the text box under the status line. Every "what to do now" line names
  *  those two and nothing else. It fits the status line on a 375px phone (48 characters) whole.
  *  The words live in the catalog (nt_tryAgainLine, cn-v1138): the panel reads them in the person's

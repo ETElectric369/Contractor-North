@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { lapseWall, LAPSED_OPEN_DOORS, PATHNAME_HEADER, SEARCH_HEADER } from "@/lib/lapse-doors";
 import { accessState, BILLING_COLUMNS } from "@/lib/subscription";
 import { LAPSED_DOCK, visibleDock } from "@/lib/dock";
+import { titleCaseIn } from "../../../tests/title-case-words";
 
 /**
  * THE WALL AND ITS OPEN DOORS (cn-v1137), end to end without a browser: middleware writes the
@@ -163,11 +164,11 @@ describe("the layout's wiring (source pins)", () => {
     expect(layout).not.toContain('redirect("/subscribe")');
   });
 
-  it("the red bar: the words from the wall, Pick A Plan → /subscribe, and the accountant's door (S7); the grace banner stays", () => {
+  it("the red bar: the words from the wall, Pick a Plan → /subscribe, and the accountant's door (S7); the grace banner stays", () => {
     expect(layout).toContain("{lapseBar && (");
     expect(layout).toMatch(/bg-red-600[^\n]*\n\s*<span>\{lapseBar\}<\/span>/);
-    expect(layout).toMatch(/href="\/subscribe"[\s\S]{0,300}Pick A Plan/);
-    expect(layout).toMatch(/href="\/analytics\/accountant"[\s\S]{0,300}Download For Your Accountant/);
+    expect(layout).toMatch(/href="\/subscribe"[\s\S]{0,300}Pick a Plan/);
+    expect(layout).toMatch(/href="\/analytics\/accountant"[\s\S]{0,300}Download for Your Accountant/);
     expect(layout).toContain("Your card was declined — update it in Settings.");
   });
 
@@ -207,11 +208,11 @@ describe("the layout's wiring (source pins)", () => {
       expect(sections).toEqual([LAPSED_DOCK]);
       for (const row of sections[0].children) {
         expect(open.has(door(row.href)), row.href).toBe(true);
-        for (const w of row.label.split(/\s+/)) expect(w, row.label).toMatch(/^[A-Z]/);
+        expect(titleCaseIn(row.label, "en"), row.label).toBe(true);
       }
     }
     expect([...new Set(LAPSED_DOCK.children.map((r) => door(r.href)))].sort()).toEqual([...LAPSED_OPEN_DOORS].sort());
-    expect(LAPSED_DOCK.children.map((r) => r.label)).toEqual(["Pick A Plan", "Settings", "Download For Your Accountant", "Download Everything"]);
+    expect(LAPSED_DOCK.children.map((r) => r.label)).toEqual(["Pick a Plan", "Settings", "Download for Your Accountant", "Download Everything"]);
     expect(LAPSED_DOCK.children.map((r) => r.href)).toEqual(["/subscribe", "/settings", "/analytics/accountant", "/settings?tab=getpaid"]);
     // Not lapsed: the dock is what it was.
     expect(visibleDock({ isStaff: true }).some((s) => s.key === "plan")).toBe(false);

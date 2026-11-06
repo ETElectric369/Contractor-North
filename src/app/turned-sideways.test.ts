@@ -136,7 +136,7 @@ describe("in a BROWSER, where the page itself rotates, the chrome still does not
   // chrome-stays-put.test.ts. These rules are the browser's half.)
   const pairs: [RegExp, RegExp, string][] = [
     [/sm:gap-3/, /turned:gap-2/, "the gap between the controls"],
-    [/md:w-auto/, /turned:w-11/, "Search Or Ask stays a 44px square"],
+    [/md:w-auto/, /turned:w-11/, "Search or Ask stays a 44px square"],
     [/md:px-3/, /turned:px-0/, "…and keeps its square padding"],
     [/md:inline/, /turned:hidden/, "…and does not grow a text label"],
   ];

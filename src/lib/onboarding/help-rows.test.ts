@@ -5,7 +5,7 @@ vi.mock("@/lib/tts", () => ({ unlockAudio: vi.fn() }));
 import { helpRows } from "./help-rows";
 import { dict, translator } from "@/lib/i18n";
 import { ALL_ON } from "@/lib/features";
-import { esTitleCase } from "../../../tests/es-function-words";
+import { esTitleCase, titleCaseIn } from "../../../tests/title-case-words";
 
 /**
  * THE HELP ROWS' WORDS (cn-v1139): the four rows and their lines are the shell catalog's sh_help_
@@ -21,7 +21,7 @@ describe("helpRows", () => {
     expect(start.map((r) => [r.label, r.sub])).toEqual([
       ["Start Here", "Nort shows you around, out loud, and asks what he needs."],
       ["Show Me How", "Why Lines, Getting Around, How a Job Runs."],
-      ["Take The Setup Again", "Setup from the top. Change anything you told Nort."],
+      ["Take the Setup Again", "Setup from the top. Change anything you told Nort."],
     ]);
     const quiet = helpRows({ isStaff: true, onboarded: false, setup: {}, nortOn: false, features: ALL_ON });
     expect(quiet[0].sub).toBe("A few questions about the business, and where everything lives.");
@@ -59,7 +59,7 @@ describe("helpRows", () => {
       ["sh_help_again", "sh_help_againNort", "sh_help_againQuiet", "sh_help_finish", "sh_help_finishSub", "sh_help_showMeHow", "sh_help_startHere", "sh_help_startHereNort", "sh_help_startHereQuiet"].sort(),
     );
     for (const k of ["sh_help_startHere", "sh_help_finish", "sh_help_showMeHow", "sh_help_again"]) {
-      for (const w of dict("en")[k].replace(/\{\w+\}/g, "").split(/\s+/).filter(Boolean)) expect(w, `en:${k}`).toMatch(/^[\p{Lu}·]/u);
+      expect(titleCaseIn(dict("en")[k], "en"), `en:${k}`).toBe(true);
       expect(esTitleCase(dict("es")[k]), `es:${k}`).toBe(true); // Spanish: the significant words (cn-v1147)
     }
     for (const k of ["sh_help_startHereNort", "sh_help_startHereQuiet", "sh_help_finishSub", "sh_help_againNort", "sh_help_againQuiet"]) {

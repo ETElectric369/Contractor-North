@@ -251,9 +251,9 @@ export const DOCK: DockSection[] = [
       // No switch: Recurring Billing takes only repeat INVOICES; repeat jobs and expenses keep
       // running, and this page is their only door (it draws its own Off line for the invoices).
       { id: "ma-recur", label: "Recurring", icon: Repeat, href: "/recurring" },
-      // PETTY CASH LEFT THE MENU (W1-34): a new cash purchase is a cost like any other (Snap Or Note,
-      // Add By Hand), and a bank's ATM line is Cash Taken Out (Not A Cost). /petty-cash and every
-      // reader of the table stay; a company with petty-cash rows finds the page in Search Or Ask
+      // PETTY CASH LEFT THE MENU (W1-34): a new cash purchase is a cost like any other (Snap or Note,
+      // Add by Hand), and a bank's ATM line is Cash Taken Out (Not a Cost). /petty-cash and every
+      // reader of the table stay; a company with petty-cash rows finds the page in Search or Ask
       // (the layout's hasPettyCash), and a job's Petty Cash figure links to it.
     ],
   },
@@ -344,7 +344,7 @@ export const basePath = (href: string) => href.split("?")[0];
  * LAPSED_OPEN_DOORS is the wall's list, this is its nav). When the layout draws the shell with the
  * red bar — the owner or an admin on Settings, /subscribe or the accountant's export — every
  * renderer that reads visibleDock (the rail, the phone bar, the section strip, the avatar menu's
- * rows, Search Or Ask) draws THIS section alone, so a soft navigation from an open door cannot
+ * rows, Search or Ask) draws THIS section alone, so a soft navigation from an open door cannot
  * reach a page the wall turns a hard load away from (skeptic #43, S1: the (app) layout does not
  * re-run on a client navigation, so the full dock on /settings was a map of every closed door).
  * One mode inside the one filter, never a second nav tree.
@@ -355,9 +355,9 @@ export const LAPSED_DOCK: DockSection = {
   icon: CreditCard,
   href: "/subscribe",
   children: [
-    { id: "lp-pick", label: "Pick A Plan", icon: CreditCard, href: "/subscribe" },
+    { id: "lp-pick", label: "Pick a Plan", icon: CreditCard, href: "/subscribe" },
     { id: "lp-settings", label: "Settings", icon: Settings, href: "/settings" },
-    { id: "lp-accountant", label: "Download For Your Accountant", icon: Download, href: "/analytics/accountant" },
+    { id: "lp-accountant", label: "Download for Your Accountant", icon: Download, href: "/analytics/accountant" },
     // EVERYTHING THE COMPANY HAS (cn-v1138): the export door lives on Settings › Getting Paid, an
     // open door while lapsed (the wall matches /settings by path; the ?tab= only picks the cluster).
     { id: "lp-export", label: "Download Everything", icon: Download, href: "/settings?tab=getpaid" },

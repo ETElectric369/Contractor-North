@@ -13,8 +13,8 @@
  *                crew's alike. A person confirms it; the app never guesses.
  *   not_breaker  a switch, a receptacle, a load centre, wire: not counted and not shown.
  *
- * ONE READER: the Breakers card (office and crew), the Place From What Was Bought sheet and the
- * estimator's Generate From Line Items prompt all take their codes from this file.
+ * ONE READER: the Breakers card (office and crew), the Place from What Was Bought sheet and the
+ * estimator's Generate from Line Items prompt all take their codes from this file.
  */
 import type { CircuitKind } from "@/lib/types";
 import { normalisePartNumber } from "@/lib/shelf-plan";
@@ -82,7 +82,7 @@ export const QUAD_SWAPS: { part: string; outer: number; inner: number; trap?: st
     const trap = Object.keys(SIEMENS_TWO_DOUBLES).find((t) => t.startsWith(part));
     const [a, b] = trap ? SIEMENS_TWO_DOUBLES[trap] : [0, 0];
     return trap
-      ? { part, ...q, trap, trapWords: `Not ${trap}, That Is Two 2-Pole ${a === b ? `${a}s` : `${a}A And ${b}A`}` }
+      ? { part, ...q, trap, trapWords: `Not ${trap}, That Is Two 2-Pole ${a === b ? `${a}s` : `${a}A and ${b}A`}` }
       : { part, ...q };
   },
 );
@@ -320,7 +320,7 @@ export function partFor(slot: BreakerSlot, brand: BrandKey | null): string | nul
 }
 
 /**
- * THE CODE TABLE THE ESTIMATOR'S PROMPT CARRIES (Generate From Line Items), written from the table
+ * THE CODE TABLE THE ESTIMATOR'S PROMPT CARRIES (Generate from Line Items), written from the table
  * above so the prompt and the Breakers card can never disagree about what a Q2020 is.
  */
 export function promptCodeTable(): string {

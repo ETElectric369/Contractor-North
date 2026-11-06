@@ -119,7 +119,7 @@ describe("the paper", () => {
 
 describe("the doors", () => {
   const actions = src("src/app/(app)/billing/actions.ts");
-  it("Add A Discount writes a negative line of the kind through addInvoiceItem, which refuses a discount with nothing off", () => {
+  it("Add a Discount writes a negative line of the kind through addInvoiceItem, which refuses a discount with nothing off", () => {
     const fn = body(actions, "export async function addInvoiceItem(");
     expect(fn).toContain('if (!item.description?.trim()) return { ok: false, error: "Say what the discount is for." };');
     expect(fn).toContain('error: "A discount takes money off — give it an amount."');
@@ -127,8 +127,8 @@ describe("the doors", () => {
     expect(fn).toContain("return { ok: false, error: discountTooBig(room) };");
     expect(fn).toContain('"Discounts aren\'t switched on yet. Try again after the next update."');
     const detail = src("src/app/(app)/billing/[id]/invoice-detail.tsx");
-    expect(detail).toContain("Add A Discount");
-    expect(detail).toContain("Save The Discount");
+    expect(detail).toContain("Add a Discount");
+    expect(detail).toContain("Save the Discount");
     expect(detail).toContain("unit_price: -Math.abs(discountAmount),");
     expect(detail).toContain('kind: "discount",');
     expect(detail).toContain("if (pending) return; // Enter twice is one discount, not two");

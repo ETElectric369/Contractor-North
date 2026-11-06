@@ -21,7 +21,7 @@ import { BreakersCardView, type BreakersData } from "@/app/(app)/jobs/[id]/job-p
  * the way the office's session reads them, filtered to ET's org (postgres bypasses RLS, so the
  * filter is ours). The circuits are the night's final map as data (J-011's list isn't entered yet).
  * It must say "Short One 2P 20A (Bath Floor Heat). One 1P 20A Spare." against 8 x Q2020 + 1 x
- * Q21530CT, offer Add Q220 To Materials ($18.76 in the book) and the quad swap with "Not Q22020CT2,
+ * Q21530CT, offer Add Q220 to Materials ($18.76 in the book) and the quad swap with "Not Q22020CT2,
  * That Is Two 2-Pole 20s".
  *
  * One READ ONLY transaction, rolled back: nothing is written (0334 must already be applied).
@@ -86,7 +86,7 @@ d("the Breakers card on J-011, replayed against ET's live tickets", () => {
     }
   });
 
-  it("says Short one 2P 20A (Bath Floor Heat) — Add To Materials to everyone, and the office's Details the full count, the Q220 and the quad swap", async () => {
+  it("says Short one 2P 20A (Bath Floor Heat) — Add to Materials to everyone, and the office's Details the full count, the Q220 and the quad swap", async () => {
     const c = new pg.Client({ host: REPLAY_DB_HOST, port: 5432, user: REPLAY_DB_USER, password: REPLAY_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await c.connect();
     await assertReadOnlyReplay(c);
@@ -167,13 +167,13 @@ d("the Breakers card on J-011, replayed against ET's live tickets", () => {
       // ONE LINE for everyone (the panel-first wave); the full count, the swap and the book are the
       // office's, behind Details.
       for (const h of [crew, office]) {
-        expect(text(h)).toContain("Short one 2P 20A (Bath Floor Heat) — Add To Materials");
-        expect(labels(h)).toContain("Add To Materials");
+        expect(text(h)).toContain("Short one 2P 20A (Bath Floor Heat) — Add to Materials");
+        expect(labels(h)).toContain("Add to Materials");
       }
       expect(text(office)).toContain("Short One 2P 20A (Bath Floor Heat). One 1P 20A Spare.");
       expect(text(office)).toContain("Not Q22020CT2, That Is Two 2-Pole 20s");
-      expect(labels(office)).toContain("Add Q220 To Materials");
-      expect(labels(office)).toContain("Add Q22020CT To Materials");
+      expect(labels(office)).toContain("Add Q220 to Materials");
+      expect(labels(office)).toContain("Add Q22020CT to Materials");
       expect(text(office)).toContain("Q220 Is $18.76 In Your Price Book.");
       expect(text(office)).toContain("8802-SO-257555");
       expect(crew).not.toContain("<details");

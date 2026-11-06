@@ -190,11 +190,11 @@ const told = { orgs: 1, told: 1, skipped: skipped(), failed: 0 };
 const wordsSent = (call = 0, lang: "en" | "es" = "en") => (spies.notify.mock.calls[call][3] as (l: string) => { title: string; body: string; url: string })(lang);
 
 const EN_80 = {
-  title: "Usage: 80% Of This Month",
+  title: "Usage: 80% of This Month",
   body: "Most of this month's usage is used. It resets Dec 1. Nothing stops: past 100%, Nort and the estimator run lighter until then.",
 };
 const EN_100 = {
-  title: "Usage: Used Up For This Month",
+  title: "Usage: Used Up for This Month",
   body: "This month's usage is used up, so Nort and the estimator run on the lighter model until Dec 1. Add usage or upgrade in Settings › Getting Paid.",
 };
 const ES_80 = {

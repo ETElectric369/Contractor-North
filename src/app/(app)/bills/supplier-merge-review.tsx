@@ -240,7 +240,7 @@ export function SupplierMergeReview({
                 {count > 1 ? (
                   <>
                     {" "}
-                    Not The Same puts {count === 2 ? "each of the two" : `each of the ${count}`} on its own account
+                    Not the Same puts {count === 2 ? "each of the two" : `each of the ${count}`} on its own account
                     with its own balance instead, so this stops being asked. There is no button here that joins two
                     accounts back together afterwards, so have a look at the spellings first.
                   </>
@@ -249,15 +249,15 @@ export function SupplierMergeReview({
                 )}
               </p>
               </WhyFold>
-              {/* THE ONE-TAP WRITE SAYS SO ON SCREEN. Accept gets a sheet; Not The Same writes at
+              {/* THE ONE-TAP WRITE SAYS SO ON SCREEN. Accept gets a sheet; Not the Same writes at
                   once and has no undo here, so the warning cannot live only inside a fold. */}
               {count > 1 && (
-                <p className="mt-1 text-xs font-medium text-amber-800">Not The Same Can&apos;t Be Undone Here</p>
+                <p className="mt-1 text-xs font-medium text-amber-800">Not the Same Can&apos;t Be Undone Here</p>
               )}
 
               <div className="mt-2.5 flex flex-wrap gap-2">
                 <Button onClick={() => openAccept(p)} disabled={pending}>
-                  {p.existingAccountId ? "Accept And File Them There" : "Accept And Make The Account"}
+                  {p.existingAccountId ? "Accept and File Them There" : "Accept and Make the Account"}
                 </Button>
                 {/* NOT THE SAME IS FOR A GROUP, and only for a group.
                     On a lone spelling that already belongs to an account, this button would do the
@@ -277,7 +277,7 @@ export function SupplierMergeReview({
                       )
                     }
                   >
-                    Not The Same
+                    Not the Same
                   </Button>
                 )}
               </div>
@@ -296,14 +296,14 @@ export function SupplierMergeReview({
         <Modal
           open
           onClose={() => setAccepting(null)}
-          title={accepting.existingAccountId ? "File These On That Account" : "Make This One Account"}
+          title={accepting.existingAccountId ? "File These on That Account" : "Make This One Account"}
           size="sm"
           dirty={name.trim() !== (accepting.suggestedName ?? "") || accountNumber !== (accepting.accountNumber ?? "")}
           footer={
             <ModalActions
               onCancel={() => setAccepting(null)}
               onSave={submitAccept}
-              saveLabel={accepting.existingAccountId ? "File Them There" : "Make The Account"}
+              saveLabel={accepting.existingAccountId ? "File Them There" : "Make the Account"}
               disabled={!name.trim()}
               saving={pending && busy === `accept:${accepting.id}`}
             />
@@ -476,7 +476,7 @@ export function SupplierCandidateReview({
   return (
     <Card className="mb-6 p-4">
       <div className="mb-3">
-        <h2 className="text-base font-semibold text-slate-900">Same Supplier, Or Two? ({questions.length})</h2>
+        <h2 className="text-base font-semibold text-slate-900">Same Supplier, or Two? ({questions.length})</h2>
         <WhyFold>
           <p>These names look enough alike to ask about, and not enough for anything here to decide. Only you know which.</p>
         </WhyFold>
@@ -528,7 +528,7 @@ export function SupplierCandidateReview({
                       <span className="block text-sm tabular-nums text-slate-800">
                         {s.accountId
                           ? s.owed === null
-                            ? "Paid At The Register"
+                            ? "Paid at the Register"
                             : formatCurrency(s.owed)
                           : formatCurrency(s.unpaid > 0.005 ? s.unpaid : s.total)}
                       </span>
@@ -572,7 +572,7 @@ export function SupplierCandidateReview({
                     Consolidated Electrical Distributors, Inc." is a nowrap button wider than a
                     375px phone. The sentence above it names the account. */}
                 <Button variant="outline" onClick={() => openJoin(q)} disabled={pending}>
-                  Join Them Onto One Account
+                  Join Them onto One Account
                 </Button>
                 <Button
                   variant="outline"
@@ -597,7 +597,7 @@ export function SupplierCandidateReview({
         <Modal
           open
           onClose={() => setJoining(null)}
-          title={joining.existingAccountName ? "File It On That Account" : "Make This One Account"}
+          title={joining.existingAccountName ? "File It on That Account" : "Make This One Account"}
           size="sm"
           dirty={
             branchLabel.trim() !== "" ||
@@ -608,7 +608,7 @@ export function SupplierCandidateReview({
             <ModalActions
               onCancel={() => setJoining(null)}
               onSave={submitJoin}
-              saveLabel={joining.existingAccountName ? "File It There" : "Make The Account"}
+              saveLabel={joining.existingAccountName ? "File It There" : "Make the Account"}
               disabled={!joining.existingAccountId && !name.trim()}
               saving={pending && busy === `join:${joining.id}`}
             />
@@ -824,7 +824,7 @@ export function SupplierUnfiledSpellings({
         <h2 className="text-base font-semibold text-slate-900">
           {/* THE COUNT IS THE PILE'S, NOT THE LIST'S LENGTH: the figure and the count come out of the
               one read together, so this heading and /bills' own File It door quote one pile. */}
-          Papers Not On A Supplier Account Yet ({papers ?? rows})
+          Papers Not on a Supplier Account Yet ({papers ?? rows})
           {owedHere > 0.005 ? (
             <span className="font-normal text-slate-500"> · {formatCurrency(owedHere)} Still Open</span>
           ) : null}
@@ -889,7 +889,7 @@ export function SupplierUnfiledSpellings({
                 href={`/bills?q=${encodeURIComponent(g.alias)}#bills-search`}
                 className="flex min-h-11 shrink-0 items-center text-sm font-medium text-brand hover:underline"
               >
-                Say What The Expense Is
+                Say What the Expense Is
               </a>
             ) : null}
             {/* STILL POSSIBLE, NO LONGER PUSHED: the quiet door, after the row has said its piece. */}
@@ -905,7 +905,7 @@ export function SupplierUnfiledSpellings({
         {namelessPapers > 0 && (
           <li className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5">
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm text-slate-800">No Supplier Name On The Paper</span>
+              <span className="block truncate text-sm text-slate-800">No Supplier Name on the Paper</span>
               <span className="block text-xs text-slate-500">
                 {namelessPapers} {namelessPapers === 1 ? "paper" : "papers"} · {spellingMoneySaid(unnamed?.total ?? 0, formatCurrency)} ·
                 nothing typed in Where, so there is no name to search for
@@ -918,7 +918,7 @@ export function SupplierUnfiledSpellings({
               href="/bills#all-bills"
               className="flex min-h-11 shrink-0 items-center text-sm font-medium text-brand hover:underline"
             >
-              Find It In All Bills
+              Find It in All Bills
             </a>
           </li>
         )}

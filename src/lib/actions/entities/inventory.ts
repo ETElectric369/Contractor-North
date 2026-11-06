@@ -15,7 +15,7 @@ import type { ActionDef, ActionResult } from "../types";
  * left as a door that says no.
  *
  * stock.take (Phase 3) is Nort's way to move stock, and it moves nothing. "Took 60 feet of 12/2 from
- * stock for Honeysuckle" FILLS the Took From Stock card: the job resolved, the item resolved by name
+ * stock for Honeysuckle" FILLS the Took from Stock card: the job resolved, the item resolved by name
  * off the crew's view of the shelf (shelf_for_crew: names, units, counts, never a cost), the count
  * with the item's own unit. The card's link opens the job's sheet filled in, and a PERSON taps Take
  * It (fill vs execute, Erik 2026-08-02). Two items that match the name are a question back, never a
@@ -26,9 +26,9 @@ export const inventoryActions: Record<string, ActionDef> = {
   "stock.take": {
     name: "stock.take",
     group: "stock",
-    label: "Fill the Took From Stock card",
+    label: "Fill the Took from Stock card",
     description:
-      "When someone says they TOOK material FROM STOCK / from inventory / off the shelf (their words; you always say stock) / from the shop for a job ('took <amount> of <item> from stock for <job>', 'grabbed <count> <item> off the shelf for <job>'): this FILLS the job's Took From Stock card and returns the link and a card that are put on the screen for you. It does NOT take anything: the person taps Take It. NEVER say it's taken, recorded or on the job until they do; say it's ready to tap. " +
+      "When someone says they TOOK material FROM STOCK / from inventory / off the shelf (their words; you always say stock) / from the shop for a job ('took <amount> of <item> from stock for <job>', 'grabbed <count> <item> off the shelf for <job>'): this FILLS the job's Took from Stock card and returns the link and a card that are put on the screen for you. It does NOT take anything: the person taps Take It. NEVER say it's taken, recorded or on the job until they do; say it's ready to tap. " +
       "job_id = the job's id from list_jobs OR its name / number as spoken. item = the item's name as they said it (a short name or the full stock name). qty = the count they said, only if they said one; unit = the unit they said (feet, each), only if they said one. " +
       "If it says several items match, read the names back and ask which one; if none match, say what's in stock (list_shelf). Never guess a count or a price. Taking more than stock shows is allowed: say what it says about the office settling it.",
     input: z.object({
@@ -98,7 +98,7 @@ export const inventoryActions: Record<string, ActionDef> = {
           card: {
             kind: "task",
             eyebrow: "not saved yet",
-            title: `Tap To Take: ${what}`,
+            title: `Tap to Take: ${what}`,
             scope: `Not taken yet: tap above, then Take It. For ${label}. In stock: ${onShelf}.${shortSaid ? ` ${shortSaid}.` : ""}`,
             href,
             next: qty ? "Open it and tap Take It to save it." : "Open it, type how many, and tap Take It.",

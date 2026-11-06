@@ -274,7 +274,7 @@ describe("PART 2 — one tap to change it, and it is not a dead end", () => {
     expect(html).toContain("The app picked that from today&#x27;s schedule");
     expect(html).toContain(CHANGE_JOB_LABEL);
     // Title Case, 44px, and NOT a modal: the clock stays two buttons.
-    expect(CHANGE_JOB_LABEL).toBe("Change The Job");
+    expect(CHANGE_JOB_LABEL).toBe("Change the Job");
     expect(html).toContain("min-h-11");
     expect(html).not.toContain("role=\"dialog\"");
   });
@@ -296,8 +296,8 @@ describe("PART 2 — one tap to change it, and it is not a dead end", () => {
     expect(html).toContain("The app put this punch on ARR 56 rough-in");
     expect(html).toContain("the whole punch moves");
     expect(html).toContain("Leave It Where It Is");
-    // "Skip, The Office Will Pick" would be a lie: the punch already has a job.
-    expect(html).not.toContain("Skip, The Office Will Pick");
+    // "Skip, the Office Will Pick" would be a lie: the punch already has a job.
+    expect(html).not.toContain("Skip, the Office Will Pick");
   });
 
   it("the sheet never offers the job the punch is already on", () => {
@@ -797,7 +797,7 @@ describe("the move path never tells a man his hours are on no job", () => {
     state.client = fakeSupabase(readFails(ARR), calls);
     const moving = await whichJobChoices(PUNCH, ARR);
     expect(moving.ok).toBe(false);
-    // A punch that already carries a job is not in Hours On No Job, so the office is never prompted:
+    // A punch that already carries a job is not in Hours on No Job, so the office is never prompted:
     // telling him they will is the same lie as "still on no job", one door along.
     expect(moving.ok === false && moving.error).toBe(choicesUnavailable(true));
     expect(moving.ok === false && moving.error).not.toContain("the office will put");
@@ -812,7 +812,7 @@ describe("the sentence retires itself the moment the person answers it another w
   /**
    * A SWITCH JOB *IS* THE ANSWER, and the Timeclock panel kept the line on screen anyway: the banner
    * read the new job while the box below still said "Your punch is on ARR 56 — the app picked that",
-   * offering Change The Job for a piece the person had already left. Over 0288's two minutes a switch
+   * offering Change the Job for a piece the person had already left. Over 0288's two minutes a switch
    * CUTS, so that door pointed at the closed pre-switch stub; inside them it re-points whole, so the
    * same door dead-ended on "This punch is already on a job."
    *

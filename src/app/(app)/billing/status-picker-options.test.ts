@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { titleCaseIn } from "../../../../tests/title-case-words";
 import { invoiceStatusItems, statusToSend, SENT_BY_HAND, type InvoiceStatusDeed } from "@/lib/nav-tree";
 
 /**
@@ -69,16 +70,16 @@ describe("the ⋯ status deeds (invoiceStatusItems)", () => {
     expect(src).toMatch(/const next = statusToSend\(value\);\s*start\(async \(\) => \{\s*const res = await setInvoiceStatus\(invoiceId, next\);/);
   });
 
-  it("Back To Draft only where the server allows it (INV-069: a deposit on a bill nobody received never locks it)", () => {
+  it("Back to Draft only where the server allows it (INV-069: a deposit on a bill nobody received never locks it)", () => {
     const labels = (c: Parameters<typeof invoiceStatusItems>[0]) => invoiceStatusItems(c).map((i) => ("label" in i ? i.label : i.note));
-    expect(labels({ status: "sent", amountPaid: 200, sentAt: null })).toContain("Back To Draft");
+    expect(labels({ status: "sent", amountPaid: 200, sentAt: null })).toContain("Back to Draft");
     const held = labels({ status: "partial", amountPaid: 200, sentAt: "2026-09-19T20:54:55.199Z" });
-    expect(held).not.toContain("Back To Draft");
+    expect(held).not.toContain("Back to Draft");
     // …and where it isn't, the sentence says why, in its place - never a blank.
     expect(held.some((l) => /can't go back to Draft/.test(l))).toBe(true);
     // A draft is never offered Draft; a void one is offered the way back from a mistaken Void.
-    expect(labels({ status: "draft" })).not.toContain("Back To Draft");
-    expect(labels({ status: "void" })).toContain("Back To Draft");
+    expect(labels({ status: "draft" })).not.toContain("Back to Draft");
+    expect(labels({ status: "void" })).toContain("Back to Draft");
   });
 
   it("Void Invoice sits last, behind a confirm, and never on a void bill", () => {
@@ -115,7 +116,7 @@ describe("INV-071 as the ⋯ offers it", () => {
     expect(all).toContain("Mark Sent Again - I Re-Sent It");
     for (const l of all) {
       expect(l).not.toContain("—");
-      for (const w of l.replace(/ - /g, " ").split(" ")) expect(w[0], `${l}: ${w}`).toBe(w[0].toUpperCase());
+      expect(titleCaseIn(l.replace(/ - /g, " · "), "en"), l).toBe(true); // " - " starts a new segment, like a dot
     }
   });
 

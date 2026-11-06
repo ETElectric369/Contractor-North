@@ -31,7 +31,7 @@ describe("a receipt too big to read", () => {
     expect(off.kind).toBe("filed");
     expect(off.sentence).toContain("receipts are read up to 8 MB");
     expect(off.sentence).not.toContain("Nort");
-    expect(off.sentence).toContain("Record As Cost");
+    expect(off.sentence).toContain("Record as Cost");
   });
 });
 

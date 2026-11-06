@@ -75,9 +75,9 @@ export default async function MaterialListPage({
           .limit(100)
       : Promise.resolve({ data: null }),
     jobId ? canonicalMaterialListId(jobId) : Promise.resolve({ id: null as string | null }),
-    // The job's takes from stock (0344), for the Took From Stock door under the list. No cost.
+    // The job's takes from stock (0344), for the Took from Stock door under the list. No cost.
     jobId ? jobTakes(supabase, jobId) : Promise.resolve({ takes: [], missing: true, error: null }),
-    // The switches (0352): Purchase Orders off hides New PO, Shop Stock off hides Took From Stock.
+    // The switches (0352): Purchase Orders off hides New PO, Shop Stock off hides Took from Stock.
     viewerSwitches(),
   ]);
   // A takes read that fails is logged and said in the list's place, never an empty list.

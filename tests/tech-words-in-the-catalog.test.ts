@@ -214,7 +214,7 @@ describe("the scanner reads the shapes English leaks in", () => {
       function go() {
         setError("Could not save.");
         setSaid(\`Switched to \${job} just now\`);
-        setStatus(speech.speechSupported() ? "Tap Talk To Nort to try again" : t("nt_noVoiceLine"));
+        setStatus(speech.speechSupported() ? "Tap Talk to Nort to try again" : t("nt_noVoiceLine"));
         setStatus(t("nt_tryAgainLine"));
         setError("Saved");
         setOpen("two words");
@@ -304,11 +304,11 @@ describe("the scanner reads the shapes English leaks in", () => {
   });
 
   it("an allowed text passes by its file; the same words elsewhere do not", () => {
-    const allow = [{ file: "src/app/(app)/timeclock/x.tsx", text: "Pick The Job", why: "a test" }];
+    const allow = [{ file: "src/app/(app)/timeclock/x.tsx", text: "Pick the Job", why: "a test" }];
     const ok = (file: string, text: string) => allow.some((a) => a.text === text && file.endsWith(a.file));
-    const src = `const A = () => <button>Pick The Job</button>;`;
+    const src = `const A = () => <button>Pick the Job</button>;`;
     const leaks = collectLeaks(src, "src/app/(app)/timeclock/x.tsx");
-    expect(leaks.map((l) => l.text)).toEqual(["Pick The Job"]);
+    expect(leaks.map((l) => l.text)).toEqual(["Pick the Job"]);
     expect(leaks.filter((l) => !ok("src/app/(app)/timeclock/x.tsx", l.text))).toEqual([]);
     expect(leaks.filter((l) => !ok("src/app/(app)/jobs/x.tsx", l.text))).toHaveLength(1);
   });

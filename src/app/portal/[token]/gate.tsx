@@ -62,7 +62,7 @@ export function gateTitle(access: PortalAccess): string | null {
   return "Your account";
 }
 
-/** Sign Out On This Device, for a customer's own session (the office's look has nothing to sign out of). */
+/** Sign Out on This Device, for a customer's own session (the office's look has nothing to sign out of). */
 export function portalSignOut(access: PortalAccess, token: string): React.ReactNode {
   return access.kind === "in" && access.session === "customer" ? <PortalSignOut signOut={signOutPortal.bind(null, token)} /> : null;
 }

@@ -7,7 +7,7 @@ import type { ActionItem, Affordance, AlreadyInvoicedTarget } from "./types";
  *
  * The row used to end in a strip of grey icons (a calendar, a person, a clock, an X, a chevron) and a
  * 20px box: five guesses per row, none of them saying what it did. Now each row has ONE button that
- * says its verb ("Send It", "Pick A Day", "Close Out"), and behind lane 1a's ⋯ (RowMoreSheet) only
+ * says its verb ("Send It", "Pick a Day", "Close Out"), and behind lane 1a's ⋯ (RowMoreSheet) only
  * what is real for that row: a Snooze that picks a day, Assign on a job needing a day, and the row's
  * honest ending behind a confirm (Lost, Not Needed, Didn't Happen, Cancel, Set Aside). Tapping the
  * row still opens it. The words Dismiss and Delete never appear.
@@ -25,10 +25,10 @@ export type RowAct =
   | { type: "call"; tel: string }
   /** Sends the verb straight away (Called, Close Out, Take Off Hold). */
   | { type: "run"; verb: Affordance }
-  /** Asks for a day (the day picker), then sends the verb with it (Pick A Day). */
+  /** Asks for a day (the day picker), then sends the verb with it (Pick a Day). */
   | { type: "pickDay"; verb: "schedule" }
   /**
-   * Asks when it comes back (the ComeBackPicker, In A Week picked), then sends the verb with the day
+   * Asks when it comes back (the ComeBackPicker, In a Week picked), then sends the verb with the day
    * (and the words, when asked). askWhy: Why? is shown (never required).
    */
   | { type: "comeBack"; verb: "snooze"; askWhy: boolean; button: string }
@@ -86,14 +86,14 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
 
   switch (item.kind) {
     case "supplier_paper":
-      // Nothing new: its cards carry Put It On J-0xx / Another Job / Shop Stock / Business Cost /
+      // Nothing new: its cards carry Put It on J-0xx / Another Job / Shop Stock / Business Cost /
       // Already Billed, one tap each.
       return none;
     case "supplier_pay":
       return ctx.isStaff ? { ...none, primary: open(`Pay ${item.payee?.trim() || "Supplier"}`, item.href) } : none;
     case "time_stray":
       // Already Billed stays on the row (its own door, drawn by the list).
-      return { ...none, primary: open(item.chip === "Clock Left Running" ? "Fix The Clock" : "Put On A Job", item.href) };
+      return { ...none, primary: open(item.chip === "Clock Left Running" ? "Fix the Clock" : "Put on a Job", item.href) };
     case "visit_unbilled": {
       const billed = item.chip === "Billed, Not Paid";
       const onJob = item.id.startsWith("jdone-");
@@ -109,7 +109,7 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
                 "Cancel",
                 onJob ? "Cancel This Job?" : "Cancel This Visit?",
                 `Marks ${what} cancelled, so nothing is billed for it and it leaves Needs You. You can change it back on the ${onJob ? "job" : "visit"}.`,
-                onJob ? "Cancel The Job" : "Cancel The Visit",
+                onJob ? "Cancel the Job" : "Cancel the Visit",
               ),
             ]
           : []),
@@ -154,7 +154,7 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
       };
     case "quote_accepted":
       return {
-        primary: has(item, "schedule") && item.targetId ? { label: "Pick A Day", act: { type: "pickDay", verb: "schedule" } } : open("Pick A Day", item.href),
+        primary: has(item, "schedule") && item.targetId ? { label: "Pick a Day", act: { type: "pickDay", verb: "schedule" } } : open("Pick a Day", item.href),
         also: null,
         // The bill exists (tie it), or the work went away after all (Lost marks the estimate declined).
         more: [
@@ -198,11 +198,11 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
       return {
         primary: open("Write It Up", item.href),
         also: null,
-        // Open The Visit (cn-v1071): the row's id IS the visit. Every door here used to lead to a
+        // Open the Visit (cn-v1071): the row's id IS the visit. Every door here used to lead to a
         // NEW estimate, so a visit that had already become a job by another road (one customer's: written up
         // without the backlink) could only be called Lost; its page has the attach door (won).
         more: [
-          open("Open The Visit", `/appointments/${item.id}`),
+          open("Open the Visit", `/appointments/${item.id}`),
           ...(has(item, "dismiss")
             ? [ending("dismiss", "Lost", "Didn't Win It?", `Records ${what} as lost, so it stops asking. The inspection is marked lost; you can change it back on its own page.`, "Mark It Lost")]
             : []),
@@ -210,7 +210,7 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
       };
     case "job_to_schedule":
       return {
-        primary: has(item, "schedule") ? { label: "Pick A Day", act: { type: "pickDay", verb: "schedule" } } : open("Pick A Day", item.href),
+        primary: has(item, "schedule") ? { label: "Pick a Day", act: { type: "pickDay", verb: "schedule" } } : open("Pick a Day", item.href),
         also: null,
         more: [
           has(item, "assign") ? { label: "Assign", act: { type: "assign", verb: "assign" } } : null,
@@ -224,7 +224,7 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
               )
             : null,
           has(item, "dismiss")
-            ? ending("dismiss", "Cancel", "Cancel This Job?", `Marks ${what} cancelled, so it leaves the schedule and Needs You. You can change it back on the job.`, "Cancel The Job")
+            ? ending("dismiss", "Cancel", "Cancel This Job?", `Marks ${what} cancelled, so it leaves the schedule and Needs You. You can change it back on the job.`, "Cancel the Job")
             : null,
         ].filter((d): d is RowDoor => !!d),
       };
@@ -262,7 +262,7 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
     // and the door are declared together (permit-inspection-items INSPECTION_DOOR) so they cannot
     // drift. Every one of them opens the permit's card, which is where all three are answered.
     case "permit_inspection":
-      return { ...none, primary: open(INSPECTION_DOOR[item.chip ?? ""] ?? "See The Permit", item.href) };
+      return { ...none, primary: open(INSPECTION_DOOR[item.chip ?? ""] ?? "See the Permit", item.href) };
     case "organize": {
       const primary = open(item.paper === "organize" ? "File It" : "Sort It", item.href);
       return {
@@ -285,9 +285,9 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
           ? [
               ending(
                 "do",
-                "Signed On Paper",
-                "Signed On Paper?",
-                `Records ${what} signed on paper by its customer today, so it stops asking. The wording they signed is frozen as it was sent. To name someone else or another day, use Signed On Paper on the job's contract.`,
+                "Signed on Paper",
+                "Signed on Paper?",
+                `Records ${what} signed on paper by its customer today, so it stops asking. The wording they signed is frozen as it was sent. To name someone else or another day, use Signed on Paper on the job's contract.`,
                 "Record It Signed",
               ),
             ]

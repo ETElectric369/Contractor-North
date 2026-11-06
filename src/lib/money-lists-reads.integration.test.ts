@@ -12,7 +12,7 @@ import { computeCollected } from "@/lib/analytics/money-metrics";
  *
  *   · THE SALES DOT counts only the leads due now (the layout: status new, not converted, and no
  *     follow-up day or one that has come), so a lead snoozed from Needs You waits for its day.
- *   · PETTY CASH'S DOOR in Search Or Ask: the layout's existence check (this company's rows, one at
+ *   · PETTY CASH'S DOOR in Search or Ask: the layout's existence check (this company's rows, one at
  *     most) sees its own company's entry and never another's.
  *   · CASH TAKEN OUT (NOT A COST) is kept under the word 0363's CHECK allows ('petty_cash'): a line
  *     and a rule under it are accepted, the app's own word is refused, and it reads back as itself.

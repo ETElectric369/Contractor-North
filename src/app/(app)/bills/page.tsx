@@ -94,7 +94,7 @@ import { stopWaitingOnCredit } from "./waiting-credit-actions";
 export const dynamic = "force-dynamic";
 // Read Now and Read Again on a card read a paper inside this page's server actions: a 12-page CED
 // PDF gets the reader's own time, not the platform default (audit v994, SI4). A paper put in
-// through Snap Or Note is read on its own route (/api/paperwork/read), with 60 seconds. The statement
+// through Snap or Note is read on its own route (/api/paperwork/read), with 60 seconds. The statement
 // scan reads here too at up to 16000 tokens, so the page carries 300 s (the largest the repo uses).
 export const maxDuration = 300;
 
@@ -191,7 +191,7 @@ export default async function BillsPage({
 }: {
   /**
    * `pay` is My Day's "Pay CED $X By Oct 10" door (supplier-pay-item.ts): the account whose
-   * Record A Payment sheet opens on arrival. The sheet is the one that already exists. (The paste
+   * Record a Payment sheet opens on arrival. The sheet is the one that already exists. (The paste
    * box's `?import=` banner went with the paste box: pasted invoice text is imported from Snap Or
    * Note's note box now, and its line there says what came in.)
    *
@@ -291,7 +291,7 @@ export default async function BillsPage({
     // with an error and a null, which reads here as "no supplier documents" - model A, exactly the
     // page he had yesterday.
     // One read for every reader (supplier-papers.ts), so My Day's cards and this page can never be
-    // handed different documents. It carries Waiting On A Credit's stamp when 0346 is on, and
+    // handed different documents. It carries Waiting on a Credit's stamp when 0346 is on, and
     // retries without it when it is not.
     readSupplierDocuments(supabase, orgId),
     // Which scanned bills cover which supplier invoices. A document with no link is a purchase
@@ -437,7 +437,7 @@ export default async function BillsPage({
   // The claim read and the signing both depend on the first wave's rows and on nothing else, so
   // they ride together. Adding a second serial hop to this page was the phone-lag class all over
   // again (audit v921) and it is not worth one sentence on a card.
-  // ONE PAPER DOOR (W1-30): a paper put in through Snap Or Note is source "organize", so one the
+  // ONE PAPER DOOR (W1-30): a paper put in through Snap or Note is source "organize", so one the
   // reader hasn't finished (not read yet, or too big) is drawn here too, with its Read Now, exactly
   // as one dropped on this page always was: it may well be a bill.
   const trayPapers = ((paperRows ?? []) as any[]).filter(
@@ -458,7 +458,7 @@ export default async function BillsPage({
    *
    * Needs You's count is `items.length + supplierCards`, so dropping them from `papers` takes them out
    * of the count by construction; and `statementsElsewhere` is what keeps the empty line true and the
-   * old doors pointing somewhere (My Day's Papers To Sort still lands on #sort-these).
+   * old doors pointing somewhere (My Day's Papers to Sort still lands on #sort-these).
    */
   const papers = trayPapers.filter((i) => !answeredOnReconcile(i));
   const statementsElsewhere = trayPapers.length - papers.length;
@@ -527,7 +527,7 @@ export default async function BillsPage({
   const looseDocs = billTiesErr ? docs : docs.filter((d: any) => !tiedDocs.has(String(d.id)) && !(d.file_url && tiedPaths.has(String(d.file_url))));
 
   // Each live roll by the receipt line it came off. A read that failed leaves this empty, and the
-  // card then offers Put The Rest On The Shelf on a line whose roll is already there - which the
+  // card then offers Put the Rest on the Shelf on a line whose roll is already there - which the
   // server refuses in words ("already on the shelf"), so the wrong is a sentence, never a double.
   const itemNames = new Map<string, string>(((shelfItemsRead?.data ?? []) as any[]).map((i) => [String(i.id), String(i.name ?? "")]));
   const shelfByLine = new Map<string, NonNullable<ReceiptForBilling["lines"][number]["shelf"]>>();
@@ -555,7 +555,7 @@ export default async function BillsPage({
     amount: Number(b.amount) || 0,
     // A receipt whose ORDER is already billed is held too (review of Phase 2): the importer skips
     // it (the customer paid for the delivery through the PO line), so its lines are as settled as
-    // a claimed receipt's, and Put The Rest On The Shelf on it would put a paid-for coil on the shelf.
+    // a claimed receipt's, and Put the Rest on the Shelf on it would put a paid-for coil on the shelf.
     billedOn: billedOn.get(String(b.id)) ?? (b.po_id ? billedOn.get(String(b.po_id)) ?? null : null),
     lines: (b.line_items ?? []).map((l: any) => ({
       id: String(l.id),
@@ -951,7 +951,7 @@ export default async function BillsPage({
           mark: markCtx,
           shopStock,
         });
-  // Already Billed On J-010 on the cards (0357), from the reading the ledger already made; a card's
+  // Already Billed on J-010 on the cards (0357), from the reading the ledger already made; a card's
   // job with no bill on the page yet is read on its own (only then: one more breath).
   const reachRead = abReach as AlreadyBilledReach | null;
   const cardJobsUnread = cardJobIds(bareFeed).filter((id) => !reachRead?.jobs.has(id));
@@ -1064,7 +1064,7 @@ export default async function BillsPage({
         .join(" · "),
       words: wordsOf(d.invoiceNumber, d.jobNameRaw, supplier, account, moneyWords(d.total), d.invoiceDate, sayKind(d.kind), ...jobWords(jobId)),
       // Where its own buttons are (billsPaperDoor, the routing the job page's papers use too): its
-      // Needs You card, its Waiting On A Credit fold, its job, else its supplier's own lists.
+      // Needs You card, its Waiting on a Credit fold, its job, else its supplier's own lists.
       href: billsPaperDoor({
         onNeedsYou: waitingPapers.has(d.id),
         waitingOnCredit: waitingOnCredit.has(d.id),
@@ -1099,7 +1099,7 @@ export default async function BillsPage({
         formatCurrency(b.amount),
         b.job_id ? `on ${jobSaid(b.job_id) ?? b.jobs?.name ?? "a job"}` : isShelfTicket(b) ? "shop stock" : `business cost, ${bucketOf(b.category)}`,
         // THE ROW'S OWN WORDS, from the one function that makes them (8a982483): a ticket the
-        // supplier's closed paper covers reads the same in Search Or Ask as it does on its row.
+        // supplier's closed paper covers reads the same in Search or Ask as it does on its row.
         billSettledLabel({ status: b.status, amount: b.amount, amountPaid: b.amount_paid == null ? null : Number(b.amount_paid) || 0 }, formatCurrency).toLowerCase(),
       ]
         .filter(Boolean)
@@ -1210,13 +1210,13 @@ export default async function BillsPage({
     waitingByAccount.set(accountId, { name: had.name, count: had.count + 1 });
   }
 
-  // WHAT SHOWS, AND WHEN (W1-32). A new company sees the title, Snap Or Note, Add By Hand and the
+  // WHAT SHOWS, AND WHEN (W1-32). A new company sees the title, Snap or Note, Add by Hand and the
   // drop line, and nothing else: the search, Needs You, Suppliers, All Bills and More each appear once
   // they hold something (or once a read of theirs failed, which they say).
   const hasSupplierSide = !!paperFeed || readFailed.size > 0;
   const showSuppliers = !!accountsErr || supplierAccounts.length > 0 || unassigned.bills > 0 || typeof payOn === "string";
   // Purchase Orders on is reason enough: All Bills' ⋯ is New PO's one home on this page, and the Bills &
-  // POs row, /purchasing and "po" in Search Or Ask all land here (review of W1-32: a company that had
+  // POs row, /purchasing and "po" in Search or Ask all land here (review of W1-32: a company that had
   // just turned the switch on, with nothing yet, found no New PO and no word about orders).
   const poOn = featureOn(switches.features, "purchase_orders");
   const showAllBills = !!billsErr || poOn || (billsWithLines as any[]).length > 0 || (pos ?? []).length > 0 || looseDocs.length > 0;
@@ -1236,12 +1236,12 @@ export default async function BillsPage({
         : statementsElsewhere > 0
           ? "Nothing else waiting here."
           : `Nothing waiting. Every paper${recordsSince ? ` since ${formatDateShort(recordsSince)}` : ""} is in your books.`;
-  // The jobs Add By Hand offers: open and finished, never cancelled, the place first and the number second.
+  // The jobs Add by Hand offers: open and finished, never cancelled, the place first and the number second.
   const handJobs = paperJobs.map((j) => ({ id: j.id, label: jobPickLabel(j) }));
 
   return (
     // THE WHOLE PAGE IS THE DROP ZONE (dropbox plan, Phase 1): drag any number of PDFs and photos
-    // anywhere onto it, or press Snap Or Note (the one paper door, W1-30: the same queue as + on
+    // anywhere onto it, or press Snap or Note (the one paper door, W1-30: the same queue as + on
     // every page). Nothing is filed on drop; each paper waits under Needs You until a person taps an
     // answer on its card.
     //
@@ -1297,7 +1297,7 @@ export default async function BillsPage({
                     href={`#supplier-waiting-credit-${accountId}`}
                     className="mt-2 flex min-h-11 items-center text-sm font-medium text-brand hover:underline"
                   >
-                    {`Waiting On A Credit (${w.count}) · Under ${w.name}`}
+                    {`Waiting on a Credit (${w.count}) · Under ${w.name}`}
                   </a>
                 ))}
               </div>
@@ -1314,7 +1314,7 @@ export default async function BillsPage({
           >
             <span className="min-w-0">
               {openDuplicates.length === 1
-                ? `The Same ${formatCurrency(openDuplicates[0].amount)} Ticket Is On Two Jobs`
+                ? `The Same ${formatCurrency(openDuplicates[0].amount)} Ticket Is on Two Jobs`
                 : `${openDuplicates.length} Tickets Are Each Filed More Than Once`}
             </span>
             <span className="shrink-0 font-medium">Sort It Out</span>
@@ -1368,10 +1368,10 @@ export default async function BillsPage({
               recordAsBill: recordSupplierInvoiceAsBill,
               // Same Purchase: Tie Them (audit v994, DB1).
               tieToBill: tieSupplierInvoiceToBill,
-              // Record To Shelf (Shop Stock, Phase 2): both halves passed, or the button does not render.
+              // Record to Shelf (Shop Stock, Phase 2): both halves passed, or the button does not render.
               // Shop Stock off (0352): neither half is passed, so it doesn't.
               ...(shopStock ? { shelfLines: supplierInvoiceShelfLines, recordToShelf: recordSupplierInvoiceToShelf } : {}),
-              // Waiting On A Credit's way back: Stop Waiting on the folded line puts it on Needs You.
+              // Waiting on a Credit's way back: Stop Waiting on the folded line puts it on Needs You.
               stopWaitingOnCredit,
             }}
           />

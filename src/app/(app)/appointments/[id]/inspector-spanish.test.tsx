@@ -37,7 +37,7 @@ import { Inspector, measuredRowLabel, measureLabelWords } from "./inspector";
 import { LangProvider } from "@/components/lang-provider";
 import type { InspectionAccess } from "@/lib/inspection/inspection-access";
 import type { PlanBrief } from "@/lib/plan-brief";
-import { esTitleCase } from "../../../../../tests/es-function-words";
+import { esTitleCase, titleCaseIn } from "../../../../../tests/title-case-words";
 
 const SHEET = {
   id: "sheet-1",
@@ -133,7 +133,7 @@ describe("a crew lead's sheet speaks Spanish", () => {
   });
 
   it("no English door, heading or line is left on it", () => {
-    for (const d of ["Save", "Take", "Add", "Just Tell Nort", "Something Else", "Add A Measurement", "Add A Task", "Add A Material", "Done", "Where", "Tasks", "Photos", "Notes"]) expect(doors, d).not.toContain(d);
+    for (const d of ["Save", "Take", "Add", "Just Tell Nort", "Something Else", "Add a Measurement", "Add a Task", "Add a Material", "Done", "Where", "Tasks", "Photos", "Notes"]) expect(doors, d).not.toContain(d);
     expect(html).not.toMatch(/aria-label="(Remove This|Jump To|Kit)/);
     expect(html).not.toMatch(/>(Materials|Photos|Measurements|Note|Hours|Answered|Inspection)</);
     expect(t).not.toContain("crew lead on this visit");
@@ -148,7 +148,7 @@ describe("a crew lead's sheet speaks Spanish", () => {
 });
 
 describe("the office's sheet speaks Spanish too", () => {
-  it("Where, Use My Location, the sheet picker, the price-book door, the scope row's Remove, Start The Estimate", () => {
+  it("Where, Use My Location, the sheet picker, the price-book door, the scope row's Remove, Start the Estimate", () => {
     const two = [SHEET, { ...SHEET, id: "sheet-2", name: "Service call" }];
     const html = render("office", { templates: two });
     expect(html).toContain(">Dónde<");
@@ -158,15 +158,15 @@ describe("the office's sheet speaks Spanish too", () => {
     expect(html).toContain('aria-label="Quitar Remodel scope"');
     expect(buttons(html)).toContain("Empezar el Presupuesto");
     expect(html).toContain('href="/quotes/new?capture=appt-1"');
-    expect(buttons(html)).not.toContain("Start The Estimate");
-    expect(html).not.toContain("Pick A Sheet");
+    expect(buttons(html)).not.toContain("Start the Estimate");
+    expect(html).not.toContain("Pick a Sheet");
   });
 
   it("an estimate that stands opens as Abrir el Presupuesto", () => {
     const html = render("office", { estimate: { id: "q-1", number: "EST-7", live: true } });
     expect(buttons(html)).toContain("Abrir el Presupuesto");
     expect(buttons(html)).not.toContain("Empezar el Presupuesto");
-    expect(html).not.toContain("Open The Estimate");
+    expect(html).not.toContain("Open the Estimate");
   });
 
   it("a task kit: the picker's rows, the Units box, the preview from the kit, the gone and unread kits", () => {
@@ -228,7 +228,7 @@ describe("the office's sheet speaks Spanish too", () => {
     expect(buttons(html)).toContain("Llenar 1 Respuesta desde los Planos");
     const e = textOf(render("office", { planBrief: brief }, "en"));
     expect(e).toContain("Already filled from the plans: Work — they're under Answered below, edit anything that's off. The questions still showing here are the ones the plans couldn't answer.");
-    expect(e).toContain("Fill 1 Answer From The Plans");
+    expect(e).toContain("Fill 1 Answer from the Plans");
     expect(e).toContain("More from the plans (2)");
   });
 
@@ -348,13 +348,8 @@ describe("the sheet's source reads every word through t()", () => {
 });
 
 describe("the Inspector catalog (vi_)", () => {
-  /** Every word begins with a capital, a digit or a symbol, after Spanish's opening ¿ / ¡; a {slot} is a hole. */
-  const titleCase = (s: string) =>
-    s
-      .replace(/\{\w+\}/g, " ")
-      .split(/\s+/)
-      .filter(Boolean)
-      .every((w) => /^[¿¡]?[\p{Lu}\p{N}&/+·(—–]/u.test(w));
+  /** English Title Case through the one judge (cn-v1148: significant words; tests/title-case-words). */
+  const titleCase = (s: string) => titleCaseIn(s, "en");
 
   it("names the one screen that reads it, and nothing else", () => {
     expect(vi_).toBeTruthy();
@@ -458,35 +453,35 @@ describe("the Inspector catalog (vi_)", () => {
       vi_btn_measureArea: "Measure Area",
       vi_btn_scan3d: "3D Scan",
       vi_btn_somethingElse: "Something Else",
-      vi_btn_addALineItem: "Add A Line Item…",
+      vi_btn_addALineItem: "Add a Line Item…",
       vi_btn_removeWhat: "Remove {what}",
       vi_btn_removeThisTask: "Remove This Task",
       vi_btn_noKit: "No Kit",
-      vi_btn_kitNoLongerInThePriceList: "Kit No Longer In The Price List",
+      vi_btn_kitNoLongerInThePriceList: "Kit No Longer in the Price List",
       vi_btn_removeThisMaterial: "Remove This Material",
-      vi_btn_addAMaterial: "Add A Material",
+      vi_btn_addAMaterial: "Add a Material",
       vi_btn_take: "Take",
       vi_btn_add: "Add",
       vi_btn_removeThisPhoto: "Remove This Photo",
       vi_btn_removeThisMeasurement: "Remove This Measurement",
-      vi_btn_addAMeasurement: "Add A Measurement",
+      vi_btn_addAMeasurement: "Add a Measurement",
       vi_btn_done: "Done",
-      vi_btn_addATask: "Add A Task",
+      vi_btn_addATask: "Add a Task",
       vi_btn_addFiles: "Add Files",
       vi_btn_remove: "Remove",
-      vi_btn_pickASheet: "Pick A Sheet…",
+      vi_btn_pickASheet: "Pick a Sheet…",
       vi_btn_useMyLocation: "Use My Location",
-      vi_btn_fillAnswersFromPlansOne: "Fill {n} Answer From The Plans",
-      vi_btn_fillAnswersFromPlansMany: "Fill {n} Answers From The Plans",
-      vi_btn_filledFromThePlans: "Filled From The Plans",
+      vi_btn_fillAnswersFromPlansOne: "Fill {n} Answer from the Plans",
+      vi_btn_fillAnswersFromPlansMany: "Fill {n} Answers from the Plans",
+      vi_btn_filledFromThePlans: "Filled from the Plans",
       vi_btn_justTellNort: "Just Tell Nort",
       vi_btn_setUpMyQuestions: "Set Up My Questions",
       vi_btn_settingUp: "Setting Up…",
       vi_btn_orBuildMyOwn: "Or Build My Own",
       vi_btn_save: "Save",
       vi_btn_saving: "Saving…",
-      vi_btn_openTheEstimate: "Open The Estimate",
-      vi_btn_startTheEstimate: "Start The Estimate",
+      vi_btn_openTheEstimate: "Open the Estimate",
+      vi_btn_startTheEstimate: "Start the Estimate",
       vi_inYourOwnWords: "In your own words",
       vi_pieceOfWorkPlaceholder: "The piece of work, in your words",
       vi_unitsPlaceholder: "units",
@@ -530,7 +525,7 @@ describe("the Inspector catalog (vi_)", () => {
       vi_thatsAllOfThem: "That's all of them.",
       vi_addItemsToPriceList: "Add items to your price list and they'll show up here.",
       vi_dropThePlans: "Drop the Plans",
-      vi_dropPhotosPdfs3d: "Drop Photos, PDFs Or 3D Files",
+      vi_dropPhotosPdfs3d: "Drop Photos, PDFs or 3D Files",
       vi_fileTypeNotAccepted: "{name} isn't a file type we accept.",
       vi_badge3d: "3D",
       vi_badgePdf: "PDF",
@@ -611,12 +606,12 @@ describe("the Inspector catalog (vi_)", () => {
       vi_couldntOpenMeasure: "Couldn't open Measure. Try again, or type the measurement.",
       vi_measureNoNumber: "Measure came back without a number. Try again.",
       vi_measureSameSpot: "Measure came back with nothing — the points sat on the same spot. Try again.",
-      vi_btn_addTheScopeTasks: "Add The {scope} Tasks {count}",
+      vi_btn_addTheScopeTasks: "Add the {scope} Tasks {count}",
       vi_retiredWas: "{base} — choices you've since changed",
       vi_retiredKept: "{base} — answered before you changed this question",
       vi_dropFilesHere: "Drop Files Here",
       vi_fileTypeDoesntGoHere: "That file type doesn't go here",
-      vi_btn_tapToDismiss: "Tap To Dismiss",
+      vi_btn_tapToDismiss: "Tap to Dismiss",
     };
     // The table is the catalog, whole: a key added to one and not the other is a hole.
     expect(Object.keys(replaced).sort()).toEqual(Object.keys(vi_.en).sort());
@@ -625,8 +620,8 @@ describe("the Inspector catalog (vi_)", () => {
     expect(fillText(en.vi_fromKitForUnit, { units: "7", unit: "footing" })).toBe("From the kit, for ×7 footing");
     expect(fillText(en.vi_fromKitPer, { unit: en.vi_unitLower })).toBe("From the kit, per unit");
     expect(fillText(en.vi_yourHoursStand, { hours: "3", kit: "14" })).toBe("your 3 h stand (the kit says 14 h)");
-    expect(fillText(en.vi_btn_fillAnswersFromPlansOne, { n: "1" })).toBe("Fill 1 Answer From The Plans");
-    expect(fillText(en.vi_btn_fillAnswersFromPlansMany, { n: "2" })).toBe("Fill 2 Answers From The Plans");
+    expect(fillText(en.vi_btn_fillAnswersFromPlansOne, { n: "1" })).toBe("Fill 1 Answer from the Plans");
+    expect(fillText(en.vi_btn_fillAnswersFromPlansMany, { n: "2" })).toBe("Fill 2 Answers from the Plans");
     expect(fillText(en.vi_measurementsMany, { n: "1" })).toBe("1 measurements"); // the bar's old words, singular and all
     expect(fillText(en.vi_photosOne, { n: "1" })).toBe("1 photo");
     expect(fillText(en.vi_partsMany, { n: "2" })).toBe("2 parts");

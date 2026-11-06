@@ -76,14 +76,14 @@ export function moreOptionsSummary(v: InquiryFormValue, t: (key: string) => stri
 }
 
 /**
- * NEW LEAD IN SEVEN (W2-07): Name, Phone, Address, What They Need, What Kind Of Work and How Long
+ * NEW LEAD IN SEVEN (W2-07): Name, Phone, Address, What They Need, What Kind of Work and How Long
  * side by side, and one closed More Options row — the pattern Wave 1's New Job set. It was thirteen
  * fields, one of them "Residential or commercial", which the Company box already answers (the server
  * works it out: leads/actions inferredLeadType).
  *
  *   Address is the street-only picker: the city, state and zip a pick resolves show on one grey line
  *   under it and go as hidden inputs; typing over a pick clears them (a town left from another street
- *   is the false value 0177 forbids). A street typed and not picked gets "Add The Town", which opens
+ *   is the false value 0177 forbids). A street typed and not picked gets "Add the Town", which opens
  *   More Options, where its City, State and Zip are.
  *   More Options holds Company, Email and Internal Notes (and that town), and opens itself when a
  *   restored draft or an edited lead has anything inside it.

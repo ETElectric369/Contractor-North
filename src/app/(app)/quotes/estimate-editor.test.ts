@@ -111,8 +111,8 @@ describe("birth without litter", () => {
     const doors: [string, string][] = [
       ["qe_btn_notNow", "Not Now"],
       ["qe_btn_dropThemAll", "Drop Them All"],
-      ["qe_btn_addToEstimate", "Add {n} To The Estimate"],
-      ["qe_btn_applyToBook", "Apply {n} To The Price Book"],
+      ["qe_btn_addToEstimate", "Add {n} to the Estimate"],
+      ["qe_btn_applyToBook", "Apply {n} to the Price Book"],
       ["qe_btn_tickAll", "Tick All"],
       ["qe_btn_untickAll", "Untick All"],
     ];
@@ -158,7 +158,7 @@ describe("the saved page's doors, on the editor", () => {
     );
     const t = text(html);
     expect(t).toContain("← From Lead: Thistlewood Builders");
-    expect(t).toContain("← From The Visit on");
+    expect(t).toContain("← From the Visit on");
     expect(t).toContain("Revises E-000 — accepting this one supersedes it.");
     expect(t).toContain("plans.pdf");
     expect(t).toContain("Created");
@@ -196,9 +196,9 @@ describe("the saved page's doors, on the editor", () => {
     expect(t).toContain("These line items are locked");
     expect(t).toContain("A draw was already billed against it — revise it instead.");
     expect(html).not.toContain('placeholder="hours?"');
-    expect(t).not.toContain("Add A Task");
+    expect(t).not.toContain("Add a Task");
     expect(t).not.toContain("Draft with Estimator");
-    expect(t).not.toContain("Labor And Parts On The Paper");
+    expect(t).not.toContain("Labor and Parts on the Paper");
     expect(html).toContain('id="title"');
     expect(t).toContain("Install transfer switch");
     expect(t).toContain("$290.00");
@@ -210,10 +210,10 @@ describe("the saved page's doors, on the editor", () => {
     expect(t).toContain("Superseded by E-002 — that estimate is the price for this work now.");
     expect(t).toContain("These line items are locked");
     expect(t).toContain("E-001 is superseded by E-002 — edit that one instead.");
-    expect(t).not.toContain("Add A Line");
+    expect(t).not.toContain("Add a Line");
     // The revision deleted or walked back: requireEditableQuote says editable, and so does the editor.
     const free = text(saved({ status: "superseded" }, [task], { supersededBy: null, lock: null }));
-    expect(free).toContain("Add A Line");
+    expect(free).toContain("Add a Line");
     expect(free).not.toContain("These line items are locked");
     expect(editorSrc).toContain('const lock: { reason: string } | null = props.mode === "saved" ? props.saved.lock : null;');
     expect(editorSrc).not.toContain("its lines are history now");

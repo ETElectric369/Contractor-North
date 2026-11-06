@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { TRADE_ORDER, TRADE_PRESETS } from "@/lib/trade-codes";
 import { TRADE_PACKAGES } from "@/lib/trade-package";
+import { titleCaseIn } from "../../tests/title-case-words";
 import {
   ALL_ON,
   BLANK_PRESET,
@@ -38,8 +39,8 @@ describe("the whitelist and the board", () => {
   it("every key has exactly one row, in the same order, with a Title Case label and one plain line", () => {
     expect(FEATURES.map((f) => f.key)).toEqual([...FEATURE_KEYS]);
     for (const f of FEATURES) {
-      // Title Case: every word starts upper-case, except the joining "&".
-      for (const w of f.label.split(" ")) if (w !== "&") expect(w[0], `${f.label}`).toMatch(/[A-Z]/);
+      // Title Case through the one judge (cn-v1148).
+      expect(titleCaseIn(f.label, "en"), f.label).toBe(true);
       expect(f.line.length, f.key).toBeGreaterThan(10);
       expect(f.line.length, f.key).toBeLessThanOrEqual(110);
       expect(f.line).not.toMatch(/\bsettings\.|_|0\d{3}/); // no developer text

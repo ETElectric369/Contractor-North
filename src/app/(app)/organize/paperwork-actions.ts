@@ -21,7 +21,7 @@ import { createOpenListPaper, openListLine } from "@/app/(app)/bills/open-list-c
  * and waits. File It, Undo and Tie are in actions.ts beside the teardown they share. This file
  * holds the rest: the "Already In" check before upload, the row, a person's own corrections, the
  * CED path (a CED PDF goes on the supplier documents list, which is what those are, never a bill),
- * and Keep It In Files for paper that is not a cost.
+ * and Keep It in Files for paper that is not a cost.
  */
 
 export type PaperResult = { ok: boolean; error?: string; message?: string };
@@ -211,7 +211,7 @@ function cedDropLine(p: PaperProposal | null): string {
   const bad = refused.length
     ? `; ${refused.length} didn't add up and won't be added: ${refused.map((r) => r.error).join("; ")}`
     : "";
-  return `${found}${bad}. Waiting below: press Add To Supplier Documents.`;
+  return `${found}${bad}. Waiting below: press Add to Supplier Documents.`;
 }
 
 /**
@@ -265,7 +265,7 @@ export async function updatePaperwork(
     return {
       ok: false,
       askCharge: true,
-      error: `This was read as a credit memo: money coming back to you. A return goes on a job as a negative total, -${Math.abs(amount).toFixed(2)}, so it comes off the customer's bill. If it really is a ${type} you paid or owe, press It Is A Charge.`,
+      error: `This was read as a credit memo: money coming back to you. A return goes on a job as a negative total, -${Math.abs(amount).toFixed(2)}, so it comes off the customer's bill. If it really is a ${type} you paid or owe, press It Is a Charge.`,
     };
   }
 
@@ -279,7 +279,7 @@ export async function updatePaperwork(
   };
   // THE LINES TURN WITH THE TOTAL A PERSON TYPED (audit v994 review). The reader lined them up with
   // the total IT read; a person who types the other sign here (a return's -51.58 on a paper read
-  // as a bill, or It Is A Charge on one read as a credit memo) would otherwise leave the row, and
+  // as a bill, or It Is a Charge on one read as a credit memo) would otherwise leave the row, and
   // the bill File It makes from it, pointing both ways at once. insertItemizedBill holds the same
   // rule where the bill is written; this keeps the tray row itself telling the truth.
   if (amount !== null && Array.isArray(item.line_items) && item.line_items.length) {

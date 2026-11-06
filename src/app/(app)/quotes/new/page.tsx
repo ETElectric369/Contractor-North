@@ -90,7 +90,7 @@ export default async function NewQuotePage({
   let typedCapture: ReturnType<typeof parseInspectorCapture> | null = null;
   let captureInquiryId: string | undefined;
   let captureApptId: string | undefined; // verified appointment id — saveQuote stamps the write-up backlink on it
-  let captureScopeWord: string | null = null; // the visit's scope word: what Remember As A Kit files a kit under
+  let captureScopeWord: string | null = null; // the visit's scope word: what Remember as a Kit files a kit under
   // The inspection already knows WHOSE house this is. Without carrying these through, a repeat
   // customer's inspection wrote up into a blank estimate and you re-picked them from the full
   // contact list standing in their yard.
@@ -110,7 +110,7 @@ export default async function NewQuotePage({
       // THE VISIT'S ESTIMATE IS OPENED, NEVER TWINNED (S1): a second open of this door, a stale Start
       // The Estimate link or a second tab must edit the row the visit already became — its first
       // save would otherwise birth a twin and overwrite the visit's backlink (capture.quote_id, last
-      // writer wins). The same answer the Inspector's Open The Estimate reads; a superseded one opens
+      // writer wins). The same answer the Inspector's Open the Estimate reads; a superseded one opens
       // its standing revision, and a declined or expired one hands this door back.
       const standing = await liveEstimateBehindVisit(supabase, captureQuoteId((appt as any).capture));
       if (standing) redirect(`/quotes/${standing}`);

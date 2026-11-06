@@ -165,7 +165,7 @@ export function scheduleStatus(milestones: Milestone[], contractTotal: number): 
  *   contract   a fixed-price job with a live estimate and no schedule: the contract
  *              (contractTotalFromQuotes, the page's progress.estimate) less what went out on sent,
  *              non-void bills (progress.invoiced; a draft is not a bill). The job's New Invoice bills
- *              from it (Part Of The Estimate takes a part of exactly this figure).
+ *              from it (Part of the Estimate takes a part of exactly this figure).
  *   schedule   a job on a payment schedule, any billing type: scheduleStatus' own remaining (the
  *              scheduled dollars not drawn yet), and the next payment Request Next Payment draws.
  *

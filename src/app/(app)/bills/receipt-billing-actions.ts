@@ -37,7 +37,7 @@ async function restampAfterLineWrite(supabase: any, orgId: string | null | undef
  * the line off the customer's bill, or typing a new "used" figure, would re-cost a 190 ft roll as the
  * whole 250 ft coil (or bill 60 ft while the shelf still holds 250). So while a roll sits on the line
  * these two doors refuse, and say the way through: take the roll off the shelf, then change it and
- * put the rest back. Bill The Whole Line (billed_amount null) still goes: it takes the roll off.
+ * put the rest back. Bill the Whole Line (billed_amount null) still goes: it takes the roll off.
  * Null means no roll (or a database before 0303); a string is the refusal, or a failed read.
  */
 async function liveRollOnLine(supabase: any, orgId: string | null | undefined, lineId: string): Promise<string | null> {
@@ -49,7 +49,7 @@ async function liveRollOnLine(supabase: any, orgId: string | null | undefined, l
 }
 
 const ROLL_ON_LINE =
-  "A roll from this line is in stock, and it holds the pieces this job didn't use. Take It Out Of Stock first, change what this job used, then put the rest back in stock.";
+  "A roll from this line is in stock, and it holds the pieces this job didn't use. Take It Out of Stock first, change what this job used, then put the rest back in stock.";
 
 /**
  * SWITCH ONE RECEIPT LINE OFF THE CUSTOMER'S BILL (migration 0268).
@@ -232,7 +232,7 @@ export async function setReceiptLineUsage(input: {
    * with no cost and no history. That count is now a cache of the shelf's own ledger, which the
    * database refuses to have typed over, and a line is marked is_stock only while a roll from it
    * is on the shelf. So this door moves the MONEY (what this job is billed) and nothing else;
-   * "Put The Rest On The Shelf" (putOnShelf in src/lib/stock-ledger.ts) is the door that puts the
+   * "Put the Rest on the Shelf" (putOnShelf in src/lib/stock-ledger.ts) is the door that puts the
    * rest on the shelf, with its pieces, its unit and what it cost off this receipt (Phase 2).
    */
   const note = await restampAfterLineWrite(supabase, ctx.orgId, (line as { bill_id?: string | null }).bill_id);
@@ -323,9 +323,9 @@ export async function putRestOnShelf(input: ShelfPick): Promise<ReceiptLineUsage
 }
 
 /**
- * TAKE IT OFF THE SHELF: the way back from Put The Rest On The Shelf, while nothing has been taken
+ * TAKE IT OFF THE SHELF: the way back from Put the Rest on the Shelf, while nothing has been taken
  * from the roll (the database refuses after, naming the takes to undo). The roll's dollars go back
- * onto the job; what the customer is billed does not move, and Bill The Whole Line is one tap away.
+ * onto the job; what the customer is billed does not move, and Bill the Whole Line is one tap away.
  */
 export async function takeRollOffShelf(lotId: string): Promise<Result> {
   const res = await unshelveLot(String(lotId ?? ""));

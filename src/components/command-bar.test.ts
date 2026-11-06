@@ -11,7 +11,7 @@ import { translator } from "@/lib/i18n";
 import { ALL_ON, type FeatureMap } from "@/lib/features";
 import { isApplePlatform, modKeyLabel } from "@/lib/mod-key";
 import { NORT_TALK_EVENT, SETUP_EVENT } from "@/lib/onboarding/help-rows";
-import { esTitleCase } from "../../tests/es-function-words";
+import { esTitleCase } from "../../tests/title-case-words";
 
 const barSrc = readFileSync(join(process.cwd(), "src/components/command-bar.tsx"), "utf8");
 
@@ -41,7 +41,7 @@ describe("commandNavItems", () => {
       // The lapsed dock's fourth row, Download Everything (/settings?tab=getpaid, cn-v1138), carries a
       // ?query like every status row and stays out of the palette; Settings is its door here.
       expect(hrefs(items), String(isStaff)).toEqual(["/subscribe", "/settings", "/analytics/accountant"]);
-      expect(items.map((i) => i.label)).toEqual(["Pick A Plan", "Settings", "Download For Your Accountant"]);
+      expect(items.map((i) => i.label)).toEqual(["Pick a Plan", "Settings", "Download for Your Accountant"]);
       expect(commandNavItems(isStaff, ALL_ON, true, true, "es").map((i) => i.label)).toEqual(["Elegir un Plan", "Ajustes", "Descargar para Tu Contador"]);
       expect(hrefs(matchNavItems(items, "accountant"))).toEqual(["/analytics/accountant"]);
       expect(hrefs(matchNavItems(items, "jobs"))).toEqual([]);
@@ -289,32 +289,32 @@ describe("the command bar's footer", () => {
 });
 
 /**
- * SEARCH OR ASK, NOTHING TYPED (W1-09): Talk To Nort first (Nort on), then — for staff — the rows
+ * SEARCH OR ASK, NOTHING TYPED (W1-09): Talk to Nort first (Nort on), then — for staff — the rows
  * the graduation cap held. Nort off, none of them: the setup rows sit under Help in the avatar menu.
  */
-describe("Search Or Ask's rows before anything is typed", () => {
+describe("Search or Ask's rows before anything is typed", () => {
   const DONE = { full_name: "Pat Lee", trade: "Electrical", city: "Truckee", service_area: "Tahoe", labor_rate: 120 };
   const labels = (rows: ReturnType<typeof idleRows>) => rows.map((r) => r.label);
 
-  it("Nort on, staff never walked through: Talk To Nort, Start Here, Show Me How, Take The Setup Again", () => {
+  it("Nort on, staff never walked through: Talk to Nort, Start Here, Show Me How, Take the Setup Again", () => {
     expect(labels(idleRows({ isStaff: true, features: ALL_ON, setup: {}, onboarded: false }))).toEqual([
-      "Talk To Nort", "Start Here", "Show Me How", "Take The Setup Again",
+      "Talk to Nort", "Start Here", "Show Me How", "Take the Setup Again",
     ]);
   });
 
   it("walked through, two setup questions still open: Finish Setting Up · 2 Left", () => {
     const rows = idleRows({ isStaff: true, features: ALL_ON, setup: { ...DONE, service_area: null, labor_rate: null }, onboarded: true });
-    expect(labels(rows)).toEqual(["Talk To Nort", "Finish Setting Up · 2 Left", "Show Me How", "Take The Setup Again"]);
+    expect(labels(rows)).toEqual(["Talk to Nort", "Finish Setting Up · 2 Left", "Show Me How", "Take the Setup Again"]);
   });
 
   it("walked through, nothing open: no Start Here and no Finish row", () => {
     expect(labels(idleRows({ isStaff: true, features: ALL_ON, setup: DONE, onboarded: true }))).toEqual([
-      "Talk To Nort", "Show Me How", "Take The Setup Again",
+      "Talk to Nort", "Show Me How", "Take the Setup Again",
     ]);
   });
 
-  it("a tech: Talk To Nort only — no setup rows", () => {
-    expect(labels(idleRows({ isStaff: false, features: ALL_ON, setup: {}, onboarded: false }))).toEqual(["Talk To Nort"]);
+  it("a tech: Talk to Nort only — no setup rows", () => {
+    expect(labels(idleRows({ isStaff: false, features: ALL_ON, setup: {}, onboarded: false }))).toEqual(["Talk to Nort"]);
   });
 
   it("Nort off: nothing here (Search only; the setup rows live under Help, behind the initials)", () => {
@@ -325,7 +325,7 @@ describe("Search Or Ask's rows before anything is typed", () => {
 
   it("Show Me How folds its lessons open under it, and lists only lessons whose switch is on", () => {
     const open = labels(idleRows({ isStaff: true, features: ALL_ON, setup: DONE, onboarded: true, lessonsOpen: true }));
-    expect(open).toEqual(["Talk To Nort", "Show Me How", "Why Lines", "Getting Around", "How a Job Runs", "Take The Setup Again"]);
+    expect(open).toEqual(["Talk to Nort", "Show Me How", "Why Lines", "Getting Around", "How a Job Runs", "Take the Setup Again"]);
     const noSales = labels(idleRows({ isStaff: true, features: off("leads", "estimates"), setup: DONE, onboarded: true, lessonsOpen: true }));
     expect(noSales).not.toContain("Why Lines");
     // Its own row keeps the sheet open (it only folds) and says which way it's folded.
@@ -336,7 +336,7 @@ describe("Search Or Ask's rows before anything is typed", () => {
 
 /**
  * A SPANISH-SPEAKING TECH'S PALETTE (cn-v1138): the same rows, in his words — the dock's labels
- * through dockLabel, Talk To Nort, the kind chip, the lapsed rows. The English list is byte for
+ * through dockLabel, Talk to Nort, the kind chip, the lapsed rows. The English list is byte for
  * byte what it was (the default language is "en").
  */
 describe("the palette in Spanish", () => {
@@ -364,7 +364,7 @@ describe("the palette in Spanish", () => {
 
   it("before anything is typed: Hablar con Nort, said out loud", () => {
     expect(idleRows({ isStaff: false, features: ALL_ON, setup: {}, onboarded: false, lang: "es" }).map((r) => [r.label, r.sub])).toEqual([["Hablar con Nort", "Dilo en voz alta"]]);
-    expect(idleRows({ isStaff: false, features: ALL_ON, setup: {}, onboarded: false }).map((r) => [r.label, r.sub])).toEqual([["Talk To Nort", "Say it out loud"]]);
+    expect(idleRows({ isStaff: false, features: ALL_ON, setup: {}, onboarded: false }).map((r) => [r.label, r.sub])).toEqual([["Talk to Nort", "Say it out loud"]]);
   });
 
   it("the kind chip: Go to → Ir a; a kind the catalog does not name stays as typed", () => {
@@ -581,11 +581,11 @@ describe("a doing row runs inside the tap that picked it", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it("Talk To Nort dispatches cn:nort-talk SYNCHRONOUSLY: the listener has run before run() returns", () => {
+  it("Talk to Nort dispatches cn:nort-talk SYNCHRONOUSLY: the listener has run before run() returns", () => {
     let heard = false;
     target.addEventListener(NORT_TALK_EVENT, () => (heard = true));
     const talk = idleRows({ isStaff: false, features: ALL_ON, onboarded: true })[0];
-    expect(talk.label).toBe("Talk To Nort");
+    expect(talk.label).toBe("Talk to Nort");
     talk.run!();
     // No await between: if dispatching were deferred (a timer, a promise), this would still be false,
     // and on an iPhone the mic would start outside the gesture and never open.
@@ -616,11 +616,11 @@ describe("a doing row runs inside the tap that picked it", () => {
     expect(calls.order).toEqual(rows.flatMap(() => ["unlockAudio", "dispatch"]));
   });
 
-  it("with Nort off Start Here and Take The Setup Again open the questions (no tour: the tour is Nort talking)", async () => {
+  it("with Nort off Start Here and Take the Setup Again open the questions (no tour: the tour is Nort talking)", async () => {
     const { helpRows } = await import("@/lib/onboarding/help-rows");
     const rows = helpRows({ isStaff: true, onboarded: false, setup: {}, nortOn: false, features: off("nort") });
     expect(rows.flatMap((r) => ("request" in r ? [`${r.label}=${r.request}`] : [r.label]))).toEqual([
-      "Start Here=questions", "Show Me How", "Take The Setup Again=questions",
+      "Start Here=questions", "Show Me How", "Take the Setup Again=questions",
     ]);
   });
 });

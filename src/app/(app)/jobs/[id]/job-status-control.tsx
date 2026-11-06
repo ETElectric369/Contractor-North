@@ -88,7 +88,7 @@ export async function writeStatusPick(id: string, next: string): Promise<{ ok: b
  * menu (44px rows, Title Case, the current one checked). Every write goes through the guarded
  * writers: setJobStatus, and setJobHold for a hold. Picking On Hold opens the come-back picker
  * instead of writing blind: Why? (required, it is the reminder the job comes back with) and the day
- * (In A Week unless another is picked; there is no "no date": "too quiet gets things lost", 0366),
+ * (In a Week unless another is picked; there is no "no date": "too quiet gets things lost", 0366),
  * with Hold It. Leaving on_hold is ONE write, the pick itself (writeStatusPick): setJobStatus clears
  * hold_reason on any status that isn't on_hold, and the database's own jobs_hold_day (0366) clears
  * the day and who held it, so a stale reason never reads as a live one. (It used to go through

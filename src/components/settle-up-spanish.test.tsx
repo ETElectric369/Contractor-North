@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { CATALOGS, dict, fillText, translator } from "@/lib/i18n";
 import { TEXTS_NOT_READY_LINE } from "@/lib/sms-readiness";
 import { sendFirstDetail, sendFirstQuestion } from "@/lib/pay-door-words";
-import { esTitleCase } from "../../tests/es-function-words";
+import { esTitleCase, titleCaseIn } from "../../tests/title-case-words";
 
 /**
  * THE SETTLE UP BUTTON IN SPANISH (the visit-page-in-Spanish wave, cn-v1144, su_). The one Get Paid
@@ -85,7 +85,7 @@ describe("the Get Paid sheet speaks Spanish to a Spanish reader", () => {
     expect(text(job)).toContain("Una tarjeta se cobra sobre la factura abierta del trabajo");
     const visit = text(es(createElement(SettleUpButton as never, { source: "appointment", id: "a-1", cardEnabled: true, methods: ["Cash"] })));
     expect(visit).toContain("Una tarjeta escribe la factura, la envía y marca la visita como hecha");
-    expect(visit).not.toMatch(/Send The Bill|Get Paid/);
+    expect(visit).not.toMatch(/Send the Bill|Get Paid/);
   });
 
   it("the last sentence before Apple owns the screen carries the door's own cents, in Spanish; English is the default", () => {
@@ -169,13 +169,8 @@ describe("the Get Paid sheet speaks Spanish to a Spanish reader", () => {
 
 describe("the Settle Up catalog (su_)", () => {
   const su = CATALOGS.find((c) => c.prefix === "su_")!;
-  /** Every word begins with a capital, a digit or a symbol, after Spanish's opening ¿ / ¡; a {slot} is a hole. */
-  const titleCase = (s: string) =>
-    s
-      .replace(/\{\w+\}/g, " ")
-      .split(/\s+/)
-      .filter(Boolean)
-      .every((w) => /^[¿¡]?[\p{Lu}\p{N}&\/+·(—–]/u.test(w));
+  /** English Title Case through the one judge (tests/title-case-words, cn-v1148). */
+  const titleCase = (s: string) => titleCaseIn(s, "en");
 
   it("names the one screen that reads it, and nothing else", () => {
     expect(su).toBeTruthy();
@@ -221,17 +216,17 @@ describe("the Settle Up catalog (su_)", () => {
       su_cardOnVisitLine: "A card writes the bill, sends it, and marks the visit done — then the card door goes in front of the customer.",
       su_btn_gettingItReady: "Getting It Ready…",
       su_btn_showCardQr: "Show Card QR",
-      su_btn_sendBillShowCardQr: "Send The Bill & Show Card QR",
+      su_btn_sendBillShowCardQr: "Send the Bill & Show Card QR",
       su_draftAtOpen: "{doc} is still a draft, so a card asks to send it as the bill first. Money recorded below doesn't.",
       su_thisInvoiceCap: "This invoice",
       su_scanToPay: "Scan to pay — {amount}",
       su_scanToPayByCard: "Scan to pay by card",
       su_cardApplePayLine: "Card, Apple Pay or Google Pay on their phone. It records itself the moment it lands.",
-      su_btn_textThePayLink: "Text The Pay Link",
+      su_btn_textThePayLink: "Text the Pay Link",
       su_btn_copied: "Copied",
       su_btn_copyLink: "Copy Link",
       su_waitingForPayment: "Waiting for the payment…",
-      su_payLinkNote: "Text The Pay Link sends from this phone’s number. Copy Link to send it from the business line.",
+      su_payLinkNote: "Text the Pay Link sends from this phone’s number. Copy Link to send it from the business line.",
       su_payLinkSms: "{inv}{amount}. Pay by card here: {url}",
       su_invoiceDash: "Invoice {n} — ",
       su_holdCard: "Hold their card to the top of the phone: {amount}",
@@ -242,7 +237,7 @@ describe("the Settle Up catalog (su_)", () => {
       su_confirmingStripe: "Confirming with Stripe — a few seconds.",
       su_turningOnTap: "Turning on Tap to Pay on iPhone — Apple's terms come up first.",
       su_appleGuideUp: "Apple's guide to Tap to Pay on iPhone is up.",
-      su_appleGuideUnavailable: "Apple's guide isn't available on this iPhone — the steps are in Settings › Getting Paid › How To Tap.",
+      su_appleGuideUnavailable: "Apple's guide isn't available on this iPhone — the steps are in Settings › Getting Paid › How to Tap.",
       su_balanceChanged: "The balance changed while Apple's terms were up. Press Tap to Pay again for the new amount.",
       su_cardApprovedChecking: "Card approved — checking with Stripe…",
       su_askAdmin: "Ask an owner or admin to enable Tap to Pay on iPhone first.",
@@ -280,7 +275,7 @@ describe("the Settle Up catalog (su_)", () => {
       su_btn_textReceipt: "Text Receipt",
       su_btn_texted: "Texted",
       su_btn_sending: "Sending…",
-      su_btn_textFromThisPhone: "Text From This Phone",
+      su_btn_textFromThisPhone: "Text from This Phone",
       su_btn_emailReceipt: "Email Receipt",
       su_btn_emailed: "Emailed",
       su_btn_share: "Share",
@@ -291,11 +286,11 @@ describe("the Settle Up catalog (su_)", () => {
       su_untilThenTextFromPhone: "Until then, text it from this phone.",
       su_scanForReceipt: "Scan for the receipt",
       su_noteTextReceipt: "Text Receipt sends from the business’s number.",
-      su_noteTextFromPhone: "Text From This Phone sends from this phone’s number.",
+      su_noteTextFromPhone: "Text from This Phone sends from this phone’s number.",
       su_noteEmailReceipt: "Email Receipt sends from the business’s email.",
       su_noteShare: "Share opens this phone’s share sheet.",
       su_receiptTexted: "Receipt texted — the paid invoice, from the business's number.",
-      su_textingNotSetUp: "Texting isn't set up yet, so the business can't text it. Text From This Phone sends it from yours.",
+      su_textingNotSetUp: "Texting isn't set up yet, so the business can't text it. Text from This Phone sends it from yours.",
       su_textDidntSend: "The text didn't send — open the invoice and send it from there.",
       su_textDidntReach: "The text didn't reach the server — check your connection and try again.",
       su_receiptEmailed: "Receipt emailed — the paid invoice.",
@@ -318,7 +313,7 @@ describe("the Settle Up catalog (su_)", () => {
       su_amountPlaceholder: "$ amount",
       su_howTheyPaidLower: "How they paid",
       su_btn_showVenmoQr: "Show Venmo QR",
-      su_btn_sendBillShowVenmoQr: "Send The Bill & Show Venmo QR",
+      su_btn_sendBillShowVenmoQr: "Send the Bill & Show Venmo QR",
       su_datePaid: "Date Paid",
       su_note: "Note",
       su_notePlaceholder: "e.g. check #1042",

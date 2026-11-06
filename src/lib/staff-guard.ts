@@ -36,7 +36,7 @@ export async function requireStaff() {
 }
 
 /** Resolve a Supabase client for ANY signed-in, active member of a company: the crew as well as
- *  the office. For the few doors both share (Took From Stock, Shop Stock Phase 3): the database
+ *  the office. For the few doors both share (Took from Stock, Shop Stock Phase 3): the database
  *  decides what each may do (stock_draw hands a tech no cost), and this says who is asking.
  *  Deactivated is a boundary here exactly as in requireStaff. orgId is required: a door with no
  *  company to scope to is refused, never run unscoped. */

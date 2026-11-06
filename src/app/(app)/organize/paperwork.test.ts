@@ -884,7 +884,7 @@ describe("a supplier return through Organize: its lines come with it, or it does
       expect(res.ok).toBe(false);
       expect(res.askCharge).toBe(true);
       expect(res.error).toContain("-51.58");
-      expect(res.error).toContain("It Is A Charge");
+      expect(res.error).toContain("It Is a Charge");
       expect(did("organized_items", "update")).toBeUndefined();
     });
 
@@ -898,7 +898,7 @@ describe("a supplier return through Organize: its lines come with it, or it does
       expect(did("organized_items", "update")!.payload).toMatchObject({ doc_type: "bill", amount: -51.58, kind: "receipt" });
     });
 
-    it("a person who says It Is A Charge is believed: a misread bill saves positive", async () => {
+    it("a person who says It Is a Charge is believed: a misread bill saves positive", async () => {
       state.client = fakeSupabase(
         { "organized_items.select": [{ data: MEMO, error: null }], "organized_items.update": [{ data: [{ id: "oi-ret" }], error: null }] },
         calls,
@@ -908,7 +908,7 @@ describe("a supplier return through Organize: its lines come with it, or it does
       expect(did("organized_items", "update")!.payload).toMatchObject({ doc_type: "bill", amount: 51.58 });
     });
 
-    it("It Is A Charge turns the credit memo's negative lines positive in the same save", async () => {
+    it("It Is a Charge turns the credit memo's negative lines positive in the same save", async () => {
       state.client = fakeSupabase(
         {
           "organized_items.select": [{ data: { ...MEMO, line_items: NEGATIVE }, error: null }],
@@ -1121,7 +1121,7 @@ describe("AI Suggest never takes money out of the tray", () => {
     );
     const res = await aiReviewItem("oi-2");
     expect(res.ok).toBe(true);
-    expect(res.message).toContain("Tap Keep As Note on the row");
+    expect(res.message).toContain("Tap Keep as Note on the row");
     const u = did("organized_items", "update")!;
     expect(u.payload.status).toBeUndefined();
     expect(u.payload.proposal).toMatchObject({ suggestKeep: true, suggestTask: null, why: "Reference." });
@@ -1239,7 +1239,7 @@ describe("AI Suggest never takes money out of the tray", () => {
     expect(did("tasks", "delete")).toBeDefined();
   });
 
-  it("Keep As Note files it as a note, only while it is waiting, and a receipt is never kept as a note", async () => {
+  it("Keep as Note files it as a note, only while it is waiting, and a receipt is never kept as a note", async () => {
     state.client = fakeSupabase(
       { "organized_items.select": [{ data: { ...NOTE, proposal: { suggestKeep: true } }, error: null }], "organized_items.update": [{ data: [{ id: "oi-2" }], error: null }] },
       calls,
@@ -1427,7 +1427,7 @@ describe("Tie and Undo", () => {
   it("Undo of a job's photo filed with a bill already on the books drops the row, never the bill, never into the tray", async () => {
     // billJobReceipt's same-number answer (J-013 "ARR #56"): a job document tied to the bill its
     // number names, source "job". There is no tray paper to put back: the photo stays the job's and
-    // reads Not On A Bill Yet on its Costs tab again.
+    // reads Not on a Bill Yet on its Costs tab again.
     state.client = fakeSupabase(
       {
         "organized_items.select": [
@@ -1439,7 +1439,7 @@ describe("Tie and Undo", () => {
     );
     const res = await undoPaperwork("oi-9");
     expect(res.ok).toBe(true);
-    expect(res.message).toContain("Not On A Bill Yet");
+    expect(res.message).toContain("Not on a Bill Yet");
     expect(did("bills", "delete")).toBeUndefined();
     expect(did("organized_items", "update")).toBeUndefined();
     expect(did("organized_items", "delete")?.selected).toBe(true);
@@ -1603,7 +1603,7 @@ describe("Undo, Delete and a deleted bill leave nothing wrong behind (audit v994
     expect(written[1]).toMatchObject({ billable: true, billed_amount: 7.2 });
   });
 
-  it("TD3: a line with a roll on the shop shelf refuses the Undo, and points at Take It Off The Shelf", async () => {
+  it("TD3: a line with a roll on the shop shelf refuses the Undo, and points at Take It Off the Shelf", async () => {
     const lines = [{ description: "12/2 Romex, 250 ft", quantity: 1, unit_price: 180, amount: 180, category: "Materials", billable: true, billed_amount: 36, is_stock: true, sort_order: 0 }];
     state.client = fakeSupabase(
       {
@@ -1616,7 +1616,7 @@ describe("Undo, Delete and a deleted bill leave nothing wrong behind (audit v994
     const res = await undoPaperwork("oi-9");
     expect(res.ok).toBe(false);
     expect(res.error).toContain("(12/2 Romex, 250 ft) is in shop stock");
-    expect(res.error).toContain("Take It Out Of Stock");
+    expect(res.error).toContain("Take It Out of Stock");
     expect(did("bills", "delete")).toBeUndefined();
   });
 
@@ -1638,7 +1638,7 @@ describe("Undo, Delete and a deleted bill leave nothing wrong behind (audit v994
     expect(did("documents", "delete")).toBeUndefined();
     expect(did("organized_items", "update")).toBeUndefined();
     expect(did("organized_items", "delete")!.eqs).toContainEqual(["org_id", "org-1"]);
-    expect(res.message).toContain("The receipt stays on the job; press Record As Cost there");
+    expect(res.message).toContain("The receipt stays on the job; press Record as Cost there");
   });
 
   it("TD1: a link row written by Record as Cost says so (source 'job'), whatever its dates", async () => {
@@ -1718,7 +1718,7 @@ describe("a picture: What is this? (Erik, 2026-09-24)", () => {
     );
     const res = await fileItem("oi-p", { type: "photo", jobId: "job-046" });
     expect(res.ok).toBe(true);
-    // IN THE JOB'S OWN FOLDER (audit v994, PR4): the tech on the job can see it and Show On Portal
+    // IN THE JOB'S OWN FOLDER (audit v994, PR4): the tech on the job can see it and Show on Portal
     // takes it. The paper keeps its organize original for the tray.
     expect(storageLog.copied).toHaveLength(1);
     expect(storageLog.copied[0][0]).toBe("org-1/organize/panel.jpg");
@@ -1876,7 +1876,7 @@ describe("a picture: What is this? (Erik, 2026-09-24)", () => {
     expect(did("documents", "insert")!.payload).toMatchObject({ job_id: "job-046", file_url: "org-1/organize/quote.pdf" });
   });
 
-  it("Bill Or Receipt makes it a receipt first, then reads it for the total, even if the model still calls it a photo", async () => {
+  it("Bill or Receipt makes it a receipt first, then reads it for the total, even if the model still calls it a photo", async () => {
     ai.parsed = { paper_type: "photo", kind: "job_document", title: "Home Depot", vendor: "Home Depot", amount: 23.4, category: "Photo", confidence: "medium" };
     state.client = fakeSupabase(
       {
@@ -1902,7 +1902,7 @@ describe("a picture: What is this? (Erik, 2026-09-24)", () => {
     expect(did("bills", "insert")).toBeUndefined();
   });
 
-  it("Bill Or Receipt on a paper already filed changes nothing", async () => {
+  it("Bill or Receipt on a paper already filed changes nothing", async () => {
     state.client = fakeSupabase(
       { "organized_items.select": [{ data: { id: "oi-p", title: "x", file_url: "org-1/organize/p.jpg", status: "filed", proposal: null }, error: null }] },
       calls,
@@ -1912,7 +1912,7 @@ describe("a picture: What is this? (Erik, 2026-09-24)", () => {
     expect(did("organized_items", "update")).toBeUndefined();
   });
 
-  it("Bill Or Receipt is only the answer to What Is This?: a statement or a CED PDF is refused, and nothing is written", async () => {
+  it("Bill or Receipt is only the answer to What Is This?: a statement or a CED PDF is refused, and nothing is written", async () => {
     for (const row of [
       { ...PICTURE, doc_type: "statement", category: "Other", proposal: null },
       { ...PICTURE, doc_type: null, category: "Other", proposal: { ced: { name: "ced.pdf", text: "x" } } },
@@ -1954,7 +1954,7 @@ describe("a picture: What is this? (Erik, 2026-09-24)", () => {
     const bucket = await aiReviewItem("oi-p");
     expect(bucket.ok).toBe(true);
     expect(bucket.message).toContain("Nothing was picked");
-    expect(bucket.message).toContain("press Bill Or Receipt");
+    expect(bucket.message).toContain("press Bill or Receipt");
     expect(bucket.message).not.toContain("Tap it");
     expect(did("organized_items", "update")).toBeUndefined();
   });
@@ -2011,13 +2011,13 @@ describe("billJobReceipt (Snap the Bill, Record as Cost) no longer drops what th
  * ITEMS C1-1 AND C1-4 (ONE DEFECT): THE PERSON'S PART OF THE JOB IS NOT THROWN AWAY BY A GOOD READ.
  *
  * Erik is on Chris's deck job, whose estimate is Framing and Decking. He taps Add Cost, picks
- * "Decking" in Part Of The Job, snaps the lumber receipt and taps Read the Receipt — the DEFAULT save,
+ * "Decking" in Part of the Job, snaps the lumber receipt and taps Read the Receipt — the DEFAULT save,
  * because supplier and amount are blank. The sheet handed this function paid, category and the date
  * and NOT his answer, so the model's "Framing" won (or nothing did), the Costs tab printed
- * "No Part Of The Job Set" on the very cost he had just answered, and nothing said so — while the
+ * "No Part of the Job Set" on the very cost he had just answered, and nothing said so — while the
  * Category dropdown directly above it was carried through under this file's own attestation rule.
  */
-describe("billJobReceipt: the person's Part Of The Job beats the model's (items C1-1, C1-4)", () => {
+describe("billJobReceipt: the person's Part of the Job beats the model's (items C1-1, C1-4)", () => {
   const paper = {
     vendor: "A Lumber Yard",
     amount: 900,
@@ -2046,7 +2046,7 @@ describe("billJobReceipt: the person's Part Of The Job beats the model's (items 
     expect(did("bills", "insert")!.payload.scope_category).toBe("Decking");
   });
 
-  it("stores his answer even when the model shrugged — the case that read 'No Part Of The Job Set'", async () => {
+  it("stores his answer even when the model shrugged — the case that read 'No Part of the Job Set'", async () => {
     estimate.scopes = ["Framing", "Decking"];
     ai.parsed = { ...paper, scope_category: "Uncategorized" };
     state.client = fakeSupabase(script(), calls);
@@ -2202,7 +2202,7 @@ describe("importCedInvoices knows a PDF by its content, never its name", () => {
     const res = await importCedInvoices({ files: [{ name: "statement.txt", text: "%PDF-1.7\n1 0 obj << >>" }] });
     expect(res.ok).toBe(false);
     expect(res.error).toContain("statement.txt reached here as raw PDF bytes");
-    expect(res.error).toContain("Put it in through Snap Or Note");
+    expect(res.error).toContain("Put it in through Snap or Note");
   });
 });
 
@@ -2496,7 +2496,7 @@ describe("billJobReceipt asks 'already on the books?' like every other door (aud
         // The "already billed?" read, loadBooks' papers read, then the "already tied?" read.
         "organized_items.select": [{ data: null, error: null }, { data: [], error: null }, { data: null, error: null }],
         // The tie: this photo filed against the bill (J-013 "ARR #56": a loose second photo used to
-        // sit on the Costs badge as "Not On A Bill Yet" forever).
+        // sit on the Costs badge as "Not on a Bill Yet" forever).
         "organized_items.insert": [{ data: [{ id: "oi-tie" }], error: null }],
       }),
       calls,

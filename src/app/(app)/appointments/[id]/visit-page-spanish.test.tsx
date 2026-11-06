@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CATALOGS, dict, fillText, translator } from "@/lib/i18n";
 import { formatDate, formatDateTime } from "@/lib/utils";
-import { esTitleCase } from "../../../../../tests/es-function-words";
+import { esTitleCase, titleCaseIn } from "../../../../../tests/title-case-words";
 
 /**
  * THE VISIT PAGE IN SPANISH (the visit-page-in-Spanish wave, cn-v1144, vp_). The page a tech opens from
@@ -91,7 +91,7 @@ const atClock = (iso: string, p: Partial<CardProps>) => {
     vi.useRealTimers();
   }
 };
-const NO_ENGLISH_DOORS = /Start The Job|Link To|Make A New Job|Ask The Office|Call The Office|Text The Office|Clock In On|Switch To|Open J-|Here to do the work|This visit is done|on the clock on/;
+const NO_ENGLISH_DOORS = /Start the Job|Link To|Make a New Job|Ask the Office|Call the Office|Text the Office|Clock In On|Switch To|Open J-|Here to do the work|This visit is done|on the clock on/;
 
 describe("the start card speaks Spanish to a Spanish reader", () => {
   it("office, no job yet: the question, the line with the customer, and the two doors in Title Case", () => {
@@ -180,12 +180,12 @@ describe("the start card speaks Spanish to a Spanish reader", () => {
     expect(body).toContain(formatDateTime(preview.scheduledStart, TZ, "es"));
     expect(body).not.toContain(formatDateTime(preview.scheduledStart, TZ, "en"));
     expect(html).toContain('aria-label="Hora de inicio"');
-    expect(html).not.toMatch(/Visit Time|Pick A Time|Started at|The job will be/);
+    expect(html).not.toMatch(/Visit Time|Pick a Time|Started at|The job will be/);
     // A job with no customer and no address yet: Ninguno for the customer, Ninguna for the address.
     const bare = text(atClock("2026-09-25T22:32:00.000Z", { preview: { ...preview, customer: null, address: null } }));
     expect(bare).toContain("Cliente Ninguno aún");
     expect(bare).toContain("Dirección Ninguna aún");
-    // With a same-day job on offer the sheet is Make A New Job, and names the second job.
+    // With a same-day job on offer the sheet is Make a New Job, and names the second job.
     const second = atClock("2026-09-25T22:32:00.000Z", { linkInstead: { ...j55, customer: "Pat Thistlewood" } });
     expect(second).toContain('data-modal="Crear Nuevo Trabajo"');
     expect(second).toContain('Pat Thistlewood ya tiene <span class="font-semibold">J-055</span>, hecho ese día. Esto crea un segundo trabajo.');
@@ -211,7 +211,7 @@ describe("how the visit ended, in Spanish", () => {
     expect(text(html)).toMatch(/^¿Cómo terminó esta\?/);
     expect(html).toContain(">Perdida<");
     expect(html).toContain("Ganada · Elegir el Trabajo");
-    expect(html).not.toMatch(/Lost|Won · Pick The Job|How did this one end/);
+    expect(html).not.toMatch(/Lost|Won · Pick the Job|How did this one end/);
   });
 
   it("the estimate it became, a dead one said so; the outcome with a Spanish day and Cambiar", () => {
@@ -335,13 +335,8 @@ describe("the page and the voice fill (server side): the mechanism on the source
 
 describe("the visit page catalog (vp_)", () => {
   const vp = CATALOGS.find((c) => c.prefix === "vp_")!;
-  /** Every word begins with a capital, a digit or a symbol, after Spanish's opening ¿ / ¡; a {slot} is a hole. */
-  const titleCase = (s: string) =>
-    s
-      .replace(/\{\w+\}/g, " ")
-      .split(/\s+/)
-      .filter(Boolean)
-      .every((w) => /^[¿¡]?[\p{Lu}\p{N}&\/+·(—–]/u.test(w));
+  /** English Title Case through the one judge (cn-v1148: significant words; tests/title-case-words). */
+  const titleCase = (s: string) => titleCaseIn(s, "en");
 
   it("names the page, its five pieces and its hear-actions, then the pieces it draws and the server it taps (builder D), and nothing else", () => {
     expect(vp).toBeTruthy();
@@ -415,22 +410,22 @@ describe("the visit page catalog (vp_)", () => {
 
   it("every English value is the literal it replaced, byte for byte", () => {
     const replaced: Record<string, string> = {
-      vp_btn_backToSchedule: "Back To Schedule",
-      vp_btn_backToMyDay: "Back To My Day",
+      vp_btn_backToSchedule: "Back to Schedule",
+      vp_btn_backToMyDay: "Back to My Day",
       vp_btn_actions: "Actions",
       vp_pendingPick: "pending pick",
       vp_doneBadge: "done",
       vp_cancelledBadge: "cancelled",
       vp_btn_markInspectionDone: "Mark Inspection Done",
       vp_btn_editDetails: "Edit Details…",
-      vp_waitingForADay: "Waiting For A Day",
+      vp_waitingForADay: "Waiting for a Day",
       vp_noJob: "no job",
       vp_crewLeadsAfterUpdate: "Crew leads can fill this in once the office finishes an update. Until then only the office can change it.",
       vp_customerToldUsOnline: "What the customer told us online",
       vp_theirWordsConfirm: "Their words, not a finding — confirm on site.",
       vp_noneMatchedSheet: "None of these matched a question on your inspection sheet, so none of them could fill it in.",
       vp_couldntReadWebsiteForm: "Couldn't read the website form's questions just now, so the customer's answers aren't shown. Reload to try again.",
-      vp_inspectionOrEstimate: "Inspection Or Estimate",
+      vp_inspectionOrEstimate: "Inspection or Estimate",
       vp_inspection: "Inspection",
       vp_thisJob: "This job",
       vp_noConnection: "No connection. That didn't go through; try again when you have a bar or two.",
@@ -461,31 +456,31 @@ describe("the visit page catalog (vp_)", () => {
       vp_onClockSince: "You’re on the clock on {label} since {since}.",
       vp_startingMovesWhole: "Starting this job moves this whole punch onto it — none of it stays behind.",
       vp_startingSwitchesHere: "Starting this job switches your clock here.",
-      vp_btn_linkTo: "Link To {job}",
-      vp_btn_linkToInstead: "Link To {job} Instead",
-      vp_btn_makeANewJobAnyway: "Make A New Job Anyway",
-      vp_btn_startAJobFromThisVisit: "Start A Job From This Visit",
-      vp_btn_startTheJobAndClockIn: "Start The Job And Clock In",
-      vp_btn_startTheJob: "Start The Job",
+      vp_btn_linkTo: "Link to {job}",
+      vp_btn_linkToInstead: "Link to {job} Instead",
+      vp_btn_makeANewJobAnyway: "Make a New Job Anyway",
+      vp_btn_startAJobFromThisVisit: "Start a Job from This Visit",
+      vp_btn_startTheJobAndClockIn: "Start the Job and Clock In",
+      vp_btn_startTheJob: "Start the Job",
       vp_askOfficeToStart: "Ask the office to start the job",
       vp_askOverNoJob: "This visit is done and has no job. If the work goes on, ask the office to start one.",
       vp_askNoJobYet: "This visit has no job yet, and only the office can start one. Once they do, you can clock in right here.",
-      vp_btn_askTheOffice: "Ask The Office",
-      vp_btn_callTheOffice: "Call The Office",
-      vp_btn_textTheOffice: "Text The Office",
+      vp_btn_askTheOffice: "Ask the Office",
+      vp_btn_callTheOffice: "Call the Office",
+      vp_btn_textTheOffice: "Text the Office",
       vp_thisVisitIs: "This visit is {job}",
       vp_switchingMovesWhole: "Switching moves this whole punch onto {job} — none of it stays behind.",
       vp_switchingEndsPart: "Switching ends that part now and starts this one.",
       vp_closedLine: "The visit is done and {job} is finished, so there’s no clock to start here.",
-      vp_youreOnTheClockHere: "You’re On The Clock Here",
-      vp_btn_switchTo: "Switch To {job}",
-      vp_btn_clockInOn: "Clock In On {job}",
+      vp_youreOnTheClockHere: "You’re on the Clock Here",
+      vp_btn_switchTo: "Switch to {job}",
+      vp_btn_clockInOn: "Clock In on {job}",
       vp_btn_open: "Open {job}",
-      vp_makeANewJob: "Make A New Job",
+      vp_makeANewJob: "Make a New Job",
       vp_btn_cancel: "Cancel",
       vp_btn_linking: "Linking…",
       vp_btn_starting: "Starting…",
-      vp_btn_switchToThisJob: "Switch To This Job",
+      vp_btn_switchToThisJob: "Switch to This Job",
       vp_alreadyHasSecondJob: "{customer} already has {job}, made that day. This makes a second job.",
       vp_theJobWillBe: "The job will be",
       vp_name: "Name",
@@ -500,7 +495,7 @@ describe("the visit page catalog (vp_)", () => {
       vp_startedAt: "Started at",
       vp_btn_now: "Now",
       vp_btn_visitTime: "Visit Time · {clock}",
-      vp_btn_pickATime: "Pick A Time",
+      vp_btn_pickATime: "Pick a Time",
       vp_clockStartsAtTimeAbove: "Your clock starts at the time above.",
       vp_noConnectionLink: "No connection, so that didn't go through. Try again when you have a bar or two.",
       vp_connectThisTo: "Connect this to a lead, customer or job",
@@ -516,14 +511,14 @@ describe("the visit page catalog (vp_)", () => {
       vp_nobodyByThatName: "Nobody by that name yet.",
       vp_nothingMatchesYet: "Nothing matches yet — carry on, you can connect this later.",
       vp_couldntMakeTheLead: "Couldn't make the lead.",
-      vp_btn_addAsANewLead: "Add As A New Lead",
+      vp_btn_addAsANewLead: "Add as a New Lead",
       vp_addressGoesOnLead: "{typed} — this visit’s address goes on the lead",
       vp_couldntConnectIt: "Couldn't connect it — try again.",
       vp_won: "Won",
       vp_lost: "Lost",
       vp_btn_lost: "Lost",
-      vp_btn_wonPickTheJob: "Won · Pick The Job",
-      vp_btn_clearTheAnswer: "Clear The Answer",
+      vp_btn_wonPickTheJob: "Won · Pick the Job",
+      vp_btn_clearTheAnswer: "Clear the Answer",
       vp_btn_keepIt: "Keep It",
       vp_writtenUpAs: "Written up as",
       vp_btn_theEstimate: "The Estimate",
@@ -544,7 +539,7 @@ describe("the visit page catalog (vp_)", () => {
       vp_btn_markDone: "Mark Done",
       vp_couldntPutBackOnSchedule: "Couldn't put it back on the schedule — try again.",
       vp_backOnTheSchedule: "Back on the schedule.",
-      vp_btn_putItBackOnTheSchedule: "Put It Back On The Schedule",
+      vp_btn_putItBackOnTheSchedule: "Put It Back on the Schedule",
       vp_thatVisitDidntChange: "That visit didn't change — try again.",
       vp_btn_wontHappen: "Won't Happen",
       vp_couldntUpdateStatus: "Couldn't update the status — try again.",
@@ -555,7 +550,7 @@ describe("the visit page catalog (vp_)", () => {
       vp_formIsntAnInspection: "That form isn't an inspection.",
     };
     // The table is C's half of the catalog, whole; D's half (visit-pieces-spanish.test's table, 122 keys:
-    // the Edit Details modal, Clear The Date, Start The Job's server, the shared libraries, the clock-in's
+    // the Edit Details modal, Clear the Date, Start the Job's server, the shared libraries, the clock-in's
     // clash) is the rest. A key added to the catalog and to neither table is a hole.
     for (const k of Object.keys(replaced)) expect(vp.en, k).toHaveProperty(k);
     expect(Object.keys(vp.en)).toHaveLength(Object.keys(replaced).length + 122);
@@ -566,7 +561,7 @@ describe("the visit page catalog (vp_)", () => {
     expect(fillText(en.vp_switchedClock, { job: "J-055", from: en.vp_theOtherJob, at: "3:32 PM" })).toBe("Switched your clock to J-055 from the other job at 3:32 PM.");
     expect(fillText(en.vp_clockedYouIn, { job: "J-055", at: "12:00 PM" })).toBe("Clocked you in on J-055 at 12:00 PM.");
     expect(fillText(en.vp_clockInUndone, { job: en.vp_theJob })).toBe("Clock-in undone. The job stays.");
-    expect(fillText(en.vp_btn_linkToInstead, { job: "J-055" })).toBe("Link To J-055 Instead");
+    expect(fillText(en.vp_btn_linkToInstead, { job: "J-055" })).toBe("Link to J-055 Instead");
     expect(fillText(en.vp_btn_visitTime, { clock: "10:00 AM" })).toBe("Visit Time · 10:00 AM");
     expect(fillText(en.vp_markedDoneNote, { note: "3 tasks joined J-055." })).toBe("Marked Done. 3 tasks joined J-055.");
     expect(fillText(en.vp_putBackNote, { note: "The pick-a-time link stays withdrawn — send a new one." })).toBe("Put back. The pick-a-time link stays withdrawn — send a new one.");

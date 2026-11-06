@@ -9,11 +9,11 @@ import { join } from "node:path";
  *
  *  - No switches stored (or on): the ledger renders exactly as before.
  *  - Purchase Orders off: New PO goes (the list's ⋯ with it), and every PO is still a row of the one
- *    list (W1-32), under the Off line (the owner gets Turn On; anyone else Ask The Owner). Open POs
+ *    list (W1-32), under the Off line (the owner gets Turn On; anyone else Ask the Owner). Open POs
  *    keep counting in job cost: nothing on this page computes that, and nothing here skips the
  *    purchase_orders read.
  *  - Shop Stock off: a receipt line isn't offered to the shelf, the supplier cards don't offer it,
- *    and Record To Shelf gets neither half; a roll already on the shelf keeps its line.
+ *    and Record to Shelf gets neither half; a roll already on the shelf keeps its line.
  */
 let tab: string | null = null;
 vi.mock("next/navigation", () => ({
@@ -58,8 +58,8 @@ describe("the ledger's purchase orders (one list, W1-32)", () => {
     tab = "po";
     expect(ledger({ features: ALL_ON, isOwner: true })).toBe(ledger());
     expect(ledger()).toContain("data-new-po");
-    expect(ledger()).toMatch(/aria-label="More For All Bills"/);
-    expect(ledger()).not.toContain("Ask The Owner");
+    expect(ledger()).toMatch(/aria-label="More for All Bills"/);
+    expect(ledger()).not.toContain("Ask the Owner");
     // No tab strip any more: the orders are rows of the one list.
     expect(ledger()).not.toMatch(/<button[^>]*>Purchase Orders/);
   });
@@ -68,7 +68,7 @@ describe("the ledger's purchase orders (one list, W1-32)", () => {
     tab = null;
     const off = ledger({ features: { ...ALL_ON, purchase_orders: false } });
     expect(off).not.toContain("data-new-po");
-    expect(off).not.toContain("More For All Bills");
+    expect(off).not.toContain("More for All Bills");
     expect(off).toContain("PO-003");
     expect(off).toContain('href="/purchasing/po1"');
   });
@@ -82,7 +82,7 @@ describe("the ledger's purchase orders (one list, W1-32)", () => {
     expect(owner).toContain("PO-003");
     // A tech or the office: told who can turn it on, and no button.
     const staff = ledger({ features: { ...ALL_ON, purchase_orders: false }, isOwner: false });
-    expect(staff).toContain("Ask The Owner");
+    expect(staff).toContain("Ask the Owner");
     expect(staff).not.toContain(">Turn On<");
   });
 });
@@ -94,22 +94,22 @@ describe("a receipt line and the shelf", () => {
     supplier: "A Supplier",
     lines: [{ id: "l1", description: "12/2 NM-B 250'", quantity: 1, unit: "ea", unit_price: 158.55, amount: 158.55, category: null, billable: true, billable_amount: 158.55 }],
   } as any;
-  it("on / not passed: today's line, Put The Rest On The Shelf offered", () => {
+  it("on / not passed: today's line, Put the Rest on the Shelf offered", () => {
     const today = renderToStaticMarkup(createElement(ReceiptLines, { receipt }));
     expect(renderToStaticMarkup(createElement(ReceiptLines, { receipt, shopStock: true }))).toBe(today);
-    expect(today).toContain("Put The Rest In Stock");
+    expect(today).toContain("Put the Rest in Stock");
   });
   it("off: not offered", () => {
-    expect(renderToStaticMarkup(createElement(ReceiptLines, { receipt, shopStock: false }))).not.toContain("Put The Rest In Stock");
+    expect(renderToStaticMarkup(createElement(ReceiptLines, { receipt, shopStock: false }))).not.toContain("Put the Rest in Stock");
   });
 });
 
 describe("the page wires the switches (the parts too big to draw here)", () => {
   const PAGE = readFileSync(join(process.cwd(), "src/app/(app)/bills/page.tsx"), "utf8");
-  it("Record To Shelf gets both halves only while Shop Stock is on", () => {
+  it("Record to Shelf gets both halves only while Shop Stock is on", () => {
     expect(PAGE).toContain("...(shopStock ? { shelfLines: supplierInvoiceShelfLines, recordToShelf: recordSupplierInvoiceToShelf } : {})");
   });
-  it("the supplier cards, Needs You's paper cards and Add By Hand are told the switch", () => {
+  it("the supplier cards, Needs You's paper cards and Add by Hand are told the switch", () => {
     expect(PAGE).toMatch(/supplierPaperFeed\(\{[\s\S]*?shopStock,\s*\}\)/);
     expect(PAGE).toMatch(/<NeedsYou\s+items=\{paperItems\}\s+jobs=\{paperJobs\}\s+matches=\{paperMatches\}\s+shopStock=\{shopStock\}/);
     expect(PAGE).toContain("<AddByHandButton jobs={handJobs} shopStock={shopStock} jobsUnread={!!jobsErr} />");

@@ -178,7 +178,7 @@ export default async function InvoicePage({
      is already folded into bill_rate there, so he is never "unrated". */
   const hasCostLines = ((items ?? []) as { import_source?: string | null }[]).some((i) => i.import_source === "costs");
   /* THE WAY IN FOR HOURS ON NO JOB (0357): an invoice with no job that went out and has a line that
-     could hold hours offers Already Billed: Hours On No Job, so hours taken back off with Not Billed
+     could hold hours offers Already Billed: Hours on No Job, so hours taken back off with Not Billed
      After All (or never marked) can be marked here any day, not only from a Needs You row that lives
      three days. Only while some shift on no job is open to mark (a door onto nothing is a dead end);
      a lost read shows the door, and the sheet says what it finds. */
@@ -193,7 +193,7 @@ export default async function InvoicePage({
        and touching the box can never send the customer's usual back over an invoice priced at
        something else. No materials lines yet: nothing to read, the box starts at the usual. */
     (inv as any).job_id && hasCostLines ? readInvoiceMarkup(supabase, inv.id, (inv as any).job_id) : Promise.resolve(null),
-    // Send To QuickBooks shows only when THIS company has connected (qboConnected).
+    // Send to QuickBooks shows only when THIS company has connected (qboConnected).
     qboConnected(String((inv as any).org_id ?? "")),
     /* HOURS ON NO JOB MARKED BY HAND ON THIS INVOICE (0357, TTUSD on INV-055): they have no job page,
        so this is where their Not Billed After All lives. Only on an invoice with no job that isn't
@@ -392,7 +392,7 @@ export default async function InvoicePage({
 
   return (
     <div className="mx-auto max-w-4xl">
-      <BackLink fallback="/billing" fallbackLabel="Back To Invoices" />
+      <BackLink fallback="/billing" fallbackLabel="Back to Invoices" />
       {refund && (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
           {refund.recorded != null ? (
@@ -604,7 +604,7 @@ export default async function InvoicePage({
       )}
       {(noJobHandLines.length > 0 || noJobDoor) && (
         <div className="mb-4 space-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
-          <p className="text-sm font-semibold text-slate-900">{noJobHandLines.length > 0 ? "Hours On No Job, Billed By Hand Here" : "Hours On No Job"}</p>
+          <p className="text-sm font-semibold text-slate-900">{noJobHandLines.length > 0 ? "Hours on No Job, Billed by Hand Here" : "Hours on No Job"}</p>
           {noJobHandLines.map((l) => (
             <div key={l.lineId} className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
               <span>
@@ -623,8 +623,8 @@ export default async function InvoicePage({
               )}
               <AlreadyBilledButton
                 jobId={null}
-                target={{ kind: "time", ids: [], what: "Hours On No Job", invoiceId: inv.id }}
-                label="Already Billed: Hours On No Job"
+                target={{ kind: "time", ids: [], what: "Hours on No Job", invoiceId: inv.id }}
+                label="Already Billed: Hours on No Job"
               />
             </div>
           )}

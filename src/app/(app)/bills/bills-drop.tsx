@@ -12,7 +12,7 @@ import type { NumberMatch } from "@/lib/paperwork";
  * THE BILLS PAGE'S HALF OF THE ONE PAPER DOOR (W1-30; it was Drop Paperwork, Justin 2026-09-24:
  * "drop PDF/JPEG/PNG onto Bills & Purchasing and have it parsed").
  *
- * The queue is Snap Or Note's (components/snap-or-note: the + in the top bar, on every page): one
+ * The queue is Snap or Note's (components/snap-or-note: the + in the top bar, on every page): one
  * set of rules for a photo, a PDF, a supplier's list or a bank download, whichever way it came in.
  * This page keeps two things of its own:
  *
@@ -59,14 +59,14 @@ export function PaperworkDropZone({ children }: { children: React.ReactNode }) {
  * NEEDS YOU: ONE CARD FOR EVERYTHING WAITING ON A PERSON (W1-32). In order: what happened to each file
  * just dropped (with Clear Finished Lines), every dropped paper waiting for its answer (a receipt, a
  * bill, a supplier invoice or a picture: the paper card), then the supplier's bills not in the books
- * (`supplier`, drawn by the page: the cards and their Waiting On A Credit lines, or the sentence saying
+ * (`supplier`, drawn by the page: the cards and their Waiting on a Credit lines, or the sentence saying
  * they couldn't be checked).
  *
  * A BANK DOWNLOAD AND A SUPPLIER'S OPEN LIST ARE NOT HERE ANY MORE (2026-10-03, Erik: "so it still
  * doesnt make sense to me that all this reconcile stuff is on the bills page"). They compare two
  * records rather than becoming a cost, so they are answered on /reconcile, where they are dropped
  * (lib/paperwork answeredOnReconcile). `statementsElsewhere` is how this card stays honest about it:
- * one line pointing at them, so every door that lands on #sort-these — My Day's Papers To Sort, a
+ * one line pointing at them, so every door that lands on #sort-these — My Day's Papers to Sort, a
  * download's own drop line — still reaches the paper it came for instead of an empty card.
  *
  * The count is only what is open: the papers waiting HERE plus the supplier cards. A statement waiting
@@ -118,7 +118,7 @@ export function NeedsYou({
     <Card className="mb-6 scroll-mt-20 p-4" id="needs-you">
       <h2 className="text-base font-semibold text-slate-900">Needs You{open ? ` (${open})` : ""}</h2>
       <p className="mt-0.5 text-xs text-slate-500">Paper to sort and supplier bills not in your books yet.</p>
-      {/* Where My Day's Papers To Sort lands. (A bank download is answered on Reconcile since
+      {/* Where My Day's Papers to Sort lands. (A bank download is answered on Reconcile since
           2026-10-03, and the link that used to say "Open Needs You" is gone: this card draws the
           pointer line to that page, never the download's own card.) */}
       <span id="sort-these" className="block scroll-mt-20" />
@@ -148,8 +148,8 @@ export function NeedsYou({
             className="flex min-h-11 items-center text-sm font-medium text-brand hover:underline"
           >
             {statementsElsewhere === 1
-              ? "A Statement Is Waiting On Reconcile"
-              : `${statementsElsewhere} Statements Are Waiting On Reconcile`}
+              ? "A Statement Is Waiting on Reconcile"
+              : `${statementsElsewhere} Statements Are Waiting on Reconcile`}
           </a>
         )}
         {supplier}

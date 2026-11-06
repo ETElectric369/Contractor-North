@@ -3,7 +3,7 @@ import type { DirectoryPanel } from "@/lib/panel/directory";
 
 /**
  * "YOUR PANEL" ON THE CUSTOMER'S JOB PAGE (0335; Panel plan, phase 5). Shown only once the office
- * turns on "Show The Panel On Their Page" for the job; live, like the rest of the page. Drawn by the
+ * turns on "Show the Panel on Their Page" for the job; live, like the rest of the page. Drawn by the
  * one directory renderer (components/panel-directory), from the customer-safe shape alone: where
  * each circuit sits, what the door says, what it feeds when that differs, its size and type, and a
  * New tag on the new work. No part numbers, suppliers, prices, wire tags, notes, progress, or

@@ -208,7 +208,7 @@ export default async function PublicInvoicePage({
                 className="flex min-h-[44px] w-full items-center justify-center rounded-xl px-6 py-3 text-center text-base font-semibold text-white shadow-sm"
                 style={{ backgroundColor: co.brand }}
               >
-                Pay {formatCurrency(fee.cardTotal)} By Card
+                Pay {formatCurrency(fee.cardTotal)} by Card
               </a>
               <p className="mt-1.5 text-center text-xs text-slate-500">
                 {fee.fee > 0
@@ -226,7 +226,7 @@ export default async function PublicInvoicePage({
                   className="flex min-h-[44px] w-full items-center justify-center rounded-xl border-2 bg-white px-6 py-3 text-center text-base font-semibold shadow-sm"
                   style={{ borderColor: co.brand, color: co.brand }}
                 >
-                  Pay {formatCurrency(balance)} By Bank Transfer
+                  Pay {formatCurrency(balance)} by Bank Transfer
                 </a>
                 <p className="mt-1.5 text-center text-xs text-slate-500">
                   {fee.fee > 0 ? "No processing fee. " : ""}Straight from your bank account. Takes a few business

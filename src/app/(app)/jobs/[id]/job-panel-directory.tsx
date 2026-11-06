@@ -112,7 +112,7 @@ export function PanelDirectoryCard({
               </a>
               {staff && (
                 <Button onClick={onSave} disabled={busy}>
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Save As Circuit Map
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Save as Circuit Map
                 </Button>
               )}
             </div>
@@ -120,7 +120,7 @@ export function PanelDirectoryCard({
               The door card and the circuit map, from the {n} kept circuit{n === 1 ? "" : "s"}. No prices, wire tags or notes are on it.
             </p>
             {staff && (
-              <p className="mt-1 text-xs text-slate-500">Save As Circuit Map puts it on the customer&apos;s Plans And Drawings, in place of the older circuit map.</p>
+              <p className="mt-1 text-xs text-slate-500">Save as Circuit Map puts it on the customer&apos;s Plans and Drawings, in place of the older circuit map.</p>
             )}
           </div>
         </div>

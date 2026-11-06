@@ -103,7 +103,7 @@ describe("an inspection's result is one door, in words", () => {
     // Only while the permit is open to visits: not before it is issued, not once closed, not a legacy hand-marked pass.
     expect([...PERMIT_STATUSES_OPEN_TO_VISITS].sort()).toEqual(["failed", "inspection_scheduled", "issued", "scheduled"]);
     expect(rows).toContain('const missing = !unread && PERMIT_STATUSES_OPEN_TO_VISITS.has(permitStatus ?? "") && stand.state !== "clear" ? authorityWithoutRow(authority, ordered) : null;');
-    expect(rows).toContain("Add The {missing} Inspection");
+    expect(rows).toContain("Add the {missing} Inspection");
     expect(rows).toContain("saveInspection({ authority: missing, scheduled_for: null, scheduled_window: null, permit_id: permitId, first: true })"); // the town goes first in line
     expect(rows).toContain("{canWrite && missing && addedFor !== missing && ("); // a second tap in the refresh gap adds nothing
     expect(rows).toContain('className="h-auto min-h-11 whitespace-normal py-2 text-left"'); // a long authority wraps, never widens the phone

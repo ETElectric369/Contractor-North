@@ -88,7 +88,7 @@ export function paperContentsLines(rows: SupplierPaperLineRow[]): PaperContentsL
     const part = text(l?.part_number);
     // A row with nothing on it at all is not a line (supplierBillLines drops the same ones).
     if (!amount && !qty && !money(l?.unit_price) && !description && !part) continue;
-    const named = description ?? part ?? "A Line With No Description";
+    const named = description ?? part ?? "A Line with No Description";
     const withPart = part && description && !description.toUpperCase().includes(part.toUpperCase()) ? `${named} (${part})` : named;
     // A back-ordered line prints a zero quantity: the count says nothing, so it is left off.
     const what = qty ? `${quantityWords(qty)} × ${withPart}` : withPart;
@@ -125,7 +125,7 @@ export function paperContents(input: {
       : input.pdfCheckFailed
         ? "It couldn't check for its PDF just now."
         : fileName
-          ? `Its PDF wasn't saved here, only what was read from ${fileName}. Put that PDF in again through Snap Or Note on Bills to keep it.`
+          ? `Its PDF wasn't saved here, only what was read from ${fileName}. Put that PDF in again through Snap or Note on Bills to keep it.`
           : "It came in as pasted text, so there's no PDF here.";
   return { invoiceNumber: String(input.invoice?.invoice_number ?? ""), lines, tax, shipping, total, offLines, pdfUrl, pdfNote };
 }

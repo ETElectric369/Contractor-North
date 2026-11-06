@@ -97,10 +97,10 @@ describe("what it says", () => {
   });
 
   it("one sentence: the new answer, then the rule, in the card's own words", () => {
-    const narrowed = sayRuleChange({ kind: "narrowed", said: "Already Counted Or Not Income", band: sayBand({ minCents: 55_000, maxCents: 200_000 }) });
-    expect(narrowed).toBe("The rule that said Already Counted Or Not Income now covers $550.00 to $2,000.00.");
-    expect(sayReanswer({ line: "June 3 TRANSFER FROM 9876", answer: "Owner's Money In", rules: [{ kind: "narrowed", said: "Already Counted Or Not Income", band: "$550.00 to $2,000.00" }] })).toBe(
-      "June 3 TRANSFER FROM 9876 is now Owner's Money In. The rule that said Already Counted Or Not Income now covers $550.00 to $2,000.00.",
+    const narrowed = sayRuleChange({ kind: "narrowed", said: "Already Counted or Not Income", band: sayBand({ minCents: 55_000, maxCents: 200_000 }) });
+    expect(narrowed).toBe("The rule that said Already Counted or Not Income now covers $550.00 to $2,000.00.");
+    expect(sayReanswer({ line: "June 3 TRANSFER FROM 9876", answer: "Owner's Money In", rules: [{ kind: "narrowed", said: "Already Counted or Not Income", band: "$550.00 to $2,000.00" }] })).toBe(
+      "June 3 TRANSFER FROM 9876 is now Owner's Money In. The rule that said Already Counted or Not Income now covers $550.00 to $2,000.00.",
     );
   });
 
@@ -122,8 +122,8 @@ describe("what it says", () => {
 
   it("a line that already says it: nothing changed, unless a rule still said the old answer", () => {
     expect(sayReanswer({ line: "June 3 TRANSFER FROM 9876", answer: "Owner's Money In", already: true })).toBe("June 3 TRANSFER FROM 9876 already says Owner's Money In. Nothing was changed.");
-    expect(sayReanswer({ line: "June 3 TRANSFER FROM 9876", answer: "Owner's Money In", already: true, rules: [{ kind: "narrowed", said: "Already Counted Or Not Income", band: "$550.00 to $2,000.00" }] })).toBe(
-      "June 3 TRANSFER FROM 9876 already says Owner's Money In. The rule that said Already Counted Or Not Income now covers $550.00 to $2,000.00.",
+    expect(sayReanswer({ line: "June 3 TRANSFER FROM 9876", answer: "Owner's Money In", already: true, rules: [{ kind: "narrowed", said: "Already Counted or Not Income", band: "$550.00 to $2,000.00" }] })).toBe(
+      "June 3 TRANSFER FROM 9876 already says Owner's Money In. The rule that said Already Counted or Not Income now covers $550.00 to $2,000.00.",
     );
   });
 
@@ -188,10 +188,10 @@ describe("the card's Sorted Lines", () => {
     );
     expect(more).toBe(0);
     expect(lines.map((l) => [l.day, l.title, l.money, l.direction, l.answer, l.by, l.current])).toEqual([
-      ["Sep 2", "SHELL 123 ANYTOWN", "$88.45", "out", "Fuel", "Answered By You", "cost:Fuel"],
-      ["Sep 4", "DEPOSIT", "$1,275.00", "in", "Already In North (Matched)", "Matched", null],
-      ["Sep 5", "Check 1043", "$640.00", "out", "Pay Pat Crew", "Answered By You", "crew:pat"],
-      ["Sep 12", "ANYTOWN WIRE HOUSE", "$340.55", "out", "On 41 Larkspur · J-054 — Marla Finch", "Answered By You", "job:job-1"],
+      ["Sep 2", "SHELL 123 ANYTOWN", "$88.45", "out", "Fuel", "Answered by You", "cost:Fuel"],
+      ["Sep 4", "DEPOSIT", "$1,275.00", "in", "Already in North (Matched)", "Matched", null],
+      ["Sep 5", "Check 1043", "$640.00", "out", "Pay Pat Crew", "Answered by You", "crew:pat"],
+      ["Sep 12", "ANYTOWN WIRE HOUSE", "$340.55", "out", "On 41 Larkspur · J-054 — Marla Finch", "Answered by You", "job:job-1"],
       ["Sep 13", "ACME TOOLS RETURN", "$30.00", "in", "Refund: Tools & Supplies", "By Your Rule", "cost:Tools & Supplies"],
     ]);
   });

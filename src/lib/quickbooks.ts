@@ -9,7 +9,7 @@ export function qboConfigured(): boolean {
 
 /**
  * True when THIS company has connected its QuickBooks (Wave 0). qboConfigured only says North can
- * talk to Intuit, so every company's invoice menu offered Send To QuickBooks, connected or not.
+ * talk to Intuit, so every company's invoice menu offered Send to QuickBooks, connected or not.
  * accounting_connections is owner/admin-readable only (0015), and office staff may push
  * (sendInvoiceToQuickbooks is requireStaff), so the row is read with the service client, for this
  * org, and only whether a realm is on it comes back. Any failure answers false: no door.

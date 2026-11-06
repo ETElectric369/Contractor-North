@@ -72,7 +72,7 @@ export default async function JobsPage({
       : Promise.resolve({ data: null }),
     // Un-drawn payment-schedule milestones ("unbilled" = no linked invoice, the
     // billing-pipeline rule): a draw job whose deposit is paid but whose remaining draws
-    // were never drafted still owes contract money — it must not tag "Paid In Full".
+    // were never drafted still owes contract money — it must not tag "Paid in Full".
     needBillingTags
       ? supabase.from("payment_milestones").select("job_id").is("invoice_id", null).limit(1000)
       : Promise.resolve({ data: null }),

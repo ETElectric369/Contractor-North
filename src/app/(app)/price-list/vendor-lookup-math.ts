@@ -13,7 +13,7 @@ import { refusalWords } from "@/lib/ai-refusal";
  * A choice with nothing left is removed. Nothing left at all is "Nothing found", said plainly.
  *
  * THE APP SUGGESTS, A PERSON DECIDES. A choice is only ever picked for a person when exactly one
- * came back and the name isn't a person's, and even then it is on screen with None Of These beside
+ * came back and the name isn't a person's, and even then it is on screen with None of These beside
  * it. A pick fills the preview row or the card's boxes; nothing is saved until Add or Save.
  *
  * Pure and client-safe (no server imports), so every rule is tested with made-up names.

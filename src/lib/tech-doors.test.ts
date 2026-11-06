@@ -70,7 +70,7 @@ describe("the job's side doors", () => {
     for (const tag of ["<SettleUpButton", "<MarkCompleteButton", "<SectionActionsMenu"]) {
       expect(s).toMatch(new RegExp(`\\{viewerIsStaff && [^\\n]*\\(\\n\\s*${tag}`));
     }
-    // Every other verb is a row inside that staff-only menu: Edit Details…, Clear The Date, Put It
+    // Every other verb is a row inside that staff-only menu: Edit Details…, Clear the Date, Put It
     // Back On The Schedule, Won't Happen.
     expect(s).toMatch(/\{viewerIsStaff && \(\s*<SectionActionsMenu tree=\{VISIT_ACTIONS_MENU\}>/);
     const menu = s.slice(s.indexOf("<SectionActionsMenu tree={VISIT_ACTIONS_MENU}>"), s.indexOf("</SectionActionsMenu>"));
@@ -95,7 +95,7 @@ describe("the job's side doors", () => {
     expect(s).toMatch(/estimateHref=\{viewerIsStaff && estimatesOn \?/);
     // The heading names the estimate only for the people who get its door.
     expect(s).toContain('{viewerIsStaff && estimatesOn ? t("vp_inspectionOrEstimate") : t("vp_inspection")}');
-    expect(translator("en")("vp_inspectionOrEstimate")).toBe("Inspection Or Estimate");
+    expect(translator("en")("vp_inspectionOrEstimate")).toBe("Inspection or Estimate");
     expect(translator("en")("vp_inspection")).toBe("Inspection");
   });
 
@@ -146,7 +146,7 @@ describe("the job's side doors", () => {
     // lost-read fallback that offers the doors wherever a sent bill is.
     const job = src("jobs/[id]/page.tsx");
     expect(job).toMatch(/r\.ready \? \(r\.jobs\.get\(id\) \?\? \{ charge: false, ret: false \}\) : \{ charge: false, ret: false \}/);
-    // The invoice page's Already Billed: Hours On No Job: only once the hands read is ready (a lost
+    // The invoice page's Already Billed: Hours on No Job: only once the hands read is ready (a lost
     // read still shows it; the sheet says what it finds).
     const inv = src("billing/[id]/page.tsx");
     expect(inv).toMatch(/const noJobReady = !\(noJobHands && noJobHands !== "failed" && !noJobHands\.ready\);/);
@@ -155,7 +155,7 @@ describe("the job's side doors", () => {
 });
 
 describe("pure rules", () => {
-  it("the + gives a tech no typed verb: his + is Snap Or Note (W1-11)", () => {
+  it("the + gives a tech no typed verb: his + is Snap or Note (W1-11)", () => {
     // The rows carry their words as keys since cn-v1139 (nv_add_, lib/words/nav.ts).
     expect(ACTIONS.filter((a) => !a.staffOnly).map((a) => a.key)).toEqual([]);
   });

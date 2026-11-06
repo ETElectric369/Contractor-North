@@ -148,7 +148,7 @@ const yearInputs = (): OwnerMoneyInputs => ({
 
 /**
  * SHOP STOCK (0303; Erik's decision 1, 2026-09-24: "the month i buy it"). A ticket bought for the
- * shelf, and the part of a job's ticket that went on the shelf, count as Put On The Shelf in the
+ * shelf, and the part of a job's ticket that went on the shelf, count as Put on the Shelf in the
  * month the ticket is dated - never in Materials & Bills or a business bucket. A piece taken off
  * the shelf later moves cost onto a job's profit only; it never adds to a month again. So filing a
  * STOCK ticket leaves the month's total cost unchanged, and the formula reconciles to the cent.
@@ -176,7 +176,7 @@ describe("computeOwnerMoney: the shelf counts in the month it is bought", () => 
     expect(holds(m.totals)).toBe(true);
   });
 
-  it("a STOCK ticket is Put On The Shelf in its month, never Materials, and the month's total cost is unchanged", () => {
+  it("a STOCK ticket is Put on the Shelf in its month, never Materials, and the month's total cost is unchanged", () => {
     const asJob = computeOwnerMoney(inputs([jobTicket]), AUG, TZ, TODAY);
     const lots = [{ lot_id: "L1", bill_id: "s1", cost: 199.48, cost_left: 199.48, lost_cost: 0, live: true }];
     const asStock = computeOwnerMoney(inputs([{ ...stockTicket, on_shelf: true }], lots), AUG, TZ, TODAY);
@@ -191,7 +191,7 @@ describe("computeOwnerMoney: the shelf counts in the month it is bought", () => 
     for (const x of asStock.months) expect(holds(x)).toBe(true);
   });
 
-  it("only a STOCK ticket's ROLLS are Put On The Shelf: its Not Stock lines and their tax are Tools & Supplies, so the shelf adds up", () => {
+  it("only a STOCK ticket's ROLLS are Put on the Shelf: its Not Stock lines and their tax are Tools & Supplies, so the shelf adds up", () => {
     // 199.48 ticket; the counted coil is a $180.17 roll, the Not Stock line and its tax $19.31.
     const asJob = computeOwnerMoney(inputs([jobTicket]), AUG, TZ, TODAY);
     const lots = [{ lot_id: "L1", bill_id: "s1", cost: 180.17, cost_left: 180.17, lost_cost: 0, live: true }];
@@ -205,7 +205,7 @@ describe("computeOwnerMoney: the shelf counts in the month it is bought", () => 
     expect(holds(asStock.totals)).toBe(true);
   });
 
-  it("the shelf's part of a JOB ticket leaves Materials & Bills for Put On The Shelf, same month, same total", () => {
+  it("the shelf's part of a JOB ticket leaves Materials & Bills for Put on the Shelf, same month, same total", () => {
     const lots = [{ lot_id: "L1", bill_id: "h1", cost: 180.17, cost_left: 136.93, lost_cost: 0, live: true }];
     const m = computeOwnerMoney(inputs([jobTicket], lots), AUG, TZ, TODAY);
     expect(m.totals.materialsAndBills).toBe(19.31);
@@ -215,7 +215,7 @@ describe("computeOwnerMoney: the shelf counts in the month it is bought", () => 
     expect(holds(m.totals)).toBe(true);
   });
 
-  it("a write-off is Shop Stock Lost in the MONTH IT WAS WRITTEN OFF, and Put On The Shelf gives it back: Left For You never moves", () => {
+  it("a write-off is Shop Stock Lost in the MONTH IT WAS WRITTEN OFF, and Put on the Shelf gives it back: Left For You never moves", () => {
     // The roll went on the shelf in August; 50 ft were written off (ruined) in September.
     const lots = [{ lot_id: "L1", bill_id: "h1", cost: 180.17, cost_left: 100, live: true }];
     const moves = [{ id: "w1", lot_id: "L1", kind: "write_off", cost: 36.93, created_at: "2026-09-10T18:00:00Z" }];
@@ -269,7 +269,7 @@ describe("computeOwnerMoney: the shelf counts in the month it is bought", () => 
     expect(m.onShelfNow).toBe(40);
   });
 
-  it("an OPENING roll written off is never a month's loss: it was never a month's Put On The Shelf (review of Phase 4)", () => {
+  it("an OPENING roll written off is never a month's loss: it was never a month's Put on the Shelf (review of Phase 4)", () => {
     // Counted in at $100 with no receipt, then all of it written off in September. Nothing bought.
     const lots = [{ lot_id: "L0", bill_id: null, kind: "opening", cost: 100, cost_left: 0, live: true }];
     const moves = [{ id: "w0", lot_id: "L0", kind: "write_off", cost: 100, created_at: "2026-09-10T18:00:00Z" }];
@@ -1646,7 +1646,7 @@ describe("the owner's build time: on-site hours are a cost, office hours are ove
    * "What the owner's hours cost" had TWO implementations that rounded differently. The engine rounded
    * every shift to whole cents and added; tallyBuildTime (the job hub, /analytics' job rows,
    * budget-vs-actual, Nort's owner_cost) summed dollars and rounded once at the end. So the profit and
-   * loss's "Owner Hours Charged To Jobs" did not equal the sum of what the jobs were actually charged -
+   * loss's "Owner Hours Charged to Jobs" did not equal the sum of what the jobs were actually charged -
    * which is exactly what the accountant workbook tells an accountant that line IS.
    *
    * Measured before the fix: $15.09 against $15.08 at a $10.05 rate over three half-hour shifts, and it

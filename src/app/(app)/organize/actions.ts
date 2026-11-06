@@ -129,7 +129,7 @@ const READ_LIMIT = 8 * 1024 * 1024;
  * became a business cost, with no person looking at either. That is a model read writing money,
  * and a model read is a proposal. So this writes only the row: what the paper says, what KIND of
  * paper it is, the number printed on it, and what the reader SUGGESTS (the job the paper names, a
- * bucket). The row stays needs_review, "Ready To File", until a person picks where it goes and
+ * bucket). The row stays needs_review, "Ready to File", until a person picks where it goes and
  * presses File It, which is fileItem below and nothing else.
  *
  * The one exception is a handwritten note with no money on it: it is kept as a note, as before.
@@ -376,7 +376,7 @@ export async function readAsCost(id: string): Promise<{ ok: boolean; error?: str
     .maybeSingle();
   if (!item) return { ok: false, error: "That paper isn't here any more." };
   if (item.status !== "needs_review") return { ok: false, error: "This is already filed. Undo it first, then change what it is." };
-  // THE SAME GATE THE BUTTON SHOWS: Bill Or Receipt is the answer to "What is this?", which only a
+  // THE SAME GATE THE BUTTON SHOWS: Bill or Receipt is the answer to "What is this?", which only a
   // picture asks. A CED PDF, a statement or a credit memo turned into a receipt here would lose
   // what it is and become a cost File It could write.
   if (readinessOf(item).state !== "picture")
@@ -647,10 +647,10 @@ ${MASKED_PRICE_PROMPT_RULE}`,
       // after another Record as Cost press (another paid read).
       //
       // THE PHOTO IS FILED WITH THAT BILL (J-013 "ARR #56", 2026-09-30: one live bill, and the
-      // Costs badge said 3 with the receipts fold reading "Not On A Bill Yet"). This answer used to
+      // Costs badge said 3 with the receipts fold reading "Not on a Bill Yet"). This answer used to
       // write NOTHING, so the second photo of the same ticket stayed a Receipt on no tie: the job
       // page called it loose, counted it on the Costs chip, flagged it "Not on a bill yet." and
-      // offered Record As Cost, whose only answer was this sentence again, forever. The paper IS
+      // offered Record as Cost, whose only answer was this sentence again, forever. The paper IS
       // that bill's, by the same reading every door trusts, so it is filed against the bill the way
       // Same Purchase: Tie Them files one (tied_bill_id, never bill_id: no teardown can take the
       // bill down through it, and the idempotency read above still lets Different Purchase through).
@@ -675,7 +675,7 @@ ${MASKED_PRICE_PROMPT_RULE}`,
         ? `Already on the books: ${label}. This photo is filed with that bill; nothing was recorded twice.`
         : `Already on the books: ${label}. Nothing was recorded twice, but this photo couldn't be filed with that bill, so the job's Costs tab will keep saying it is not on a bill yet.`;
       // WHICH BILL, AND WHETHER IT IS THIS JOB'S (d1ff7c5a): when the tie above did NOT land, the
-      // doors beside this sentence used to be Record As Cost (another paid read, the same answer)
+      // doors beside this sentence used to be Record as Cost (another paid read, the same answer)
       // or Different Purchase (a SECOND bill for the same money). Naming the bill lets the door
       // offer Same Purchase: It's That Bill, which writes the one missing tie by hand
       // (linkReceiptToBill, job containment checked there). A tie that landed needs no door.
@@ -775,7 +775,7 @@ ${MASKED_PRICE_PROMPT_RULE}`,
     });
   }
   const linkWarning = linkMissing
-    ? "The cost is recorded, but this receipt did not get marked as billed. Tapping Record As Cost on it again would write a second bill, so check the job's costs first."
+    ? "The cost is recorded, but this receipt did not get marked as billed. Tapping Record as Cost on it again would write a second bill, so check the job's costs first."
     : null;
 
   // A PERSON SAID DIFFERENT PURCHASE: the tie the same-number answer filed this photo under (above)
@@ -1082,7 +1082,7 @@ async function whoPicked(
  * FILE IT: THE ONE DOOR A PIECE OF PAPER BECOMES MONEY THROUGH (0295).
  *
  * A person picked where it goes and pressed the button. Every surface that files paper calls this:
- * the Organize tray, Snap Or Note's cards (on /bills' Needs You), and nothing else. There used to be a second, weaker
+ * the Organize tray, Snap or Note's cards (on /bills' Needs You), and nothing else. There used to be a second, weaker
  * way in on /organize (a job dropdown that filed the moment it changed, with the category hard-
  * coded to "Receipt", no counter-preview flag and no look at what was already on the books), and a
  * third that let the model file on its own (AI Review & File). Both are gone; this is the only
@@ -1277,7 +1277,7 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
     category = docCategory;
     // A PHOTO OR A JOB PAPER GOES IN THE JOB'S OWN FOLDER (audit v994, PR4). Left in
     // <org>/organize/, which only the office can open (0213), a panel photo filed to J-047 was
-    // missing from the tech's Photos tab on J-047 and Show On Portal refused it. The document
+    // missing from the tech's Photos tab on J-047 and Show on Portal refused it. The document
     // points at a copy in <org>/<job>/; the paper keeps its original for the tray. A receipt or a
     // bill stays where it is: it is the office's paper, with prices on it.
     //
@@ -1438,7 +1438,7 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
         return backToTray(`Supplier document ${si.number} was just covered by another bill, so this was not filed. It is back in the tray; look again and tie it to that bill.`);
       if (linkErr || !linked?.length) {
         reportError("organize:fileItem.link", linkErr ?? new Error("bill_supplier_invoices insert wrote no rows"), { billId, supplierInvoiceId: si.id });
-        linkNote = ` The link to supplier document ${si.number} didn't save; the cost is on the books, and Record It As A Bill on that document will tie the two.`;
+        linkNote = ` The link to supplier document ${si.number} didn't save; the cost is on the books, and Record It as a Bill on that document will tie the two.`;
       }
     }
   }
@@ -1599,14 +1599,14 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
     if (item.job_id) revalidatePath(`/jobs/${item.job_id}`);
     return {
       ok: true,
-      message: `Undone: its cost is off the job. The receipt stays on the job; press Record As Cost there to make it a cost again.${papersBackSaid(torn.papersBack)}`,
+      message: `Undone: its cost is off the job. The receipt stays on the job; press Record as Cost there to make it a cost again.${papersBackSaid(torn.papersBack)}`,
     };
   }
 
   // A JOB'S PHOTO FILED WITH A BILL ALREADY ON THE BOOKS (billJobReceipt's same-number answer, a
   // tied row with source "job"): there is no tray paper to put back, only the job's own document,
-  // which stays. The row goes, so the photo reads Not On A Bill Yet on the job's Costs tab again,
-  // beside Record As Cost, exactly as an undone job-page cost does above. Never into the tray.
+  // which stays. The row goes, so the photo reads Not on a Bill Yet on the job's Costs tab again,
+  // beside Record as Cost, exactly as an undone job-page cost does above. Never into the tray.
   if (tied && item.source === "job" && !item.bill_id && item.document_id) {
     const { data: gone, error: goneErr } = await supabase.from("organized_items").delete().eq("id", id).eq("org_id", ctx.orgId).select("id");
     if (goneErr) return { ok: false, error: dbError(goneErr) };
@@ -1614,7 +1614,7 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
     revalidatePath("/organize");
     revalidatePath("/bills");
     if (item.job_id) revalidatePath(`/jobs/${item.job_id}`);
-    return { ok: true, message: "Untied. The photo stays on the job and reads Not On A Bill Yet on its Costs tab again; nothing else changed." };
+    return { ok: true, message: "Untied. The photo stays on the job and reads Not on a Bill Yet on its Costs tab again; nothing else changed." };
   }
 
   const type = paperTypeOfItem(item);
@@ -1803,9 +1803,9 @@ export async function deleteOrganizedItem(id: string): Promise<Result & { messag
 
 /**
  * Save a typed/dictated note as a needs-review item (no photo). THE ONE NOTE WRITER: Nort's
- * organize.saveNote and Snap Or Note's note box both land here.
+ * organize.saveNote and Snap or Note's note box both land here.
  *
- * It only saves, and answers quickly with the note's id. Snap Or Note's office note is read AFTER,
+ * It only saves, and answers quickly with the note's id. Snap or Note's office note is read AFTER,
  * on a call of its own (/api/paperwork/read with note: true, which runs aiReviewItem: the routine
  * model, metered under Organize), so a read that runs out of time or loses signal can only ever say
  * "Saved, Not Read", never "Not saved" for a note that is in (W1-30; the SI4 class). A crew
@@ -2122,7 +2122,7 @@ ${jobLines.join("\n") || "(none)"}`,
       if (state === "picture")
         return {
           ok: true,
-          message: `A guess: ${label}. If it's a job photo, press Job Photo on the row and the guess is there to tap. If it's a bill or receipt, press Bill Or Receipt. ${reason}`.trim(),
+          message: `A guess: ${label}. If it's a job photo, press Job Photo on the row and the guess is there to tap. If it's a bill or receipt, press Bill or Receipt. ${reason}`.trim(),
         };
       return { ok: true, message: `A guess: ${label}. Tap it on the row to pick it, then press File It if that's right. ${reason}`.trim() };
     }
@@ -2136,7 +2136,7 @@ ${jobLines.join("\n") || "(none)"}`,
           ok: true,
           message: `Suggested: Business Cost, ${cat}. Nothing was picked: ${
             state === "picture"
-              ? "if it's a bill or receipt, press Bill Or Receipt on the row first."
+              ? "if it's a bill or receipt, press Bill or Receipt on the row first."
               : "this wasn't read as a bill or receipt. If it is one, Fix Details and change its type."
           } ${reason}`.trim(),
         };
@@ -2172,7 +2172,7 @@ ${jobLines.join("\n") || "(none)"}`,
         };
       // SUGGEST PROPOSES, EVEN HERE (Erik, audit v994 PR2). This used to insert the task and file
       // the note on its own, and the only message saying so vanished with the card on refresh, with
-      // no Undo. Now the proposal is kept on the row as a chip (Add A Reminder: <title>, or Keep As
+      // no Undo. Now the proposal is kept on the row as a chip (Add a Reminder: <title>, or Keep As
       // Note), and a person's tap does it, through a door that says what it did and offers Undo.
       const proposal: PaperProposal =
         action === "task"
@@ -2192,7 +2192,7 @@ ${jobLines.join("\n") || "(none)"}`,
       revalidatePath("/organize");
       return {
         ok: true,
-        message: `Suggested: ${said}. Tap ${action === "task" ? "Add A Reminder" : "Keep As Note"} on the row if that's right; nothing moves until you do. ${reason}`.trim(),
+        message: `Suggested: ${said}. Tap ${action === "task" ? "Add a Reminder" : "Keep as Note"} on the row if that's right; nothing moves until you do. ${reason}`.trim(),
       };
     }
     // NOTHING TO SUGGEST IS AN ANSWER, NOT A FAILURE (Erik, 2026-09-24): said as a plain note on the

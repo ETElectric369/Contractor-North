@@ -1,7 +1,7 @@
 import { formatPhone } from "@/lib/utils";
 
 /**
- * A CONTACT CARD READ OUT OF A WEB PAGE, WITH NO MODEL (Fill From Their Site, 2026-09-27).
+ * A CONTACT CARD READ OUT OF A WEB PAGE, WITH NO MODEL (Fill from Their Site, 2026-09-27).
  *
  * In order of trust, and each later source only fills what an earlier one left empty:
  *   1. schema.org JSON-LD: the site's own card (Organization, LocalBusiness, GovernmentOrganization

@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
  * WAITING ON A CREDIT IS HONORED ON THE JOB'S COSTS TAB (audit v1018, class 4).
  *
  * /bills folds a paper a person set aside for a credit, with Stop Waiting as its only door. The
- * job's Named On A Paper list used to offer Record It As A Bill on that same paper and say nothing
+ * job's Named On A Paper list used to offer Record It as a Bill on that same paper and say nothing
  * about the wait: one tap put a cost the supplier is taking back onto the customer's job. Here it
  * is a plain row: who the credit is from, since when, and the door to where Stop Waiting lives.
  */
@@ -33,7 +33,7 @@ const paper = (over: Partial<JobPaperView>): JobPaperView => ({
 });
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&quot;/g, '"').replace(/\s+/g, " ");
 
-describe("Named On A Paper, Not Recorded Yet: a paper waiting on a credit", () => {
+describe("Named on a Paper, Not Recorded Yet: a paper waiting on a credit", () => {
   const html = renderToStaticMarkup(
     createElement(JobPaperList, {
       jobId: "j45",
@@ -49,18 +49,18 @@ describe("Named On A Paper, Not Recorded Yet: a paper waiting on a credit", () =
 
   it("says who the credit is from and since when, and offers no Record", () => {
     expect(text(waitRow)).toContain("Waiting on a credit from CED since");
-    expect(waitRow).not.toContain("Record It As A Bill");
+    expect(waitRow).not.toContain("Record It as a Bill");
     expect(waitRow).not.toContain("<button");
   });
 
-  it("its one door lands on that supplier's Waiting On A Credit fold, where Stop Waiting is (44px)", () => {
+  it("its one door lands on that supplier's Waiting on a Credit fold, where Stop Waiting is (44px)", () => {
     expect(waitRow).toContain(`href="/bills#supplier-waiting-credit-${CED}"`);
-    expect(text(waitRow)).toContain("Open It On Bills");
+    expect(text(waitRow)).toContain("Open It on Bills");
     expect(waitRow).toMatch(/<a[^>]*min-h-11/);
   });
 
-  it("a paper nobody set aside keeps its Record It As A Bill", () => {
-    expect(openRow).toContain("Record It As A Bill");
+  it("a paper nobody set aside keeps its Record It as a Bill", () => {
+    expect(openRow).toContain("Record It as a Bill");
   });
 
   it("the explainer is a Why? fold, so the header line and the rows lead", () => {

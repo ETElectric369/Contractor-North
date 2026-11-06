@@ -943,7 +943,7 @@ export function InvoiceDetail({
                 className="group flex min-h-11 w-full items-center gap-2 text-left"
                 title="Edit title"
               >
-                <span className={title ? "font-medium text-slate-800" : "text-slate-400"}>{title || "Add A Title…"}</span>
+                <span className={title ? "font-medium text-slate-800" : "text-slate-400"}>{title || "Add a Title…"}</span>
                 <Pencil className="h-3.5 w-3.5 text-slate-400 group-hover:text-brand" />
               </button>
             )}
@@ -1031,7 +1031,7 @@ export function InvoiceDetail({
         )}
 
         {/* THE STATUS LEFT THE BODY (W1-27): the header's Badge is the one place it shows, and the
-            deeds the old picker offered (Mark Sent - I Sent It Myself, Mark Sent Again, Back To Draft,
+            deeds the old picker offered (Mark Sent - I Sent It Myself, Mark Sent Again, Back to Draft,
             Void Invoice) are ⋯ rows (InvoiceStatusMenuItems below, lib/nav-tree invoiceStatusItems),
             with the sentence that says why Draft is gone where it is. Parking is the ⋯'s Set Aside
             Until… and the one line above. */}
@@ -1185,7 +1185,7 @@ export function InvoiceDetail({
                 warning would be a question with nowhere to answer it. */}
             {twoJobTickets > 0 && (
               <Link href="/reconcile#same-ticket-two-jobs" className="inline-flex min-h-11 items-center text-xs font-medium text-brand underline">
-                {twoJobTickets === 1 ? "Pick Which Job The Ticket Is On" : "Pick Which Job Each Ticket Is On"}
+                {twoJobTickets === 1 ? "Pick Which Job the Ticket Is On" : "Pick Which Job Each Ticket Is On"}
               </Link>
             )}
             {/* START IT OVER IS STILL DRAFT-ONLY, AND THAT ONE IS NOT OURS TO OPEN. Its refusal
@@ -1320,7 +1320,7 @@ export function InvoiceDetail({
                         disabled={pending || items[0]?.id === it.id}
                         className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
                       >
-                        <ChevronsUp className="h-4 w-4" /> Move To Top
+                        <ChevronsUp className="h-4 w-4" /> Move to Top
                       </button>
                       <button
                         type="button"
@@ -1328,7 +1328,7 @@ export function InvoiceDetail({
                         disabled={pending || items[items.length - 1]?.id === it.id}
                         className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
                       >
-                        <ChevronsDown className="h-4 w-4" /> Move To Bottom
+                        <ChevronsDown className="h-4 w-4" /> Move to Bottom
                       </button>
                     </div>
                   )}
@@ -1365,7 +1365,7 @@ export function InvoiceDetail({
                       instead of four blocks to remember. */}
                   {!linesLocked && (
                     <>
-                      {/* One step up or down went (W1-27): Move To Top / Move To Bottom in the line's
+                      {/* One step up or down went (W1-27): Move to Top / Move to Bottom in the line's
                           edit form and Group Materials & Labor below do the moving, 44px each. */}
                       <button
                         onClick={() => startEdit(it)}
@@ -1433,7 +1433,7 @@ export function InvoiceDetail({
               {/* The same two doors the server's own refusal names (invoiceLineEditRefusal), in the
                   same order, so reading the page and tripping the guard never tell two stories. */}
               <p>
-                This invoice is void, so its lines are set. If you voided it by mistake, use Back To Draft in
+                This invoice is void, so its lines are set. If you voided it by mistake, use Back to Draft in
                 the ⋯ menu at the top. To bill this work, start a new invoice.
               </p>
             </div>
@@ -1485,7 +1485,7 @@ export function InvoiceDetail({
                 />
                 <NumberInput aria-label="Discount amount" value={discountAmount} onValueChange={setDiscountAmount} className="w-28 text-right" placeholder="Amount" />
                 <Button onClick={addDiscount} disabled={pending}>
-                  Save The Discount
+                  Save the Discount
                 </Button>
                 <button type="button" onClick={() => setDiscountOpen(false)} className="text-sm text-slate-500 hover:underline">
                   Cancel
@@ -1493,7 +1493,7 @@ export function InvoiceDetail({
               </div>
             ) : (
               <button type="button" onClick={() => setDiscountOpen(true)} className="text-sm font-medium text-brand hover:underline">
-                Add A Discount
+                Add a Discount
               </button>
             )}
           </div>

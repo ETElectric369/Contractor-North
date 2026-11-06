@@ -88,7 +88,7 @@ describe("the Off line on every record page", () => {
   });
 
   it("the inspections list with Leads off names no button it doesn't draw", () => {
-    // NewInspectionButton (Start An Inspection) renders only with Leads on, so the empty state's
+    // NewInspectionButton (Start an Inspection) renders only with Leads on, so the empty state's
     // words follow it (the site visit's one word, lib/statuses).
     const src = readFileSync(join(ROOT, "inspections/page.tsx"), "utf8");
     // The words live in lib/words/inspections since cn-v1146: the page names the keys, the catalog the words.
@@ -97,7 +97,7 @@ describe("the Off line on every record page", () => {
     expect(inspectionsWords.en.ip_noOpenInspections).toBe("No open inspections");
     const block = src.slice(at, src.indexOf("</EmptyState>", at));
     expect(block).toContain('description={leadsOn ? t("ip_emptyDescLeadsOn") : t("ip_emptyDescLeadsOff")}');
-    expect(inspectionsWords.en.ip_emptyDescLeadsOn).toContain("Start An Inspection");
+    expect(inspectionsWords.en.ip_emptyDescLeadsOn).toContain("Start an Inspection");
     expect(inspectionsWords.es.ip_emptyDescLeadsOn).toContain("Empezar una Inspección");
     expect(inspectionsWords.en.ip_emptyDescLeadsOff).toBe("Nothing open right now.");
     expect(block).toContain("{leadsOn && <NewInspectionButton");

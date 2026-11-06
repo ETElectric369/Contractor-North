@@ -50,7 +50,7 @@ beforeEach(() => {
   db.refuse = null;
 });
 
-describe("Clear The Date", () => {
+describe("Clear the Date", () => {
   it("with 0368: the date and the end clear, a pending pick-a-time link is withdrawn", async () => {
     expect(await unscheduleAppointment("a1")).toEqual({ ok: true });
     expect(db.writes[0]).toMatchObject({ table: "appointments", patch: { starts_at: null, ends_at: null } });
@@ -66,18 +66,18 @@ describe("Clear The Date", () => {
     expect(db.writes).toEqual([]);
   });
 
-  it("the readers with no date range sort a waiting visit last and say Waiting For A Day, never a blank or 1970", () => {
+  it("the readers with no date range sort a waiting visit last and say Waiting for a Day, never a blank or 1970", () => {
     const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
     const search = read("src/app/api/search/route.ts");
     expect(search).toContain('.order("starts_at", { ascending: false, nullsFirst: false })');
-    expect(search).toContain('a.starts_at ? formatDate(a.starts_at) : "Waiting For A Day"');
+    expect(search).toContain('a.starts_at ? formatDate(a.starts_at) : "Waiting for a Day"');
     expect(search).toContain(": `/appointments/${a.id}`");
     const walks = read("src/app/(app)/inspections/page.tsx");
     expect(walks).toContain('.order("starts_at", { ascending: false, nullsFirst: false })');
     expect(walks).toContain('<span>{t("ip_waitingForADay")}</span>');
-    expect(translator("en")("ip_waitingForADay")).toBe("Waiting For A Day");
+    expect(translator("en")("ip_waitingForADay")).toBe("Waiting for a Day");
     expect(read("src/app/(app)/appointments/[id]/page.tsx")).toContain('<span>{t("vp_waitingForADay")}</span>');
-    expect(translator("en")("vp_waitingForADay")).toBe("Waiting For A Day");
+    expect(translator("en")("vp_waitingForADay")).toBe("Waiting for a Day");
     expect(read("src/app/(app)/jobs/[id]/page.tsx")).toContain('a.starts_at ? formatDateTime(a.starts_at, undefined, lang) : t("jb_waitingForADay")');
     // A waiting visit made into a job makes a job waiting for a day, not a "scheduled" one with none.
     expect(read("src/app/(app)/appointments/actions.ts")).toContain('status: appt.starts_at ? "scheduled" : "to_be_scheduled"');
@@ -87,11 +87,11 @@ describe("Clear The Date", () => {
     const s = readFileSync(join(process.cwd(), "src/app/(app)/appointments/unschedule-button.tsx"), "utf8");
     // The words come from the catalog since the visit-page-in-Spanish wave (vp_btn_clearTheDate), English byte for byte.
     expect(s).toContain('const words = pending ? t("vp_btn_clearing") : t("vp_btn_clearTheDate");');
-    expect(translator("en")("vp_btn_clearTheDate")).toBe("Clear The Date");
+    expect(translator("en")("vp_btn_clearTheDate")).toBe("Clear the Date");
     expect(translator("en")("vp_btn_clearing")).toBe("Clearing…");
     expect(s).not.toContain('size="sm"');
     expect(s).toContain('toast(t("vp_waitsUnderWaitingForADay"), "success");');
-    expect(translator("en")("vp_waitsUnderWaitingForADay")).toBe("It waits under Waiting For A Day on the schedule. Place it there when they call.");
+    expect(translator("en")("vp_waitsUnderWaitingForADay")).toBe("It waits under Waiting for a Day on the schedule. Place it there when they call.");
     expect(translator("en")("vp_couldntClearTheDate")).toBe("Couldn't clear the date.");
     // On the visit page it is a ⋯ Actions row (W2-11): the same words and toast, the menu's 44px row.
     expect(s).toContain("className={ACTIONS_ROW_CLS}");

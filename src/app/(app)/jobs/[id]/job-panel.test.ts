@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { titleCaseIn } from "../../../../../tests/title-case-words";
 
 /**
  * THE PANEL TAB ON SCREEN (Panel plan, phase 2; the panel-first wave), rendered from J-011's night
@@ -12,7 +13,7 @@ import { renderToStaticMarkup } from "react-dom/server";
  * suggestions the door can't draw, dimmed and named "From E-017", each with Keep / Change / Not This,
  * and one Keep All above the door; THE DOOR (panel-visual.test.tsx pins its drawing); the list under
  * it, By Area by default, with "20A · 1P · Kitchen Outlets Right" lines, a New/Existing word and a
- * progress chip; Add A Circuit; and Add New Panel LAST. No List / Positions switch any more.
+ * progress chip; Add a Circuit; and Add New Panel LAST. No List / Positions switch any more.
  *
  * The 375px law, as far as markup can prove it: every button is a 44px target (a tandem's half line
  * on the door is half a 44px space by the door's own scale, and says so with data-half-line), nothing
@@ -77,14 +78,17 @@ function buttons(html: string) {
 }
 const textOf = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ");
 
-/** Title Case: every word that starts with a letter starts with a capital, except the small words
- *  a title keeps lower-case only in the middle — and this app capitalises those too. */
+/** Title Case through the one judge (cn-v1148): the significant words capital, the function words lowercase mid-title. */
 function isTitleCase(label: string): boolean {
-  return label
-    .replace(/\(\d+\)/g, "")
-    .split(/\s+/)
-    .filter((w) => /^[a-z]/i.test(w))
-    .every((w) => /^[A-Z]/.test(w));
+  return titleCaseIn(label.replace(/\(\d+\)/g, "").trim(), "en");
+}
+/** The fixture's typed circuit labels are data the person wrote (they keep their casing), and a line's sr-only
+ *  "Space N, Suggested From …:" is read aloud, not drawn: what is judged is the door's own drawn words. */
+const TYPED_LABELS = ["Bedroom And Chandelier Lights", "Kitchen And Living Lights", "Disposal And Insta-Hot", "TV And Entertainment"];
+function doorWords(b: { markup: string }): string {
+  let t = b.markup.replace(/<span class="sr-only">[\s\S]*?<\/span>/g, "").replace(/<[^>]+>/g, "").replace(/&#x27;|&apos;/g, "'").replace(/&amp;/g, "&");
+  for (const d of TYPED_LABELS) t = t.split(d).join(" ");
+  return t.replace(/\s+/g, " ").trim();
 }
 
 /** The 375px law in markup: every button a 44px target; no fixed pixel width over 343px. A tandem's
@@ -121,7 +125,7 @@ describe("the Panel tab for the office, with E-017 not yet brought in", () => {
     expect(t).toContain("Reused");
   });
 
-  it("names the panel with its count, then the door, the list and Add A Circuit, and Add New Panel last; no List / Positions switch", () => {
+  it("names the panel with its count, then the door, the list and Add a Circuit, and Add New Panel last; no List / Positions switch", () => {
     // The heading: the panel's name and how many circuits are on it, in words.
     expect(t).toContain(`Main Panel ${FINAL_MAP.length} circuits`);
     expect(circuitCountWords(FINAL_MAP.length)).toBe("22 circuits");
@@ -131,14 +135,14 @@ describe("the Panel tab for the office, with E-017 not yet brought in", () => {
     expect(labels).not.toContain("Positions");
     expect(labels).not.toContain("List");
     expect(labels).not.toContain("Add Another Panel");
-    expect(labels).not.toContain("Add The Panel");
-    // The order down the tab: heading → the door (its main breaker on top) → the list → Add A Circuit → Add New Panel.
+    expect(labels).not.toContain("Add the Panel");
+    // The order down the tab: heading → the door (its main breaker on top) → the list → Add a Circuit → Add New Panel.
     const at = (s: string) => t.indexOf(s);
     expect(at("22 circuits")).toBeGreaterThan(-1);
     expect(at("22 circuits")).toBeLessThan(at("125A Main"));
     expect(at("125A Main")).toBeLessThan(at("By Area"));
-    expect(at("By Area")).toBeLessThan(at("Add A Circuit"));
-    expect(at("Add A Circuit")).toBeLessThan(at("Add New Panel"));
+    expect(at("By Area")).toBeLessThan(at("Add a Circuit"));
+    expect(at("Add a Circuit")).toBeLessThan(at("Add New Panel"));
     expect(labels[labels.length - 1]).toBe("Add New Panel");
     // The list's sort: By Space · By Area · By Size, By Area first on.
     expect(html).toMatch(/aria-selected="true"[^>]*>By Area</);
@@ -147,7 +151,7 @@ describe("the Panel tab for the office, with E-017 not yet brought in", () => {
 
   it("is phone-safe and Title Case", () => {
     phoneSafe(html);
-    for (const b of buttons(html)) if (b.text) expect(isTitleCase(b.text), b.text).toBe(true);
+    for (const b of buttons(html)) if (doorWords(b)) expect(isTitleCase(doorWords(b)), b.text).toBe(true);
   });
 });
 
@@ -184,7 +188,7 @@ describe("the same tab for a tech", () => {
   it("never carries the estimate bar (the estimates are never even loaded for him)", () => {
     const html = render(data({ staff: false, estimates: [] }));
     expect(textOf(html)).not.toContain("Bring Them In");
-    expect(textOf(html)).toContain("Add A Circuit");
+    expect(textOf(html)).toContain("Add a Circuit");
     phoneSafe(html);
   });
 });
@@ -198,7 +202,7 @@ describe("a job with no panel yet", () => {
     expect(t).toContain("Tap an open space on the door to add the first circuit there.");
     expect(t).toContain("24 Spaces");
     const labels = buttons(html).map((b) => b.text);
-    expect(labels).not.toContain("Add The Panel");
+    expect(labels).not.toContain("Add the Panel");
     // Edit Panel belongs to a panel that exists: the first circuit makes Panel 1.
     expect(labels).not.toContain("Edit Panel");
     expect(html.match(/is open\. Tap to fill it\./g)).toHaveLength(24);
@@ -225,7 +229,7 @@ describe("the door on the tab (panel-visual.test.tsx pins the drawing)", () => {
     const clash = textOf(render(data({ panels: [panel], circuits: [...placed, circuit({ room: "Bar", description: "Bar", amps: 20, space: 1 })], estimates: [] })));
     expect(clash).toContain("Space 1 has Kitchen Outlets Right and Bar on it.");
     phoneSafe(html);
-    for (const b of buttons(html)) if (b.text) expect(isTitleCase(b.text), b.text).toBe(true);
+    for (const b of buttons(html)) if (doorWords(b)) expect(isTitleCase(doorWords(b)), b.text).toBe(true);
   });
 });
 
@@ -270,8 +274,8 @@ describe("the circuit sheet", () => {
     const labels = buttons(html).map((b) => b.text);
     expect(labels).toContain("Take Off");
     expect(labels).toContain("Done");
-    expect(labels).toContain("Verified On Site");
-    for (const b of buttons(html).filter((x) => x.text && x.text !== "A" && x.text !== "B")) expect(isTitleCase(b.text), b.text).toBe(true);
+    expect(labels).toContain("Verified on Site");
+    for (const b of buttons(html).filter((x) => x.text && x.text !== "A" && x.text !== "B" && doorWords(x))) expect(isTitleCase(doorWords(b)), b.text).toBe(true);
   });
 
   it("a suggestion: Keep and Not This, what the estimate said, and its check", () => {
@@ -309,11 +313,11 @@ describe("a circuit listed before the panel was added", () => {
     const html = sheet(FINAL_MAP[0], [PANEL, sub]);
     const options = [...html.matchAll(/<option[^>]*>([^<]*)<\/option>/g)].map((m) => m[1]);
     expect(options).toEqual(expect.arrayContaining(["Main Panel", "Sub Panel"]));
-    expect(options).not.toContain("Pick The Panel");
+    expect(options).not.toContain("Pick the Panel");
     // A loose one with several panels: a disabled prompt to pick, never a choice to leave it off.
     const pick = sheet(loose, [PANEL, sub]);
     const panelSelect = pick.split("<select").find((s) => s.includes("Sub Panel"))!.split("</select>")[0];
-    expect(panelSelect).toMatch(/<option value="" disabled=""[^>]*>Pick The Panel<\/option>/);
+    expect(panelSelect).toMatch(/<option value="" disabled=""[^>]*>Pick the Panel<\/option>/);
     expect([...panelSelect.matchAll(/<option value=""(?![^>]*disabled)/g)]).toHaveLength(0);
   });
 
@@ -395,7 +399,7 @@ describe("the reads on the tab: a photo's line on the door, a plans label check 
     const t = textOf(html);
     expect(t).toContain("Label Check: Kitchen Fridge");
     expect(t).toContain("Plans Say Mini Fridge, Your List Says Fridge.");
-    expect(t).toContain("From The Plans · E-1");
+    expect(t).toContain("From the Plans · E-1");
     // In the list under the door, among the Kitchen circuits: never above the door.
     expect(t.indexOf("Label Check: Kitchen Fridge")).toBeGreaterThan(t.indexOf("By Area"));
     const labels = buttons(html).map((b) => b.text);
@@ -405,10 +409,10 @@ describe("the reads on the tab: a photo's line on the door, a plans label check 
     // The garage read has a space (1, open): it is drawn dimmed on the door with its own Keep (its
     // Not This is in its sheet); the label check is about a circuit with no space, so it is listed.
     expect(labels.filter((l) => l === "Not This")).toHaveLength(1);
-    expect(html).toMatch(/data-line="suggested"[\s\S]*?Space 1, Suggested From The Panel Photo/);
+    expect(html).toMatch(/data-line="suggested"[\s\S]*?Space 1, Suggested From the Panel Photo/);
     expect(labels).not.toContain("Keep All (2)");
     phoneSafe(html);
-    for (const b of buttons(html)) if (b.text) expect(isTitleCase(b.text), b.text).toBe(true);
+    for (const b of buttons(html)) if (doorWords(b)) expect(isTitleCase(doorWords(b)), b.text).toBe(true);
   });
 
   it("a photo line on a space a kept circuit holds is 'Photo says' under that line, with Use It and Skip, and Keep All leaves it out", () => {
@@ -424,7 +428,7 @@ describe("the reads on the tab: a photo's line on the door, a plans label check 
   });
 });
 
-describe("Add A Circuit carries only the room and the amps (J-011, 2026-09-25)", () => {
+describe("Add a Circuit carries only the room and the amps (J-011, 2026-09-25)", () => {
   it("a 2-pole never carries into the next add: the floor heat made three outlets 2-poles", () => {
     expect(carryQuick({ room: "Living", amps: "20", poles: "2", work: "new" })).toEqual({ room: "Living", amps: "20", poles: "1", work: "new" });
   });

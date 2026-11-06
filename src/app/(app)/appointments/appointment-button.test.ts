@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { titleCaseIn } from "../../../../tests/title-case-words";
 
 /**
  * AN INSPECTION'S FORM SAYS INSPECTION (cn-v1134). One form creates or edits an appointment OR an
@@ -65,7 +66,7 @@ describe("the form's words follow its kind", () => {
   it("the propose mode keeps its own words, in Title Case; an edit never proposes", () => {
     expect(apptFormWords({ kind: "other", editing: false, mode: "propose", linkReady: false })).toEqual({ title: "New Appointment", saveLabel: "Create Link", trigger: "New Appointment" });
     expect(apptFormWords({ kind: "inspection", editing: false, mode: "propose", linkReady: false }).saveLabel).toBe("Create Link");
-    expect(apptFormWords({ kind: "other", editing: false, mode: "propose", linkReady: true }).title).toBe("Text The Customer These Times");
+    expect(apptFormWords({ kind: "other", editing: false, mode: "propose", linkReady: true }).title).toBe("Text the Customer These Times");
     expect(apptFormWords({ kind: "inspection", editing: true, mode: "propose", linkReady: false })).toEqual({ title: "Edit Inspection", saveLabel: "Save Inspection", trigger: "New Inspection" });
   });
 
@@ -75,7 +76,7 @@ describe("the form's words follow its kind", () => {
         for (const mode of ["set", "propose"] as const)
           for (const linkReady of [false, true]) {
             const w = apptFormWords({ kind, editing, mode, linkReady });
-            for (const s of [w.title, w.saveLabel, w.trigger]) for (const word of s.split(" ")) expect(word, s).toMatch(/^[A-Z]/);
+            for (const s of [w.title, w.saveLabel, w.trigger]) expect(titleCaseIn(s, "en"), s).toBe(true);
           }
   });
 });
@@ -86,7 +87,7 @@ describe("the closed form, rendered", () => {
     expect(html({ defaultType: "inspection" })).not.toContain("New Appointment");
     expect(html({})).toContain("New Appointment");
     expect(html({ defaultType: "job" })).toContain("New Appointment");
-    expect(html({ defaultType: "inspection", buttonLabel: "Book An Inspection" })).toContain("Book An Inspection");
+    expect(html({ defaultType: "inspection", buttonLabel: "Book an Inspection" })).toContain("Book an Inspection");
   });
 
   it("the edit trigger is still the pencil titled Edit", () => {

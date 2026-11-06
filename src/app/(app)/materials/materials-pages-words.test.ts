@@ -113,7 +113,7 @@ beforeEach(() => {
 });
 
 describe("the list page (materials/[id]) in Spanish", () => {
-  it("a tech on a job's list: the back door, the date, Took From Stock, the editor and Tell The Office", async () => {
+  it("a tech on a job's list: the back door, the date, Took from Stock, the editor and Tell the Office", async () => {
     const html = await listPage("es");
     const text = textOf(html);
     expect(text).toContain("Volver a las Listas de Materiales");
@@ -124,7 +124,7 @@ describe("the list page (materials/[id]) in Spanish", () => {
     expect(text).toContain("Comprados (1)");
     expect(text).toContain("1 por comprar");
     expect(text).toContain("Deck screws");
-    for (const en of ["Back to Material Lists", "Took From Stock", "Tell The Office", "Bought (", "to buy", "Created Oct"]) expect(text).not.toContain(en);
+    for (const en of ["Back to Material Lists", "Took from Stock", "Tell the Office", "Bought (", "to buy", "Created Oct"]) expect(text).not.toContain(en);
   });
 
   it("a tech on the office's paper (a quote's take-off): read-only, said in Spanish", async () => {
@@ -141,8 +141,8 @@ describe("the list page (materials/[id]) in Spanish", () => {
     const text = textOf(html);
     expect(text).toContain("Back to Material Lists");
     expect(text).toContain("Created Oct 20, 2026");
-    expect(buttons(html)).toContain("Took From Stock");
-    expect(buttons(html)).toContain("Tell The Office");
+    expect(buttons(html)).toContain("Took from Stock");
+    expect(buttons(html)).toContain("Tell the Office");
     expect(html).toContain('placeholder="Add an item…"');
     expect(text).toContain("Bought (1)");
     expect(text).toContain("1 to buy");

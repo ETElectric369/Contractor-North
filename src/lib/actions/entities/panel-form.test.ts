@@ -5,7 +5,7 @@ import { placeSaid } from "./panel-form";
  * WHERE A SPOKEN CIRCUIT GOES (the panel-first wave): Nort's words about a circuit's place turned
  * into the space, half and poles the Panel tab keeps. A tandem said twice on one space is its A and
  * B halves in the order said; a 2-pole said by its spaces is the top one; a quad hangs the way the
- * panel's numbers run (model quadCentreHalf, the rule the photo and Place From What Was Bought use);
+ * panel's numbers run (model quadCentreHalf, the rule the photo and Place from What Was Bought use);
  * words that disagree, a tandem with no space or no half, and a quad nobody can place come back as
  * a question.
  */

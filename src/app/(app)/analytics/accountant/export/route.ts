@@ -100,7 +100,7 @@ export async function GET(req: NextRequest) {
         .range(f, t),
     ),
     // EVERY INVOICE MADE IN THE PERIOD, drafts and voids included, ALWAYS - not only when Sales Tax is
-    // switched on. The workbook's Invoices Made In This Period list and its Sales Tax rows are both
+    // switched on. The workbook's Invoices Made in This Period list and its Sales Tax rows are both
     // built from these rows, so the two cannot disagree about a period's tax; with Sales Tax off a
     // company used to have no list of its own invoices in the file at all.
     readAllPages<any>((f, t) =>

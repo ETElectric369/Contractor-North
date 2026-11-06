@@ -319,7 +319,7 @@ describe("the door", () => {
    * four of its lines. His dentist and his transfer to savings are not the office's business.
    *
    * So the refusal is in addOpenList now, where EVERY door gets it, and this is drawn from both: the
-   * statement line on Reconcile ("bills_drop") and Snap Or Note ("organize"). All amounts positive
+   * statement line on Reconcile ("bills_drop") and Snap or Note ("organize"). All amounts positive
    * and no heading row: that is the file that walked through.
    */
   it("a bank's own lines with no headings over them are refused at every door, never kept as a supplier's card", async () => {
@@ -373,7 +373,7 @@ describe("the door", () => {
     // The total of three different fills, said as a total (never "3×", which reads as each).
     expect(shell.money).toBe("3 charges · $288.45");
     expect(shell.buttons.map((b) => b.label)).toEqual(["Fuel", "Auto", "Owner's Draw"]);
-    expect(rowBy(v, "Deposit").buttons.map((b) => b.label)).toEqual(["On INV-1001", "Other Income", "Already Counted Or Not Income"]);
+    expect(rowBy(v, "Deposit").buttons.map((b) => b.label)).toEqual(["On INV-1001", "Other Income", "Already Counted or Not Income"]);
     expect(rowBy(v, "Check 1043").buttons.map((b) => b.label)).toEqual(["Pay Pat Crew", "Owner's Draw"]);
     // Another company's supplier, invoice and crew are never offered.
     expect(JSON.stringify(v)).not.toMatch(/Someone Else|INV-9|Other Crew/);
@@ -381,7 +381,7 @@ describe("the door", () => {
   });
 });
 
-describe("Swap Money In And Out", () => {
+describe("Swap Money In and Out", () => {
   it("flips a download nothing was applied from, and refuses once some of it is counted", async () => {
     const id = await drop(`Date,Description,Amount\n09/01/2026,SHELL OIL 9 ANYTOWN,62.10\n09/02/2026,COFFEE CART,4.50\n`, "card.csv");
     expect((await view(id)).rows.every((r) => r.direction === "in")).toBe(true);
@@ -1248,7 +1248,7 @@ describe("Change Answer", () => {
     const { june3 } = await transfersAnsweredNotIncome();
     const res = await reanswerBankLine({ lineId: june3.id, choice: "owner_in" });
     expect(res.ok).toBe(true);
-    expect(res.message).toMatch(new RegExp(`^${day("June 3")} .*TRANSFER.* is now Owner's Money In\\. The rule that said Already Counted Or Not Income now covers \\$550\\.00 to \\$2,000\\.00\\.$`));
+    expect(res.message).toMatch(new RegExp(`^${day("June 3")} .*TRANSFER.* is now Owner's Money In\\. The rule that said Already Counted or Not Income now covers \\$550\\.00 to \\$2,000\\.00\\.$`));
     expect(db.bank_lines.find((l) => l.id === june3.id)).toMatchObject({ choice: "owner_in", bucket: null, sorted_by: "person" });
     // WRITES NOTHING: the bank line IS the record of the owner's own money.
     expect(db.bills).toHaveLength(0);
@@ -1263,7 +1263,7 @@ describe("Change Answer", () => {
     db.bank_lines.find((l) => l.id === june3.id)!.choice = "owner_in";
     const before = structuredClone(db.bank_lines);
     const res = await reanswerBankLine({ lineId: june3.id, choice: "owner_in" });
-    expect(res.message).toMatch(/ already says Owner's Money In\. The rule that said Already Counted Or Not Income now covers \$550\.00 to \$2,000\.00\.$/);
+    expect(res.message).toMatch(/ already says Owner's Money In\. The rule that said Already Counted or Not Income now covers \$550\.00 to \$2,000\.00\.$/);
     expect(db.bank_lines).toEqual(before);
     expect(db.bank_rules[0]).toMatchObject({ min_cents: 55_000, max_cents: 200_000 });
     // Asked again: nothing left to settle, and it says so.
@@ -1411,11 +1411,11 @@ XXXXX1234,09/12/2026,,1111-CORNER STORE ANYTOWN,120.00,,Posted,866.69
     const after = await view(id);
     expect(after.sortedProblem).toBeNull();
     expect(after.sortedLines.map((l) => [l.title, l.answer, l.by])).toEqual([
-      ["1111-SHELL 123 ANYTOWN ST", "Fuel", "Answered By You"],
-      ["Check 1043", "Pay Pat Crew", "Answered By You"],
-      ["1111-SHELL 456 OTHERTOWN", "Fuel", "Answered By You"],
-      ["1111-SHELL 123 ANYTOWN ST", "Fuel", "Answered By You"],
-      ["STRIPE TRANSFER ST-AB12", "Already In North (Matched)", "Matched"],
+      ["1111-SHELL 123 ANYTOWN ST", "Fuel", "Answered by You"],
+      ["Check 1043", "Pay Pat Crew", "Answered by You"],
+      ["1111-SHELL 456 OTHERTOWN", "Fuel", "Answered by You"],
+      ["1111-SHELL 123 ANYTOWN ST", "Fuel", "Answered by You"],
+      ["STRIPE TRANSFER ST-AB12", "Already in North (Matched)", "Matched"],
     ]);
     const check = after.sortedLines.find((l) => l.title === "Check 1043")!;
     expect(check.current).toBe("crew:pat");
@@ -1481,7 +1481,7 @@ describe("the owner's money", () => {
     // EVERY PLACE THAT HANDS A PAPER ROW TO THE BROWSER RUNS EVERY ROW THROUGH IT. The bank card moved
     // off /bills to /reconcile on 2026-10-03 (lib/paperwork answeredOnReconcile), so the list of places
     // moved with it rather than this tripwire being dropped: Reconcile's read, Organize's page, and
-    // Snap Or Note's sheet, which draws the same card for a file just dropped.
+    // Snap or Note's sheet, which draws the same card for a file just dropped.
     const { readFileSync } = await import("node:fs");
     for (const page of [
       "src/app/(app)/reconcile/statement-cards.ts",

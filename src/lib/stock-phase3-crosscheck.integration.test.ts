@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 /**
  * SHOP STOCK PHASE 3, END TO END: THE CROSS-CHECK NEITHER TEAM COULD RUN ALONE (feat/stock-phase3).
  *
- * feat/stock-take built the door (Took From Stock, the office bell, Undo, the job's takes list,
+ * feat/stock-take built the door (Took from Stock, the office bell, Undo, the job's takes list,
  * 0344's reads); feat/stock-bill built the billing (one invoice line per take, 0343's claim
  * boundary). This walks ONE take through both, inside ONE transaction that is always rolled back:
  *

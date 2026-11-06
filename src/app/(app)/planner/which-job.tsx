@@ -31,7 +31,7 @@ export type { SheetPhase, WhichJobOption, WhichJobResult } from "../timeclock/wh
  * simply didn't render, so Navigate / Materials / Add Cost vanished with no sentence and no door
  * (Erik, 2026-09-11: "what happened to my materials button on the job im clocked into").
  *
- * The Now card says that sentence and has that door: its ONE Pick The Job button opens the sheet
+ * The Now card says that sentence and has that door: its ONE Pick the Job button opens the sheet
  * below. One pick sets the job on the WHOLE open entry — every hour since the punch, not just the
  * minutes after the tap. After the write lands the route is refreshed and the job's doors take the
  * question's place — no reload, nothing to find.
@@ -40,7 +40,7 @@ export type { SheetPhase, WhichJobOption, WhichJobResult } from "../timeclock/wh
  * while the sheet just before it offered the job he punched last and today's schedule too: a tech
  * helping on a crewmate's scheduled job, who tapped Skip, came back and couldn't find the job the
  * sheet had offered. So every door opens this sheet: one list, one write (putPunchOnJob), one set of
- * sentences — the Now card's Pick The Job, the Timeclock's Pick The Job, the clock itself after a
+ * sentences — the Now card's Pick the Job, the Timeclock's Pick the Job, the clock itself after a
  * punch on no job, and the offline queue once it files.
  *
  * Only ever offered when the punch has NO job. Moving a punch that already carries one stays
@@ -57,8 +57,8 @@ export type { SheetPhase, WhichJobOption, WhichJobResult } from "../timeclock/wh
 //   · the punch is ALREADY saved before the sheet appears: the clock never waits on it, and the
 //     sheet loads its own list after the clock has answered;
 //   · the likely jobs first (which-job-choices), each one 44px tap;
-//   · "Skip, The Office Will Pick" always there: skipping writes nothing and the office picks, as
-//     before (Hours On No Job, the job's Time tab);
+//   · "Skip, the Office Will Pick" always there: skipping writes nothing and the office picks, as
+//     before (Hours on No Job, the job's Time tab);
 //   · picking is a checked write, and anything but a landed write comes back as a plain line;
 //   · a job the clock knew never gets here: the clock stays two buttons;
 //   · nothing to offer, nothing to ask: an empty list closes the sheet and a toast says where the
@@ -107,7 +107,7 @@ export function WhichJobSheetView({
     </Button>
   ) : (
     /* A MOVE IS NEVER A DEAD END AND NEVER A DEMAND: the way out says the punch stays where the app
-       put it, which is exactly what ignoring the sentence does. "Skip, The Office Will Pick" would be
+       put it, which is exactly what ignoring the sentence does. "Skip, the Office Will Pick" would be
        a lie here — the punch already has a job. */
     <Button type="button" variant="outline" className="min-h-[44px] w-full" onClick={onSkip} disabled={!!busyId}>
       {moment === "move" ? t("cs_leaveItWhereItIs") : t("cs_skipOfficeWillPick")}
@@ -244,7 +244,7 @@ export function WhichJobSheet({
       },
       () => {
         // ON A MOVE THE PUNCH ALREADY HAS A JOB: "the office will put it on its job" would promise a
-        // prompt the office never sees, because a punch with a job is not in Hours On No Job.
+        // prompt the office never sees, because a punch with a job is not in Hours on No Job.
         if (alive) setState({ phase: "failed", error: jobsDidntLoadSentence(where, lang) });
       },
     );

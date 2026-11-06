@@ -202,7 +202,7 @@ describe("the parser's edges", () => {
     const r = parsePanelPhoto({
       panel: { spaces: 32 },
       lines: [
-        { space: 99, label: "Off The End" },
+        { space: 99, label: "Off the End" },
         { space: null, label: "Bayberry Fan" },
         { space: null, label: null, amps: 20 },
         { space: 3, label: null, amps: null },
@@ -212,7 +212,7 @@ describe("the parser's edges", () => {
     expect(r.rows).toEqual([]);
     expect(r.unreadable).toEqual([
       "Space 9's label is torn off",
-      '"Off The End" is on space 99, which isn\'t on a 32-space panel.',
+      '"Off the End" is on space 99, which isn\'t on a 32-space panel.',
       '"Bayberry Fan" had no space number the photo showed.',
       "A 20A breaker had no space number the photo showed.",
     ]);

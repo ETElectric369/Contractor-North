@@ -76,7 +76,7 @@ describe("Renaming a scope word in the words box orphans the rules that wait on 
   });
 });
 
-describe("Remember As A Kit files the kit under a whole free-typed scope paragraph", () => {
+describe("Remember as a Kit files the kit under a whole free-typed scope paragraph", () => {
   const FREE: Playbook = { needs: [{ key: "scope", label: "Scope", ask: "What's the job?", slot: { type: "scope" } }] };
   const WORDS: Playbook = { needs: [{ key: "kind", label: "Project", ask: "What kind?", slot: { type: "scope", options: ["Deck", "Remodel"] } }] };
 

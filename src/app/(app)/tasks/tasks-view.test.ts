@@ -75,7 +75,7 @@ describe("Carried From on the Reminders page: open rows only", () => {
 
   it("an open carried pin wears the chip and the pin glyph", () => {
     const html = row("open");
-    expect(html).toContain("Carried From Monday");
+    expect(html).toContain("Carried from Monday");
     expect(html).toMatch(/lucide-pin/);
   });
 

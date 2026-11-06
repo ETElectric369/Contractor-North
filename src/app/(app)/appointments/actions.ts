@@ -289,7 +289,7 @@ async function dropReplacedCustomer(ws: Said, appointmentId: string, leadId: str
   return undefined;
 }
 
-/** "Start An Inspection" (it was "Inspect now") — the already-onsite path (Erik: "sometimes we're
+/** "Start an Inspection" (it was "Inspect now") — the already-onsite path (Erik: "sometimes we're
  *  onsite already — too many steps today"). Creates a type='inspection' appointment starting NOW (status
  *  'scheduled'; filling in the capture is what makes it *done*), linked to the lead when
  *  launched from one, so the caller can route STRAIGHT to /appointments/<id> and start
@@ -716,9 +716,9 @@ export async function linkAppointmentTo(
   const lead = kind === "job" ? await stampLeadWonByJob(supabase, { jobId: targetId, inquiryId: (appt as { inquiry_id?: string | null }).inquiry_id }) : {};
   const warnings: string[] = lead.warning ? [lead.warning] : [];
   let note: string | undefined;
-  /* THE VISIT'S WORK JOINS THE JOB IT WON (cn-v1134). Won · Pick The Job linked an existing job and
+  /* THE VISIT'S WORK JOINS THE JOB IT WON (cn-v1134). Won · Pick the Job linked an existing job and
      stamped the win (cn-v1069), and left the tasks he typed on the visit — each with its minutes and
-     parts — and the typed take-off on the visit, where nothing on the job read them. Start The Job
+     parts — and the typed take-off on the visit, where nothing on the job read them. Start the Job
      carried both onto the job it made; this door now carries them onto the job it links, through
      the same read (lib/appointments/visit-work) and the same two keyed writers (bornTasks,
      "task:<id>"; addCaptureItemsToJobList, "capture:<id>" and "task:<id>#<part>"), so a second press
@@ -1649,7 +1649,7 @@ export async function createJobFromAppointment(
      paid job missing from its own customer's card and a job page with no contact. If the lead
      already carries a card, the job inherits it here, at the one step that connects the two.
 
-     AND A FRESH LEAD GETS ITS CARD HERE (209451e1). A lead → inspection visit → Start The Job is a
+     AND A FRESH LEAD GETS ITS CARD HERE (209451e1). A lead → inspection visit → Start the Job is a
      win like any other, and every other win (an accepted estimate, settleUp, setJobContact) mints
      the customer through the one rule, customerForInquiry: dedup by phone / email / name, the
      person's own address, the lead stamped won. This door stamped the lead won and minted nothing,
@@ -1755,7 +1755,7 @@ export async function createJobFromAppointment(
   // the rest showing ghosts.
   //
   // THE LINK IS THE CLAIM (visit-start review, 2026-09-25). The job_id read above is a check, and
-  // two devices tapping Start The Job at once both passed it and both inserted a job; this update
+  // two devices tapping Start the Job at once both passed it and both inserted a job; this update
   // then overwrote the first link with the second, orphaning one job with a clock running on it.
   // So the write only lands on a visit that still has no job, and the tap that lands zero rows
   // re-reads to learn why: somebody else's job won (ours is deleted, it has no children yet, and

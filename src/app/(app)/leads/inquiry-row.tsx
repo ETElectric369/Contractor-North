@@ -67,7 +67,7 @@ export async function markLeadLost(
  * contact card on a tap whose only warning was a hover title a phone never shows: a silent write.
  * Erik (cn-v724): "a lead can convert to a contact anytime if the person wants to create one", so the
  * door stays, where a person asks for it. convertInquiry(id, 'customer') checks the book first and
- * never closes the lead; the toast says which happened ("Saved Rita Moss As A Contact", or "Linked To
+ * never closes the lead; the toast says which happened ("Saved Rita Moss as a Contact", or "Linked To
  * Rita Moss" when the book already had her) and offers Open. Nothing navigates on its own.
  */
 export async function saveLeadAsContact(
@@ -180,7 +180,7 @@ export function InquiryRow({
     >
       {/* ── LINE 1: WHO, how to reach them, and the ONE next step. Erik: "lets do the phone number
           and email to the right of the name". A linked lead's name opens its contact; an unlinked
-          one is only its name: making a contact is the ⋯ panel's Save As Contact, never a tap on a
+          one is only its name: making a contact is the ⋯ panel's Save as Contact, never a tap on a
           name. ── */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {inquiry.customer_id ? (
@@ -295,7 +295,7 @@ export function InquiryRow({
 /**
  * THE ⋯ PANEL (W2-07): the message and files, the plan report, the work's kind and size, then the
  * Follow Up day with Mark Contacted and Mark Lost (the status moves itself: Quoted and Won are stamped
- * by the deed that earns them), Save As Contact for a lead with no card, Edit, and Delete Lead.
+ * by the deed that earns them), Save as Contact for a lead with no card, Edit, and Delete Lead.
  */
 export function LeadDetails({
   inquiry,

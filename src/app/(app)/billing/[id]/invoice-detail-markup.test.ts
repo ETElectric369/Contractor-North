@@ -236,12 +236,12 @@ describe("the invoice body (W1-27)", () => {
     expect(out).toContain("Group Materials &amp; Labor");
   });
 
-  it("a two-line invoice can still swap its lines: Move To Top / Move To Bottom show from two lines", async () => {
+  it("a two-line invoice can still swap its lines: Move to Top / Move to Bottom show from two lines", async () => {
     // The line's edit form opens on a tap (state), so the gate is pinned in the source.
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const src = readFileSync(join(process.cwd(), "src/app/(app)/billing/[id]/invoice-detail.tsx"), "utf8");
-    const at = src.indexOf("Move To Top");
+    const at = src.indexOf("/> Move to Top"); // the button itself, not a comment that names it
     const gate = src.slice(src.lastIndexOf("{items.length", at), at);
     expect(gate).toMatch(/^\{items\.length > 1 && \(/);
   });
@@ -283,7 +283,7 @@ describe("the invoice body (W1-27)", () => {
     expect(html({ hold_until: ahead, jobs: { status: "in_progress" } })).toContain("Set aside until");
   });
 
-  it("a bill that went out and came Back To Draft says its date: its next send keeps it", () => {
+  it("a bill that went out and came Back to Draft says its date: its next send keeps it", () => {
     expect(dueWords({ isDraft: true, dueDate: "2026-08-31", byHand: false, netDays: 30, sentBefore: true })).toBe("Due Aug 31 · Net 30");
     expect(dueWords({ isDraft: true, dueDate: "2026-08-31", byHand: false, netDays: 30, sentBefore: false })).toBe("Due 30 days after you send it");
     expect(html({ due_date: "2026-08-31", due_date_by_hand: false, sent_at: "2026-08-01T18:00:00Z" })).not.toContain("after you send it");

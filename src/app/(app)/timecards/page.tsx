@@ -227,7 +227,7 @@ export default async function TimecardsPage({
     .order("clock_in", { ascending: true });
   const todayStartMs = tzDayStartUtc(todayStrInTz(tz), tz).getTime();
   // THE SHIFT, NOT THE PIECE (audit v994 SW1). After a Switch Job (0288) the running entry began at
-  // the switch; the long-shift line, the "since" on the On The Clock rows and the clock-out sheet's
+  // the switch; the long-shift line, the "since" on the On the Clock rows and the clock-out sheet's
   // forgotten test all count from the first piece of the shift (lib/shift-chain). A failed read is
   // reported and each clock falls back to its own start, which is what the page said before.
   const openOnly = ((openNow ?? []) as any[]).filter((e) => e.status === "open");
@@ -324,7 +324,7 @@ export default async function TimecardsPage({
    *  needs), so no row is ever a dead end.
    *
    *  A SPLIT SHIFT IS ENTRIES (0288). The pieces of one shift are ordinary rows; the editor offers
-   *  Move The Split and Join Back between two touching pieces of the same family, found from the
+   *  Move the Split and Join Back between two touching pieces of the same family, found from the
    *  same rows the bracket reads (familyRows below), never the anchored week alone (audit v994 SW8). */
   const weekRows = (entries ?? []) as any[];
   const neighborLabel = (r: any) => (r?.job ? jobLabel(r.job) : (r?.job_code ?? "no job"));
@@ -337,7 +337,7 @@ export default async function TimecardsPage({
             clock_in: String(r.clock_in),
             // NULL STAYS NULL. String(null) is "null", a truthy string, so a RUNNING neighbour — which
             // is what a Switch Job leaves after the piece before it — read as closed, and the editor
-            // drew Join Back Into One Shift on a boundary join_time_entries refuses outright (0322).
+            // drew Join Back into One Shift on a boundary join_time_entries refuses outright (0322).
             clock_out: r.clock_out ? String(r.clock_out) : null,
             label: neighborLabel(r),
             // Join Back names whose job the hours land on, and its Undo cuts the shift back the way it was.
@@ -370,7 +370,7 @@ export default async function TimecardsPage({
   /* ── ONE DOOR PER ROW (Wave 2) ─────────────────────────────────────────────────────────────
    *  The whole row already opens the shift's editor (the ?entry= door), so a CLOSED row carries no
    *  controls: the pencil was a second way to the same place, and Copy To… moved into the editor
-   *  it opens ("Copy To Someone Else…"). A RUNNING row keeps its one labelled action, "Clock Out
+   *  it opens ("Copy to Someone Else…"). A RUNNING row keeps its one labelled action, "Clock Out
    *  <Name>": an action, not a pencil, and the thing the office reaches for on a running clock. */
   const detailById = new Map<string, { controls: ReactNode }>();
   for (const e of weekRows) {
@@ -650,7 +650,7 @@ export default async function TimecardsPage({
           : `open ${openHrs}`,
       // The row names what tapping it does.
       verb: e.auto_closed_reason
-        ? "Set The Hours"
+        ? "Set the Hours"
         : clockDoorWords(e.profiles?.full_name, { self: !!user?.id && e.profile_id === user.id }).clockOut,
       // The deep link names the ENTRY'S OWN WEEK, not the page's (same reason as the grid pills).
       href: hrefFor(weekOf(day), `entry=${e.id}`),
@@ -661,8 +661,8 @@ export default async function TimecardsPage({
    *  Brian's 9/11 clock punch landed on no job. Needs You dropped it after three days, this box never
    *  listed it, and on 9/19 the office billing 41 Larkspur typed the day again: the same hours, paid
    *  twice. A shift on no job is hours nobody bills, so it stays here, in any week, until a person
-   *  says what it was: Pick A Job (the row opens its editor) or Company Time (the company's own
-   *  non-billable code). Needs You's Hours On No Job line opens this list (#no-job). */
+   *  says what it was: Pick a Job (the row opens its editor) or Company Time (the company's own
+   *  non-billable code). Needs You's Hours on No Job line opens this list (#no-job). */
   const noJob = await noJobP;
   // The read's own code (companyTimeCode over the not-billed codes): the one Needs You words its
   // line from, so the Company Time door and both sentences can never disagree.
@@ -710,7 +710,7 @@ export default async function TimecardsPage({
   }
   /* THE FOCUSED ENTRY'S OWN FAMILY (audit v994 SW8). A link with no week (payroll, an invoice, the
      long-shift bell) can open a piece whose neighbour lies outside everything read above, so the
-     family is read by its first entry: Join Back and Move The Split never depend on the span. */
+     family is read by its first entry: Join Back and Move the Split never depend on the span. */
   let focusFamilyRows: any[] = familyRows;
   if (focusEntry) {
     const root = String((focusEntry as any).split_from || (focusEntry as any).id);
@@ -932,7 +932,7 @@ export default async function TimecardsPage({
             {noJobRows.length > 0 && (
               <div id="no-job" className="mt-2 scroll-mt-24">
                 <h4 className="text-xs font-semibold uppercase tracking-wide text-amber-900">
-                  Hours On No Job ({noJobRows.length}
+                  Hours on No Job ({noJobRows.length}
                   {noJob?.capped ? "+" : ""} · {formatDuration(noJob?.hours ?? 0)})
                 </h4>
                 <p className="text-xs text-amber-800">
@@ -945,7 +945,7 @@ export default async function TimecardsPage({
                     href="/settings?tab=crew"
                     className="inline-flex min-h-[44px] items-center gap-0.5 text-sm font-medium text-amber-800"
                   >
-                    Add A Not-Billed Code
+                    Add a Not-Billed Code
                     <ChevronRight className="h-4 w-4 text-amber-700" aria-hidden />
                   </Link>
                 )}
@@ -967,7 +967,7 @@ export default async function TimecardsPage({
                           scroll={false}
                           className="flex min-h-[44px] items-center gap-0.5 px-1 text-sm font-medium text-amber-800"
                         >
-                          Pick A Job
+                          Pick a Job
                           <ChevronRight className="h-4 w-4 text-amber-700" aria-hidden />
                         </Link>
                       </span>

@@ -55,7 +55,7 @@ export function LineKindChips({
   const countsNow = counts(item.line_kind ?? null);
 
   // A DISCOUNT CHIP only on a line that takes money off (0389): a positive line cannot be filed
-  // as a gift; Add A Discount is the door that makes one.
+  // as a gift; Add a Discount is the door that makes one.
   const kinds: readonly (PickableLineKind | typeof DISCOUNT_KIND)[] =
     canBeDiscount(item.line_total) && !item.import_source ? [...PICKABLE_LINE_KINDS, DISCOUNT_KIND] : PICKABLE_LINE_KINDS;
 
@@ -111,7 +111,7 @@ export function LineKindChips({
             disabled={disabled || pending}
             className="min-h-[44px] rounded-lg px-2 text-xs font-medium text-slate-500 hover:text-brand disabled:opacity-50"
           >
-            Read It From The Line
+            Read It from the Line
           </button>
         )}
       </div>

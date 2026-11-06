@@ -161,24 +161,24 @@ describe("a rail card: one ⋯, no status dropdown", () => {
     expect(rail).toMatch(/<RailCardMore i=\{i\} todayStr=\{todayStr\} \/>/);
   });
 
-  it("a job not on hold: Open The Job, and Put On Hold…", () => {
+  it("a job not on hold: Open the Job, and Put on Hold…", () => {
     const html = rows(job());
-    expect(html).toMatch(/<a[^>]*href="\/jobs\/j1"[^>]*>Open The Job<\/a>/);
-    expect(text(html)).toContain("Put On Hold…");
+    expect(html).toMatch(/<a[^>]*href="\/jobs\/j1"[^>]*>Open the Job<\/a>/);
+    expect(text(html)).toContain("Put on Hold…");
     expect(text(html)).not.toMatch(/Snooze|Change Why|Take Off Hold/);
   });
 
-  it("a held job: Snooze…, Change Why… and Take Off Hold; never Put On Hold", () => {
+  it("a held job: Snooze…, Change Why… and Take Off Hold; never Put on Hold", () => {
     const t = text(rows(job({ onHold: true, holdReason: "Waiting on the permit", status: "on_hold" })));
-    for (const w of ["Open The Job", "Snooze…", "Change Why…", "Take Off Hold"]) expect(t, w).toContain(w);
-    expect(t).not.toContain("Put On Hold");
+    for (const w of ["Open the Job", "Snooze…", "Change Why…", "Take Off Hold"]) expect(t, w).toContain(w);
+    expect(t).not.toContain("Put on Hold");
   });
 
   it("a visit opens its visit, a lead its lead; neither has hold verbs", () => {
     const visit = rows({ id: "a1", kind: "appointment", name: "Site inspection: Rita Moss", address: null, city: null });
-    expect(visit).toMatch(/<a[^>]*href="\/appointments\/a1"[^>]*>Open The Visit<\/a>/);
+    expect(visit).toMatch(/<a[^>]*href="\/appointments\/a1"[^>]*>Open the Visit<\/a>/);
     const lead = rows({ id: "l1", kind: "lead", name: "Rita Moss", address: null, city: null });
-    expect(lead).toMatch(/<a[^>]*href="\/leads\?focus=l1"[^>]*>Open The Lead<\/a>/);
+    expect(lead).toMatch(/<a[^>]*href="\/leads\?focus=l1"[^>]*>Open the Lead<\/a>/);
     expect(text(visit + lead)).not.toMatch(/Hold|Snooze|Why/);
   });
 
@@ -203,11 +203,11 @@ describe("a rail card: one ⋯, no status dropdown", () => {
     expect(railWords.en.ag_rail_offHoldBack).toBe("{name} is off hold and back on the calendar.");
   });
 
-  it("the footer says Jump To The Calendar ↓ and Clear Time, every target 44px", () => {
+  it("the footer says Jump to the Calendar ↓ and Clear Time, every target 44px", () => {
     const rail = read("src/app/(app)/schedule/place-rail.tsx");
     expect(rail).toContain('{t("ag_rail_btn_jumpToCalendar")} ↓');
     expect(rail).toContain('{t("ag_rail_btn_clearTime")}');
-    expect(railWords.en.ag_rail_btn_jumpToCalendar).toBe("Jump To The Calendar");
+    expect(railWords.en.ag_rail_btn_jumpToCalendar).toBe("Jump to the Calendar");
     expect(railWords.en.ag_rail_btn_clearTime).toBe("Clear Time");
     expect(rail).not.toMatch(/Jump to the calendar|clear time/);
     const footer = rail.slice(rail.indexOf("{chosen.length > 0 && ("));
@@ -216,7 +216,7 @@ describe("a rail card: one ⋯, no status dropdown", () => {
 });
 
 describe("the heading counts what waits, and says when a list is capped", () => {
-  it("'Waiting For A Day (n)', '(n+)' and one line when any rail read hits its cap", () => {
+  it("'Waiting for a Day (n)', '(n+)' and one line when any rail read hits its cap", () => {
     const page = read("src/app/(app)/schedule/page.tsx");
     expect(page).toContain('{t("nv_sched_waitingForADay")} <span');
     expect(page).toContain('({waiting.length}{railCapped ? "+" : ""})');

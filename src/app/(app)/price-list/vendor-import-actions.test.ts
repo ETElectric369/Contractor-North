@@ -376,7 +376,7 @@ describe("the screen: Title Case on every new clickable, and the words that repl
   const MANAGER = read("./vendors-manager.tsx");
 
   it("the import door and its preview", () => {
-    for (const label of ["Import A List", "Drop A Vendor List Here (Excel, CSV, PDF Or Photo)", "Tick All", "Untick All", "Guessed From The Name", "A Person", "Nothing Ticked"]) {
+    for (const label of ["Import a List", "Drop a Vendor List Here (Excel, CSV, PDF or Photo)", "Tick All", "Untick All", "Guessed from the Name", "A Person", "Nothing Ticked"]) {
       expect(IMPORT).toContain(label);
     }
     expect(IMPORT).toContain("`Add ${n} Vendor${n === 1 ? \"\" : \"s\"}`");
@@ -385,14 +385,14 @@ describe("the screen: Title Case on every new clickable, and the words that repl
     expect(IMPORT).toContain("min-h-11 min-w-11");
   });
 
-  it("the Vendors tab: chips, kind words, View On Map, and the line that says who carries prices", () => {
+  it("the Vendors tab: chips, kind words, View on Map, and the line that says who carries prices", () => {
     expect(MANAGER).toContain("Suppliers, subcontractors and brands can all carry prices on items.");
     // PUT IT ON AN ITEM IS ON EVERY VENDOR'S SHEET (Erik 2026-09-30): no Kind is turned away, so
     // the sentence that used to send a subcontractor back to change its Kind is gone.
-    expect(MANAGER).toContain("Put It On An Item");
+    expect(MANAGER).toContain("Put It on an Item");
     expect(MANAGER).not.toContain("subcontractors don");
     expect(MANAGER).not.toContain("Change its Kind to Supplier or Brand");
-    expect(MANAGER).toContain("View On Map");
+    expect(MANAGER).toContain("View on Map");
     expect(MANAGER).not.toContain("A vendor is the brand, e.g. Andersen.\n");
     expect(MANAGER).not.toContain('placeholder: "the brand, e.g. Andersen"');
   });

@@ -12,7 +12,7 @@
  *
  * The sheet asks "Which line already charged for this?", lists only the lines that can hold it
  * (lib/already-billed: sent bills, lines typed or changed by hand, never a credit or a lump), beside
- * what the cost was, and presses Mark Billed On INV-x. For hours it lists the open shifts (for a line
+ * what the cost was, and presses Mark Billed on INV-x. For hours it lists the open shifts (for a line
  * that names one person, only that person's: 0361 holds a line to its person's hours) and ticks only
  * the line's own person's, up to the day the bill was written. For a receipt that cost more than
  * the line (Pinyon Sage: $110 against $186.93) with Shop Stock on, it first asks "Did J-010 Use All Of
@@ -279,8 +279,8 @@ export function AlreadyBilledSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
-  const num = chosen?.invoice.invoice_number ?? "The Bill";
-  const markLabel = `Mark Billed On ${num}`;
+  const num = chosen?.invoice.invoice_number ?? "the Bill";
+  const markLabel = `Mark Billed on ${num}`;
   const isTime = data?.target.kind === "time";
   // WHOSE HOURS (0361): a line that names one person is offered only that person's shifts, and only
   // those that are listed are ever marked (a tick left on another person's shift is not sent).
@@ -450,7 +450,7 @@ export function AlreadyBilledSheet({
 
         {data && chosen && step === "ask" && (
           <div className="space-y-3">
-            <p className="text-base font-semibold text-slate-900">Did {data.jobNumber} Use All Of It?</p>
+            <p className="text-base font-semibold text-slate-900">Did {data.jobNumber} Use All of It?</p>
             <p className="text-slate-600">
               {chosen.line.description.trim() || "The line"} on {num} is {formatCurrency(chosen.line.line_total)}, and this bill cost{" "}
               {formatCurrency(data.target.cost ?? 0)}. If some of it went into shop stock, put it there first: once {num} holds the bill, its
@@ -465,7 +465,7 @@ export function AlreadyBilledSheet({
                   mark();
                 }}
               >
-                Yes, All Of It
+                Yes, All of It
               </Button>
               <Button
                 type="button"
@@ -477,7 +477,7 @@ export function AlreadyBilledSheet({
                   if (data.target.billId) readReceipt(data.target.billId);
                 }}
               >
-                No, Some Went Into Stock
+                No, Some Went into Stock
               </Button>
               <Button type="button" variant="ghost" onClick={() => setStep("pick")}>
                 Back
@@ -563,7 +563,7 @@ export function AlreadyInvoicedSheet({
       onCancel={onClose}
       onSave={press}
       saving={saving}
-      saveLabel={picked?.number ? `Billed On ${picked.number}` : "Billed On It"}
+      saveLabel={picked?.number ? `Billed on ${picked.number}` : "Billed on It"}
       disabled={!chosen || saving || !load?.ok}
     />
   );

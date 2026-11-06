@@ -28,7 +28,7 @@
  *                                               fetchProfitInputs, getJobActualByCategory
  *     · src/app/(app)/analytics/page.tsx        Job profitability (builds its own ProfitInputs)
  *     · Nort: get_job_financials / list_job_profitability / profit_by_type (through the above)
- *     · src/lib/analytics/owner-money.ts        the shelf's part of a bill goes to Put On The Shelf
+ *     · src/lib/analytics/owner-money.ts        the shelf's part of a bill goes to Put on the Shelf
  *   stays whole (a supplier's paper, or what the CUSTOMER pays):
  *     · src/app/(app)/bills/page.tsx, bills/supplier-actions.ts   supplier balance and debt
  *     · src/lib/pricing/learned-prices.ts (0100)                   learned price

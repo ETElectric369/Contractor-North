@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 /**
  * THE DOOR ON EVERY FORM THAT ADDS HOURS (the duplicate punches, 2026-09-26). Before the office
  * types a person's day, the form shows what that person already has on it, and a punch on no job
- * gets "Put This On <job>", keeping its clock times. And one tap is one entry: the forms cannot
+ * gets "Put This on <job>", keeping its clock times. And one tap is one entry: the forms cannot
  * send a save twice.
  */
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
@@ -53,21 +53,21 @@ const render = (shifts: DayShift[], forJob: { id: string; label: string } | null
   );
 
 describe("the day's shifts, above the form", () => {
-  it("a punch on no job offers Put This On <the form's job>, with its own clock times", () => {
+  it("a punch on no job offers Put This on <the form's job>, with its own clock times", () => {
     const html = render([punch], { id: "j28", label: "41 Larkspur" });
     expect(html).toContain("Brian already has a shift on Fri, Sep 11");
     expect(html).toContain("10:31 AM to 6:57 PM · 8.43 h");
     expect(html).toContain("No job");
-    expect(html).toContain(">Put This On 41 Larkspur</button>");
+    expect(html).toContain(">Put This on 41 Larkspur</button>");
     expect(html).toContain("Put it on 41 Larkspur instead of adding the hours again.");
   });
 
-  it("a punch STILL RUNNING on no job gets Put This On <job> too (putShiftOnJob takes an open row: 'running since … is on <job> now')", () => {
+  it("a punch STILL RUNNING on no job gets Put This on <job> too (putShiftOnJob takes an open row: 'running since … is on <job> now')", () => {
     const running: DayShift = { ...punch, id: "running", clockOut: null, hours: 0 };
     const html = render([running], { id: "j28", label: "41 Larkspur" });
     expect(html).toContain("since 10:31 AM, still on the clock");
     expect(html).toContain("No job");
-    expect(html).toContain(">Put This On 41 Larkspur</button>");
+    expect(html).toContain(">Put This on 41 Larkspur</button>");
     // The server marks it the door's kind whether it is closed or still running.
     const actions = readFileSync(new URL("./actions.ts", import.meta.url), "utf8");
     expect(actions).toContain("noJob: !r.job_id && !code,");
@@ -78,7 +78,7 @@ describe("the day's shifts, above the form", () => {
 
   it("with no job picked yet, the punch is shown and the form says to pick the job; there is no blind button", () => {
     const html = render([punch], null);
-    expect(html).not.toContain("Put This On");
+    expect(html).not.toContain("Put This on");
     // Add Time Entry on Timecards is the one form with no job yet, and its Job field is above the list.
     expect(html).toContain("Pick the job above to put it there instead of adding the hours again.");
     expect(html).toContain('href="/timecards?entry=punch"');
@@ -95,7 +95,7 @@ describe("the day's shifts, above the form", () => {
   it("a shift already on a job (and billed) is named with its job and invoice, and opens on Timecards", () => {
     const html = render([billed], { id: "j28", label: "41 Larkspur" });
     expect(html).toContain("41 Larkspur · on INV-081");
-    expect(html).not.toContain("Put This On");
+    expect(html).not.toContain("Put This on");
     expect(html).toContain("Open That Shift");
     expect(html).toContain("Hours that overlap these would be counted twice.");
   });
@@ -105,7 +105,7 @@ describe("the day's shifts, above the form", () => {
   });
 });
 
-describe("Put This On moves the punch only, and the form says what it typed that the punch didn't get", () => {
+describe("Put This on moves the punch only, and the form says what it typed that the punch didn't get", () => {
   it("names each field typed, and nothing when nothing was", () => {
     expect(notCarriedWords({ miles: 12, lunch: true, code: "ROUGH", rate: 30, notes: "panel" })).toBe(
       "Not added to that shift: 12 miles, the lunch, code ROUGH, the rate and the notes typed on the form. Open it to add them.",
@@ -142,7 +142,7 @@ describe("the day's shifts in Spanish (cn-v1138): the list reads the person's la
     expect(html).toContain(">Poner Esto en 41 Larkspur</button>");
     expect(html).toContain("Ponlo en 41 Larkspur en vez de agregar las horas otra vez.");
     expect(html).not.toContain("already has");
-    expect(html).not.toContain("Put This On");
+    expect(html).not.toContain("Put This on");
   });
 
   it("two shifts, one billed: Spanish count, 'on INV' and the Open That Shift door; a day marked off says so in Spanish", () => {
@@ -168,7 +168,7 @@ describe("the day's shifts in Spanish (cn-v1138): the list reads the person's la
     expect(notCarriedWords({ miles: 12 })).toBe(notCarriedWords({ miles: 12 }, "en"));
     // The English the office reads is what it was.
     expect(dict("en").tc_offThatDay).toBe("Marked off that day on the schedule.");
-    expect(dict("en").tc_putThisOn).toBe("Put This On {job}");
+    expect(dict("en").tc_putThisOn).toBe("Put This on {job}");
     expect(dict("en").tc_alreadyHasOne).toBe("{name} already has a shift on {day}");
   });
 });
@@ -194,7 +194,7 @@ describe("one tap, one entry", () => {
     expect(src("../jobs/[id]/page.tsx")).toContain("<AddTimeEntry");
     expect(src("../jobs/[id]/page.tsx")).toContain("fixedJob={{ id: j.id, label: jobLabel(j) }}");
   });
-  it("a dropped connection on Put This On, Company Time or either Undo is a sentence (the 60mph law)", () => {
+  it("a dropped connection on Put This on, Company Time or either Undo is a sentence (the 60mph law)", () => {
     const put = src("./same-day-shifts.tsx");
     // The sentences come through the catalog since cn-v1138: the door reads the key, the key says "No connection".
     expect(put).toMatch(/try \{\s*r = await putShiftOnJob\([^)]*\);\s*\} catch \{\s*toast\(t\("tc_offlineShiftMayNotMove"\)/);
@@ -220,6 +220,6 @@ describe("one tap, one entry", () => {
     expect(src("./same-day-shifts.tsx")).toMatch(/href=\{`\/timecards\?entry=\$\{s\.id\}`\}\s*onClick=\{\(\) => onOpenShift\?\.\(s\)\}/);
   });
   it("the door is an outline button, never a second primary beside the form's own", () => {
-    expect(render([punch], { id: "j28", label: "41 Larkspur" })).toMatch(/<button[^>]*class="[^"]*border-slate-300[^"]*"[^>]*>Put This On 41 Larkspur<\/button>/);
+    expect(render([punch], { id: "j28", label: "41 Larkspur" })).toMatch(/<button[^>]*class="[^"]*border-slate-300[^"]*"[^>]*>Put This on 41 Larkspur<\/button>/);
   });
 });

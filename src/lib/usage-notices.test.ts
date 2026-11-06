@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { translator } from "@/lib/i18n";
 import { usageNoticeKey, usageNoticeKind, usageNoticeWords } from "./usage-notices";
-import { esTitleCase } from "../../tests/es-function-words";
+import { esTitleCase, titleCaseIn } from "../../tests/title-case-words";
 
 /**
  * THE USAGE NOTICES' KEYS AND WORDS (cn-v1140): one key per month per threshold so the cron tells
@@ -11,11 +11,8 @@ import { esTitleCase } from "../../tests/es-function-words";
  */
 const en = translator("en");
 const es = translator("es");
-const titleCase = (s: string) =>
-  s
-    .split(/\s+/)
-    .filter(Boolean)
-    .every((w) => /^[\p{Lu}\p{N}&\/+·(]/u.test(w));
+/** English Title Case through the one judge (tests/title-case-words, cn-v1148). */
+const titleCase = (s: string) => titleCaseIn(s, "en");
 
 describe("usageNoticeKey", () => {
   const m = (pct: number, state: "fine" | "watch" | "almost" | "out", monthKey = "2026-10") => ({ pct, state, monthKey });
@@ -53,14 +50,14 @@ describe("usageNoticeWords", () => {
 
   it("80, English: the title and the body with the reset day and the nothing-stops line", () => {
     expect(usageNoticeWords("usage_80:2026-10", window, en, "en")).toEqual({
-      title: "Usage: 80% Of This Month",
+      title: "Usage: 80% of This Month",
       body: "Most of this month's usage is used. It resets Nov 1. Nothing stops: past 100%, Nort and the estimator run lighter until then.",
     });
   });
 
   it("100, English: used up, the lighter model until the reset, the one door", () => {
     expect(usageNoticeWords("usage_100:2026-10", window, en, "en")).toEqual({
-      title: "Usage: Used Up For This Month",
+      title: "Usage: Used Up for This Month",
       body: "This month's usage is used up, so Nort and the estimator run on the lighter model until Nov 1. Add usage or upgrade in Settings › Getting Paid.",
     });
   });

@@ -210,7 +210,7 @@ describe("the one sentence", () => {
   it("cuts a why-line VISIBLY when a company's own method name overruns it", () => {
     // A method is whatever somebody typed into Settings, so its name can be any length. A clause sliced
     // off mid-word with no mark reads like a sentence that simply ended.
-    const long = "A Very Long Custom Way Of Being Paid That Somebody Typed Into Settings One Afternoon";
+    const long = "A Very Long Custom Way of Being Paid That Somebody Typed into Settings One Afternoon";
     const r = row(view({ payments: [pay(10_000, "2026-06-10", long)], moneyIn: [] }), long.toLowerCase());
     expect(r.why.length).toBe(WHY_LINE_MAX);
     expect(r.why.endsWith("\u2026")).toBe(true);

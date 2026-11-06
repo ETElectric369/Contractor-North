@@ -1,10 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { titleCaseIn } from "../../../../../tests/title-case-words";
 
 /**
  * THE PHASE 5 CARDS ON SCREEN: the Panel tab's Print card (since the panel-first wave: Door Labels
- * and Circuit Map for everyone, Save As Circuit Map under it for the office) and the Customer Page
+ * and Circuit Map for everyone, Save as Circuit Map under it for the office) and the Customer Page
  * tab's switch with its preview of exactly what the customer reads (unchanged). 44px targets and
  * Title Case on every clickable.
  */
@@ -23,17 +24,17 @@ import { FINAL_MAP, J011, PANEL, circuit } from "@/lib/panel/__fixtures__/honeys
 
 const text = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/\s+/g, " ");
 const clickables = (html: string) => [...html.matchAll(/<(button|a)\b([^>]*)>([\s\S]*?)<\/\1>/g)].map((m) => ({ attrs: m[2], label: text(m[3]).trim() }));
-const titleCase = (label: string) => label.split(/\s+/).filter((w) => /^[a-z]/i.test(w)).every((w) => /^[A-Z0-9]/.test(w));
+const titleCase = (label: string) => titleCaseIn(label, "en"); // the one judge (cn-v1148)
 
 describe("the Panel tab's Print card (one door: Door Labels and Circuit Map)", () => {
   // The night's map with the first few in spaces, so the strips have words to fit.
   const PLACED = FINAL_MAP.map((c, i) => (i < 6 ? { ...c, space: i + 1 } : c));
 
-  it("the office: Door Labels, Circuit Map and Save As Circuit Map under it, 44px and Title Case", () => {
+  it("the office: Door Labels, Circuit Map and Save as Circuit Map under it, 44px and Title Case", () => {
     const html = renderToStaticMarkup(createElement(PanelDirectoryCard, { jobId: J011, staff: true, circuits: PLACED, panel: PANEL }));
     const t = text(html);
     const cs = clickables(html);
-    expect(cs.map((c) => c.label)).toEqual(["Door Labels", "Circuit Map", "Save As Circuit Map"]);
+    expect(cs.map((c) => c.label)).toEqual(["Door Labels", "Circuit Map", "Save as Circuit Map"]);
     for (const c of cs) {
       expect(c.attrs).toMatch(/min-h-\[44px\]|h-11|h-10|min-h-11/);
       expect(titleCase(c.label)).toBe(true);
@@ -46,15 +47,15 @@ describe("the Panel tab's Print card (one door: Door Labels and Circuit Map)", (
     // Circuit Map: the same PDF viewer page as before, and the saved document's door beside it.
     expect(html).toContain(`href="/print/pdf-preview?doc=panel&amp;id=${J011}&amp;back=${encodeURIComponent(`/jobs/${J011}?tab=panel`)}"`);
     expect(t).toContain("The door card and the circuit map, from the 22 kept circuits.");
-    expect(t).toContain("Save As Circuit Map puts it on the customer's Plans And Drawings");
-    expect(html.indexOf("Circuit Map</a>")).toBeLessThan(html.indexOf("Save As Circuit Map"));
+    expect(t).toContain("Save as Circuit Map puts it on the customer's Plans and Drawings");
+    expect(html.indexOf("Circuit Map</a>")).toBeLessThan(html.indexOf("Save as Circuit Map"));
     // Nothing on the tab is called Panel Directory any more.
     expect(t).not.toContain("Panel Directory");
     expect(html).toContain('aria-label="Print"');
   });
 
   it("says a tight label on the card, before anyone opens the labels page", () => {
-    const long = { ...FINAL_MAP[0], space: 1, panel_label: "Bedroom And Chandelier Lights Over The Stair Landing" };
+    const long = { ...FINAL_MAP[0], space: 1, panel_label: "Bedroom And Chandelier Lights over the Stair Landing" };
     const narrow = { ...PANEL, label_width_in: 0.5 };
     const html = renderToStaticMarkup(createElement(PanelDirectoryCard, { jobId: J011, staff: false, circuits: [long, ...FINAL_MAP.slice(1)], panel: narrow }));
     const t = text(html);
@@ -67,10 +68,10 @@ describe("the Panel tab's Print card (one door: Door Labels and Circuit Map)", (
     expect(text(two)).toContain("Width 1.25 in left, 1.5 in right; change it under Edit Panel.");
   });
 
-  it("a tech prints both; Save As Circuit Map is the office's and never renders for the crew", () => {
+  it("a tech prints both; Save as Circuit Map is the office's and never renders for the crew", () => {
     const html = renderToStaticMarkup(createElement(PanelDirectoryCard, { jobId: J011, staff: false, circuits: PLACED, panel: PANEL }));
     expect(clickables(html).map((c) => c.label)).toEqual(["Door Labels", "Circuit Map"]);
-    expect(text(html)).not.toContain("Save As Circuit Map");
+    expect(text(html)).not.toContain("Save as Circuit Map");
   });
 
   it("no panel handed in: Door Labels still opens the job's first panel, and no width is guessed", () => {
@@ -82,7 +83,7 @@ describe("the Panel tab's Print card (one door: Door Labels and Circuit Map)", (
   });
 
   it("a one-panel job's loose kept circuits are counted on the card the way the labels page prints them (lib/panel/held)", () => {
-    const loose = { ...FINAL_MAP[0], space: 1, panel_id: null, panel_label: "Bedroom And Chandelier Lights Over The Stair Landing" };
+    const loose = { ...FINAL_MAP[0], space: 1, panel_id: null, panel_label: "Bedroom And Chandelier Lights over the Stair Landing" };
     const narrow = { ...PANEL, label_width_in: 0.5 };
     const card = (livePanels: number) =>
       text(renderToStaticMarkup(createElement(PanelDirectoryCard, { jobId: J011, staff: false, circuits: [loose, ...FINAL_MAP.slice(1)], panel: narrow, livePanels })));
@@ -144,7 +145,7 @@ describe("the Customer Page tab's panel switch", () => {
     const t = text(html);
     expect(html).toContain('role="switch"');
     expect(html).toContain('aria-checked="false"');
-    expect(t).toContain("Show The Panel On Their Page");
+    expect(t).toContain("Show the Panel on Their Page");
     expect(t).toContain("Andrew Crake doesn't see the panel. Turn it on when the list is ready.");
     expect(t).toContain("What Andrew Crake Would See");
     expect(html).toContain('data-panel-line="— · Entry Lights · feeds Kitchen And Living Lights · 15A"');
@@ -160,13 +161,13 @@ describe("the Customer Page tab's panel switch", () => {
     const t = text(html);
     expect(html).toContain('aria-checked="true"');
     expect(t).toContain("What Andrew Crake Sees");
-    expect(t).toContain('On their Plans And Drawings: "Circuit Map", shown Sep 25, 2026.');
+    expect(t).toContain('On their Plans and Drawings: "Circuit Map", shown Sep 25, 2026.');
   });
 
   it("no panel yet: no switch, a way to the Panel tab", () => {
     const html = view({ panels: [], preview: [] });
     expect(html).not.toContain('role="switch"');
     expect(text(html)).toContain("This job has no panel yet.");
-    expect(clickables(html).map((c) => c.label)).toEqual(["Go To Panel"]);
+    expect(clickables(html).map((c) => c.label)).toEqual(["Go to Panel"]);
   });
 });

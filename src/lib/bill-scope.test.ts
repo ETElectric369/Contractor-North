@@ -96,7 +96,7 @@ describe("scopeAfterJobMove", () => {
   });
 
   // ITEM C1-2: taken OFF every job, the one sentence spoke of "the job it moved to" (there isn't one)
-  // and sent him to the Edit Bill box's Part Of The Job control, which is not drawn without a job.
+  // and sent him to the Edit Bill box's Part of the Job control, which is not drawn without a job.
   it("taken off every job it says what happened, invents no job, and names no door that isn't drawn", () => {
     const r = scopeAfterJobMove("Framing", { jobId: null, jobScopes: [] });
     expect(r.value).toBeNull();
@@ -112,9 +112,9 @@ describe("scopeAfterJobMove", () => {
 describe("what the screen says", () => {
   it("names the part, or says plainly that none is set", () => {
     expect(scopeSaid("Decking")).toBe("Decking");
-    expect(scopeSaid(null)).toBe("No Part Of The Job Set");
+    expect(scopeSaid(null)).toBe("No Part of the Job Set");
     // A stored "Uncategorized" from before the column was decided in one place reads the same way.
-    expect(scopeSaid(SCOPE_UNCATEGORIZED)).toBe("No Part Of The Job Set");
+    expect(scopeSaid(SCOPE_UNCATEGORIZED)).toBe("No Part of the Job Set");
   });
 
   it("a job whose estimate has no parts offers no question at all (no dead-end dropdown)", () => {
@@ -129,9 +129,9 @@ describe("what the screen says", () => {
  *
  * main's receipt reader could store the literal "Uncategorized". The control kept a stored word the
  * estimate no longer has (right, so a dropdown can never silently re-file a cost under nothing just
- * by being opened) and so it kept that one too: "No Part Of The Job / Uncategorized / Framing /
+ * by being opened) and so it kept that one too: "No Part of the Job / Uncategorized / Framing /
  * Decking" — in the one control whose whole purpose is to stop a budget row splitting in two. The
- * Costs tab row beside it already said "No Part Of The Job Set" about the same cost, so the row and
+ * Costs tab row beside it already said "No Part of the Job Set" about the same cost, so the row and
  * the box disagreed until he saved. Both decisions moved in here.
  */
 describe("what the one control shows (item C1-3)", () => {
@@ -142,13 +142,13 @@ describe("what the one control shows (item C1-3)", () => {
     expect(scopeSelected(SCOPE_UNCATEGORIZED)).toBe("");
   });
 
-  it("a stored 'Uncategorized' is shown as No Part Of The Job, with NO option of its own", () => {
+  it("a stored 'Uncategorized' is shown as No Part of the Job, with NO option of its own", () => {
     const options = scopeOptions(["Framing", "Decking"], SCOPE_UNCATEGORIZED);
     expect(options).toEqual(["Framing", "Decking"]);
     expect(options).not.toContain(SCOPE_UNCATEGORIZED);
     // And the box now agrees with the row the Costs tab prints beside it.
     expect(scopeSelected(SCOPE_UNCATEGORIZED)).toBe("");
-    expect(scopeSaid(SCOPE_UNCATEGORIZED)).toBe("No Part Of The Job Set");
+    expect(scopeSaid(SCOPE_UNCATEGORIZED)).toBe("No Part of the Job Set");
   });
 
   it("a part the estimate has LOST still rides in the list, so saving the box saves what is there", () => {
@@ -166,7 +166,7 @@ describe("what the one control shows (item C1-3)", () => {
 /**
  * ITEMS C1-1 AND C1-4 (ONE DEFECT): WHOSE WORD WINS, decided here and nowhere else.
  *
- * The Add Cost sheet drew Part Of The Job and then handed the receipt reader paid, category and the
+ * The Add Cost sheet drew Part of the Job and then handed the receipt reader paid, category and the
  * date and NOT the answer — so on the default Read the Receipt save the model's guess won, Erik's
  * picked "Decking" never left the browser, and no sentence anywhere said it had been dropped.
  */

@@ -35,7 +35,7 @@ export type ShelfLotView = {
    *  null for a roll counted in by hand. */
   backTo: string | null;
   /** It came in on a ticket bought for the shelf: there is no job to send it back to, so it has no
-   *  Take It Off The Shelf (the ticket's Undo in the tray is the way back). */
+   *  Take It Off the Shelf (the ticket's Undo in the tray is the way back). */
   shelfTicket: boolean;
   /** The supplier on its ticket (null for a roll counted in): names the Return To door. */
   supplier: string | null;
@@ -95,8 +95,8 @@ const qty = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(
 
 /**
  * THE SHELF, ONE ROW PER ITEM ("12/2 NM-B · 250 ft · $180.17"). Tap a row for where each roll came
- * from and where each piece went, and the doors the record allows: Count It, Add A Roll Counted In,
- * Take It Off The Shelf (a roll nothing was taken from), and Undo on a count or a take. A take an
+ * from and where each piece went, and the doors the record allows: Count It, Add a Roll Counted In,
+ * Take It Off the Shelf (a roll nothing was taken from), and Undo on a count or a take. A take an
  * invoice already bills refuses its Undo in words that name the invoice.
  */
 export function ShopStockList({ items, openItem = null }: { items: ShelfItemView[]; openItem?: string | null }) {
@@ -183,7 +183,7 @@ export function ShopStockList({ items, openItem = null }: { items: ShelfItemView
                       onClick={() => setAdding(it)}
                       className="flex min-h-11 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
                     >
-                      Add A Roll Counted In
+                      Add a Roll Counted In
                     </button>
                     <ItemActions item={asItem(it)} hasHistory={it.lots.length > 0 || it.moves.length > 0} />
                   </div>
@@ -217,7 +217,7 @@ export function ShopStockList({ items, openItem = null }: { items: ShelfItemView
                                 }
                                 className="-ml-1 flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
                               >
-                                Take It Out Of Stock
+                                Take It Out of Stock
                               </button>
                             )}
                             {l.liveMoves === 0 && l.shelfTicket && (
@@ -311,7 +311,7 @@ export function ShopStockList({ items, openItem = null }: { items: ShelfItemView
                                   onClick={() => act(() => settleShortAction(m.id), "Settled from stock.")}
                                   className="flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
                                 >
-                                  Settle From Stock
+                                  Settle from Stock
                                 </button>
                               )}
                             </li>
@@ -405,7 +405,7 @@ function CountIt({ item, onClose, onDone }: { item: ShelfItemView; onClose: () =
       title={`Count ${item.name}`}
       size="sm"
       dirty={diff !== 0}
-      footer={<ModalActions onCancel={onClose} onSave={save} saving={saving} saveLabel="Save The Count" disabled={saving || count < 0} />}
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={saving} saveLabel="Save the Count" disabled={saving || count < 0} />}
     >
       <div className="space-y-3">
         <p className="text-sm text-slate-600">
@@ -460,10 +460,10 @@ function AddOpeningRoll({ item, onClose, onDone }: { item: ShelfItemView; onClos
     <Modal
       open
       onClose={onClose}
-      title={`Add A Roll Of ${item.name}`}
+      title={`Add a Roll of ${item.name}`}
       size="sm"
       dirty={pieces > 0 || cost > 0 || !!note}
-      footer={<ModalActions onCancel={onClose} onSave={save} saving={saving} saveLabel="Put It In Stock" disabled={saving || !(pieces > 0) || !note.trim()} />}
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={saving} saveLabel="Put It in Stock" disabled={saving || !(pieces > 0) || !note.trim()} />}
     >
       <div className="space-y-3">
         <p className="text-sm text-slate-600">

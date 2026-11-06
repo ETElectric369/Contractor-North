@@ -22,7 +22,7 @@ import { PasskeyManager } from "./passkey-manager";
 import { AvatarUpload } from "./avatar-upload";
 import { LangProvider } from "@/components/lang-provider";
 import type { Lang } from "@/lib/i18n";
-import { esTitleCase } from "../../../../tests/es-function-words";
+import { esTitleCase } from "../../../../tests/title-case-words";
 
 const r = (lang: Lang, el: Parameters<typeof renderToStaticMarkup>[0]) => renderToStaticMarkup(createElement(LangProvider, { lang, children: el }));
 const words = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").replace(/&#x27;/g, "'").trim();
@@ -61,7 +61,7 @@ describe("Nort speaks first", () => {
   const greeting = createElement(NortGreeting, { greets: true, name: "" });
   it("English as before; Spanish in the tech's words", () => {
     const en = r("en", greeting);
-    expect(words(en)).toContain("Nort speaks first When you tap Talk To Nort, he says hello the moment the mic is live");
+    expect(words(en)).toContain("Nort speaks first When you tap Talk to Nort, he says hello the moment the mic is live");
     expect(words(en)).toContain("Nort greets you as");
     expect(en).toContain('placeholder="Your first name"');
     const es = r("es", greeting);

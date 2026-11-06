@@ -1,5 +1,5 @@
 /**
- * The one read behind "Link To J-055 Instead" (lib/appointments/visit-start.ts has the rule). The
+ * The one read behind "Link to J-055 Instead" (lib/appointments/visit-start.ts has the rule). The
  * appointment page offers the door from it and linkVisitInstead re-asks it before linking, so the
  * page and the action can never disagree about which job is on offer.
  *

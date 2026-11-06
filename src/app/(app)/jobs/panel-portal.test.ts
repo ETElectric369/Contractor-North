@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 /**
  * THE PANEL'S CUSTOMER-SIDE DOORS, PINNED (Panel plan, phase 5): the office's switch and Save As
  * Circuit Map. Office only; the switch is one write read back, and a job with no panel is said so;
- * Save As Circuit Map prints the directory with the office's own session, files it as a Plan, and
+ * Save as Circuit Map prints the directory with the office's own session, files it as a Plan, and
  * shows it as a Circuit Map REPLACING the newest circuit map there (never a guess from a name).
  * Unscripted database calls throw, so every statement is accounted for.
  */
@@ -91,7 +91,7 @@ afterEach(() => vi.unstubAllGlobals());
 const PDF = new Uint8Array(2048).fill(37);
 const pdfResponse = () => new Response(PDF, { status: 200, headers: { "content-type": "application/pdf" } });
 
-describe("Show The Panel On Their Page", () => {
+describe("Show the Panel on Their Page", () => {
   it("a tech is refused before anything is read", async () => {
     state.guard = { error: "This action is staff-only." };
     expect(await setPanelOnPortal(JOB, true)).toEqual({ ok: false, error: "Only the office can do that." });
@@ -185,7 +185,7 @@ describe("the panel card and the Panel Map switch (0352)", () => {
   });
 });
 
-describe("Save As Circuit Map", () => {
+describe("Save as Circuit Map", () => {
   const ready = (extra: Record<string, any[]> = {}) => ({
     "jobs.select": [JOB_ROW],
     "job_circuits.select": [{ count: 22, error: null }],
@@ -238,7 +238,7 @@ describe("Save As Circuit Map", () => {
     share.filePlan.mockResolvedValueOnce({ ok: true, paper: { id: NEW_DOC } });
     share.showPaper.mockResolvedValueOnce({ ok: true, row: { document_id: NEW_DOC, title: "Circuit Map" } });
     const r = await saveCircuitMap(JOB);
-    expect(r).toMatchObject({ ok: true, replaced: null, message: "Saved as the circuit map on Andrew Crake's page, under Plans And Drawings." });
+    expect(r).toMatchObject({ ok: true, replaced: null, message: "Saved as the circuit map on Andrew Crake's page, under Plans and Drawings." });
     expect(share.showPaper).toHaveBeenCalledWith(NEW_DOC, { kind: "circuit_map", title: "Circuit Map" });
   });
 

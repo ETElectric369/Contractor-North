@@ -152,7 +152,7 @@ describe("every tab count in the app is an open count", () => {
     const page = read("app/(app)/jobs/[id]/page.tsx");
     const costsOpen = page.slice(page.indexOf("const costsOpen ="), page.indexOf(";", page.indexOf("const costsOpen =")));
     // The three piles, each a list of rows: Not Billed Yet, the supplier's papers in nobody's books,
-    // and the receipts the Receipts & Papers fold calls "Not On A Bill Yet" (from the very list the
+    // and the receipts the Receipts & Papers fold calls "Not on a Bill Yet" (from the very list the
     // fold is handed). Not Billed Yet is counted as the pile ids the tab DRAWS (a bill, an order, a
     // take from stock — lib/job-cost-groups openRowsDrawn), and an id no row stands behind is
     // reported, never counted (J-013 again, 2026-09-29: the chip still said 3 on one live bill).

@@ -56,7 +56,7 @@ export type UnbilledView =
  * fixed-price job with no live estimate (W1-19): its next New Invoice pulls the same hours and
  * receipts (nextInvoiceImportsActuals, J-010 Pinyon Sage), so this figure is what that door bills. A
  * payment schedule or a fixed-price contract bills something else - a figure here would be a number
- * no door produces (MONEY law) - so there the Overview leads with Left To Bill instead
+ * no door produces (MONEY law) - so there the Overview leads with Left to Bill instead
  * (left-to-bill-card.tsx). The Labor / Bills / Stock / Credit rows sit in a Why? fold under the one
  * figure; the sentences that change what the button does stay outside it.
  *
@@ -232,7 +232,7 @@ export function UnbilledCard({
                     )}
                   </dd>
                 </div>
-                {/* PIECES TAKEN FROM STOCK (Took From Stock): what they cost the company, and the
+                {/* PIECES TAKEN FROM STOCK (Took from Stock): what they cost the company, and the
                     same markup as the bills, so the office sees both figures. One line each on the
                     next bill. */}
                 {takes > 0 && (

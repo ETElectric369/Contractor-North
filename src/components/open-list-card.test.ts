@@ -72,7 +72,7 @@ describe("the open-list card", () => {
 
   it("marks nothing paid from a list with no figures of its own until a person ticks that it is whole", () => {
     const html = render(BASE);
-    expect(textOf(html)).toContain("It's The Whole List: Mark 1 Paper Paid");
+    expect(textOf(html)).toContain("It's the Whole List: Mark 1 Paper Paid");
     expect(html).toMatch(/type="checkbox"/);
     const apply = buttons(html).find((b) => b.text === "Apply")!;
     expect(apply.markup).toMatch(/disabled=""/);
@@ -114,7 +114,7 @@ describe("the open-list card", () => {
     const text = textOf(html);
     expect(text).toContain("Doc Ref Code");
     expect(text).toContain("Q-1001");
-    expect(buttons(html).map((b) => b.text)).toEqual(["Read It With These Columns", "Not Now", "Delete"]);
+    expect(buttons(html).map((b) => b.text)).toEqual(["Read It with These Columns", "Not Now", "Delete"]);
   });
 
   it("says what stops it, and never leaves a dead end", () => {

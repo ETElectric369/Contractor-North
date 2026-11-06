@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * "IT IS THAT BILL" (d1ff7c5a). linkReceiptToBill writes the one organized_items tie a loose receipt
  * is missing (document_id + bill_id, on the bill's job). Pinned without a database:
  *
- *   - a tech's Snap Or Note row (needs_review, no bill on it) naming the same document does NOT
+ *   - a tech's Snap or Note row (needs_review, no bill on it) naming the same document does NOT
  *     block the tie: only a row that already carries a bill (bill_id, or tied_bill_id) does;
  *   - a row already on THIS bill is a re-tap: ok, nothing stacked;
  *   - a row on ANOTHER bill is said, never silently kept;
@@ -121,7 +121,7 @@ describe("linkReceiptToBill: the tie a loose receipt is missing", () => {
     });
   });
 
-  it("a tech's Snap Or Note row naming the document, with no bill on it, does not block the tie", async () => {
+  it("a tech's Snap or Note row naming the document, with no bill on it, does not block the tie", async () => {
     state.ties = [{ id: "t-note", document_id: DOC, bill_id: null, tied_bill_id: null, status: "needs_review" }];
     const res = await linkReceiptToBill(BILL, DOC);
     expect(res).toEqual({ ok: true });

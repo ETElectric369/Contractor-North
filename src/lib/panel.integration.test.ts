@@ -11,7 +11,7 @@ import { E017 } from "./panel/__fixtures__/honeysuckle";
  * Migration 0333 — THE JOB KNOWS ITS PANEL, exercised where the boundary lives.
  *
  * Erik's decision 1 (2026-09-25): the crew works the circuit list — add, relabel, place, Planned /
- * Roughed / Done, Verified On Site, Take Off with Undo — and only the office brings circuits in from
+ * Roughed / Done, Verified on Site, Take Off with Undo — and only the office brings circuits in from
  * an estimate or the plans, shows the panel on the customer's page, or takes a panel off a job.
  * Nobody hard-deletes. Nothing on either table carries a price. This speaks to the database AS a
  * tech and AS staff (the 0254 suite's pattern: `set local role authenticated` + planted claims,

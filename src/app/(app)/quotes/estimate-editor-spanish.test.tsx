@@ -37,7 +37,7 @@ describe("the editor in Spanish", () => {
     expect(words).toContain("Válido hasta");
     expect(words).toContain("Se guarda solo en cuanto le pones algo.");
     expect(html).toContain('placeholder="Cant."');
-    for (const english of ["Generate Line Items", "Add A Task", "Add A Line", "Draft with Estimator", "Saves itself the moment"]) expect(words).not.toContain(english);
+    for (const english of ["Generate Line Items", "Add a Task", "Add a Line", "Draft with Estimator", "Saves itself the moment"]) expect(words).not.toContain(english);
   });
 
   it("a saved estimate: the revision chain says its sentence around the link, the created line its date", () => {

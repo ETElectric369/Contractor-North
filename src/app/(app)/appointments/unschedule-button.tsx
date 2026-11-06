@@ -11,7 +11,7 @@ import { translator } from "@/lib/i18n";
 import { unscheduleAppointment } from "./actions";
 
 /** "We'll get back to you" is a real answer, and this is its button — the visit keeps everything
- *  but its date and waits on the schedule's rail under Waiting For A Day, placeable with one tap.
+ *  but its date and waits on the schedule's rail under Waiting for a Day, placeable with one tap.
  *
  *  IT WORKS NOW (0368, 2026-09-27): appointments.starts_at held NOT NULL from 0042, so every press
  *  failed on production. 0368 lets a visit wait without a day (every reader already expected one),
@@ -19,7 +19,7 @@ import { unscheduleAppointment } from "./actions";
  *
  *  `menuItem` (W2-11): the same words and toast as a row in the visit page's ⋯ Actions. The words
  *  follow the signed-in person's language (lib/words/visit-page, vp_; the row says what the
- *  calendar's own Clear The Date says, ag_cal_btn_clearTheDate); the server's refusal (res.error,
+ *  calendar's own Clear the Date says, ag_cal_btn_clearTheDate); the server's refusal (res.error,
  *  in the caller's language already) is said as received. */
 export function UnscheduleButton({ id, menuItem = false }: { id: string; menuItem?: boolean }) {
   const router = useRouter();

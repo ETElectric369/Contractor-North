@@ -26,7 +26,7 @@ describe("the door on the estimate", () => {
     expect(builder).toContain('import { rememberTaskAsKit } from "../price-list/kit-actions";');
     expect(builder).toContain('import { kitFromTaskDetail, kitNameFromLine, kitSummary } from "@/lib/estimate/kit-from-task";');
     const breakdown = builder.slice(builder.indexOf("export function TaskBreakdown("));
-    expect(breakdown).toContain("Remember As A Kit");
+    expect(breakdown).toContain("Remember as a Kit");
     expect(breakdown).toContain("rememberTaskAsKit({ name: kitName, unit: kitUnit, detail: d, category: kitCategory.trim() || null })");
     // The pure rule speaks BEFORE the round trip, so the door never opens onto a refusal.
     // Since cn-v1145 the screen hands its language and translator on (the refusal reads in Spanish).
@@ -91,7 +91,7 @@ describe("the inspector", () => {
   });
 });
 
-describe("Start The Job on a visit", () => {
+describe("Start the Job on a visit", () => {
   it("reads the task kits when a task picked one and births through the same expansion — in the ONE visit read (lib/appointments/visit-work, cn-v1134)", () => {
     const fn = body(src("src/app/(app)/appointments/actions.ts"), "export async function createJobFromAppointment(");
     expect(fn).toContain('const work = await visitWork(supabase, appointmentId, "job");');
@@ -145,7 +145,7 @@ describe("the kit manager says what a task kit is", () => {
   it("shows the hours per unit on the kit and lets Edit Kit set them; updateKit writes them", () => {
     const manager = src("src/app/(app)/price-list/kits-manager.tsx");
     expect(manager).toContain("Task · {hoursPerUnitText(Number(k.labor_minutes))} per {k.unit || \"ea\"}");
-    expect(manager).toContain("Hours Per Unit");
+    expect(manager).toContain("Hours per Unit");
     expect(manager).toContain("labor_minutes: hours === null ? null : Math.round(hours * 60), unit: unit.trim() || null");
     const update = body(src("src/app/(app)/price-list/kit-actions.ts"), "export async function updateKit(");
     expect(update).toContain("patch.labor_minutes =");

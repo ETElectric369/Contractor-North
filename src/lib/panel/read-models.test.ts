@@ -28,7 +28,7 @@ function stubModel(reply: string, stop = "end_turn") {
 
 beforeEach(() => meter.mockClear());
 
-describe("Read Circuits From The Plans: the model call", () => {
+describe("Read Circuits from the Plans: the model call", () => {
   it("sends ONE PDF as a document, meters it as panel-plans, and names the sheets it couldn't count", async () => {
     const reply = JSON.stringify({
       sheets_read: ["E-1", "E-2"],

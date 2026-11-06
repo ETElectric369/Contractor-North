@@ -5,7 +5,7 @@ import { AFFORDANCES, KIND_STREAM, type ActionItem } from "./types";
 /**
  * What to do with a shift on no job, in words that match the doors the company actually has: with a
  * not-billed code (companyTimeCode) Company Time files it; without one, the way to get that door.
- * Shared by this line and the Timecards Hours On No Job section.
+ * Shared by this line and the Timecards Hours on No Job section.
  */
 export function noJobAdvice(companyCode: string | null): string {
   return companyCode
@@ -38,7 +38,7 @@ export function noJobHoursActionItem(summary: NoJobHours | null | undefined, opt
       kind: "time_stray",
       chip: "On No Job",
       stream: KIND_STREAM.time_stray,
-      title: "Hours On No Job · Couldn't Check",
+      title: "Hours on No Job · Couldn't Check",
       subtitle: "Couldn't read the shifts that are on no job just now. Open Timecards to see them.",
       who: null,
       when: null,
@@ -57,7 +57,7 @@ export function noJobHoursActionItem(summary: NoJobHours | null | undefined, opt
       kind: "time_stray",
       chip: "On No Job",
       stream: KIND_STREAM.time_stray,
-      title: "Hours On No Job · Couldn't List Them All",
+      title: "Hours on No Job · Couldn't List Them All",
       subtitle: `The newest ${NO_JOB_READ_CAP} shifts on no job are all billed, empty or today's, so older ones weren't checked.`,
       who: null,
       when: null,
@@ -79,7 +79,7 @@ export function noJobHoursActionItem(summary: NoJobHours | null | undefined, opt
     kind: "time_stray",
     chip: "On No Job",
     stream: KIND_STREAM.time_stray,
-    title: `Hours On No Job · ${shifts.length}${summary?.capped ? "+" : ""}`,
+    title: `Hours on No Job · ${shifts.length}${summary?.capped ? "+" : ""}`,
     // ONE COMPANY CODE DECIDES THE WORDS, the same one that draws the Company Time door on
     // Timecards: without a not-billed code there is no such door, so the line never offers it.
     subtitle: `${hours} h ${span}${people.length <= 3 ? ` (${people.join(", ")})` : ""}, on no job and no invoice. ${noJobAdvice(summary?.companyCode ?? null)}`,

@@ -86,7 +86,7 @@ describe("DOCK time doors — Schedule after Today, Clock is the crew's, Timecar
   /**
    * ONE INVOICES PAGE (W1-29): Accounts Receivable and Payments folded into /billing (By Customer and
    * Payments In), and their old routes redirect there, so they have no row. PETTY CASH LEFT THE MENU
-   * (W1-34): a company with rows finds it in Search Or Ask.
+   * (W1-34): a company with rows finds it in Search or Ask.
    *
    * MONEY CARRIES ONE DOT NOW, and only one (cn-v1037): Reconcile's, which is how many KINDS of
    * disagreement have anything open — a rollup bounded by the ReconcileKind union, zero drawing

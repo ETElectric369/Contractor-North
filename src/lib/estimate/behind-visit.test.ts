@@ -37,7 +37,7 @@ describe("liveEstimateBehindVisit", () => {
       expect(f.calls[0]).toMatchObject({ table: "quotes", select: "id, status", filters: [["eq", "id", "q1"]] });
     }
   });
-  it("a declined or expired estimate is over: null, so Start The Estimate is honest", async () => {
+  it("a declined or expired estimate is over: null, so Start the Estimate is honest", async () => {
     for (const status of ["declined", "expired"]) expect(await liveEstimateBehindVisit(fake(quote(status)).sb, "q1")).toBeNull();
   });
   it("a row this company cannot read is null (RLS: not ours, or gone)", async () => {

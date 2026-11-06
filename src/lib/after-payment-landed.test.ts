@@ -119,7 +119,7 @@ describe("afterPaymentLanded — the four steps every pay door takes", () => {
     expect(calls.rang[1].line.title).toBe("Still to bill");
     expect(calls.rang[1].line.body).toContain("19.5 h and 2 bills ($2,911.12)");
     expect(calls.rang[1].line.body).toContain("41 Larkspur · J-002 — Marla Finch");
-    expect(calls.rang[1].line.body).toContain("This Is The Last Bill");
+    expect(calls.rang[1].line.body).toContain("This Is the Last Bill");
     // The door is the JOB: the invoice is paid, so sending a person there is a dead end.
     expect(calls.rang[1].line.url).toBe(`/jobs/${JOB}`);
     // Nobody is left out of this one, not even the person who typed the payment.

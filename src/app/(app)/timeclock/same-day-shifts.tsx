@@ -18,7 +18,7 @@ import { putShiftOnJob, shiftsOnDay, takeShiftOffJob, type DayShift, type DayShi
  * that day was already in the book, 10:31 AM to 6:57 PM, on no job, and nothing on the form said
  * so. Payroll paid both. So the forms that add hours (Add Time Entry, on Timecards and on the job's
  * Time tab, and Log Hours) show the person's shifts on the day picked, and a shift on no job gets
- * one tap that puts it on the job with its real clock times: Put This On <job>. Nothing is decided
+ * one tap that puts it on the job with its real clock times: Put This on <job>. Nothing is decided
  * for anyone: the tap is the office's, the form still saves if they meant a second shift, and the
  * database refuses one that overlaps (0360) in words that name the shift.
  *
@@ -159,7 +159,7 @@ export function SameDayShiftsList({
 /**
  * The live list: reads shiftsOnDay whenever the person, the day or the job changes (a short pause
  * first, so typing a date does not fire a read per keystroke). `refreshKey` re-reads after a
- * refusal; `onPlaced` hears a Put This On that landed, with its sentence and the shift it moved (the
+ * refusal; `onPlaced` hears a Put This on that landed, with its sentence and the shift it moved (the
  * form closes on it, and says what it typed that the shift did not get: notCarriedWords). `onRead`
  * hears every answer for the person and day on screen (never a stale one): Add Time Entry starts its
  * Job field on where the schedule put them.

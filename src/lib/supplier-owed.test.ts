@@ -190,7 +190,7 @@ describe("what bills.status says, and what a row says about itself", () => {
     const fmt = (v: number) => `$${v.toFixed(2)}`;
     expect(billSettledLabel({ status: "paid", amount: 100, amountPaid: 100 }, fmt)).toBe("Paid");
     expect(billSettledLabel({ status: "unpaid", amount: 100, amountPaid: 0 }, fmt)).toBe("On Account");
-    expect(billSettledLabel({ status: "unpaid", amount: 523.47, amountPaid: 200 }, fmt)).toBe("Part-Paid $200.00 Of $523.47");
+    expect(billSettledLabel({ status: "unpaid", amount: 523.47, amountPaid: 200 }, fmt)).toBe("Part-Paid $200.00 of $523.47");
     expect(billSettledLabel({ status: "unpaid", amount: 100, amountPaid: 50, superseded: true }, fmt)).toBe("Set Aside");
     // Without the number, the word decides, as before 0383.
     expect(billSettledLabel({ status: "paid" }, fmt)).toBe("Paid");
@@ -206,9 +206,9 @@ describe("what bills.status says, and what a row says about itself", () => {
     expect(billSettledTone({ status: "paid", amount: 100, amountPaid: 40 })).toBe("amber");
   });
 
-  it("the control's face says the deed: Mark Paid on an open bill, Mark On Account on a paid one", () => {
+  it("the control's face says the deed: Mark Paid on an open bill, Mark on Account on a paid one", () => {
     expect(boughtHowFace({ status: "unpaid" })).toBe("Mark Paid");
-    expect(boughtHowFace({ status: "paid" })).toBe("Mark On Account");
+    expect(boughtHowFace({ status: "paid" })).toBe("Mark on Account");
   });
 });
 
@@ -370,7 +370,7 @@ describe("(a) what do I owe this supplier", () => {
 
     // THE ONE NUMBER DOES NOT MOVE. It was $1,558.42 before this - $51.58 less than he owes.
     expect(owedBack.total).toBe(1610);
-    // No negative row reaches the workbook's Owed To Suppliers or Nort's by_supplier.
+    // No negative row reaches the workbook's Owed to Suppliers or Nort's by_supplier.
     expect(owedBack.lines.every((l) => l.owed > 0)).toBe(true);
     expect(owedBack.lines.find((l) => l.name === "Summit Supply")).toBeUndefined();
     // It is NAMED beside the total, under the spelling on the paper, with no account id to call it.

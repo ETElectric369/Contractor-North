@@ -623,7 +623,7 @@ export function defineStockLedgerSuite(connect: () => Promise<SqlClient>) {
     });
   });
 
-  it("a stale roll is never priced from: a direct take is refused, and Took From Stock steps over it to a short", async () => {
+  it("a stale roll is never priced from: a direct take is refused, and Took from Stock steps over it to a short", async () => {
     if (!needs()) return;
     await step(async () => {
       const it1 = await item();

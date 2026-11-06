@@ -12,7 +12,7 @@ import { createBackStepper, createOverlayStack } from "./ui/overlay-history";
 
 /**
  * THE APP'S ONE ROW ⋯ (My Day's agenda rows first, every Needs You row next). A 44px ⋯ opens a small
- * sheet titled with the row. A row can open a sheet of its own above it (Move To Another Day…, Edit
+ * sheet titled with the row. A row can open a sheet of its own above it (Move to Another Day…, Edit
  * Details…): the ⋯ sheet stays mounted under it, the child stacks above it, and a Back, an Escape or
  * the child's Cancel closes the child only.
  */
@@ -26,7 +26,7 @@ describe("the ⋯ trigger", () => {
   it("is 44px and says which row it is for", () => {
     const html = renderToStaticMarkup(el(RowMoreSheet, { title: "Smith inspection" }, "rows"));
     expect(ROW_MORE_TRIGGER).toContain("h-11 w-11");
-    expect(html).toMatch(/<button type="button" aria-label="More For Smith inspection"[^>]*class="[^"]*h-11 w-11[^"]*"/);
+    expect(html).toMatch(/<button type="button" aria-label="More for Smith inspection"[^>]*class="[^"]*h-11 w-11[^"]*"/);
     // Closed, the sheet draws nothing.
     expect(html).not.toContain("rows");
   });
@@ -49,10 +49,10 @@ describe("the sheet", () => {
   });
 
   it("stays mounted while a child sheet is open; the child renders after it, so it stacks above it at the same z-index", () => {
-    const child = el(Modal, { open: true, onClose: () => {}, title: "Move To Another Day" }, "day chips");
+    const child = el(Modal, { open: true, onClose: () => {}, title: "Move to Another Day" }, "day chips");
     const html = renderToStaticMarkup(el(RowMoreSheetView, { open: true, title: "Smith inspection", onClose: () => {} }, child));
     const sheetTitle = html.indexOf(">Smith inspection</h2>");
-    const childTitle = html.indexOf(">Move To Another Day</h2>");
+    const childTitle = html.indexOf(">Move to Another Day</h2>");
     expect(sheetTitle).toBeGreaterThan(0);
     expect(childTitle).toBeGreaterThan(sheetTitle);
     // Both overlays are the same layer; the child's, later in the tree and inside the sheet, paints on top.

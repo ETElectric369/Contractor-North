@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { CATALOGS, dict, translator } from "@/lib/i18n";
 import { formatDateTime } from "@/lib/utils";
 import type { Customer } from "@/lib/types";
-import { esTitleCase } from "../../../../tests/es-function-words";
+import { esTitleCase, titleCaseIn } from "../../../../tests/title-case-words";
 
 /**
  * THE CUSTOMERS' SCREENS IN SPANISH (builder C of the Ventas-2 wave, cn-v1146, cu_): the table's
@@ -64,7 +64,8 @@ const text = (html: string) =>
     .replace(/\s+/g, " ")
     .trim();
 const t = translator("es");
-const titleCase = (s: string) => s.replace(/\{\w+\}/g, " ").split(/\s+/).filter(Boolean).every((w) => /^[¿¡]?[\p{Lu}\p{N}&\/+·(—–.]/u.test(w));
+/** English Title Case through the one judge (cn-v1148: significant words; tests/title-case-words). */
+const titleCase = (s: string) => titleCaseIn(s, "en");
 
 const larkspur = {
   id: "c-1",
@@ -103,7 +104,7 @@ describe("New Customer in Spanish", () => {
     for (const w of ["Nombre *", "Empresa", "Tipo", "Estado", "Correo", "Teléfono", "Dirección", "Ciudad", "Estado (EE. UU.)", "Código postal", "Notas", "Importar un .vcf", "Autorrelleno"]) expect(words).toContain(w);
     for (const o of ["Residencial", "Comercial", "Industrial", "Contratista", "Subcontratista", "Activo", "Inactivo"]) {
       expect(html).toContain(`>${o}</option>`);
-      expect(titleCase(o)).toBe(true);
+      expect(esTitleCase(o)).toBe(true);
     }
     expect(html).toContain('placeholder="Nombre del cliente o contacto"');
     expect(words).not.toMatch(/New Customer|Create Customer|Residential|Tip: type/);
@@ -215,8 +216,8 @@ describe("the catalog", () => {
   it("the English is what each screen said before the move", () => {
     const e = dict("en");
     expect(e.cu_showingFirst).toBe("Showing the first {n} customers — search to narrow the list.");
-    expect(e.cu_btn_mergeIntoKept).toBe("Merge {n} Into Kept");
-    expect(e.cu_btn_backToCustomers).toBe("Back To Customers");
+    expect(e.cu_btn_mergeIntoKept).toBe("Merge {n} into Kept");
+    expect(e.cu_btn_backToCustomers).toBe("Back to Customers");
     expect(e.cu_btn_statusInquiry).toBe("Inquiry");
     expect(e.cu_deleteConfirm).toBe(
       "Delete {name}? Only possible when nothing important still points at them — jobs, estimates, invoices, contracts, account credits, or a link to a job as a sub/supplier all block it. Appointments, documents, work orders and inquiries survive but lose their contact.",

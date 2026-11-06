@@ -2,9 +2,9 @@
  * PAPER THAT HAS BEEN READ AND NOT YET FILED (0295; Erik, 2026-09-24).
  *
  * "Organize photos wait for File It": a model read is a proposal, never a filing. Every receipt,
- * bill or invoice that comes in through Snap Or Note is read, shown as ONE card ("Home Depot ·
+ * bill or invoice that comes in through Snap or Note is read, shown as ONE card ("Home Depot ·
  * $84.12 · It Says 13897 HONEYSUCKLE"), and becomes money only when a person taps one of the
- * card's answers (Put It On J-011, Another Job, Shop Stock, Business Cost). This module is the pure
+ * card's answers (Put It on J-011, Another Job, Shop Stock, Business Cost). This module is the pure
  * half of that: what a piece of paper IS, what it can become today, what stops it, and whether the
  * same purchase is already on the books. The server's File It and each answer on screen ask the
  * same function, so a door that looks open is open and a refusal on the server is the sentence the
@@ -78,7 +78,7 @@ export function paperTypeLabel(t: PaperType | null | undefined): string {
     case "bill":
       return "Bill";
     case "not_a_cost":
-      return "Not A Cost";
+      return "Not a Cost";
     case "supplier_documents":
       return "Supplier Documents";
     case "statement":
@@ -195,7 +195,7 @@ export type PaperProposal = {
    * AI SUGGEST'S PROPOSAL FOR A NOTE OR A KEPT PAPER (Erik, audit v994 PR2: "AI Suggest on a note
    * or kept paper PROPOSES; a person taps to confirm"). It used to make the task and file the note
    * itself, from a button named Suggest, with its only message lost on refresh. Now it is kept on
-   * the row as a chip: Make Task: <title>, or Keep As Note. Nothing moves until one is tapped.
+   * the row as a chip: Make Task: <title>, or Keep as Note. Nothing moves until one is tapped.
    */
   suggestTask?: { title: string; category: "office" | "operations" | "sales" } | null;
   suggestKeep?: boolean | null;
@@ -390,7 +390,7 @@ export function paperTypeOfItem(item: PaperItem): PaperType | null {
 /**
  * A PLAIN PICTURE, NOT PAPER (Erik, 2026-09-24: "if it's a picture not a bill ... it should ask
  * where to file it"). A photo of a job site, a panel or a label was read as "not a cost" and
- * offered Keep It In Files, as if it were a permit. It is asked "What is this?" first. The reader
+ * offered Keep It in Files, as if it were a permit. It is asked "What is this?" first. The reader
  * says so on the proposal; a row read before that says it with the category "Photo".
  */
 export function isPicture(item: PaperItem): boolean {
@@ -454,7 +454,7 @@ export type Readiness =
 export function readinessOf(item: PaperItem): Readiness {
   if (item.status && item.status !== "needs_review") return { state: "filed", sentence: "Filed." };
   const p = proposalOf(item);
-  if (p.ced) return { state: "supplier_documents", sentence: "Ready To File: these go on the supplier documents list." };
+  if (p.ced) return { state: "supplier_documents", sentence: "Ready to File: these go on the supplier documents list." };
   if (p.openList) return { state: "open_list", sentence: "Check what it changes, then Apply." };
   if (p.bankImport) return { state: "bank_download", sentence: "Answer the rows that need you, then Apply." };
   if (p.tooBig && !isRead(item)) return { state: "too_big", sentence: "Too big to read: fill it in yourself." };
@@ -468,12 +468,12 @@ export function readinessOf(item: PaperItem): Readiness {
     return {
       state: "later",
       sentence:
-        "A statement, but its list of open papers couldn't be read. Put the supplier's open list (Excel, CSV or a PDF with text) or a clearer copy in through Snap Or Note, and it will show what it changes.",
+        "A statement, but its list of open papers couldn't be read. Put the supplier's open list (Excel, CSV or a PDF with text) or a clearer copy in through Snap or Note, and it will show what it changes.",
     };
   if (t && LATER_PAPER.includes(t)) return { state: "later", sentence: NOT_FILED_YET };
   if (t === "receipt" || t === "bill") {
     if (amountOf(item) === null) return { state: "needs_total", sentence: "No total was read. Put the total in with Fix Details, then answer where it goes." };
-    return { state: "ready", sentence: "Ready To File." };
+    return { state: "ready", sentence: "Ready to File." };
   }
   if (isPicture(item)) return { state: "picture", sentence: "What is this?" };
   return { state: "keep", sentence: t === "not_a_cost" ? "Not a cost. Keep it on a job or in files." : "Keep it on a job or in files." };
@@ -720,7 +720,7 @@ export function firstAnswer(item: PaperItem, jobIds: readonly string[], opts: { 
  * the supplier card's grammar). The words that made its own pick (a job's printed mark, a
  * company-use word), else what is printed where a job goes (on_paper: the PO box, else the reader's
  * hint with the company's own names taken out, worked out on the server). Null when it names
- * nothing: the headline then says No Job Name On It.
+ * nothing: the headline then says No Job Name on It.
  */
 export function paperSays(item: PaperItem): string | null {
   const p = proposalOf(item);
@@ -1268,7 +1268,7 @@ export function rematchPaper<T extends PaperItem>(
 
 /**
  * THE PICKER FOLLOWS THE SUGGESTION UNTIL A PERSON TOUCHES IT. A row renders before its paper is
- * read (Snap Or Note adds the row, then reads it); a picker seeded once at mount would miss the
+ * read (Snap or Note adds the row, then reads it); a picker seeded once at mount would miss the
  * job the paper names when the read lands. `picked` is null until a person chooses; after that,
  * theirs wins, including choosing nothing.
  */
@@ -1301,7 +1301,7 @@ export function fileRefusal(item: PaperItem, dest: PaperDestination | null): str
     // the shelf IS a line (pieces are taken from it), so a ticket with no lines can't go there yet.
     if (r.state === "too_big") return TOO_BIG_TO_FILE;
     if (r.state === "later") return NOT_FILED_YET;
-    if (r.state === "supplier_documents") return "These are supplier documents. Press Add To Supplier Documents, then Record To Stock from there.";
+    if (r.state === "supplier_documents") return "These are supplier documents. Press Add to Supplier Documents, then Record to Stock from there.";
     const st = paperTypeOfItem(item);
     if (st !== "receipt" && st !== "bill") return "Only a receipt or a bill can go into stock. Change its type in Fix Details if it is one.";
     if (r.state === "needs_total") return r.sentence;
@@ -1312,7 +1312,7 @@ export function fileRefusal(item: PaperItem, dest: PaperDestination | null): str
   }
   if (r.state === "too_big") return TOO_BIG_TO_FILE;
   if (r.state === "later") return NOT_FILED_YET;
-  if (r.state === "supplier_documents") return dest.type === "keep" ? null : "These are supplier documents. Press Add To Supplier Documents.";
+  if (r.state === "supplier_documents") return dest.type === "keep" ? null : "These are supplier documents. Press Add to Supplier Documents.";
   const t = paperTypeOfItem(item);
   const isCost = t === "receipt" || t === "bill";
   if (isCost && dest.type === "keep") return "This is a cost. File it on a job or as a business cost, or change its type in Fix Details.";
@@ -1479,7 +1479,7 @@ export function findSameNumber(
  * cost on money and day alone would tie two different trips to the supply house for the same $120.
  *
  * NOT ONLY THE BANK DOOR'S (review of release/v1026): a business cost with no job and no number
- * written any other way (Add By Hand, or a company's fill-ups loaded by hand from a bank
+ * written any other way (Add by Hand, or a company's fill-ups loaded by hand from a bank
  * export before the bank door existed) is the same shape, and a pump receipt of its money within 3
  * days is the same purchase just as surely. loadBooks brings both; only the bank door's says "from
  * the bank download".

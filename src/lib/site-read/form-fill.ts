@@ -1,7 +1,7 @@
 import type { SiteField, SiteFields } from "./extract";
 
 /**
- * WHAT A SITE'S DETAILS DO TO A FORM (Fill From Their Site, 2026-09-27). Pure, and shared by the
+ * WHAT A SITE'S DETAILS DO TO A FORM (Fill from Their Site, 2026-09-27). Pure, and shared by the
  * browser (which fills) and the server (which decides what is still missing).
  *
  * THE LAW: a suggestion fills an EMPTY box only. Whatever the person typed stays exactly as typed,

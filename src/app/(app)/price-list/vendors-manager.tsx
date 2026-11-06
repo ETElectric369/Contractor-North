@@ -56,7 +56,7 @@ export function VendorsManager({
   nortOn = true,
 }: {
   vendors: VendorSummary[];
-  /** Active items, for "Put It On An Item". */
+  /** Active items, for "Put It on an Item". */
   items: PriceItem[];
   optionsByItem: Record<string, ItemOption[]>;
   knownVendors: string[];
@@ -248,7 +248,7 @@ function VendorTile({ vendor: v, showKind, onOpen }: { vendor: VendorSummary; sh
               rel="noopener noreferrer"
               className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-sm text-slate-700 hover:bg-slate-50"
             >
-              <MapPin className="h-4 w-4" /> View On Map
+              <MapPin className="h-4 w-4" /> View on Map
             </a>
           )}
         </div>
@@ -666,7 +666,7 @@ function VendorSheet({
                   rel="noopener noreferrer"
                   className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-sm text-slate-700 hover:border-brand"
                 >
-                  <MapPin className="h-4 w-4" /> View On Map
+                  <MapPin className="h-4 w-4" /> View on Map
                 </a>
               )}
             </div>
@@ -708,7 +708,7 @@ function VendorSheet({
 
         {/* PUT IT ON ANOTHER ITEM: find the item, type the cost (and the sell, if you know it). */}
         <section>
-          <h3 className="text-sm font-semibold text-slate-900">Put It On An Item</h3>
+          <h3 className="text-sm font-semibold text-slate-900">Put It on an Item</h3>
           {picked ? (
             <div className="mt-2 space-y-2">
               <div className="flex items-center justify-between gap-2 text-sm">

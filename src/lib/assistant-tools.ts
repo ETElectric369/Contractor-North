@@ -484,7 +484,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_inventory",
     description:
-      "The office's view of the SHOP STOCK items (part number, category, how many are on hand vs the reorder point, unit, location). On hand is kept by the stock record, never typed; never offer to type a count over it. For what's in stock and what it's worth, and for anyone on the crew, use list_shelf. Pieces come out of stock with Took From Stock (stock.take fills the card; the person taps Take It). Use for 'what's running low', 'what's below its reorder point'. When it returns nothing, say nothing is in stock yet - never guess stock that isn't listed.",
+      "The office's view of the SHOP STOCK items (part number, category, how many are on hand vs the reorder point, unit, location). On hand is kept by the stock record, never typed; never offer to type a count over it. For what's in stock and what it's worth, and for anyone on the crew, use list_shelf. Pieces come out of stock with Took from Stock (stock.take fills the card; the person taps Take It). Use for 'what's running low', 'what's below its reorder point'. When it returns nothing, say nothing is in stock yet - never guess stock that isn't listed.",
     input_schema: { type: "object", properties: { search: { type: "string" }, low_only: { type: "boolean", description: "Only items at/below reorder point." }, limit: { type: "integer" } } },
   },
   {
@@ -1272,7 +1272,7 @@ export async function runDataTool(
       case "list_shelf": {
         // THE SHELF FOR EVERYONE (Shop Stock, Phase 3). The crew's view is shelf_for_crew (0302:
         // names, units, counts, never a cost), and it is everyone's base read here too, so the list
-        // is the same list the Took From Stock sheet shows. The office alone gets `value`: what the
+        // is the same list the Took from Stock sheet shows. The office alone gets `value`: what the
         // live rolls' pieces are worth, off their receipts (stock_lot_balance, staff-only under RLS,
         // and read with the caller's org said out loud).
         const lim = clampLimit(input.limit, 30);
@@ -1315,7 +1315,7 @@ export async function runDataTool(
             ...(r.onHand < 0 ? { note: "More was taken than stock showed; the office will settle it." } : {}),
             ...(staff ? { value: value.get(r.id) ?? 0 } : {}),
           })),
-          how_to_take: "A take is Took From Stock: call stock.take with the job and the item; it fills the card and the person taps Take It.",
+          how_to_take: "A take is Took from Stock: call stock.take with the job and the item; it fills the card and the person taps Take It.",
         });
       }
 

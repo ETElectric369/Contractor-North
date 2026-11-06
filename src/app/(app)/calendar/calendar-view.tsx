@@ -81,7 +81,7 @@ const localeFor = (lang: Lang) => (lang === "es" ? "es-US" : undefined);
 // silently reschedule a real appointment. Every reschedule is two deliberate
 // steps (a day and Move in the sheet, or the MoveToDay sheet's day-strip). A day
 // tap drills into that day, UNLESS the rail has armed it: ticking waiting work
-// on the rail (Waiting For A Day) turns every day into a target that places it.
+// on the rail (Waiting for a Day) turns every day into a target that places it.
 // The old "To Schedule" tray above the grid was cut in W2-05: the rail is the one
 // door for waiting work, and its place's toast carries the Undo the tray had.
 
@@ -411,7 +411,7 @@ export function CalendarView({
   canEdit?: boolean;
   /** 0370 is applied: a day can keep its own hours, so the tile's time edit is This Day's. */
   perDayHours?: boolean;
-  /** The office's Add To Schedule list: every job still in flight (schedule/add-to-schedule-sheet). */
+  /** The office's Add to Schedule list: every job still in flight (schedule/add-to-schedule-sheet). */
   addableJobs?: AddableJob[];
   /** Everyone's Day's rows by day (crew_day_assignments, both kinds): THE DAY ROW WINS for that day on
    *  the chips (off that day, on another job, put on for the day). Absent: the job's crew as it stands. */
@@ -899,7 +899,7 @@ export function CalendarView({
         ...(actual ? { actual } : {}),
         color: JOB_GRID_TONE,
         href: `/jobs/${job.id}`,
-        // Staff tap the block for its day, its time and its crew (the tile's sheet); Open The Job is inside.
+        // Staff tap the block for its day, its time and its crew (the tile's sheet); Open the Job is inside.
         ...(canEdit ? { tapId: `job:${job.id}` } : {}),
       });
     }
@@ -963,7 +963,7 @@ export function CalendarView({
            "i now have now way to adjust the time." There WAS a way — tap the pill, land in the day
            drill, find the edit pencil — but a control you have to already know about is not a way,
            it is a rumour. Staff get the tile's sheet (the day, the start, the length and who's
-           going, with Open The Visit inside), so the fix is on the tap that saw the problem; the record
+           going, with Open the Visit inside), so the fix is on the tap that saw the problem; the record
            page is the href underneath. */
         href: `/appointments/${a.id}`,
         ...(canEdit ? { tapId: `visit:${a.id}` } : {}),
@@ -1437,7 +1437,7 @@ export function CalendarView({
                   {/* THE WEEKEND IT FOLDED AWAY, NAMED AND STILL A DOOR. Nothing is drawn with work on
                       it, so a hidden day is a day that is clear — but the week says which days those
                       are (so growing a Saturday column next time is something it already warned you
-                      about), and each one opens as a day, where Add To Schedule lives. 20px of look and
+                      about), and each one opens as a day, where Add to Schedule lives. 20px of look and
                       44px of thumb through the bleed idiom (`before` past every edge, the header's own
                       grammar), so the law is kept without the header growing a line. */}
                   {hiddenWeekend.length > 0 && (

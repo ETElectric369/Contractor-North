@@ -139,7 +139,7 @@ export function sayRuleChange(r: RuleChange): string {
 /**
  * THE ONE SENTENCE (and the clauses that ride after it): what the line is now, what happened to its
  * money, and what happened to the rules. "June 3 TRANSFER FROM 9876 is now Owner's Money In. The rule
- * that said Already Counted Or Not Income now covers $550.00 to $2,000.00."
+ * that said Already Counted or Not Income now covers $550.00 to $2,000.00."
  *
  * ALREADY: the line said this answer before the tap (changed some other way). Nothing about the line
  * moves; a rule this download taught that still says the old answer for its amount is settled all the

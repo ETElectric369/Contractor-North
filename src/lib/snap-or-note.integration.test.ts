@@ -25,7 +25,7 @@ import { assertTestDatabase } from "@/lib/db-guard";
 const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER } = process.env;
 const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER ? describe : describe.skip;
 
-d("Snap Or Note: a tech's note, his photo's job document, his punch and his jobs", () => {
+d("Snap or Note: a tech's note, his photo's job document, his punch and his jobs", () => {
   let c: pg.Client;
   let orgId = "";
   let techId = "";

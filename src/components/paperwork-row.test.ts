@@ -72,27 +72,27 @@ const tagOf = (html: string, label: string) =>
 const SHUT = /\sdisabled=""/;
 
 describe("the cost card: the Supplier Bills grammar", () => {
-  it("a read receipt with NO job markings: its headline, its grey line, no Ready To File badge, and the card asks", () => {
+  it("a read receipt with NO job markings: its headline, its grey line, no Ready to File badge, and the card asks", () => {
     const html = render({});
-    expect(words(html)).toContain("Home Depot · $84.12 · No Job Name On It");
+    expect(words(html)).toContain("Home Depot · $84.12 · No Job Name on It");
     expect(words(html)).toContain("Receipt (Paid)");
-    expect(html).not.toContain("Ready To File");
+    expect(html).not.toContain("Ready to File");
     expect(html).toMatch(/>Where does this go\?<\/p>/);
-    // No first answer: nothing to pick for anyone, so Pick A Job leads.
-    expect(answers(html)).toEqual(["Pick A Job", "Shop Stock", "Business Cost"]);
+    // No first answer: nothing to pick for anyone, so Pick a Job leads.
+    expect(answers(html)).toEqual(["Pick a Job", "Shop Stock", "Business Cost"]);
     expect(html).not.toContain("selected");
     // The retired buttons are gone.
     expect(html).not.toContain(">File It<");
     expect(html).not.toContain("File It Anyway");
   });
 
-  it("the paper names the job: Put It On J-046 first, primary, with why under it, then Another Job", () => {
+  it("the paper names the job: Put It on J-046 first, primary, with why under it, then Another Job", () => {
     const html = render({ doc_number: "8802-1108330", item_date: "2026-09-20", proposal: { jobId: "job-046", jobFrom: "address", jobHint: "518 CINDER LAKE RD" } });
     expect(words(html)).toContain("Home Depot · $84.12 · It Says 518 CINDER LAKE RD");
     expect(words(html)).toContain("#8802-1108330 · Sep 20, 2026 · Receipt (Paid)");
-    expect(answers(html)).toEqual(["Put It On J-046", "Another Job", "Shop Stock", "Business Cost"]);
-    expect(tagOf(html, "Put It On J-046")).not.toMatch(SHUT);
-    expect(tagOf(html, "Put It On J-046")).toContain("glass-ink"); // the primary button
+    expect(answers(html)).toEqual(["Put It on J-046", "Another Job", "Shop Stock", "Business Cost"]);
+    expect(tagOf(html, "Put It on J-046")).not.toMatch(SHUT);
+    expect(tagOf(html, "Put It on J-046")).toContain("glass-ink"); // the primary button
     expect(html).toContain("Job picked from the address on the receipt: 518 CINDER LAKE RD");
     expect(html).not.toMatch(/>Where does this go\?<\/p>/);
     expect(html).not.toContain("Guess");
@@ -101,7 +101,7 @@ describe("the cost card: the Supplier Bills grammar", () => {
   it("a MODEL'S GUESS is the first answer too, but marked Guess, with 'Not read off the paper' under it", () => {
     for (const proposal of [{ guessJobId: "job-046", why: "The store is near the job." }, { jobId: "job-046", jobHint: "518 CINDER LAKE" }]) {
       const html = render({ proposal });
-      expect(answers(html)).toEqual(["Put It On J-046 Guess", "Another Job", "Shop Stock", "Business Cost"]);
+      expect(answers(html)).toEqual(["Put It on J-046 Guess", "Another Job", "Shop Stock", "Business Cost"]);
       expect(html).toContain("Not read off the paper");
       expect(html).not.toContain("Job picked from");
       expect(html).not.toContain("selected");
@@ -111,7 +111,7 @@ describe("the cost card: the Supplier Bills grammar", () => {
   it("a bucket a model liked is the first answer as Business Cost · Fuel, marked Guess", () => {
     const html = render({ proposal: { bucket: "Fuel", bucketFrom: "ai", why: "A pump receipt." } });
     expect(answers(html)[0]).toBe("Business Cost · Fuel Guess");
-    expect(answers(html)).toContain("Pick A Job");
+    expect(answers(html)).toContain("Pick a Job");
     expect(html).toContain("Not read off the paper: A pump receipt.");
   });
 
@@ -120,11 +120,11 @@ describe("the cost card: the Supplier Bills grammar", () => {
     const conflict = "The paper points to more than one job (the address and the PO number), so no job was picked.";
     const html = render({ proposal: { jobId: null, jobFrom: null, jobConflict: conflict } });
     expect(html).toContain("The paper points to more than one job");
-    expect(html.indexOf("The paper points to more than one job")).toBeLessThan(html.indexOf("Pick A Job"));
-    expect(answers(html)).toEqual(["Pick A Job", "Shop Stock", "Business Cost"]);
+    expect(html.indexOf("The paper points to more than one job")).toBeLessThan(html.indexOf("Pick a Job"));
+    expect(answers(html)).toEqual(["Pick a Job", "Shop Stock", "Business Cost"]);
     // A model's guess beside it is still only a guess, and says so.
     const guessed = render({ proposal: { jobId: null, jobFrom: null, guessJobId: "job-046", jobConflict: conflict } });
-    expect(answers(guessed)[0]).toBe("Put It On J-046 Guess");
+    expect(answers(guessed)[0]).toBe("Put It on J-046 Guess");
     expect(guessed).toContain("The paper points to more than one job");
   });
 
@@ -132,7 +132,7 @@ describe("the cost card: the Supplier Bills grammar", () => {
     const matches = [{ kind: "bill", billId: "bill-1", sentence: "Already on the books: CED #8802-1108330, $653.25, on J-046 Jason Wexley." }];
     const html = render({ doc_number: "8802-1108330" }, matches);
     expect(html).toContain("Already on the books: CED #8802-1108330");
-    expect(answers(html)).toEqual(["Same Purchase: Tie Them", "Pick A Job", "Shop Stock", "Business Cost"]);
+    expect(answers(html)).toEqual(["Same Purchase: Tie Them", "Pick a Job", "Shop Stock", "Business Cost"]);
     expect(html).toContain("Any other button below records it as a different purchase.");
     expect(html).not.toContain("Different Purchase: File It Anyway");
     // Every answer then carries the flag. A maybe (another spelling) alone does not: the server takes
@@ -159,7 +159,7 @@ describe("the cost card: the Supplier Bills grammar", () => {
     expect(html).toContain("Filing it makes the bill and links it to that document.");
     expect(html).not.toContain("Any other button below records it as a different purchase.");
     expect(html).toContain("If it isn&#x27;t the same purchase, any other button below files it, and its bill notes the other spelling.");
-    expect(answers(html)[1]).toBe("Put It On J-046");
+    expect(answers(html)[1]).toBe("Put It on J-046");
   });
 
   it("every answer that files sends the flag (missing it recreates the duplicate-bill refusal)", () => {
@@ -170,7 +170,7 @@ describe("the cost card: the Supplier Bills grammar", () => {
     expect(SRC).toContain("{ differentPurchase: shelfSheet.differentPurchase }");
   });
 
-  it("a supplier document no bill covers: no Tie, the first answer stays Put It On J-046, and the card says filing links it", () => {
+  it("a supplier document no bill covers: no Tie, the first answer stays Put It on J-046, and the card says filing links it", () => {
     const html = render({ doc_type: "bill", vendor: "CED", doc_number: "8802-1108330", proposal: { jobId: "job-046", jobFrom: "po" } }, [
       {
         kind: "supplier_invoice",
@@ -180,14 +180,14 @@ describe("the cost card: the Supplier Bills grammar", () => {
       },
     ]);
     expect(html).not.toContain("Same Purchase: Tie Them");
-    expect(answers(html)[0]).toBe("Put It On J-046");
+    expect(answers(html)[0]).toBe("Put It on J-046");
     expect(html).toContain("Filing it makes the bill and links it to that document.");
   });
 
   it("the answers point at the company's own buckets and the Closest / Every Job picker, never a select on the card", () => {
     const html = render({});
     expect(html).not.toMatch(/<select/);
-    expect(tagOf(html, "Pick A Job")).toContain('aria-expanded="false"');
+    expect(tagOf(html, "Pick a Job")).toContain('aria-expanded="false"');
     expect(tagOf(html, "Business Cost")).toContain('aria-expanded="false"');
     // Jobs as the buttons say them: the number first, a finished one known by its status.
     expect(pickJobOf(JOBS[1])).toEqual({ id: "job-011", label: "J-011", name: "13897 Honeysuckle", status: "complete" });
@@ -235,12 +235,12 @@ describe("Paper A (audit v994): PO TOOLS, the reader's bucket, and PO STOCK", ()
     const html = render({ ...TOOLS_TICKET, proposal: { po: "STOCK", companyUse: { bucket: null, from: "po", words: "STOCK" } }, on_paper: "PO STOCK" });
     expect(html).toMatch(/>Where does this go\?<\/p>/);
     expect(words(html)).toContain("It Says PO STOCK");
-    expect(answers(html)).toEqual(["Pick A Job", "Shop Stock", "Business Cost"]);
+    expect(answers(html)).toEqual(["Pick a Job", "Shop Stock", "Business Cost"]);
   });
 
   it("a hint that was only the company's own name says nothing: the server's null is an answer", () => {
     const html = render({ ...TOOLS_TICKET, proposal: { jobHint: "ERIK TAYLOR" }, on_paper: null });
-    expect(words(html)).toContain("No Job Name On It");
+    expect(words(html)).toContain("No Job Name on It");
     expect(html).not.toContain("ERIK TAYLOR");
   });
 
@@ -252,20 +252,20 @@ describe("Paper A (audit v994): PO TOOLS, the reader's bucket, and PO STOCK", ()
     line_items: [{ description: "NMB 12/2 W/GND (250 ft Coil)", quantity: 1, unit_price: 44.44, amount: 44.44 }],
   };
 
-  it("Shop Stock on (or the switch not passed): today's card, and a STOCK paper's first answer is Record To Stock", () => {
+  it("Shop Stock on (or the switch not passed): today's card, and a STOCK paper's first answer is Record to Stock", () => {
     for (const item of [{}, SHELF_TICKET]) expect(render(item, [], { shopStock: true })).toBe(render(item));
     const html = render(SHELF_TICKET);
-    expect(answers(html)).toEqual(["Record To Stock", "Pick A Job", "Business Cost"]);
+    expect(answers(html)).toEqual(["Record to Stock", "Pick a Job", "Business Cost"]);
     expect(html).toContain("Shop Stock picked from the PO on the bill: STOCK");
   });
 
   it("Shop Stock off: no stock door anywhere, and a STOCK paper picks nothing but its words still show", () => {
     const html = render({}, [], { shopStock: false });
-    expect(answers(html)).toEqual(["Pick A Job", "Business Cost"]);
+    expect(answers(html)).toEqual(["Pick a Job", "Business Cost"]);
     expect(html).not.toContain("Shop Stock");
     const marked = render(SHELF_TICKET, [], { shopStock: false });
-    expect(answers(marked)).toEqual(["Pick A Job", "Business Cost"]);
-    expect(marked).not.toContain("Record To Stock");
+    expect(answers(marked)).toEqual(["Pick a Job", "Business Cost"]);
+    expect(marked).not.toContain("Record to Stock");
     expect(marked).toMatch(/>Where does this go\?<\/p>/);
     expect(words(marked)).toContain("It Says STOCK");
   });
@@ -279,16 +279,16 @@ describe("the one door a paper the reader couldn't finish needs", () => {
     expect(words(html)).toContain("IMG_0412.jpg");
   });
 
-  it("too big to read: Fix Details: Put The Total In", () => {
+  it("too big to read: Fix Details: Put the Total In", () => {
     const html = render({ doc_type: null, kind: "job_document", vendor: null, amount: null, payment: null, proposal: { tooBig: true } });
-    expect(html).toContain("Too Big To Read");
-    expect(answers(html)).toEqual(["Fix Details: Put The Total In"]);
+    expect(html).toContain("Too Big to Read");
+    expect(answers(html)).toEqual(["Fix Details: Put the Total In"]);
   });
 
-  it("a cost with no total: Needs A Total, and its answers wait for the total", () => {
+  it("a cost with no total: Needs a Total, and its answers wait for the total", () => {
     const html = render({ amount: null });
-    expect(html).toContain("Needs A Total");
-    expect(answers(html)).toEqual(["Fix Details: Put The Total In"]);
+    expect(html).toContain("Needs a Total");
+    expect(answers(html)).toEqual(["Fix Details: Put the Total In"]);
     expect(words(html)).toContain("Home Depot · No Total Read");
     expect(html).toContain("No total was read. Put the total in with Fix Details, then answer where it goes.");
   });
@@ -298,21 +298,21 @@ describe("the other kinds of paper, the same grammar", () => {
   it("a statement is named honestly, with no answers at all: its doors are on the ⋯", () => {
     const html = render({ doc_type: "statement", kind: "job_document" });
     expect(html).toContain("A statement, but its list of open papers couldn&#x27;t be read.");
-    expect(html).toContain("Snap Or Note");
+    expect(html).toContain("Snap or Note");
     expect(answers(html)).toEqual([]);
     expect(html).toContain('aria-label="Actions"');
-    expect(paperMenuRows("later", true)).toEqual(["Fix Details", "Read Again", "Keep It In Files", "Delete"]);
+    expect(paperMenuRows("later", true)).toEqual(["Fix Details", "Read Again", "Keep It in Files", "Delete"]);
   });
 
-  it("supplier documents keep one button, Add To Supplier Documents; Keep It In Files is on the ⋯", () => {
+  it("supplier documents keep one button, Add to Supplier Documents; Keep It in Files is on the ⋯", () => {
     const html = render({
       doc_type: "supplier_documents",
       kind: "job_document",
       proposal: { ced: { numbers: ["8802-1101363"], total: 162.45, kinds: ["invoice"], text: "x", name: "a.pdf" } },
     });
-    expect(answers(html)).toEqual(["Add To Supplier Documents"]);
+    expect(answers(html)).toEqual(["Add to Supplier Documents"]);
     expect(html).toContain("Supplier document, 8802-1101363, $162.45");
-    expect(paperMenuRows("supplier_documents", true)).toEqual(["Keep It In Files"]);
+    expect(paperMenuRows("supplier_documents", true)).toEqual(["Keep It in Files"]);
   });
 
   it("a supplier document in the same PDF that didn't add up is said on the card", () => {
@@ -344,23 +344,23 @@ describe("the other kinds of paper, the same grammar", () => {
     proposal: { picture: true, guessJobId: "job-046" },
   };
 
-  it("a plain PICTURE asks What is this? first: Job Photo, Bill Or Receipt, Something Else, and no cost doors", () => {
+  it("a plain PICTURE asks What is this? first: Job Photo, Bill or Receipt, Something Else, and no cost doors", () => {
     const html = render(PICTURE);
     expect(html).toContain("Picture, Panel, 200A main");
     expect(html).toContain("What is this?");
-    expect(answers(html)).toEqual(["Job Photo", "Bill Or Receipt", "Something Else"]);
+    expect(answers(html)).toEqual(["Job Photo", "Bill or Receipt", "Something Else"]);
     expect(html).not.toContain("Business Cost");
   });
 
-  it("after Job Photo: Put Photo On J-046 (a guess, marked) and Another Job", () => {
+  it("after Job Photo: Put Photo on J-046 (a guess, marked) and Another Job", () => {
     const html = render(PICTURE, [], { initialAnswer: "photo" });
-    expect(answers(html)).toEqual(["Put Photo On J-046 Guess", "Another Job", "Change Answer"]);
+    expect(answers(html)).toEqual(["Put Photo on J-046 Guess", "Another Job", "Change Answer"]);
     const none = render({ ...PICTURE, proposal: { picture: true } }, [], { initialAnswer: "photo" });
     expect(none).toContain("Which job is this photo for?");
-    expect(answers(none)).toEqual(["Pick A Job", "Change Answer"]);
+    expect(answers(none)).toEqual(["Pick a Job", "Change Answer"]);
   });
 
-  it("not a cost: Put It On J-046, Another Job, Keep It In Files, never the old Where Does It Go? select; a Reminder chip", () => {
+  it("not a cost: Put It on J-046, Another Job, Keep It in Files, never the old Where Does It Go? select; a Reminder chip", () => {
     const html = render({
       kind: "job_document",
       doc_type: "not_a_cost",
@@ -370,18 +370,18 @@ describe("the other kinds of paper, the same grammar", () => {
       title: "Permit 2026-114",
       proposal: { guessJobId: "job-046", suggestTask: { title: "Call the inspector", category: "office" } },
     });
-    expect(answers(html)).toEqual(["Put It On J-046 Guess", "Another Job", "Keep It In Files", "Add A Reminder: Call the inspector"]);
+    expect(answers(html)).toEqual(["Put It on J-046 Guess", "Another Job", "Keep It in Files", "Add a Reminder: Call the inspector"]);
     expect(html).not.toMatch(/<select/);
     expect(html).not.toContain("Where Does It Go?");
     expect(html).not.toContain("Make Task");
     expect(html).not.toContain("AI Suggest");
-    // Keep It In Files is on the card, so the ⋯ doesn't carry it again.
-    expect(paperMenuRows("keep", true, ["Keep It In Files"])).toEqual(["Fix Details", "Read Again", "Set Aside"]);
+    // Keep It in Files is on the card, so the ⋯ doesn't carry it again.
+    expect(paperMenuRows("keep", true, ["Keep It in Files"])).toEqual(["Fix Details", "Read Again", "Set Aside"]);
   });
 
   it("after Something Else: the not-a-cost answers, with Change Answer", () => {
     const html = render(PICTURE, [], { initialAnswer: "else" });
-    expect(answers(html)).toEqual(["Put It On J-046 Guess", "Another Job", "Keep It In Files", "Change Answer"]);
+    expect(answers(html)).toEqual(["Put It on J-046 Guess", "Another Job", "Keep It in Files", "Change Answer"]);
   });
 });
 
@@ -390,18 +390,18 @@ describe("Open Paper, and the ⋯", () => {
     const lined = { signedUrl: "https://signed.example/r.jpg", line_items: [{ description: "Wire nuts", quantity: 1, unit_price: 50, amount: 50 }] };
     const html = render(lined);
     expect(tagOf(html, "Open Paper")).toContain('aria-expanded="false"');
-    expect(html.indexOf("Open Paper")).toBeLessThan(html.indexOf("Pick A Job"));
+    expect(html.indexOf("Open Paper")).toBeLessThan(html.indexOf("Pick a Job"));
     expect(html).toContain("Its lines don&#x27;t add up to the total read. Open Paper shows both.");
     expect(render({})).not.toContain("Open Paper");
   });
 
-  it("the ⋯ rows: Fix Details, Read Again, Keep It In Files, Set Aside, Delete, each only where it applies", () => {
+  it("the ⋯ rows: Fix Details, Read Again, Keep It in Files, Set Aside, Delete, each only where it applies", () => {
     expect(paperMenuRows("ready", true)).toEqual(["Fix Details", "Read Again", "Set Aside"]);
     expect(paperMenuRows("ready", false)).toEqual(["Fix Details", "Set Aside"]);
-    expect(paperMenuRows("not_read", true)).toEqual(["Fix Details", "Keep It In Files", "Set Aside"]);
+    expect(paperMenuRows("not_read", true)).toEqual(["Fix Details", "Keep It in Files", "Set Aside"]);
     expect(paperMenuRows("needs_total", true)).toEqual(["Read Again", "Set Aside"]);
-    expect(paperMenuRows("too_big", true)).toEqual(["Keep It In Files", "Set Aside"]);
-    expect(paperMenuRows("picture", true)).toEqual(["Fix Details", "Read Again", "Keep It In Files", "Set Aside"]);
+    expect(paperMenuRows("too_big", true)).toEqual(["Keep It in Files", "Set Aside"]);
+    expect(paperMenuRows("picture", true)).toEqual(["Fix Details", "Read Again", "Keep It in Files", "Set Aside"]);
     // Delete only for paper this update can't file, and last.
     expect(paperMenuRows("later", false).at(-1)).toBe("Delete");
     for (const s of ["ready", "keep", "picture", "supplier_documents", "not_read"] as const) expect(paperMenuRows(s, true)).not.toContain("Delete");
@@ -437,8 +437,8 @@ describe("the law on every card", () => {
       proposal: { jobId: "job-046", jobFrom: "address", jobHint: "13897 HONEYSUCKLE" },
     });
     expect(html).toContain("Press Read Again so its lines come with it");
-    expect(tagOf(html, "Put It On J-046")).toMatch(SHUT);
-    expect(tagOf(html, "Put It On J-046")).toContain(`title="${RETURN_NEEDS_LINES.replace(/'/g, "&#x27;")}"`);
+    expect(tagOf(html, "Put It on J-046")).toMatch(SHUT);
+    expect(tagOf(html, "Put It on J-046")).toContain(`title="${RETURN_NEEDS_LINES.replace(/'/g, "&#x27;")}"`);
     expect(tagOf(html, "Another Job")).toMatch(SHUT);
     expect(buttons(html)).toContain("Read Again");
     // A business cost is the company's own book: not held to it.
@@ -454,7 +454,7 @@ describe("the law on every card", () => {
       proposal: { jobId: "job-046", jobFrom: "address", jobHint: "13897 HONEYSUCKLE" },
     });
     expect(buttons(lined)).not.toContain("Read Again");
-    expect(tagOf(lined, "Put It On J-046")).not.toMatch(SHUT);
+    expect(tagOf(lined, "Put It on J-046")).not.toMatch(SHUT);
   });
 
   it("a paper whose bill was deleted says why it is back, naming doors that exist", () => {

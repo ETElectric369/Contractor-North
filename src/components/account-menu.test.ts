@@ -98,20 +98,20 @@ describe("the Office and Tools rows follow the role and the Calculators switch",
 });
 
 /**
- * HELP, WITH NORT OFF (W1-09): the rows that sit under Search Or Ask while Nort is on (Start Here,
- * Finish Setting Up, Show Me How, Take The Setup Again) sit here instead, for staff. (The static
+ * HELP, WITH NORT OFF (W1-09): the rows that sit under Search or Ask while Nort is on (Start Here,
+ * Finish Setting Up, Show Me How, Take the Setup Again) sit here instead, for staff. (The static
  * render opens every useState(false), so Show Me How's lessons show folded open.)
  */
 describe("the Help rows with Nort off", () => {
   const DONE = { full_name: "Pat Lee", trade: "Electrical", city: "Truckee", service_area: "Tahoe", labor_rate: 120 };
 
-  it("staff never walked through: Start Here, Show Me How with its lessons, Take The Setup Again", () => {
+  it("staff never walked through: Start Here, Show Me How with its lessons, Take the Setup Again", () => {
     const html = render(off("nort"), "owner", { onboarded: false, setup: {} });
     expect(html).toContain(">Help</div>");
     const words = buttonWords(html);
     expect(words).toContain("Start Here");
     expect(words).toContain("Show Me How");
-    expect(words).toContain("Take The Setup Again");
+    expect(words).toContain("Take the Setup Again");
     expect(words.some((w) => w.startsWith("Why Lines "))).toBe(true);
     // The lessons read their neutral words: nobody is speaking as Nort.
     expect(words.join(" ")).not.toMatch(/\bNort\b/);
@@ -124,7 +124,7 @@ describe("the Help rows with Nort off", () => {
     expect(words).not.toContain("Start Here");
   });
 
-  it("Nort on: no Help here (the rows are under Search Or Ask); a tech never gets Help", () => {
+  it("Nort on: no Help here (the rows are under Search or Ask); a tech never gets Help", () => {
     expect(render(ALL_ON, "owner", { onboarded: false })).not.toContain(">Help</div>");
     expect(render(off("nort"), "tech", { onboarded: false })).not.toContain(">Help</div>");
   });

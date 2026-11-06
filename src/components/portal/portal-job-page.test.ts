@@ -112,7 +112,7 @@ describe("the customer's job page, drawn from the allowlisted view", () => {
   it("says a draft is a running total, not a bill, and offers no pay door for it", () => {
     expect(t).toContain("Running total, not a bill yet.");
     expect(html).not.toContain('href="/i/');
-    expect(t).not.toMatch(/View And Pay/);
+    expect(t).not.toMatch(/View and Pay/);
   });
 
   it("shows every stretch's balance after it, ending at the bill's balance to the cent", () => {
@@ -183,11 +183,11 @@ describe("the customer's job page, drawn from the allowlisted view", () => {
     const sent = render(raw({ invoices: [{ ...INV_078, status: "sent", sent_at: "2026-09-24T20:00:00Z", invoice_kind: "progress", public_token: "a".repeat(32), doc: DOC }] }));
     // The street rides on the end (lib/doc-place); the token alone is still the key.
     expect(sent).toContain(`href="/i/${"a".repeat(32)}/1-main"`);
-    expect(text(sent)).toContain("View And Pay INV-078 ($1,558.62 due)");
+    expect(text(sent)).toContain("View and Pay INV-078 ($1,558.62 due)");
     expect(text(sent)).not.toContain("Running total, not a bill yet.");
-    // The card total is what the bills carry, never "Work To Date" (that is the Progress Summary's rule).
-    expect(text(sent)).toContain("Billed To Date $8,318.62");
-    expect(text(sent)).not.toContain("Work To Date");
+    // The card total is what the bills carry, never "Work to Date" (that is the Progress Summary's rule).
+    expect(text(sent)).toContain("Billed to Date $8,318.62");
+    expect(text(sent)).not.toContain("Work to Date");
   });
 
   it("never names a supplier: not in the stretches, not in the bill", () => {
@@ -218,7 +218,7 @@ describe("the customer's job page, drawn from the allowlisted view", () => {
       now: NOW,
     });
     const v2 = text(renderToStaticMarkup(createElement(PortalJobPage, { view: sentView, homeHref: "/portal/x" })));
-    expect(v2).toContain("Work Not On A Bill Yet");
+    expect(v2).toContain("Work Not on a Bill Yet");
   });
 
   it("a deposit the next bill takes off is netted, the office card's number - never more than any bill will ask", () => {
@@ -290,7 +290,7 @@ describe("labor and materials apart, right at the top and in every section (Erik
     const u = renderToStaticMarkup(createElement(PortalJobPage, { view, homeHref: "/portal/x" }));
     expect(u).toContain('data-portal-unbilled-group="labor"');
     expect(u).toContain('data-portal-unbilled-group="materials"');
-    expect(text(u)).toMatch(/Labor · 4 hours \$400\.00 Erik 4 hours \$400\.00 Materials \$100\.00 Materials Bought \$120\.00 Returns To Credit −\$20\.00 Not Added Yet \$500\.00/);
+    expect(text(u)).toMatch(/Labor · 4 hours \$400\.00 Erik 4 hours \$400\.00 Materials \$100\.00 Materials Bought \$120\.00 Returns to Credit −\$20\.00 Not Added Yet \$500\.00/);
   });
 });
 
@@ -316,7 +316,7 @@ describe("the plans and drawings section (0326)", () => {
       doc("d1", "circuit_map", `${ORG}/${JOB}/300-circuit.pdf`, { title: "Circuit Map", is_update: true }),
       doc("d2", "plan", `${ORG}/${JOB}/301-floor.jpg`, { title: "Main Floor Plan", added_at: "2026-08-03T18:00:00Z" }),
       doc("d3", "scan_3d", `${ORG}/${JOB}/302-house.e57`, { title: "House Scan" }),
-      doc("d4", "scan_3d", `${ORG}/${JOB}/303-room.usdz`, { title: "Room In 3D" }),
+      doc("d4", "scan_3d", `${ORG}/${JOB}/303-room.usdz`, { title: "Room in 3D" }),
     ],
   });
   const html = renderToStaticMarkup(
@@ -327,7 +327,7 @@ describe("the plans and drawings section (0326)", () => {
   it("has its own section and chip, with each paper's title and date", () => {
     expect(html).toContain('id="plans"');
     expect(html).toContain('href="#plans"');
-    expect(t).toContain("Plans And Drawings");
+    expect(t).toContain("Plans and Drawings");
     expect(t).toContain("Main Floor Plan");
     expect(t).toContain("Main Floor Plan Added Aug 3");
     // The newer circuit map says it is an update, not a second map.
@@ -339,22 +339,22 @@ describe("the plans and drawings section (0326)", () => {
 
   it("a picture is drawn on the page, a PDF opens in the viewer or full size, a scan opens in the 3D viewer or as the file", () => {
     expect(html).toContain('src="https://signed.example/floor?t=1"');
-    expect(t).toContain("Open The Circuit Map");
+    expect(t).toContain("Open the Circuit Map");
     expect(html).toContain('href="https://signed.example/circuit?t=1"');
     expect(t).toContain("Open Full Size");
     // A point cloud the viewer cannot draw is a plain file; the USDZ (3D Scan) spins in the viewer.
     expect(t).toContain("A 3D file.");
     expect(html).toContain('href="https://signed.example/scan?t=1"');
-    expect(t).toContain("Open The File");
+    expect(t).toContain("Open the File");
     expect(t).toContain("A 3D scan.");
-    expect(t).toContain("View In 3D");
+    expect(t).toContain("View in 3D");
     expect(html).toContain('href="https://signed.example/303-room.usdz?t=1"');
   });
 
   it("no section and no chip when nothing is shown", () => {
     const none = render(raw());
     expect(none).not.toContain('id="plans"');
-    expect(text(none)).not.toContain("Plans And Drawings");
+    expect(text(none)).not.toContain("Plans and Drawings");
   });
 });
 

@@ -9,10 +9,10 @@
  * backdated his clock, and the visit pointed at nothing.
  *
  * Five states, one card:
- *   start    office, no job yet:   Start The Job And Clock In (a small sheet: what the job will be,
- *                                  when the clock starts) · Start The Job. When this customer has
+ *   start    office, no job yet:   Start the Job and Clock In (a small sheet: what the job will be,
+ *                                  when the clock starts) · Start the Job. When this customer has
  *                                  exactly one job (open or finished) made on the visit's day, Link To J-055
- *                                  Instead LEADS and Make A New Job Anyway is the second door; when
+ *                                  Instead LEADS and Make a New Job Anyway is the second door; when
  *                                  the tapper is on the clock on that very job, there is no switch at
  *                                  all (it would cut the right shift onto a duplicate). The app
  *                                  offers; a person taps.
@@ -21,11 +21,11 @@
  *                                  Visit (the job only). The same-day job is offered open OR finished:
  *                                  Tom Goodman's J-055 was finished and invoiced before anybody came
  *                                  back to the visit, and an open-only rule led with a duplicate.
- *   ask      crew, no job yet:     Ask The Office (the bell) · Call / Text The Office. No dead end.
- *   linked   anybody, job linked:  Clock In On J-055 (Switch To J-055 when on the clock elsewhere)
+ *   ask      crew, no job yet:     Ask the Office (the bell) · Call / Text the Office. No dead end.
+ *   linked   anybody, job linked:  Clock In on J-055 (Switch to J-055 when on the clock elsewhere)
  *                                  · Open J-055.
  *   closed   the visit is over and its job is finished: Open J-055 only. No clock to start.
- *   here     already on it:        You're On The Clock Here · Open J-055.
+ *   here     already on it:        You're On the Clock Here · Open J-055.
  *
  * Every time shown or picked is the ORG's clock. Every word is the signed-in person's language
  * (lib/words/visit-page, vp_): the card reads useLang() and its clocks through lib/utils formatTime

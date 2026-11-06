@@ -123,8 +123,8 @@ type LineOverride = Partial<Pick<ReceiptBillingLine, "billable" | "billedAmount"
  * did incur. So there is a third state now, and the card asks for it the way he says it out loud:
  * how many are in the box, and how many did you use. It never answers either question itself.
  */
-/** `shopStock` false = the Shop Stock switch is off (0352): Put The Rest On The Shelf isn't offered.
- *  A roll already on the shelf keeps its line and Take It Off The Shelf, and what the customer is
+/** `shopStock` false = the Shop Stock switch is off (0352): Put the Rest on the Shelf isn't offered.
+ *  A roll already on the shelf keeps its line and Take It Off the Shelf, and what the customer is
  *  billed never moves. Absent = on. */
 export function ReceiptLines({
   receipt: r,
@@ -272,7 +272,7 @@ export function ReceiptLines({
         /* A DRAFT CLAIMANT IS NOT A WALL: its lines are still editable, and the switch still
            governs what the NEXT import takes. */
         <div className="mb-1 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
-          <p className="font-medium">On {r.billedOn.label}, Still A Draft</p>
+          <p className="font-medium">On {r.billedOn.label}, Still a Draft</p>
           <WhyFold>
             <p>
               Switching a line here changes what future invoices take, not the lines already on that draft. To take
@@ -284,7 +284,7 @@ export function ReceiptLines({
         /* NO DEAD ENDS: a claimed receipt's switches could not move a dollar, so they are gone,
            and the door that exists (Credit / Refund on the invoice) is named. */
         <div className="mb-1 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          <p className="font-medium">Locked: On {r.billedOn.label}, Already With The Customer</p>
+          <p className="font-medium">Locked: On {r.billedOn.label}, Already with the Customer</p>
           <WhyFold>
             <p>To take something off that bill, use Credit / Refund in the Actions menu on the invoice.</p>
           </WhyFold>
@@ -333,7 +333,7 @@ export function ReceiptLines({
                 ) : l.shelf ? (
                   /* A ROLL IS ON THE SHELF FROM THIS LINE: the switch would re-cost the
                      roll without moving its pieces, so it doesn't render (the server
-                     refuses it too). Take It Off The Shelf below is the way back. */
+                     refuses it too). Take It Off the Shelf below is the way back. */
                   <span className="shrink-0 text-xs text-slate-400">In stock</span>
                 ) : (
                   <button
@@ -404,7 +404,7 @@ export function ReceiptLines({
                       onClick={() => takeOff(l)}
                       className="-ml-1 flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
                     >
-                      {shelfBusy === l.id ? "Taking It Out…" : "Take It Out Of Stock"}
+                      {shelfBusy === l.id ? "Taking It Out…" : "Take It Out of Stock"}
                     </button>
                   )}
                   {l.shelf.liveMoves > 0 && (
@@ -422,7 +422,7 @@ export function ReceiptLines({
                     onClick={() => setShelving({ receipt: r, line: l })}
                     className="-ml-1 flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline"
                   >
-                    Put The Rest In Stock
+                    Put the Rest in Stock
                   </button>
                 )
               )}
@@ -430,7 +430,7 @@ export function ReceiptLines({
           );
         })}
       </ul>
-      {/* Open The Job lives once, on the bill's own detail row above these lines. */}
+      {/* Open the Job lives once, on the bill's own detail row above these lines. */}
 
       {editing && (
         <UsedOnThisJob
@@ -530,7 +530,7 @@ function PutTheRestOnTheShelf({
     <Modal
       open
       onClose={onClose}
-      title="Put The Rest In Stock"
+      title="Put the Rest in Stock"
       size="md"
       portal={portal}
       dirty={!!value?.confirmed}
@@ -539,7 +539,7 @@ function PutTheRestOnTheShelf({
           onCancel={onClose}
           onSave={save}
           saving={saving}
-          saveLabel="Put It In Stock"
+          saveLabel="Put It in Stock"
           disabled={!value || !(pieces > 0) || !(rest > 0) || saving}
         />
       }
@@ -686,7 +686,7 @@ function UsedOnThisJob({
                 }
                 className="flex min-h-11 items-center rounded-lg px-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
               >
-                Bill The Whole Line
+                Bill the Whole Line
               </button>
             ) : undefined
           }

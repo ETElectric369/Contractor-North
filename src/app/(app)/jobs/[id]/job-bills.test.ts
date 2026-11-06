@@ -10,7 +10,7 @@ import { join } from "node:path";
  * It had kept the old ones: a 16px pencil and a 16px trash icon (the trash a one-tap hard delete,
  * no question, no Undo) and a badge reading the raw "paid"/"unpaid", the word /bills retired
  * because a bill ticked paid that a cheque already covered takes the same dollar off twice. Both
- * screens now draw BillRowDoors: Settled / On Account (Mark Settled / Mark On Account on its face),
+ * screens now draw BillRowDoors: Settled / On Account (Mark Settled / Mark on Account on its face),
  * Edit, Delete, each 44px, and
  * Delete asks first.
  */
@@ -54,7 +54,7 @@ beforeEach(() => {
 
 /**
  * ONE WAY TO ADD A COST (W1-23). The list has no Add Bill of its own: a cost goes in at the top of
- * the tab (Snap The Bill, or its ⋯: Upload and Type It In, the one typed sheet). The Not Billed Yet
+ * the tab (Snap the Bill, or its ⋯: Upload and Type It In, the one typed sheet). The Not Billed Yet
  * row keeps its label, its count and its figure.
  */
 describe("the Costs tab's bills list adds nothing itself", () => {
@@ -96,7 +96,7 @@ describe("the Costs tab's bill row", () => {
     for (const t of toggles) expect(t[0]).toContain("min-h-11");
     const faces = toggles.map((t) => t[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
     // ea2b7172: on a job page "Switch" read as "switch the job"; the face says what the tap does.
-    expect(faces).toEqual(["On Account Mark Paid", "Paid Mark On Account"]);
+    expect(faces).toEqual(["On Account Mark Paid", "Paid Mark on Account"]);
     expect(html).not.toMatch(/>Switch</);
     expect(html).not.toMatch(/>\s*(paid|unpaid)\s*</);
     expect(html).not.toContain("Toggle paid/unpaid");
@@ -104,7 +104,7 @@ describe("the Costs tab's bill row", () => {
 
 
 
-  it("the bill opens: the supplier line and a 44px Open The Bill both land on the bill's fold in /bills", () => {
+  it("the bill opens: the supplier line and a 44px Open the Bill both land on the bill's fold in /bills", () => {
     const html = render();
     for (const b of BILLS) {
       const doors = Array.from(html.matchAll(new RegExp(`<a[^>]*href="/bills#bill-${b.id}"[^>]*>([\\s\\S]*?)</a>`, "g")));
@@ -112,7 +112,7 @@ describe("the Costs tab's bill row", () => {
       for (const d of doors) expect(d[0]).toContain("min-h-11");
       const words = doors.map((d) => d[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
       expect(words[0]).toContain(b.supplier);
-      expect(words[1]).toBe("Open The Bill");
+      expect(words[1]).toBe("Open the Bill");
     }
   });
 
@@ -174,15 +174,15 @@ describe("the Costs tab's Already Billed doors", () => {
   const words = (html: string) =>
     Array.from(html.matchAll(/<button([^>]*)>([\s\S]*?)<\/button>/g)).map((m) => ({ attrs: m[1], words: m[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() }));
 
-  it("Already Billed on the open row, Billed By Hand On INV-00023 · Not Billed After All on the marked one, each 44px", () => {
+  it("Already Billed on the open row, Billed by Hand on INV-00023 · Not Billed After All on the marked one, each 44px", () => {
     const html = renderToStaticMarkup(createElement(JobBills, { jobId: "j-010", bills: PS as any, pos: [], groups: groups as any, alreadyBilled: doors }));
     const b = words(html);
     expect(b.filter((x) => x.words === "Already Billed")).toHaveLength(1);
     expect(b.filter((x) => x.words === "Not Billed After All")).toHaveLength(1);
     for (const x of b.filter((y) => ["Already Billed", "Not Billed After All"].includes(y.words))) expect(x.attrs).toMatch(/\bh-11\b/);
-    expect(html).toContain("Billed By Hand On INV-00023");
+    expect(html).toContain("Billed by Hand on INV-00023");
     // The Home Depot bill is on INV-00023 by an import: no Undo of anybody's hand there.
-    expect(html.match(/Billed By Hand On/g)).toHaveLength(1);
+    expect(html.match(/Billed by Hand on/g)).toHaveLength(1);
   });
 
   it("hours a person marked sit in the Billed fold under their invoice, never under Not Billed Yet", () => {
@@ -194,20 +194,20 @@ describe("the Costs tab's Already Billed doors", () => {
     const html = renderToStaticMarkup(createElement(JobBills, { jobId: "j-010", bills: PS as any, pos: [], groups: groups as any, alreadyBilled: doors, billedHours: hours }));
     const billedAt = html.indexOf(">Billed<");
     expect(billedAt).toBeGreaterThan(-1);
-    const on23 = html.indexOf("Billed By Hand On INV-00023: 6h");
-    const on60 = html.indexOf("Billed By Hand On INV-060: 10h 30m");
+    const on23 = html.indexOf("Billed by Hand on INV-00023: 6h");
+    const on60 = html.indexOf("Billed by Hand on INV-060: 10h 30m");
     expect(on23).toBeGreaterThan(billedAt);
     expect(on60).toBeGreaterThan(billedAt);
     // INV-00023's hours are inside its fold.
     const fold = html.slice(html.indexOf("<details"), html.indexOf("</details>"));
-    expect(fold).toContain("Billed By Hand On INV-00023: 6h");
+    expect(fold).toContain("Billed by Hand on INV-00023: 6h");
     expect(words(html).filter((x) => x.words === "Not Billed After All")).toHaveLength(3);
     // Only marked hours and no billed bills: the Billed section is still drawn.
     const only = renderToStaticMarkup(
       createElement(JobBills, { jobId: "j-010", bills: PS as any, pos: [], groups: { ...groups, billed: [] } as any, alreadyBilled: doors, billedHours: hours }),
     );
     expect(only).toContain(">Billed<");
-    expect(only).toContain("Billed By Hand On INV-060: 10h 30m");
+    expect(only).toContain("Billed by Hand on INV-060: 10h 30m");
   });
 
   it("J-010, fixed price with no estimate (no piles): the marked receipt and marked hours still say so, with Not Billed After All", () => {
@@ -221,8 +221,8 @@ describe("the Costs tab's Already Billed doors", () => {
         billedHours: [{ lineId: "li-brian", invoiceId: "inv-23", invoiceNumber: "INV-00023", ids: ["t1"], hours: 6, what: "6 h of Brian Taylor's time" }],
       }),
     );
-    expect(html).toContain("Billed By Hand On INV-00023");
-    expect(html).toContain("Billed By Hand On INV-00023: 6h");
+    expect(html).toContain("Billed by Hand on INV-00023");
+    expect(html).toContain("Billed by Hand on INV-00023: 6h");
     expect(words(html).filter((x) => x.words === "Not Billed After All")).toHaveLength(2);
     expect(words(html).filter((x) => x.words === "Already Billed")).toHaveLength(0);
   });

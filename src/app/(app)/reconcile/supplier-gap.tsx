@@ -152,7 +152,7 @@ export function SupplierGap({
                   href={`/bills#supplier-invoices-${r.accountId}`}
                   className="mt-1 flex min-h-11 items-center text-sm font-medium text-brand hover:underline"
                 >
-                  {`Open ${r.name} On Bills`}
+                  {`Open ${r.name} on Bills`}
                 </Link>
               )}
             </div>

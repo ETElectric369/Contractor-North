@@ -75,7 +75,7 @@ describe("the words", () => {
 
   it("never sends the office to count a short it can't settle by counting", () => {
     const bell = officeBellWords({ who: "Brian", qty: 20, unit: "ft", item: "12/2", job: "Honeysuckle", short: 15, onHandAfter: -15 });
-    expect(bell.body).toBe("For Honeysuckle. File the roll on Shop Stock, then Settle From Stock — or Undo the take.");
+    expect(bell.body).toBe("For Honeysuckle. File the roll on Shop Stock, then Settle from Stock — or Undo the take.");
     expect(bell.body).not.toMatch(/count it/i);
     // A database before 0364 still ends its refusal the old way: it is still turned round.
     expect(settleRefusalWords("Only 0 on the shelf, and 15 were taken past it. File the roll or count the shelf first.")).toBe(
@@ -93,7 +93,7 @@ describe("the words", () => {
     );
     const short = officeBellWords({ who: "Brian", qty: 20, unit: "ft", item: "12/2", job: "Honeysuckle", short: 15, onHandAfter: -15 });
     expect(short.title).toBe("Brian took 20 ft of 12/2, stock showed 5 ft");
-    expect(short.body).toBe("For Honeysuckle. File the roll on Shop Stock, then Settle From Stock — or Undo the take.");
+    expect(short.body).toBe("For Honeysuckle. File the roll on Shop Stock, then Settle from Stock — or Undo the take.");
     for (const w of [short.title, short.body]) expect(w).not.toMatch(/\$/);
   });
 
@@ -159,7 +159,7 @@ describe("never silent (audit v1018)", () => {
     );
     const bell = officeBellWords({ who: "Brian", qty: 90, unit: "ft", item: "12/2 NM-B", job: "Honeysuckle", short: 0, onHandAfter: -10 });
     expect(bell.title).toBe("Brian took 90 ft of 12/2 NM-B; stock now reads -10 ft");
-    expect(bell.body).toBe("For Honeysuckle. An older short on it is still open: File the roll on Shop Stock, then Settle From Stock — or Undo the take.");
+    expect(bell.body).toBe("For Honeysuckle. An older short on it is still open: File the roll on Shop Stock, then Settle from Stock — or Undo the take.");
     // The bell opens where its words send the office: Shop Stock, whenever there is a short to settle.
     expect(officeBellOpensShelf({ short: 0, onHandAfter: -10 })).toBe(true);
     expect(officeBellOpensShelf({ short: 15, onHandAfter: -15 })).toBe(true);
@@ -168,10 +168,10 @@ describe("never silent (audit v1018)", () => {
   });
 
   it("Take It that didn't hear back points at the takes list only when that list read", () => {
-    expect(takeUnheardWords(true, true)).toBe("No signal, so Take It didn't hear back. It may have saved: check Taken From Stock below before tapping again.");
-    expect(takeUnheardWords(false, true)).toBe("Take It didn't hear back. It may have saved: check Taken From Stock below before tapping again.");
+    expect(takeUnheardWords(true, true)).toBe("No signal, so Take It didn't hear back. It may have saved: check Taken from Stock below before tapping again.");
+    expect(takeUnheardWords(false, true)).toBe("Take It didn't hear back. It may have saved: check Taken from Stock below before tapping again.");
     expect(takeUnheardWords(true, false)).toBe("No signal, so Take It didn't hear back. It may have saved: reload before tapping again.");
-    expect(takeUnheardWords(false, false)).not.toContain("Taken From Stock");
+    expect(takeUnheardWords(false, false)).not.toContain("Taken from Stock");
   });
 });
 

@@ -259,7 +259,7 @@ describe("which papers make a card", () => {
     expect(labels.length).toBeLessThanOrEqual(5);
   });
 
-  it("CUSTOMER ORDER NO. is no name at all: Pick A Job, nothing suggested", () => {
+  it("CUSTOMER ORDER NO. is no name at all: Pick a Job, nothing suggested", () => {
     const c = card(feedTonight(), "8802-1102291")!;
     expect(c.verdict).toBe("blank");
     expect(c.said).toBeNull();
@@ -577,7 +577,7 @@ describe("finding a paper on /bills by what he remembers", () => {
 // His real paper: 8802-1107139, $59.17, 13683 HAZELNUT, the replacement of a faulty switch that a
 // CED credit memo for the same amount will take back off. The credit hadn't come in.
 
-describe("Waiting On A Credit: 8802-1107139, $59.17, 13683 HAZELNUT", () => {
+describe("Waiting on a Credit: 8802-1107139, $59.17, 13683 HAZELNUT", () => {
   const hazelnut = (over: Record<string, unknown> = {}) =>
     doc({ id: "hazelnut", invoice_number: "8802-1107139", invoice_date: "2026-09-01", job_name_raw: "13683 HAZELNUT", total: "59.17", ...over });
   const feedWith = (extra: any[], today: string) => {
@@ -640,7 +640,7 @@ describe("Waiting On A Credit: 8802-1107139, $59.17, 13683 HAZELNUT", () => {
       const f = feedWith([hazelnut({ waiting_credit_since: TAPPED, ...bill }), memo(credit)], "2026-10-27");
       expect(card(f, "8802-1107139")).toBeUndefined();
       expect(f.waiting).toEqual([]);
-      // And /bills's Not In Your Books (and the job's Costs tab) count it taken back, not missing.
+      // And /bills's Not in Your Books (and the job's Costs tab) count it taken back, not missing.
       const { rows } = supplierDocumentRows({ documents: [hazelnut({ waiting_credit_since: TAPPED, ...bill }), memo(credit)], bills: [], links: [], aliasRows: [] });
       const need = invoicesNeedingBill(rows, { since: null });
       expect(need.rows.map((r) => r.id)).not.toContain("hazelnut");
@@ -722,8 +722,8 @@ describe("Waiting On A Credit: 8802-1107139, $59.17, 13683 HAZELNUT", () => {
 });
 
 /**
- * WHERE A STOCK PAPER STANDS ON /bills (audit v1018, class 14), so Shop Stock's Record To Shelf is
- * offered only when Not In Your Books will actually hold it.
+ * WHERE A STOCK PAPER STANDS ON /bills (audit v1018, class 14), so Shop Stock's Record to Shelf is
+ * offered only when Not in Your Books will actually hold it.
  */
 describe("supplierPaperHomes: the page's own lists, read once for other screens", () => {
   const stock = (over: Record<string, unknown>) => doc({ job_name_raw: "STOCK", invoice_date: "2026-07-21", total: "114.40", ...over });
@@ -736,7 +736,7 @@ describe("supplierPaperHomes: the page's own lists, read once for other screens"
     expect(homesOf([stock({ id: "s1", invoice_number: "8802-1103061" })]).get("s1")).toBe("not_in_books");
   });
 
-  it("before the line it is counted, never listed: no Record To Shelf for it", () => {
+  it("before the line it is counted, never listed: no Record to Shelf for it", () => {
     expect(homesOf([stock({ id: "s2", invoice_number: "8802-1099001", invoice_date: "2026-06-01" })]).get("s2")).toBe("before_books");
   });
 

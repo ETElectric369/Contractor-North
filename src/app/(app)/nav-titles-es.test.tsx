@@ -73,7 +73,7 @@ const PAGES: Page[] = [
     file: "petty-cash/page.tsx",
     slug: "pettyCash",
     title: "Petty Cash",
-    desc: "Cash you took out, and older cash entries. A new cash purchase goes in through Snap Or Note or Add By Hand.",
+    desc: "Cash you took out, and older cash entries. A new cash purchase goes in through Snap or Note or Add by Hand.",
     es: "Caja Chica", noId: true,
   },
 ];
@@ -190,15 +190,15 @@ describe("Price List: the two-part line", () => {
 });
 
 describe("the schedule's two headings", () => {
-  it("Waiting For A Day reads nv_sched_waitingForADay beside its count, from currentLangFor(user?.id)", () => {
+  it("Waiting for a Day reads nv_sched_waitingForADay beside its count, from currentLangFor(user?.id)", () => {
     const src = read("schedule/page.tsx");
     expect(src).toContain('import { currentLangFor } from "@/lib/current-lang";');
     // The language read once, then handed to the translator and the rail's libraries (crewChips).
     expect(src).toContain("const lang = await currentLangFor(user?.id);\n  const t = translator(lang);");
     expect(src).not.toContain("currentLang()");
     expect(src).toContain('{t("nv_sched_waitingForADay")} <span className="font-normal text-slate-400">({waiting.length}{railCapped ? "+" : ""})</span>');
-    expect(src).not.toContain("Waiting For A Day <span");
-    expect(en("nv_sched_waitingForADay")).toBe("Waiting For A Day");
+    expect(src).not.toContain("Waiting for a Day <span");
+    expect(en("nv_sched_waitingForADay")).toBe("Waiting for a Day");
     expect(es("nv_sched_waitingForADay")).toBe("Esperando un Día");
   });
 

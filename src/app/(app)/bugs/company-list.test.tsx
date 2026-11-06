@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { titleCaseIn } from "../../../../tests/title-case-words";
 
 /**
  * EVERY COMPANY'S STANDING, RENDERED (cn-v1137): the name, the plan, the pill, one line from the
@@ -38,7 +39,7 @@ const row = (o: Partial<CompanyRow>): CompanyRow => ({ ...ROW, ...o });
 const list = (rows: CompanyRow[], readError: string | null = null) => renderToStaticMarkup(createElement(CompanyList, { initial: rows, readError }));
 const one = (r: CompanyRow) => renderToStaticMarkup(createElement(CompanyRowView, { row: r, onComp: () => {}, onEndComp: () => {} }));
 const doorWords = (s: string) => [...s.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)].map((m) => m[1].replace(/<[^>]+>/g, "").replace(/&#x27;/g, "'").trim());
-const titleCase = (label: string) => label.split(/\s+/).every((w) => /^[A-Z0-9×(]/.test(w));
+const titleCase = (label: string) => titleCaseIn(label, "en"); // the one judge (cn-v1148)
 
 describe("the line from the reason", () => {
   it("trial: Trial Ends <Mon D> (N Days), Today and 1 Day said as such, no end date said", () => {
@@ -55,7 +56,7 @@ describe("the line from the reason", () => {
     expect(standingLine(row({ reason: "grace", daysLeft: 7 }))).toBe("Grace: 7 Days Left");
     expect(standingLine(row({ reason: "grace", daysLeft: 1 }))).toBe("Grace: 1 Day Left");
     expect(standingLine(row({ reason: "comped", compedBy: "column", compedUntil: "2027-02-01T07:59:59Z" }))).toBe("Comped Until Jan 31, 2027");
-    expect(standingLine(row({ reason: "comped", compedBy: "env", compedUntil: null }))).toBe("Comped By Env");
+    expect(standingLine(row({ reason: "comped", compedBy: "env", compedUntil: null }))).toBe("Comped by Env");
     expect(standingLine(row({ reason: "active" }))).toBe("Active");
     expect(standingLine(row({ reason: "trial_ended" }))).toBe("Lapsed: Trial Ended");
     expect(standingLine(row({ reason: "grace_spent" }))).toBe("Lapsed: Card Not Updated");
@@ -111,9 +112,9 @@ describe("a row", () => {
     expect(s).toContain(">Crew<");
     expect(s).toContain(">Trial<");
     expect(s).toContain(">Trial Ends Oct 31 (3 Days)<");
-    // "Stripe Customer", never "Card On File": the customer is minted at Checkout before any card (S11).
+    // "Stripe Customer", never "Card on File": the customer is minted at Checkout before any card (S11).
     expect(s).toContain(">Since Oct 1, 2026 · Stripe Customer<");
-    expect(s).not.toContain("Card On File");
+    expect(s).not.toContain("Card on File");
     expect(s).toContain('type="date"');
     expect(s).toContain('aria-label="Comp Until Date"');
     expect(doorWords(s)).toEqual(["Comp Until"]);
@@ -167,7 +168,7 @@ describe("Title Case on every door", () => {
     const words = doorWords(s);
     expect(words).toEqual(["Comp Until", "Comp Until", "End Comp"]);
     for (const w of words) expect(titleCase(w), w).toBe(true);
-    for (const w of ["Comped By Env", "Lapsed: Trial Ended", "Lapsed: Card Not Updated", "Lapsed: Canceled", "Trial (No End Date)"]) expect(titleCase(w), w).toBe(true);
+    for (const w of ["Comped by Env", "Lapsed: Trial Ended", "Lapsed: Card Not Updated", "Lapsed: Canceled", "Trial (No End Date)"]) expect(titleCase(w), w).toBe(true);
   });
 });
 

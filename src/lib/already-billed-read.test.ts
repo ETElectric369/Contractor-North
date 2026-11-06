@@ -7,7 +7,7 @@ import { withAlreadyBilledDoors } from "@/app/(app)/bills/supplier-papers";
  * ALREADY BILLED'S READS FOR THE NEW DOORS (0357, Erik 2026-09-26):
  *
  *   - readAlreadyBilledReach: where the sheet can work, for many jobs at once (the paper card's
- *     Already Billed On J-010, the bill's own row on /bills, the Costs tab). The sheet's own rule:
+ *     Already Billed on J-010, the bill's own row on /bills, the Costs tab). The sheet's own rule:
  *     New Invoice pulls the job's actuals (nextInvoiceImportsActuals), and a sent bill the sheet would
  *     offer has a line that could hold it (the job's own; a job that isn't Time & Material also its
  *     customer's invoices with no job). What the invoices hold, and what a person marked;
@@ -251,7 +251,7 @@ describe("loadNoJobHoursSheet: TTUSD's days on INV-055", () => {
     expect(noJobCappedWords()).toBe("Showing the newest 150 shifts on no job. Older ones aren't listed here or counted in the hours above.");
   });
 
-  it("from an invoice's own page (Already Billed: Hours On No Job): that invoice first, its obvious line picked, nothing ticked", async () => {
+  it("from an invoice's own page (Already Billed: Hours on No Job): that invoice first, its obvious line picked, nothing ticked", async () => {
     const TEST5 = { ...INV055, id: "inv-73", invoice_number: "INV-073", created_at: "2026-09-22T18:00:00Z", invoice_items: [typed("li-t5", "Test 5", 1.11)] };
     const res = await loadNoJobHoursSheet(fake(route({ invoices: { data: [TEST5, INV055] } })), ORG, [], { invoiceId: "inv-55" });
     expect(res.ok).toBe(true);
@@ -340,7 +340,7 @@ describe("withAlreadyBilledDoors: the paper cards on My Day and /bills", () => {
     return { data: [] };
   };
 
-  it("a card whose one job could hold it gets Already Billed On J-011; the reads are the jobs the cards name", async () => {
+  it("a card whose one job could hold it gets Already Billed on J-011; the reads are the jobs the cards name", async () => {
     const seen: Q[] = [];
     const feed = await withAlreadyBilledDoors(fake(route, seen), ORG, { cards: [card()], jobs: [] });
     expect(feed.cards[0].alreadyBilledOn).toEqual(J);

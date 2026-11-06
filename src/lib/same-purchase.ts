@@ -159,11 +159,11 @@ const isLive = (b: LedgerBill) => !b.superseded_by_bill_id;
 
 /**
  * EVERY LIVE BILL THAT ALREADY CARRIES THIS NUMBER, from the same supplier: in bill_number (what
- * the tray and the job page write), in supplier_invoice_number (what Record It As A Bill writes),
+ * the tray and the job page write), in supplier_invoice_number (what Record It as a Bill writes),
  * or named on its own lines or file name (a scanned statement).
  *
  * CERTAIN ONLY: the same account, or the exact same spelling. This answer hides doors (File It
- * refuses, /bills counts the document covered and drops it from Purchases Not In Your Books), so
+ * refuses, /bills counts the document covered and drops it from Purchases Not in Your Books), so
  * it never leans on a number alone. A long number under ANOTHER spelling is a WARNING, never this
  * (Erik, audit v994 DB5): billsMaybeCarryingNumber for a supplier's document, and
  * billsCarryingLongNumberElsewhere for a paper in the tray.
@@ -393,7 +393,7 @@ export function billLabel(b: LedgerBill, corrections: readonly LedgerBill[] = []
  *
  * THE SAME PURCHASE AT ANOTHER PRICE (reprice, Erik 2026-10-04): the counter priced a fixture at
  * $0.00 and CED's invoice for the same purchase came to $95.99 more. Nothing within tolerance, so
- * the card offered only Record It As A Bill: a second full bill on the job, billed to the customer
+ * the card offered only Record It as a Bill: a second full bill on the job, billed to the customer
  * twice on T&M. Now, when NO purchase is within tolerance and the document has a job (filed on
  * one, or `namedJobId`, the job its printed label names by the exact rule), the uncovered
  * purchases on that account and job within the days are offered, at most REPRICE_OFFERS, closest

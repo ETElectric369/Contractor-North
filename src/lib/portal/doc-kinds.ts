@@ -13,7 +13,7 @@
  *   - FORMAT: what the FILE is, read from its name: a picture the page draws inline, a PDF it opens
  *     in its viewer, a 3D model, or anything else. THE SEAM for LiDAR scans and 3D renderings: a
  *     format the portal cannot draw today (a .glb, an .e57, a .usdz) is shown with its title and
- *     date and a plain Open The File link, never dropped. A 3D viewer later plugs in at "model".
+ *     date and a plain Open the File link, never dropped. A 3D viewer later plugs in at "model".
  */
 
 export const PORTAL_DOC_KINDS = [
@@ -123,7 +123,7 @@ const NOISE_WORDS = new Set([
 ]);
 
 /**
- * THE TITLE A NEW PAPER STARTS WITH on the Show On Portal sheet: its file name, cleaned, or the
+ * THE TITLE A NEW PAPER STARTS WITH on the Show on Portal sheet: its file name, cleaned, or the
  * fallback when the name says nothing ("Plan, Sep 25, 2026"). A person reads and can change it
  * before anything shows; this is only the suggestion.
  *

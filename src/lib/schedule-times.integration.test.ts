@@ -16,7 +16,7 @@ import { tzDateTimeUtc } from "@/lib/tz";
  *   · the schedule writer's one row write (writeScheduleRanges): the start, the end and a chosen length
  *     land together, read back exactly, and draw (jobDayBlock) as the block chosen, 10:00 to 12:00;
  *   · the days (job_schedule_segments) are replaced by the office, a worked day kept beside the plan;
- *   · Clear The Date: the listed day leaves, the Scheduled job waits for a day again, the worked day
+ *   · Clear the Date: the listed day leaves, the Scheduled job waits for a day again, the worked day
  *     stays;
  *   · a visit's one person (setAppointmentAssignee) is the office's write;
  *   · the crew is refused every one of those writes: zero rows (the silent-write law, which each writer
@@ -185,7 +185,7 @@ d("a job's start and length, stored (schedule writers)", () => {
     expect(days).toEqual(["2026-09-22", "2026-09-28"]);
   });
 
-  it("Clear The Date: the listed day leaves, a Scheduled job waits again, the worked day stays", async () => {
+  it("Clear the Date: the listed day leaves, a Scheduled job waits again, the worked day stays", async () => {
     const id = await job("scheduled");
     await writeTimes(ownerId, id, { startIso: tzDateTimeUtc("2026-09-28", "10:00", LA), endIso: tzDateTimeUtc("2026-09-28", "12:00", LA) });
     await asPerson(ownerId, async () => {
@@ -202,7 +202,7 @@ d("a job's start and length, stored (schedule writers)", () => {
 
   it("cleared, its worked day still reaches the calendar, and put back on Oct 5 at 9:00 it is 9 to 11 on Oct 5", async () => {
     const id = await job("to_be_scheduled");
-    // The state Clear The Date leaves: no listed day, the worked Sep 22 kept as a segment.
+    // The state Clear the Date leaves: no listed day, the worked Sep 22 kept as a segment.
     await asPerson(ownerId, async () => {
       await c.query("insert into public.job_schedule_segments (job_id, start_date, end_date) values ($1, '2026-09-22', '2026-09-22')", [id]);
     });

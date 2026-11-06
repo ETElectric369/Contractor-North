@@ -138,7 +138,7 @@ describe("what a permit's row never is", () => {
     // 0378 carries a permit's old inline inspection forward as its first row, and a permit's own
     // default inspection_result was "pending" — so a permit finished last year can end up holding an
     // open row. Without the permit's status, every one of those nags forever, the "Permit Inspections"
-    // pile counts them all, and each job they hang on silently drops off Jobs Needing A Day.
+    // pile counts them all, and each job they hang on silently drops off Jobs Needing a Day.
     for (const status of ["passed", "closed"]) {
       const f = feed([visit({ position: 1, authority: "Not said" })], THU, [permit({ status })]);
       expect(f.now).toEqual([]);

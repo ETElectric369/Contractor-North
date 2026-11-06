@@ -10,7 +10,7 @@ import { createInvoiceForJob } from "../jobs/actions";
  *  BEFORE the redirect (this row used to drop it, so why you landed where you landed was never
  *  said). A refusal stays on the row; when everything is already billed on one invoice, the toast
  *  carries the door to it instead of a dead sentence. */
-export function InvoiceJobButton({ jobId, label = "Create Invoice →" }: { jobId: string; /** The row's own word for the door (Waiting To Be Billed says "Bill It"). */ label?: string }) {
+export function InvoiceJobButton({ jobId, label = "Create Invoice →" }: { jobId: string; /** The row's own word for the door (Waiting to Be Billed says "Bill It"). */ label?: string }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();

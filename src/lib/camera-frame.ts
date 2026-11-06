@@ -99,7 +99,7 @@ export const DARK_PREVIEW_HINT_MS = 3_000;
 
 /**
  * WHY getUserMedia FAILED, IN PLAIN WORDS. Keyed on the DOMException name; the modal shows this
- * line above "Choose A Photo Instead", which is always there.
+ * line above "Choose a Photo Instead", which is always there.
  */
 export function cameraFailureLine(errorName: string | null | undefined, native = false): string {
   switch (errorName) {

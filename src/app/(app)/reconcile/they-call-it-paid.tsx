@@ -16,7 +16,7 @@ import type { TheyCallItPaidRow } from "./reconcile-read";
  * supplier's own paper covering it is closed, and the bill still carries money open. Reconcile
  * names it and offers the two doors that settle it, both of which write the bill's own number:
  *   · Mark Paid - his word that the purchase is paid in full (bills.amount_paid := amount);
- *   · Record The Payment - the Suppliers card's sheet with this account, where the bill's box is.
+ *   · Record the Payment - the Suppliers card's sheet with this account, where the bill's box is.
  * "Settled · CED Says" used to be a badge that silently left this bill out of every figure; now it
  * is a row he answers.
  */
@@ -67,7 +67,7 @@ export function TheyCallItPaid({ rows }: { rows: TheyCallItPaidRow[] }) {
               </Button>
               {r.accountId && (
                 <Link href={`/bills?pay=${r.accountId}`} className="inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-white">
-                  Record The Payment
+                  Record the Payment
                 </Link>
               )}
             </span>

@@ -31,7 +31,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  *      differ), and its size, then the note about the circuits already in the panel.
  *
  * WHAT IS ON IT: only the customer-safe directory (lib/panel/directory), the same shape the portal
- * gets, because Save As Circuit Map puts this very page on the customer's Plans And Drawings. The
+ * gets, because Save as Circuit Map puts this very page on the customer's Plans and Drawings. The
  * read below never asks for a wire tag, a note, progress, a source or who did what (the projection
  * law: a column never selected cannot leak). Kept circuits only; a suggestion, a circuit taken off
  * and one coming out are not on it.

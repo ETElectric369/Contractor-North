@@ -21,7 +21,7 @@ export type { PnlKind, PnlKindShape, PnlNetting, PnlSection, PnlSectionShape } f
  *     Stock Lost (Written Off, Counted Short, Returned)
  *     Crew Pay (1099)
  *     Crew Mileage Paid                      and any bucket BUCKET_SECTION calls COGS (none today)
- *     Owner Hours Charged To Jobs            the owner's ON-SITE hours at his cost rate
+ *     Owner Hours Charged to Jobs            the owner's ON-SITE hours at his cost rate
  *     Owner Hours Added Back                 the same amount back, so the pair nets to zero
  *     Total COGS
  *   Gross Profit                             Revenue less Total COGS
@@ -99,7 +99,7 @@ export const PNL_WORDS = {
    *  to jobs" because that is literally what happened to the money, and never "billed" — billed is
    *  the $125 the CUSTOMER pays for that hour, and one word for the cost and the price is the fault
    *  that had the owner's row reading 125 in and 125 out (Erik, 2026-10-01). */
-  ownerBuildTime: "Owner Hours Charged To Jobs",
+  ownerBuildTime: "Owner Hours Charged to Jobs",
   /** The same amount straight back, so the allocation nets to zero and Net Profit does not move.
    *  NOT "contra", which is an accountant's word for an entry that exists only to cancel another, and
    *  NOT "reconciled", which already means matching two records and has a page of its own. Erik,

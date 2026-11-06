@@ -122,7 +122,7 @@ d("0354: any company, any supplier", () => {
   it("the shelf credit guard names no supplier", async () => {
     if (!ready()) return;
     const def = (await one("select pg_get_functiondef('public.guard_shelf_credit_bill()'::regprocedure) as def")).def as string;
-    expect(def).not.toMatch(/Return To CED/);
+    expect(def).not.toMatch(/Return to CED/);
     expect(def).toContain("(the return on Shop Stock)");
   });
 

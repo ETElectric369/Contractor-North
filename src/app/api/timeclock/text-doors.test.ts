@@ -576,14 +576,14 @@ describe("the 12-hour question, as a text too", () => {
     ]);
     // The pushes: each person's question in their own words, the office's buzz in English about both.
     expect(spies.push.map((p) => [p[0], p[1], p[2].title, p[2].body])).toEqual([
-      [["brian-1"], "clock_out", "Still On The Clock?", "You've been clocked in at Honeysuckle since Mon 11:00 PM. Tap to set when you stopped."],
-      [["office-1"], "long_shift", "Brian Is Still On The Clock", "Clocked in Mon 11:00 PM at Honeysuckle, 13 hours ago. Brian has been asked when the shift ended. Clock Out Brian on Timecards if you know."],
+      [["brian-1"], "clock_out", "Still on the Clock?", "You've been clocked in at Honeysuckle since Mon 11:00 PM. Tap to set when you stopped."],
+      [["office-1"], "long_shift", "Brian Is Still on the Clock", "Clocked in Mon 11:00 PM at Honeysuckle, 13 hours ago. Brian has been asked when the shift ended. Clock Out Brian on Timecards if you know."],
       [["larkspur-1"], "clock_out", "¿Sigues en el Reloj?", "Tienes entrada marcada en Honeysuckle desde lun 11:00 pm. Toca para poner a qué hora paraste."],
-      [["office-1"], "long_shift", "Larkspur Is Still On The Clock", "Clocked in Mon 11:00 PM at Honeysuckle, 13 hours ago. Larkspur has been asked when the shift ended. Clock Out Larkspur on Timecards if you know."],
+      [["office-1"], "long_shift", "Larkspur Is Still on the Clock", "Clocked in Mon 11:00 PM at Honeysuckle, 13 hours ago. Larkspur has been asked when the shift ended. Clock Out Larkspur on Timecards if you know."],
     ]);
     // The bell line says what the push said, to the same person.
     expect(spies.notify.map((n) => [n[1], n[2].title, n[2].body])).toEqual([
-      [["brian-1"], "Still On The Clock?", "You've been clocked in at Honeysuckle since Mon 11:00 PM. Tap to set when you stopped."],
+      [["brian-1"], "Still on the Clock?", "You've been clocked in at Honeysuckle since Mon 11:00 PM. Tap to set when you stopped."],
       [["larkspur-1"], "¿Sigues en el Reloj?", "Tienes entrada marcada en Honeysuckle desde lun 11:00 pm. Toca para poner a qué hora paraste."],
     ]);
   });
@@ -707,10 +707,10 @@ describe("Text on an invoice", () => {
     expect(updates.map((u) => Object.keys(u.payload))).toEqual([["sent_at"]]);
   });
 
-  it("a bill that went out, came Back To Draft and goes out again keeps its due date: that isn't the first send", async () => {
+  it("a bill that went out, came Back to Draft and goes out again keeps its due date: that isn't the first send", async () => {
     textingReady();
     const updates: Q[] = [];
-    // Back To Draft keeps sent_at (Aug 1), so the draft still says the customer has held it since.
+    // Back to Draft keeps sent_at (Aug 1), so the draft still says the customer has held it since.
     state.client = fakeSupabase(routes(updates, { status: "draft", sent_at: "2026-08-01T18:00:00.000Z" }));
     expect(await textInvoice("inv-1")).toEqual({ ok: true });
     expect(updates).toHaveLength(1);

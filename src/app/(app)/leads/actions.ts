@@ -52,7 +52,7 @@ export type Result = {
   /** Firm inspection booking: WHEN it landed (org-local date + time and the UTC instant), so a
    *  caller — the assistant above all — reads back the real time instead of assuming one. */
   data?: { starts_at: string; date: string; time: string };
-  /** Save As Contact (target 'customer'): the card the lead now carries, and whether the book
+  /** Save as Contact (target 'customer'): the card the lead now carries, and whether the book
    *  already had them (linked to it) or a new card was made, so the toast says which (W2-07). */
   contact?: { id: string; name: string; existing: boolean };
 };
@@ -797,7 +797,7 @@ export async function convertInquiry(
   }
   let customerId = opts.customerId || null;
   let mintedFromLead = false; // the card was made from this lead's own name/company/type just now
-  // The name on the card the lead lands on, when the book already had them (Save As Contact says
+  // The name on the card the lead lands on, when the book already had them (Save as Contact says
   // "Linked To <name>", never a silent link to somebody else's card).
   let matchedName: string | null = null;
   if (!customerId) {
@@ -957,7 +957,7 @@ export async function convertInquiry(
     ok: true,
     id: customerId ?? undefined,
     redirect,
-    // Save As Contact says which happened: a new card from this lead, or the card the book had.
+    // Save as Contact says which happened: a new card from this lead, or the card the book had.
     ...(isContactOnly && customerId
       ? { contact: { id: customerId, name: String((mintedFromLead ? inq.name : matchedName) ?? inq.name ?? ""), existing: !mintedFromLead } }
       : {}),

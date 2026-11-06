@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { pinnedGet, readPublicPage, READ_LIMITS, USER_AGENT, type Hop, type HopResponse, type Resolved } from "./fetch-page";
 
 /**
- * THE SSRF FENCE around Fill From Their Site. Nothing here touches the internet: DNS is a table and
+ * THE SSRF FENCE around Fill from Their Site. Nothing here touches the internet: DNS is a table and
  * every request is answered by a script (the `get` door), except the one pinning test at the bottom,
  * which talks to a server on this machine's own loopback to prove the connection goes to the address
  * that was checked and nowhere else.

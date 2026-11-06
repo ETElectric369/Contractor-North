@@ -57,17 +57,17 @@ export const SCREENS: Screen[] = [
     say: "?view=week|day&date=YYYY-MM-DD (next week = today + 7 days, view=week)",
     staffOnly: true,
     spots: [
-      { name: "waiting-for-a-day", say: "Waiting For A Day, the rail of work with no day" },
+      { name: "waiting-for-a-day", say: "Waiting for a Day, the rail of work with no day" },
       { name: "schedule-calendar", say: "the calendar" },
     ],
   },
   { name: "Clock", word: "sh_dock_clock", path: "/timeclock", say: "a tech's clock tile (the two-button clock and Switch Job)" },
-  // Reminders has no dock row (it rides Today's owns): its word is Search Or Ask's row for it.
+  // Reminders has no dock row (it rides Today's owns): its word is Search or Ask's row for it.
   { name: "Reminders", word: "sh_reminders", path: "/tasks", say: "the full Reminders list (Overdue, Today, This Week, Later, Someday); everyone sees their own" },
   { name: "Jobs", word: "sh_dock_jobs", path: "/jobs", say: "?status=<status>", spots: [{ name: "new-job", say: "New Job (office)" }] },
   {
     name: "A job",
-    // One record's sheet: the word Search Or Ask files a job under (Job / Trabajo).
+    // One record's sheet: the word Search or Ask files a job under (Job / Trabajo).
     word: "sh_kind_job",
     path: "/jobs/<id>",
     say: "?tab=job|tasks|photos|time|materials|permits|panel|appointments|wos opens that tab; costs|quotes|invoices|change-orders are the office's tabs (a tech has none)",
@@ -86,9 +86,9 @@ export const SCREENS: Screen[] = [
     say: "one invoice is /billing/<id>",
     staffOnly: true,
     spots: [
-      { name: "owed-to-you", say: "Owed To You" },
+      { name: "owed-to-you", say: "Owed to You" },
       { name: "customers", say: "By Customer (also ?open=customers)" },
-      { name: "waiting", say: "Waiting To Be Billed" },
+      { name: "waiting", say: "Waiting to Be Billed" },
       { name: "payments", say: "Payments In" },
     ],
   },
@@ -102,7 +102,7 @@ export const SCREENS: Screen[] = [
     spots: [
       { name: "needs-you", say: "Needs You: papers to sort, supplier bills not in the books (only while there are some)" },
       { name: "suppliers", say: "the Suppliers card, what is owed to each" },
-      { name: "add-by-hand", say: "Add By Hand, the typed cost sheet" },
+      { name: "add-by-hand", say: "Add by Hand, the typed cost sheet" },
       { name: "all-bills", say: "All Bills" },
     ],
   },
@@ -155,7 +155,7 @@ export const TILE_WORD_KEYS = ["sales", "invoices", "schedule", "today"] as cons
 
 /** The shell's own spots, on every screen. */
 export const SHELL_SPOTS: ScreenSpot[] = [
-  { name: "ask", say: "Search Or Ask (top bar)" },
+  { name: "ask", say: "Search or Ask (top bar)" },
   { name: "nort", say: "the Nort button (top bar)" },
   { name: "quickadd", say: "the + button (top bar)" },
   { name: "bell", say: "the Bell (top bar)" },

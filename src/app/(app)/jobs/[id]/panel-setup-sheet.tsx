@@ -404,7 +404,7 @@ export function PanelSetupSheet({
                 if (!e.target.checked && d.label_width_in_right !== "") choose("label_width_in_right", "", "the right side width");
               }}
             />
-            Different On The Right
+            Different on the Right
           </label>
           {rightOwn && (
             <Field label="Right Side Width" hint="Inches, beside the right column.">

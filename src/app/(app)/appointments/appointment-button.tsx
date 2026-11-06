@@ -228,7 +228,7 @@ export function AppointmentButton({
    *  PICKABLE_APPOINTMENT_TYPES. (The old fromLead prop this superseded, and the never-passed
    *  dayStarts suggest-a-slot input, were removed in the 2026-07-16 churn audit.) */
   defaultType?: string;
-  /** Create-button copy override ("Book An Inspection" on the Inspections tab). */
+  /** Create-button copy override ("Book an Inspection" on the Inspections tab). */
   buttonLabel?: string;
   /** Tight card-header variant: small button that stays on one line. */
   compact?: boolean;

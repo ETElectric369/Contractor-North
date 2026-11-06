@@ -242,7 +242,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // UTC server's day — a Pacific evening debrief must not fall out of the window a
   // day early).
   const reportsSince = todayStrInTz(tz, new Date(Date.now() - 14 * 86_400_000));
-  // (An open punch with NO job reads no job list here: the Now card's Pick The Job opens the
+  // (An open punch with NO job reads no job list here: the Now card's Pick the Job opens the
   // clock's own "Which Job Are You On?" sheet, which loads its list when it opens: the job he
   // punched last, today's schedule, the jobs in progress. One list at every door.)
   const [crewR, curJobRes, poolR, restCountR, doneTodayR, dailyReportsR] = await Promise.all([
@@ -820,8 +820,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
             </NavLink>
           )}
           {/* THE OFFICE'S VERBS, behind one 44px ⋯ (the app's one row sheet): a visit's Mark Done,
-              Move To Another Day… and Edit Details… (the edit kills the old dead end, appt row →
-              the job page's read-only tab); a job's Move To Another Day… only. MoveToDay is the ONE
+              Move to Another Day… and Edit Details… (the edit kills the old dead end, appt row →
+              the job page's read-only tab); a job's Move to Another Day… only. MoveToDay is the ONE
               reschedule grammar app-wide. Techs keep plain rows, no ⋯: the actions are staff-gated
               server-side. A week-view visit carries no record, so it gets no ⋯. */}
           {isStaff && (i.appt || i.jobId) && (
@@ -872,7 +872,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           The Open Leads card that once sat beside the clock for staff is gone too: a lead is a Needs
           You row below, and the Sales tile's badge counts the new, uncontacted ones.
           The card is keyed to the OPEN PUNCH's job. A punch that carries none asks "Which job are you
-          on?" with one Pick The Job door (the clock's own sheet), so the doors are never gone without
+          on?" with one Pick the Job door (the clock's own sheet), so the doors are never gone without
           a sentence (Erik 2026-09-11, "what happened to my materials button").
           Only the job's name, customer · address and its href cross into the client card; the doors
           below render here, on the server. */}

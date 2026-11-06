@@ -33,7 +33,7 @@ const tie = (o: Partial<PaperTie>): PaperTie => ({ document_id: null, bill_id: n
 const loose = (docs: ReceiptDoc[], ties: PaperTie[] | null) => receiptsNotOnABill(docs, ties)?.map((d) => d.id) ?? null;
 
 describe("which receipts are on no bill", () => {
-  it("a tech's unread photo from Snap Or Note shows: a Receipt on the job, no tie at all", () => {
+  it("a tech's unread photo from Snap or Note shows: a Receipt on the job, no tie at all", () => {
     const photo = doc();
     expect(loose([photo], [])).toEqual([photo.id]);
   });

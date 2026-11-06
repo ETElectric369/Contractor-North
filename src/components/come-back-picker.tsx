@@ -18,13 +18,13 @@ import {
  * THE COME-BACK PICKER (NY-hold, 0366): why it waits, and the day it comes back. One control for
  * every wait in the app: putting a job on hold here ("Hold It"), and, next wave, a Needs You row's
  * "Snooze" and "Still Waiting" (lane 5). Erik: "too quiet gets things lost", so there is no "No
- * Date": In A Week is picked until someone picks another day.
+ * Date": In a Week is picked until someone picks another day.
  *
  *   Why?        "Waiting on the permit". In hold mode (requireWhy) the button waits for words, and the
  *               line under it says why: the reason IS the reminder the job comes back with (setJobHold
  *               refuses a hold with no reason). Snooze and Still Waiting show it only when no reason is
  *               saved yet (askWhy), and never require it.
- *   the chips   Tomorrow · Mon · In A Week (picked) · Pick A Day (a date, today or later).
+ *   the chips   Tomorrow · Mon · In a Week (picked) · Pick a Day (a date, today or later).
  *   the button  its words are the caller's: Hold It, Snooze, Still Waiting.
  *
  * WHOSE TODAY. Given `todayStr` (the company's today, from the server) the picker works the day out
@@ -34,7 +34,7 @@ import {
  */
 export const SAY_WHY = "Say why: it's the reminder when the job comes back";
 
-/** The chips' words, by catalog key (lib/words/agenda: Tomorrow; agenda-rail: Mon, In A Week). */
+/** The chips' words, by catalog key (lib/words/agenda: Tomorrow; agenda-rail: Mon, In a Week). */
 const CHIP: Record<ComeBackPick, string> = { tomorrow: "ag_btn_tomorrow", monday: "ag_rail_btn_mon", week: "ag_rail_btn_inAWeek" };
 
 type Choice = ComeBackPick | "date";

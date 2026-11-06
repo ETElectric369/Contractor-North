@@ -56,7 +56,7 @@ export { joinLineNote, splitLineNote };
  *  unit, and unit $ at this customer's markup, the same math as the Add picker.
  *
  *  THE BOX HOLDS THE HEAD ONLY (splitLineNote): a line's note — its description's lines after the
- *  first — lives under it behind Add A Note / Edit Note, and every keystroke in either goes back
+ *  first — lives under it behind Add a Note / Edit Note, and every keystroke in either goes back
  *  out through onText as the one joined description (joinLineNote). A part has no note door. */
 export function LineDescInput({
   value,
@@ -75,14 +75,14 @@ export function LineDescInput({
   value: string;
   onText: (v: string) => void;
   onPick: (p: PriceItemLite) => void;
-  /** Add A Note / Edit Note under the box. On by default (a line); a task's part passes false. */
+  /** Add a Note / Edit Note under the box. On by default (a line); a task's part passes false. */
   noteDoor?: boolean;
   /** After the box loses focus (the dropdown's own close still runs). The editor commits the line
    *  here; a task's part drops a row he left nameless. */
   onBlur?: () => void;
-  /** When the box takes focus. Add A Task uses it to let go of the line it just focused. */
+  /** When the box takes focus. Add a Task uses it to let go of the line it just focused. */
   onFocus?: () => void;
-  /** Focus this box as it mounts: the line Add A Task just made is the one he is about to name. */
+  /** Focus this box as it mounts: the line Add a Task just made is the one he is about to name. */
   autoFocus?: boolean;
   /** While a write is on the wire (the one save model): the box waits with the rest of the form. */
   disabled?: boolean;
@@ -262,7 +262,7 @@ export function LineDescInput({
  * row says WHO (Labor · a person · his own word, "Helper") and, beside the figure, WHERE IT CAME
  * FROM through the one rule (laborRateFor / laborRateFromWords): "company default", "the customer's
  * level", "<name>'s rate" — or "typed" when he tapped the chip and wrote one, "from the scope" when
- * he dictated it. Add Labor At Another Rate puts a second row under the task; the first row is the
+ * he dictated it. Add Labor at Another Rate puts a second row under the task; the first row is the
  * task's labor and never leaves.
  *
  * A part is picked from the price book through the same autocomplete the line's description uses
@@ -305,7 +305,7 @@ export function TaskBreakdown({
    *  default. A row with no person prices at them; a row with one is held under the level. */
   levelRate?: number | null;
   defaultLaborRate?: number;
-  /** The visit's scope word ("Deck"): what Remember As A Kit files the kit under, unless he
+  /** The visit's scope word ("Deck"): what Remember as a Kit files the kit under, unless he
    *  changes it. Null when the estimate did not come from a visit with a scope. */
   scopeWord?: string | null;
   /** The org's task kits with their lines (W4): a line built from one says which, and its units

@@ -41,7 +41,7 @@ import type { Answers, AnswerValue, Need } from "@/lib/playbook/types";
  *   3. WHERE IT LIVES  the short orientation, so nobody has to hunt for what they just made.
  *
  * Finishing records a fact (profiles.onboarded_at, 0180) rather than deriving one. Never a gate,
- * and re-takeable forever from Take The Setup Again (under Search Or Ask; under Help, behind the
+ * and re-takeable forever from Take the Setup Again (under Search or Ask; under Help, behind the
  * initials, with Nort off).
  */
 
@@ -254,7 +254,7 @@ export function SetupInterview({
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <Button type="button" disabled={pending} onClick={toQuestions}>
               {pending ? (
-                <><Loader2 className="h-4 w-4 animate-spin" /> Working On Your Questions…</>
+                <><Loader2 className="h-4 w-4 animate-spin" /> Working on Your Questions…</>
               ) : (
                 <>Next: Your Questions <ArrowRight className="h-4 w-4" /></>
               )}
@@ -282,12 +282,12 @@ export function SetupInterview({
             err ? (
               <div className="mt-3 space-y-2">
                 <p className="text-sm text-rose-700">{err}</p>
-                {/* The door is named where it really is: Take The Setup Again sits under Search Or
+                {/* The door is named where it really is: Take the Setup Again sits under Search Or
                     Ask with Nort on, and under Help behind the initials with him off. */}
                 {nortOn ? (
                   <p className="text-sm text-slate-500">
                     That usually means I never got your trade, so there are no questions to draft yet.
-                    Take setup again from Search Or Ask and tell me your trade &mdash; or
+                    Take setup again from Search or Ask and tell me your trade &mdash; or
                     write them yourself under Settings &rarr; Playbook.
                   </p>
                 ) : (
@@ -348,11 +348,11 @@ export function SetupInterview({
                         the others on real jobs where they actually cost something. */}
                     {i > 0 ? (
                       <Button type="button" variant="secondary" disabled={pending} onClick={toWhere}>
-                        I&rsquo;ve Got It — Save The Rest As Drafted
+                        I&rsquo;ve Got It — Save the Rest as Drafted
                       </Button>
                     ) : (
                       <button type="button" disabled={pending} onClick={toWhere} className="text-sm text-slate-500 underline-offset-2 hover:underline">
-                        {nortOn ? <>Save Nort&rsquo;s Drafts And Read Them Later</> : "Save The Drafts And Read Them Later"}
+                        {nortOn ? <>Save Nort&rsquo;s Drafts and Read Them Later</> : "Save the Drafts and Read Them Later"}
                       </button>
                     )}
                   </div>
@@ -405,7 +405,7 @@ export function SetupInterview({
               <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
               <span>
                 <strong className="font-medium text-slate-900">This setup</strong>{" "}
-                {nortOn ? "is under Search Or Ask" : "is under Help, behind your initials"}. Take it again whenever you
+                {nortOn ? "is under Search or Ask" : "is under Help, behind your initials"}. Take it again whenever you
                 want.
               </span>
             </li>

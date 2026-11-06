@@ -155,7 +155,7 @@ describe("Needs You's Not Closed Out row says Inspection", () => {
 });
 
 /**
- * THE OTHER FEEDER OFF THE SAME TABLE, which had the word typed into it: Inspections To Write Up
+ * THE OTHER FEEDER OFF THE SAME TABLE, which had the word typed into it: Inspections to Write Up
  * read `a.title || "Inspection"`. It carries every ESTIMATE_VISIT_TYPE, so that literal printed
  * "Inspection" over an untitled QUOTE visit and over the city's Final Inspection — two rows calling
  * themselves something they are not, on the first screen he opens.

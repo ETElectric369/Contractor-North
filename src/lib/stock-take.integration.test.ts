@@ -4,7 +4,7 @@ import { assertTestDatabase } from "@/lib/db-guard";
 import { defineStockTakeSuite } from "./stock-take.db-suite";
 
 /**
- * Took From Stock at the database (0343 + 0344): a piece from the shelf is billed once, an undone or
+ * Took from Stock at the database (0343 + 0344): a piece from the shelf is billed once, an undone or
  * short piece is never billed, un-void can't bring back an undone take, and the crew reads the job's
  * takes with no cost. The suite is stock-take.db-suite.ts, over ONE connection, each case in its own
  * transaction that is always rolled back.
@@ -27,7 +27,7 @@ if (STOCK_TAKE_APPLY === "1" && isProduction) {
   throw new Error("stock-take: STOCK_TAKE_APPLY=1 is refused on the production database. Apply 0343/0344 there as migrations, in a quiet window.");
 }
 
-d("Took From Stock at the database (0343 + 0344 + 0345 + 0347 + 0348)", () => {
+d("Took from Stock at the database (0343 + 0344 + 0345 + 0347 + 0348)", () => {
   defineStockTakeSuite(
     async () => {
       const client = new pg.Client({

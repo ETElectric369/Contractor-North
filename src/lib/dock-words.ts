@@ -5,7 +5,7 @@ import { dict, type Lang } from "@/lib/i18n";
  * lib/dock.ts keeps its English `label` data — the office reads it, the title-case test judges it,
  * and every dock test pins it — and the catalog (lib/words/shell.ts) holds a key per tile and row
  * as sh_dock_<row id> (a tile by its key: sh_dock_today). Every renderer that draws a row or a tile
- * (the rail, the phone bar, the section strip and sheet, the avatar menu's rows, Search Or Ask)
+ * (the rail, the phone bar, the section strip and sheet, the avatar menu's rows, Search or Ask)
  * asks here, so the dock's data stays one list and the words stay one catalog.
  *
  * THE VARIANT RULE. A row wearing its whenOff words ("Bills" for "Bills & POs") reads

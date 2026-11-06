@@ -205,7 +205,7 @@ describe("Won't Happen deletes only a visit with nothing on it", () => {
   });
 });
 
-describe("Put It Back On The Schedule", () => {
+describe("Put It Back on the Schedule", () => {
   // Today, on the company's clock, as the action sees it.
   const tz = "America/Los_Angeles";
   const ymd = (offsetDays: number) => new Date(Date.now() + offsetDays * 86_400_000).toLocaleDateString("en-CA", { timeZone: tz });
@@ -299,7 +299,7 @@ describe("the visit page's header: at most one main button, then ⋯", () => {
     expect(page).toContain('const VISIT_ACTIONS_MENU: NavTree = { center: { label: t("vp_btn_actions"), icon: "more" }, nodes: [] };');
     expect(translator("en")("vp_btn_actions")).toBe("Actions");
     // The rows' words come from the catalog (the visit-page-in-Spanish wave), the English byte for byte.
-    for (const [key, w] of [["vp_btn_markDone", "Mark Done"], ["vp_btn_putItBackOnTheSchedule", "Put It Back On The Schedule"], ["vp_btn_wontHappen", "Won't Happen"]]) {
+    for (const [key, w] of [["vp_btn_markDone", "Mark Done"], ["vp_btn_putItBackOnTheSchedule", "Put It Back on the Schedule"], ["vp_btn_wontHappen", "Won't Happen"]]) {
       expect(rows).toContain(`t("${key}")`);
       expect(translator("en")(key)).toBe(w);
     }

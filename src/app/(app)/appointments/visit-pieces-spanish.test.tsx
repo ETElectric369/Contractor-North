@@ -9,13 +9,13 @@ import { putBackPlan, visitDayWords, wontHappenConfirm, wontHappenToast, wontHap
 import { inspectionUnreadWords, INSPECTION_UNREAD } from "@/lib/inspection/inspection-access";
 import { kitsReadWords } from "@/lib/estimate/task-kits";
 import { clockInClashWords } from "@/lib/overlap-refusal";
-import { esTitleCase } from "../../../../tests/es-function-words";
+import { esTitleCase, titleCaseIn } from "../../../../tests/title-case-words";
 
 /**
  * THE VISIT PAGE'S PIECES IN SPANISH (builder D of the visit-page-in-Spanish wave, cn-v1144, vp_): the
  * English a Spanish tech still met on the page after C's half, because it came from a piece the page
  * draws or a sentence its server returns — the Edit Details modal (appointment-button), the Clear The
- * Date row (unschedule-button), Start The Job's server (start-job-actions), and the pure libraries the
+ * Date row (unschedule-button), Start the Job's server (start-job-actions), and the pure libraries the
  * page and its server share (visit-start, wont-happen, inspection-access INSPECTION_UNREAD, task-kits
  * kitsReadWords). Rendered inside a LangProvider with "es": every door reads the catalog's Title Case
  * Spanish, every line its sentence, a clock reads "12:00 p. m.", and no English door is left. The
@@ -90,7 +90,7 @@ type FormProps = Partial<Parameters<typeof AppointmentButton>[0]>;
 const form = (p: FormProps) => createElement(AppointmentButton, { ...lists, ...p });
 
 describe("the Edit Details modal speaks Spanish to a Spanish reader", () => {
-  it("editing an inspection: the sheet's title and Save, every field label, the two new-person doors, Convert To Job, Delete", () => {
+  it("editing an inspection: the sheet's title and Save, every field label, the two new-person doors, Convert to Job, Delete", () => {
     const html = es(form({ appointment: appt, rowLabel: t("vp_btn_editDetails"), triggerClassName: "row" }));
     const body = text(html);
     expect(html).toContain('data-modal="Editar Inspección"');
@@ -107,7 +107,7 @@ describe("the Edit Details modal speaks Spanish to a Spanish reader", () => {
     // The type options read the jobs catalog's words through appointmentTypeLabel(type, lang, t).
     expect(html).toContain(">Inspección</option>");
     expect(html).toContain(`>${dict("es").jb_apptJob}</option>`);
-    expect(html).not.toMatch(/Edit Inspection|Save Inspection|Assigned to|Anyone|Convert To Job|New Lead|New Customer|Address or site|Not in the list|>Location<|>Notes<|>Type<|>Title</);
+    expect(html).not.toMatch(/Edit Inspection|Save Inspection|Assigned to|Anyone|Convert to Job|New Lead|New Customer|Address or site|Not in the list|>Location<|>Notes<|>Type<|>Title</);
   });
 
   it("the pencil trigger is titled Editar; a new visit's sheet is Nueva Cita with Fijar una Hora · Proponer Horas; the closed trigger follows the kind", () => {
@@ -118,7 +118,7 @@ describe("the Edit Details modal speaks Spanish to a Spanish reader", () => {
     expect(fresh).toContain("Nueva Cita</button>");
     expect(fresh).toContain("Fijar una Hora");
     expect(fresh).toContain("Proponer Horas");
-    expect(fresh).not.toMatch(/Set A Time|Propose Times|New Appointment|Save Appointment/);
+    expect(fresh).not.toMatch(/Set a Time|Propose Times|New Appointment|Save Appointment/);
     expect(es(form({ defaultType: "inspection" }))).toContain("Nueva Inspección</button>");
     expect(es(form({ defaultType: "inspection", buttonLabel: "Agendar una Inspección" }))).toContain("Agendar una Inspección</button>"); // a caller's own words first
   });
@@ -139,13 +139,13 @@ describe("the Edit Details modal speaks Spanish to a Spanish reader", () => {
     expect(html).toContain('title="Edit"');
     expect(html).toContain('data-modal="Edit Inspection"');
     expect(html).toContain('data-actions="Save Inspection"');
-    expect(html).toContain("Convert To Job →</button>");
+    expect(html).toContain("Convert to Job →</button>");
     expect(html).toContain(">Delete</button>");
     for (const w of ["Type", "Assigned to", "— Anyone —", "Title", "Date", "Start", "End", "Customer", "Job", "Location", "Notes", "Not in the list? Add them here."]) expect(body, w).toContain(w);
     expect(html.replace(/&#x27;|&#39;/g, "'")).toContain('placeholder="e.g. Inspection at the Smiths\', follow-up visit"');
     expect(html).toContain('placeholder="Address or site"');
     const fresh = en(form({}));
-    expect(fresh).toContain("Set A Time");
+    expect(fresh).toContain("Set a Time");
     expect(fresh).toContain("Propose Times");
     expect(fresh).toContain("New Appointment</button>");
   });
@@ -178,14 +178,14 @@ describe("the Edit Details modal speaks Spanish to a Spanish reader", () => {
   });
 });
 
-describe("the Clear The Date row, in Spanish", () => {
+describe("the Clear the Date row, in Spanish", () => {
   it("Quitar la Fecha as a ⋯ row and as a button; English without a provider", () => {
     const row = es(createElement(UnscheduleButton, { id: "appt-1", menuItem: true }));
     expect(row).toContain("Quitar la Fecha</button>");
-    expect(row).not.toContain("Clear The Date");
+    expect(row).not.toContain("Clear the Date");
     expect(es(createElement(UnscheduleButton, { id: "appt-1" }))).toContain("Quitar la Fecha");
-    expect(en(createElement(UnscheduleButton, { id: "appt-1", menuItem: true }))).toContain("Clear The Date</button>");
-    // The calendar's own Clear The Date says the same Spanish (one word per English word).
+    expect(en(createElement(UnscheduleButton, { id: "appt-1", menuItem: true }))).toContain("Clear the Date</button>");
+    // The calendar's own Clear the Date says the same Spanish (one word per English word).
     expect(t("vp_btn_clearTheDate")).toBe(dict("es").ag_cal_btn_clearTheDate);
     expect(t("vp_btn_clearing")).toBe("Quitando…");
     expect(t("vp_waitsUnderWaitingForADay")).toBe("Espera bajo Esperando un Día en la agenda. Ponla ahí cuando llamen.");
@@ -194,7 +194,7 @@ describe("the Clear The Date row, in Spanish", () => {
   });
 });
 
-describe("Start The Job's server (start-job-actions): the mechanism on the source, the words on the catalog, in both languages", () => {
+describe("Start the Job's server (start-job-actions): the mechanism on the source, the words on the catalog, in both languages", () => {
   const s = src("src/app/(app)/appointments/start-job-actions.ts");
 
   it("reads the caller's language once per call (wordsOf, hear-actions' shape) and exports only async functions", () => {
@@ -248,7 +248,7 @@ describe("Start The Job's server (start-job-actions): the mechanism on the sourc
     }
     // The slotted ones: the clock leads in Spanish, and a fragment the caller fills rides as received.
     expect(fillText(t("vp_onClockSwitchHere"), { label: "J-050", since: "8:00 a. m." })).toBe("Desde 8:00 a. m. estás en el reloj en J-050. Cambiar a Este Trabajo mueve tu reloj aquí ahora. Aún no se ha empezado nada.");
-    expect(fillText(translator("en")("vp_onClockSwitchHere"), { label: "J-050", since: "8:00 AM" })).toBe("You're on the clock on J-050 since 8:00 AM. Switch To This Job moves your clock here now. Nothing was started yet.");
+    expect(fillText(translator("en")("vp_onClockSwitchHere"), { label: "J-050", since: "8:00 AM" })).toBe("You're on the clock on J-050 since 8:00 AM. Switch to This Job moves your clock here now. Nothing was started yet.");
     expect(t("vp_onClockSwitchHere")).toContain(dict("es").vp_btn_switchToThisJob);
     expect(fillText(t("vp_onClockLinkInstead"), { job: "J-055", customer: "Pat Thistlewood" })).toBe("Estás en el reloj en J-055, el trabajo que Pat Thistlewood ya tiene de hoy. Mejor enlaza esta visita a J-055. No se empezó nada.");
     expect(fillText(t("vp_clockStillOn"), { from: "J-050", why: "el cambio no pasó." })).toBe("Tu reloj sigue en J-050: el cambio no pasó.");
@@ -390,7 +390,7 @@ describe("the pure libraries: English inline by default, the catalog's Spanish w
     expect(fillText(en("vp_clashRunning"), { when: "Friday Sep 25, 9:00 AM", where: " on J-050", nothing: en("vp_nothingWasRecorded") })).toBe(
       "You already have a clock running since Friday Sep 25, 9:00 AM on J-050. Nothing was recorded.",
     );
-    // Start The Job hands the lib its caller's language; the Time Clock's own clockIn does not.
+    // Start the Job hands the lib its caller's language; the Time Clock's own clockIn does not.
     const sja = src("src/app/(app)/appointments/start-job-actions.ts");
     expect(sja).toContain("clockInClashWords({ clash: overlap.clash, startIso: startAt, tz, isStaff: true, nothing }, lang, words)");
     expect(src("src/app/(app)/timeclock/actions.ts")).toContain("clockInClashWords({ clash: overlap.clash, startIso: clockInIso, tz, isStaff })");
@@ -433,12 +433,7 @@ describe("the pure libraries: English inline by default, the catalog's Spanish w
 
 describe("the visit page catalog (vp_), builder D's half", () => {
   const vp = CATALOGS.find((c) => c.prefix === "vp_")!;
-  const titleCase = (s: string) =>
-    s
-      .replace(/\{\w+\}/g, " ")
-      .split(/\s+/)
-      .filter(Boolean)
-      .every((w) => /^[¿¡]?[\p{Lu}\p{N}&\/+·(—–]/u.test(w));
+  const titleCase = (s: string) => titleCaseIn(s, "en");
   const D_BTN = [
     "vp_btn_newAppointment", "vp_btn_newInspection", "vp_btn_editAppointment", "vp_btn_editInspection", "vp_btn_saveAppointment", "vp_btn_saveInspection",
     "vp_btn_textTheCustomerTheseTimes", "vp_btn_createLink", "vp_btn_edit", "vp_btn_done", "vp_btn_delete", "vp_btn_copied", "vp_btn_copyLink", "vp_btn_textIt",
@@ -505,7 +500,7 @@ describe("the visit page catalog (vp_), builder D's half", () => {
     vp_btn_editInspection: "Edit Inspection",
     vp_btn_saveAppointment: "Save Appointment",
     vp_btn_saveInspection: "Save Inspection",
-    vp_btn_textTheCustomerTheseTimes: "Text The Customer These Times",
+    vp_btn_textTheCustomerTheseTimes: "Text the Customer These Times",
     vp_btn_createLink: "Create Link",
     vp_btn_edit: "Edit",
     vp_btn_done: "Done",
@@ -513,12 +508,12 @@ describe("the visit page catalog (vp_), builder D's half", () => {
     vp_btn_copied: "Copied",
     vp_btn_copyLink: "Copy Link",
     vp_btn_textIt: "Text It",
-    vp_btn_setATime: "Set A Time",
+    vp_btn_setATime: "Set a Time",
     vp_btn_proposeTimes: "Propose Times",
     vp_btn_anyone: "— Anyone —",
     vp_btn_newLead: "New Lead",
     vp_btn_newCustomer: "New Customer",
-    vp_btn_convertToJob: "Convert To Job",
+    vp_btn_convertToJob: "Convert to Job",
     vp_draftRestored: "Draft restored — pick up where you left off",
     vp_zoneNote: "Times are {zone} time, the business's clock.",
     vp_couldNotCreateJob: "Could not create job.",
@@ -551,15 +546,15 @@ describe("the visit page catalog (vp_), builder D's half", () => {
     vp_location: "Location",
     vp_addressOrSite: "Address or site",
     vp_notes: "Notes",
-    vp_btn_clearTheDate: "Clear The Date",
+    vp_btn_clearTheDate: "Clear the Date",
     vp_btn_clearing: "Clearing…",
     vp_couldntClearTheDate: "Couldn't clear the date.",
-    vp_waitsUnderWaitingForADay: "It waits under Waiting For A Day on the schedule. Place it there when they call.",
+    vp_waitsUnderWaitingForADay: "It waits under Waiting for a Day on the schedule. Place it there when they call.",
     vp_onlyOfficeStartsJob: "Only the office can start a job. Ask the office to start it, then clock in here.",
     vp_visitNotFound: "That visit could not be found.",
     vp_visitCancelledNothingStarted: "This visit was cancelled. Nothing was started.",
     vp_nothingWasStarted: "Nothing was started.",
-    vp_onClockSwitchHere: "You're on the clock on {label} since {since}. Switch To This Job moves your clock here now. Nothing was started yet.",
+    vp_onClockSwitchHere: "You're on the clock on {label} since {since}. Switch to This Job moves your clock here now. Nothing was started yet.",
     vp_onClockLinkInstead: "You're on the clock on {job}, the job {customer} already has from today. Link this visit to {job} instead. Nothing was started.",
     vp_thisCustomerLower: "this customer",
     vp_jobCouldNotBeStarted: "The job could not be started. Nothing was changed.",

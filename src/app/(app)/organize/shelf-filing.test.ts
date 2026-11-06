@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
  * THE THREE DOORS THAT PUT THINGS ON THE SHELF, PINNED (Shop Stock, Phase 2): File It to Shop Stock
- * from the tray, Put The Rest On The Shelf on a job's receipt line, and Record To Shelf on a CED
+ * from the tray, Put the Rest on the Shelf on a job's receipt line, and Record to Shelf on a CED
  * document. The database half (shelve_bill_lines, 0328) is proven in shelf-phase2.db-suite.ts; these
  * pin what the server writes, in what order, what it refuses before writing anything, and what it
  * takes back when the shelf refuses. Unscripted calls throw, so every statement is accounted for.
@@ -250,7 +250,7 @@ describe("File It to Shop Stock (the tray)", () => {
   });
 });
 
-describe("Put The Rest On The Shelf (a job's receipt line)", () => {
+describe("Put the Rest on the Shelf (a job's receipt line)", () => {
   const COIL_LINES = [
     { id: "l0", description: "Flexbox BH bar hanger ground", quantity: 1, unit_price: 8.82, amount: 8.82, category: "Electrical", billable: true, billed_amount: null },
     { id: "l1", description: "NMB 12/2 w/gnd wire 250 ft coil", quantity: 250, unit_price: 0.66, amount: 165.29, category: "Electrical", billable: true, billed_amount: null },
@@ -351,7 +351,7 @@ describe("Put The Rest On The Shelf (a job's receipt line)", () => {
   });
 });
 
-describe("Put The Rest On The Shelf: who already bills the receipt (review of Phase 2)", () => {
+describe("Put the Rest on the Shelf: who already bills the receipt (review of Phase 2)", () => {
   const LINE = { data: { id: "l1", bill_id: "b", bills: { job_id: "j011", po_id: "po-7", jobs: { name: "Honeysuckle" } } }, error: null };
   const row = (status: string, edited = false) => ({ id: `ii-${status}`, edited, invoice_id: `inv-${status}`, invoices: { id: `inv-${status}`, invoice_number: "INV-050", status } });
   it("a receipt whose ORDER a paid invoice bills is refused before anything is read off the shelf", async () => {
@@ -427,15 +427,15 @@ describe("A roll on a line fixes what the job used (review of Phase 2)", () => {
     );
     const res = await setReceiptLineBillable("l1", false);
     expect(res.ok).toBe(false);
-    expect(res.error).toContain("Take It Out Of Stock first");
+    expect(res.error).toContain("Take It Out of Stock first");
     expect(calls.filter((c) => c.verb !== "select")).toEqual([]);
   });
-  it("a new 'used' figure refuses under a roll; Bill The Whole Line (null) still goes and takes the roll off", async () => {
+  it("a new 'used' figure refuses under a roll; Bill the Whole Line (null) still goes and takes the roll off", async () => {
     const LINE = { data: { id: "l1", bill_id: "b", description: "NMB 12/2 250 ft coil", quantity: 250, unit_price: 0.66, amount: 165.29, is_stock: true, bills: { job_id: "j011", supplier: "CED" } }, error: null };
     state.client = fakeSupabase({ "bill_line_items.select": [LINE], "stock_lots.select": [{ data: [{ id: "lot-1" }], error: null }] }, calls, rpcs);
     const no = await setReceiptLineUsage({ lineId: "l1", billedAmount: 39.67, containerCount: 250, boughtQuantity: 250, usedQuantity: 60 });
     expect(no.ok).toBe(false);
-    expect(no.error).toContain("Take It Out Of Stock first");
+    expect(no.error).toContain("Take It Out of Stock first");
     expect(calls.filter((c) => c.verb !== "select")).toEqual([]);
 
     state.client = fakeSupabase(
@@ -460,7 +460,7 @@ const COIL_LINES_BILLED = [
   { id: "l3", description: "Tax at 9.000 percent", quantity: 1, unit_price: 16.47, amount: 16.47, category: "Tax", billable: true, billed_amount: null },
 ];
 
-describe("Record To Shelf (a CED document)", () => {
+describe("Record to Shelf (a CED document)", () => {
   const STAFF = { data: { role: "owner", org_id: "org-1", active: true }, error: null };
   const INV = {
     data: {

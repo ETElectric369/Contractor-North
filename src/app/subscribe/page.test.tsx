@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
  * (Manage Billing while a Stripe subscription is live, the plan cards otherwise) and the accountant's
  * export the lapsed notice promised; everyone else is told who holds the key by first name, through
  * THE one owner read (lib/lapse-words ownerFirstName: the service client, limit 1); a failed read is
- * said. (cn-v1140) A trial and a lapsed company read Pick A Plan — the plan card's Upgrade lands
+ * said. (cn-v1140) A trial and a lapsed company read Pick a Plan — the plan card's Upgrade lands
  * here — and an ACTIVE live subscriber is sent to the portal's door; only a comped company and an
  * install with billing off go home. Each plan card posts its tier and the cadence of the button
  * pressed (monthly, or yearly at PLANS' monthly-equivalent price), and only the cadences priced.
@@ -132,7 +132,7 @@ describe("one door for the owner or admin", () => {
       expect(html).toContain(`<input type="hidden" name="tier" value="${plan.tier}"/>`);
       // Attribute order is React's own (value before name): each is looked for on its own.
       expect(html).toMatch(new RegExp(`<button(?=[^>]*name="cadence")(?=[^>]*value="monthly")[^>]*>Choose ${plan.name}</button>`));
-      expect(html).toMatch(new RegExp(`<button(?=[^>]*name="cadence")(?=[^>]*value="annual")[^>]*>Yearly At [$]${plan.annual}/mo</button>`));
+      expect(html).toMatch(new RegExp(`<button(?=[^>]*name="cadence")(?=[^>]*value="annual")[^>]*>Yearly at [$]${plan.annual}/mo</button>`));
       expect(html).toContain(`$${plan.monthly}<span class="text-sm font-medium text-slate-400">/mo</span>`);
       expect(html).toContain(`$${plan.annual}/mo billed yearly`);
       // The plan's own words: what the usage includes (never a count), and our time.
@@ -148,12 +148,12 @@ describe("one door for the owner or admin", () => {
     vi.stubEnv("STRIPE_PRICE_COMPANY_MONTHLY", "");
     const html = await render();
     expect(html).toContain("Choose Crew");
-    expect(html).not.toContain("Yearly At $103/mo");
+    expect(html).not.toContain("Yearly at $103/mo");
     expect(html).not.toContain("$103/mo billed yearly");
     expect(html).not.toContain("Choose Company");
-    expect(html).toContain("Yearly At $239/mo");
+    expect(html).toContain("Yearly at $239/mo");
     expect(html).toContain("Choose Handyman");
-    expect(html).toContain("Yearly At $47/mo");
+    expect(html).toContain("Yearly at $47/mo");
   });
   it("a live subscription (past due, waiting on the card): Manage Billing alone, with the line", async () => {
     state.org = { ...state.org, subscription_status: "past_due", current_period_end: past(20), stripe_customer_id: "cust-larkspur-1", stripe_subscription_id: "subn-larkspur-1" };
@@ -179,13 +179,13 @@ describe("one door for the owner or admin", () => {
     const html = await render("A subscription already exists — use Manage Billing.");
     expect(html).toContain("A subscription already exists — use Manage Billing.");
   });
-  it("Download For Your Accountant is linked for the owner or admin — the door the lapsed notice promised (skeptic #43, S7); never for the crew", async () => {
+  it("Download for Your Accountant is linked for the owner or admin — the door the lapsed notice promised (skeptic #43, S7); never for the crew", async () => {
     const owner = await render();
-    expect(owner).toMatch(/<a href="\/analytics\/accountant"[^>]*>Download For Your Accountant<\/a>/);
+    expect(owner).toMatch(/<a href="\/analytics\/accountant"[^>]*>Download for Your Accountant<\/a>/);
     state.profile = { org_id: "org-1", role: "admin" };
-    expect(await render()).toContain("Download For Your Accountant");
+    expect(await render()).toContain("Download for Your Accountant");
     state.profile = { org_id: "org-1", role: "tech" };
-    expect(await render()).not.toContain("Download For Your Accountant");
+    expect(await render()).not.toContain("Download for Your Accountant");
   });
 });
 
@@ -222,11 +222,11 @@ describe("everyone else is told who holds the key", () => {
   });
 });
 
-describe("a standing company (cn-v1140): Pick A Plan, or the portal — no bounce", () => {
-  it("a live trial reads Pick A Plan with the plan cards (the plan card's Upgrade lands here)", async () => {
+describe("a standing company (cn-v1140): Pick a Plan, or the portal — no bounce", () => {
+  it("a live trial reads Pick a Plan with the plan cards (the plan card's Upgrade lands here)", async () => {
     state.org = { ...state.org, subscription_status: "trialing", trial_ends_at: future(3) };
     const html = await render();
-    expect(html).toContain("Pick A Plan");
+    expect(html).toContain("Pick a Plan");
     expect(html).toContain("Pick a plan to keep using Contractor North.");
     expect(html).toContain("Choose Handyman");
     expect(html).not.toContain("Manage Billing");
@@ -244,7 +244,7 @@ describe("a standing company (cn-v1140): Pick A Plan, or the portal — no bounc
   it("active on the books with no Stripe subscription to manage: the plan cards", async () => {
     state.org = { ...state.org, subscription_status: "active" };
     const html = await render();
-    expect(html).toContain("Pick A Plan");
+    expect(html).toContain("Pick a Plan");
     expect(html).toContain("Choose Handyman");
     expect(html).not.toContain("Manage Billing");
   });

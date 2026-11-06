@@ -73,7 +73,7 @@ export function BillRowDoors({
         return;
       }
       // WHAT THE TAP ACTUALLY DID (0383): Mark Paid is his word that the whole purchase is paid in
-      // full, and the database writes the number from it; Mark On Account puts it back, keeping
+      // full, and the database writes the number from it; Mark on Account puts it back, keeping
       // whatever a recorded payment paid. A payment that paid it is undone on the payment, and the
       // server says so in the trigger's words when this tap is refused.
       toast(next === "paid" ? "Marked paid in full - it is no longer on account" : "Marked on account - it is money you still owe them", "success");

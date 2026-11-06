@@ -277,7 +277,7 @@ export function CircuitEditSheet({
         if (!alive.current) return true;
         setSaving(false);
         setRow(res.row);
-        setSaved(res.row.verified ? "Marked Verified On Site." : "Took the verified mark off.");
+        setSaved(res.row.verified ? "Marked Verified on Site." : "Took the verified mark off.");
         setUndo(null);
         return true;
       } catch {
@@ -474,7 +474,7 @@ export function CircuitEditSheet({
             >
               {row.panel_id == null && (
                 <option value="" disabled>
-                  Pick The Panel
+                  Pick the Panel
                 </option>
               )}
               {panels.map((p) => (
@@ -559,8 +559,8 @@ export function CircuitEditSheet({
           >
             <ShieldCheck className="h-4 w-4 shrink-0" />
             {row.verified
-              ? `Verified On Site${row.verified_by && people[row.verified_by] ? ` By ${people[row.verified_by]}` : ""}${row.verified_at ? `, ${formatDate(row.verified_at)}` : ""}`
-              : "Verified On Site"}
+              ? `Verified on Site${row.verified_by && people[row.verified_by] ? ` By ${people[row.verified_by]}` : ""}${row.verified_at ? `, ${formatDate(row.verified_at)}` : ""}`
+              : "Verified on Site"}
           </button>
         )}
       </div>

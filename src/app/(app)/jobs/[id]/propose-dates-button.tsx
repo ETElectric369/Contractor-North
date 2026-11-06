@@ -111,7 +111,7 @@ export function ProposeDatesButton({
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="Let The Customer Pick A Date"
+        title="Let the Customer Pick a Date"
         portal
         footer={
           token ? undefined : (

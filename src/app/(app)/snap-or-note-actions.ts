@@ -87,7 +87,7 @@ export async function snapContext(): Promise<SnapContext> {
       staff: false,
       punchJobId,
       jobs: [],
-      jobsError: "Couldn't load the jobs just now. Check your signal and open Snap Or Note again.",
+      jobsError: "Couldn't load the jobs just now. Check your signal and open Snap or Note again.",
       shopStock,
     };
   const rows = (data ?? []) as ChoiceJob[];
@@ -167,7 +167,7 @@ export async function snapPaperRows(ids: string[]): Promise<SnapRows> {
     jobs: (jobsR.data ?? []) as { id: string; job_number: string; name: string; status?: string | null }[],
     matches: Object.fromEntries(items.map((i) => [i.id, matchesOnBooks(i, books)])),
     shopStock: featureOn(getOrgSettings((orgR.data as { settings?: unknown } | null)?.settings).features, "shop_stock"),
-    ...(jobsR.error ? { jobsError: "Couldn't load your jobs just now, so no job is listed on these cards. Close and open Snap Or Note to try again." } : {}),
+    ...(jobsR.error ? { jobsError: "Couldn't load your jobs just now, so no job is listed on these cards. Close and open Snap or Note to try again." } : {}),
   };
 }
 

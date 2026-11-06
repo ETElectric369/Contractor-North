@@ -147,10 +147,10 @@ export function invoiceSectionTree(
  *   Mark Sent - I Sent It Myself       a draft: the person handed it over outside the app.
  *   Mark Sent Again - I Re-Sent It     a delivered bill that changed since (customerHoldsOlderCopy):
  *                                      the corrected copy went out by hand.
- *   Back To Draft                      only where the server allows it (not with money on a bill
+ *   Back to Draft                      only where the server allows it (not with money on a bill
  *                                      the customer holds - INV-069's rule); on a void one, it is
  *                                      the way back from a mistaken Void.
- *   the sentence why Draft is gone     where Back To Draft can't be offered, never a blank.
+ *   the sentence why Draft is gone     where Back to Draft can't be offered, never a blank.
  *   Void Invoice                       above Delete, behind a confirm.
  *
  * THE CLASS THE OLD PICKER GUARDED STILL HOLDS (INV-071, status-picker-options.test.ts): no status
@@ -179,7 +179,7 @@ export function invoiceStatusItems(inv: {
   const items: InvoiceStatusDeed[] = [];
   if (isDraft) items.push({ id: "st-sent", label: "Mark Sent - I Sent It Myself", value: SENT_BY_HAND });
   else if (!isVoid && inv.customerHoldsOlderCopy) items.push({ id: "st-resent", label: "Mark Sent Again - I Re-Sent It", value: SENT_BY_HAND });
-  if (!isDraft && canReturnToDraft) items.push({ id: "st-draft", label: "Back To Draft", value: "draft" });
+  if (!isDraft && canReturnToDraft) items.push({ id: "st-draft", label: "Back to Draft", value: "draft" });
   if (!isDraft && !isVoid && !canReturnToDraft) {
     items.push({
       id: "st-draft-note",

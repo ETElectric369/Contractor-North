@@ -11,7 +11,7 @@ import { rescheduleAppointment, setAppointmentStatus } from "../appointments/act
 import { AppointmentButton, type ApptValue } from "../appointments/appointment-button";
 
 // THE AGENDA ROW'S ⋯ (My Day, staff only). Running Late? and Navigate stay on the row, where a thumb
-// at a red light finds them; the office's verbs (Mark Done, Move To Another Day…, Edit Details…) sit
+// at a red light finds them; the office's verbs (Mark Done, Move to Another Day…, Edit Details…) sit
 // behind one 44px ⋯ that opens the app's one row sheet (components/row-more-sheet). Each verb keeps
 // its record's canonical server contract: jobs → moveJobDay, appointments → rescheduleAppointment and
 // setAppointmentStatus. The page renders this for staff only; the actions are staff-gated anyway.
@@ -95,7 +95,7 @@ export async function markVisitDone(
             void io.setStatus(id, back).then(
               (r) => {
                 if (!r.ok) io.toast(r.error ?? "Couldn't put it back. Open the visit to set its status.", "error");
-                else io.toast("Back On Your Day", "success");
+                else io.toast("Back on Your Day", "success");
                 io.refresh();
               },
               () => io.toast("No connection, so it's still marked done. Try Undo again when you have a bar or two.", "error"),
@@ -115,7 +115,7 @@ interface Opt {
 }
 
 /**
- * THE SHEET'S ROWS, in order. A visit: Mark Done, Move To Another Day…, Edit Details…. A job: Move
+ * THE SHEET'S ROWS, in order. A visit: Mark Done, Move to Another Day…, Edit Details…. A job: Move
  * To Another Day… only (Done never sits on a job row: a job is done by finishing it, on the job). Each
  * row closes the sheet only when its verb lands; a nested Move or Edit sheet opens above this one.
  */
@@ -167,8 +167,8 @@ export function AgendaRowActions({
         <button type="button" disabled={pending} onClick={() => markDone(appt)} className={SHEET_ROW}>
           Mark Done
         </button>
-        <MoveToDay label="Move To Another Day" triggerClassName={SHEET_ROW} onPick={async (d) => afterMove(await moveVisitToDay(appt, d, tz))}>
-          Move To Another Day…
+        <MoveToDay label="Move to Another Day" triggerClassName={SHEET_ROW} onPick={async (d) => afterMove(await moveVisitToDay(appt, d, tz))}>
+          Move to Another Day…
         </MoveToDay>
         <AppointmentButton
           jobs={jobs}
@@ -184,8 +184,8 @@ export function AgendaRowActions({
   }
   if (jobId) {
     return (
-      <MoveToDay label="Move To Another Day" triggerClassName={SHEET_ROW} onPick={async (d) => afterMove(await moveJobFromDay(jobId, fromDate, d))}>
-        Move To Another Day…
+      <MoveToDay label="Move to Another Day" triggerClassName={SHEET_ROW} onPick={async (d) => afterMove(await moveJobFromDay(jobId, fromDate, d))}>
+        Move to Another Day…
       </MoveToDay>
     );
   }

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { titleCaseIn } from "../../../../../tests/title-case-words";
 
 /**
  * THE INSPECTION, RENDERED, FOR EACH OF ITS THREE READERS (0356; Erik, 2026-09-26: "crew leader
@@ -8,9 +9,9 @@ import { renderToStaticMarkup } from "react-dom/server";
  * doors):
  *
  *   office    unchanged: the address box, the links, the price book, scope prices and their total,
- *             the photo trash, Save and Start The Estimate.
+ *             the photo trash, Save and Start the Estimate.
  *   crewLead  fills it in: every control live, Take / Add / Save; no price anywhere (even when a
- *             price is handed in by mistake), no price book, no Start The Estimate, no address box,
+ *             price is handed in by mistake), no price book, no Start the Estimate, no address box,
  *             no photo trash; every door he can reach is Title Case and 44px.
  *   view      a plain tech: one disabled fieldset and none of the doors that would only fail.
  */
@@ -112,7 +113,7 @@ const textOf = (html: string) =>
 const buttons = (html: string) =>
   [...html.matchAll(/<button[^>]*>[\s\S]*?<\/button>/g)].map((m) => ({ markup: m[0], open: m[0].match(/^<button[^>]*>/)![0], text: textOf(m[0]) }));
 const TARGET = /min-h-\[44px\]|\bh-11\b|\bh-12\b|min-w-\[44px\]/;
-const titleCase = (s: string) => s.split(/\s+/).filter((w) => /^[a-z]/i.test(w)).every((w) => /^[A-Z]/.test(w));
+const titleCase = (s: string) => titleCaseIn(s, "en"); // the one judge (cn-v1148)
 /** Any money on screen: a dollar sign, the "@ rate" of a scope row, or either book price. (The
  *  words "the office prices it" are the point, not a leak.) */
 const PRICE = /\$|517|243|@/;
@@ -121,16 +122,16 @@ describe("the office: unchanged", () => {
   const html = render("office");
   it("keeps the address box, the price book, the scope prices and their total", () => {
     expect(html).toContain('data-address-box="yes"');
-    expect(html).toContain("Add A Line Item");
+    expect(html).toContain("Add a Line Item");
     expect(html).toMatch(/Demo — \$243\.5\/EA/);
     expect(textOf(html)).toContain("$1,034.50"); // 2 × 517.25
   });
-  it("keeps the photo trash, Save and Start The Estimate, and nothing is disabled", () => {
+  it("keeps the photo trash, Save and Start the Estimate, and nothing is disabled", () => {
     expect(html).not.toMatch(/<fieldset[^>]*disabled/);
     expect(html).toContain("absolute right-1 top-1"); // the photo's trash
     const t = buttons(html).map((b) => b.text);
     expect(t).toContain("Save");
-    expect(t).toContain("Start The Estimate");
+    expect(t).toContain("Start the Estimate");
     expect(t).toContain("Take");
     expect(t).toContain("Add");
     expect(html).toContain('href="/quotes/new?capture=appt-1"');
@@ -145,16 +146,16 @@ describe("a crew lead on this visit: fills it in, never a price", () => {
     expect(t).toContain("You're the crew lead on this visit: fill it in here. The office prices it.");
     expect(html).not.toMatch(/<fieldset[^>]*disabled/);
     const doors = buttons(html).map((b) => b.text);
-    for (const d of ["Save", "Take", "Add", "Just Tell Nort", "Deck", "Remodel", "Something Else", "Add A Measurement"]) expect(doors, d).toContain(d);
+    for (const d of ["Save", "Take", "Add", "Just Tell Nort", "Deck", "Remodel", "Something Else", "Add a Measurement"]) expect(doors, d).toContain(d);
     // What he answered is still there to edit, and his notes and measurements are his.
     expect(html).toContain("Meter base pulling off the wall");
     expect(html).toMatch(/value="Run"/);
   });
 
-  it("no price, no price book, no Start The Estimate, even with a price handed in", () => {
+  it("no price, no price book, no Start the Estimate, even with a price handed in", () => {
     expect(t).not.toMatch(PRICE);
-    expect(html).not.toContain("Add A Line Item");
-    expect(t).not.toMatch(/Start The Estimate/i);
+    expect(html).not.toContain("Add a Line Item");
+    expect(t).not.toMatch(/Start the Estimate/i);
     expect(html).not.toContain("/quotes/new");
     // What was picked, and how many, and whose job the price is.
     expect(t).toMatch(/R1 × 2/);
@@ -177,9 +178,9 @@ describe("a crew lead on this visit: fills it in, never a price", () => {
 
   it("the sheet can't be switched once one is saved on the visit", () => {
     const two = [SHEET, { ...SHEET, id: "sheet-2", name: "Service call" }];
-    expect(render("crewLead", { templates: two })).not.toContain("Pick A Sheet");
-    expect(render("crewLead", { templates: two, initialTemplateId: null })).toContain("Pick A Sheet");
-    expect(render("office", { templates: two })).toContain("Pick A Sheet");
+    expect(render("crewLead", { templates: two })).not.toContain("Pick a Sheet");
+    expect(render("crewLead", { templates: two, initialTemplateId: null })).toContain("Pick a Sheet");
+    expect(render("office", { templates: two })).toContain("Pick a Sheet");
   });
 
   it("every door he can reach is Title Case and 44px", () => {
@@ -248,13 +249,13 @@ describe("a plain tech: reads it", () => {
     expect(t).toContain("Only the office can change the inspection.");
     expect(html).toMatch(/<fieldset[^>]*disabled/);
     const doors = buttons(html).map((b) => b.text);
-    for (const d of ["Save", "Take", "Add", "Start The Estimate"]) expect(doors, d).not.toContain(d);
+    for (const d of ["Save", "Take", "Add", "Start the Estimate"]) expect(doors, d).not.toContain(d);
     expect(html).not.toContain("absolute right-1 top-1");
     expect(html).not.toContain('data-address-box="yes"');
   });
   it("never a price, even with one handed in", () => {
     expect(t).not.toMatch(PRICE);
-    expect(html).not.toContain("Add A Line Item");
+    expect(html).not.toContain("Add a Line Item");
   });
   it("a crew lead before 0356 gets the same read-only sheet, with the page's line", () => {
     const before = textOf(render("view", { viewNote: "Crew leads can fill this in once the office finishes an update. Until then only the office can change it." }));
@@ -274,8 +275,8 @@ describe("a tasks question: his tasks, his hours, his parts — never a price", 
     expect(html).toContain('title="R1 — Remodel scope">R1 — Remodel scope</span>');
     expect(pills(html)).toBe(1);
     const doors = buttons(html).map((b) => b.text);
-    expect(doors).toContain("Add A Task");
-    expect(doors).toContain("Add A Material");
+    expect(doors).toContain("Add a Task");
+    expect(doors).toContain("Add a Material");
     expect(html).toContain('aria-label="Remove This Task"');
     const list = html.match(/<datalist id="tasks-book-tasks">[\s\S]*?<\/datalist>/)?.[0] ?? "";
     expect(list).toContain('value="R1 — Remodel scope"');
@@ -292,8 +293,8 @@ describe("a tasks question: his tasks, his hours, his parts — never a price", 
     expect(html).not.toContain("<datalist");
     expect(pills(html)).toBe(1);
     const doors = buttons(html).map((b) => b.text);
-    expect(doors).toContain("Add A Task");
-    expect(doors).toContain("Add A Material");
+    expect(doors).toContain("Add a Task");
+    expect(doors).toContain("Add a Material");
     expect(html).toContain('aria-label="Remove This Task"');
     expect(html).toContain('aria-label="Remove This Material"');
     expect(textOf(html)).not.toMatch(PRICE);
@@ -305,8 +306,8 @@ describe("a tasks question: his tasks, his hours, his parts — never a price", 
     expect(textOf(html)).toContain("Hot tub wires"); // t2 collapsed to its row (the task sheet)
     expect(pills(html)).toBe(1);
     const doors = buttons(html).map((b) => b.text);
-    expect(doors).not.toContain("Add A Task");
-    expect(doors).not.toContain("Add A Material");
+    expect(doors).not.toContain("Add a Task");
+    expect(doors).not.toContain("Add a Material");
     expect(html).not.toContain('aria-label="Remove This Task"');
     expect(textOf(html)).not.toMatch(PRICE);
   });
@@ -386,7 +387,7 @@ describe("the kits read says how it went (item 3): a sentence once, and never a 
   it("a task that picked a kit says 'not read' with no picker — not that the kit left the price list", () => {
     const html = render("office", { taskKits: [], kitsNote: NOTE, kitsUnread: true, initialAnswers: KIT_ANSWERS });
     expect(textOf(html)).toContain("kit not read");
-    expect(html).not.toContain("No Longer In The Price List");
+    expect(html).not.toContain("No Longer in the Price List");
     expect(html).not.toContain(">kit?<");
     expect(html).not.toContain('aria-label="Kit"'); // nothing to pick from
     expect(textOf(html)).toContain("Kit");
@@ -395,7 +396,7 @@ describe("the kits read says how it went (item 3): a sentence once, and never a 
   it("a kit that is truly gone (the kits were read, it was not among them) still says so", () => {
     const html = render("office", { taskKits: [], initialAnswers: KIT_ANSWERS });
     expect(textOf(html)).toContain("kit?");
-    expect(html).toContain("Kit No Longer In The Price List");
+    expect(html).toContain("Kit No Longer in the Price List");
     expect(textOf(html)).not.toContain("not read");
   });
   it("a whole read says nothing", () => {
@@ -424,14 +425,14 @@ describe("the scope lights its kits (field feedback 10-13, item 2): one offer ro
 
   it("typed 'deck' (the Something Else box) lights the two Deck kits, blind to case and spacing; a kit already on the list is not offered twice", () => {
     const html = render("office", { templates: [SCOPE_SHEET], taskKits: DECK_KITS, initialAnswers: { work: "deck", tasks: null } });
-    expect(one(html)).toContain("Add The Deck Tasks (2)");
+    expect(one(html)).toContain("Add the Deck Tasks (2)");
     expect(html).toContain(">Something Else<");
     const withOne = render("office", {
       templates: [SCOPE_SHEET],
       taskKits: DECK_KITS,
       initialAnswers: { work: "Deck", tasks: [{ id: "t1", name: "Footings", hours: null, units: null, kit_id: "dk1", materials: [] }] },
     });
-    expect(one(withOne)).toContain("Add The Deck Tasks (1)");
+    expect(one(withOne)).toContain("Add the Deck Tasks (1)");
     // the picker is grouped: the visit's scope first, Other Kits last
     const sel = withOne.match(/<select aria-label="Kit"[\s\S]*?<\/select>/)?.[0] ?? "";
     const labels = [...sel.matchAll(/<optgroup label="([^"]+)"/g)].map((m) => m[1]);
@@ -445,7 +446,7 @@ describe("the scope lights its kits (field feedback 10-13, item 2): one offer ro
     expect(one(render("office", { templates: [SCOPE_SHEET], taskKits: DECK_KITS, kitsPicker: false, initialAnswers: { work: "Deck", tasks: null } }))).not.toContainEqual(expect.stringMatching(/^Add The .* Tasks/));
     // a crew lead fills the visit in: the offer is his too, and it is 44px
     const lead = render("crewLead", { templates: [SCOPE_SHEET], taskKits: DECK_KITS, initialAnswers: { work: "remodel", tasks: null } });
-    const row = buttons(lead).find((b) => b.text === "Add The Remodel Tasks (1)");
+    const row = buttons(lead).find((b) => b.text === "Add the Remodel Tasks (1)");
     expect(row).toBeTruthy();
     expect(row!.open).toMatch(TARGET);
   });
@@ -484,7 +485,7 @@ describe("the task sheet (field feedback 10-13, item 2b): rows, one open task, i
     expect(row2).toContain("1 photo · 1 measurement");
     expect(row2).not.toContain("hidden");
     expect(html).toContain('aria-expanded="false" data-task-row="t2"');
-    expect(buttons(html).map((b) => b.text)).toContain("Add A Task");
+    expect(buttons(html).map((b) => b.text)).toContain("Add a Task");
     expect(buttons(html).map((b) => b.text)).not.toContain("Done");
   });
 
@@ -492,7 +493,7 @@ describe("the task sheet (field feedback 10-13, item 2b): rows, one open task, i
     const html = render("office", over({ initialOpenTaskId: "t2" }));
     expect(html).toContain('value="Hot tub wires"');
     expect(html).not.toContain('value="Transfer switch"');
-    const card = html.slice(html.indexOf('id="task-t2"'), html.indexOf("Add A Task"));
+    const card = html.slice(html.indexOf('id="task-t2"'), html.indexOf("Add a Task"));
     expect(card).toContain(PHOTO2.url);
     expect(card).not.toContain(PHOTO.url); // the visit's own photo is not on this task
     expect(card).toContain('value="Drop"');
@@ -502,7 +503,7 @@ describe("the task sheet (field feedback 10-13, item 2b): rows, one open task, i
     const doors = buttons(card).map((b) => b.text);
     expect(doors).toContain("Take");
     expect(doors).toContain("Add");
-    expect(doors).toContain("Add A Measurement");
+    expect(doors).toContain("Add a Measurement");
     expect(doors).toContain("Done");
     // the visit's own Measurements section shows the rows no task claimed
     const visitMeasures = html.slice(html.lastIndexOf(">Measurements<"), html.indexOf("Materials", html.lastIndexOf(">Measurements<")));
@@ -512,9 +513,9 @@ describe("the task sheet (field feedback 10-13, item 2b): rows, one open task, i
 
   it("a crew lead's open task has Take / Add / Done and no photo trash; a plain tech's has none of them", () => {
     const lead = render("crewLead", over({ initialOpenTaskId: "t2" }));
-    const card = lead.slice(lead.indexOf('id="task-t2"'), lead.indexOf("Add A Task"));
+    const card = lead.slice(lead.indexOf('id="task-t2"'), lead.indexOf("Add a Task"));
     const doors = buttons(card);
-    expect(doors.map((b) => b.text)).toEqual(expect.arrayContaining(["Take", "Add", "Add A Measurement", "Done"]));
+    expect(doors.map((b) => b.text)).toEqual(expect.arrayContaining(["Take", "Add", "Add a Measurement", "Done"]));
     expect(card).not.toContain('aria-label="Remove This Photo"');
     for (const b of doors.filter((x) => x.text.trim())) expect(b.open, b.text).toMatch(TARGET);
     const view = render("view", over({ initialOpenTaskId: "t2" }));

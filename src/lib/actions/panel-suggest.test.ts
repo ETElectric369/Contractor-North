@@ -266,7 +266,7 @@ describe("get_job_panel: Nort reads the panel", () => {
     // Where each sits in the directory's words (spaceWords): a single "7", a full 2-pole "9/11".
     expect(out.circuits.find((c: { space: string | null }) => c.space === "7")).toBeTruthy();
     expect(out.circuits.every((c: { space: string | null }) => c.space == null || /^\d+[AB]?(\/\d+[AB]?)*$/.test(c.space))).toBe(true);
-    expect(out.suggestions_waiting).toEqual([{ id: "sug", circuit: "Smokes", size: "1P ? AFCI", space: null, from: "From The Panel Photo", check: null }]);
+    expect(out.suggestions_waiting).toEqual([{ id: "sug", circuit: "Smokes", size: "1P ? AFCI", space: null, from: "From the Panel Photo", check: null }]);
     expect(out.breakers.verdict).toBe("Short One 2P 20A (Bath Floor Heat). One 1P 20A Spare.");
     expect(out.breakers.to_order).toEqual(["1 x Q220 2P 20A Breaker"]);
     expect(out.note).toMatch(/until a person taps Keep/);

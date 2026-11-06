@@ -893,7 +893,7 @@ function openDrawRoute(opts: { actuals: boolean; schedule?: boolean; lump?: numb
 }
 
 describe("J-011 — a draw built from actuals takes new work; a contract draw refuses it (server)", () => {
-  it("Bill The Work So Far (the progress report) with INV-078 open lands on INV-078: no second draw, new hours JOIN the negotiated line, says what it pulled", async () => {
+  it("Bill the Work So Far (the progress report) with INV-078 open lands on INV-078: no second draw, new hours JOIN the negotiated line, says what it pulled", async () => {
     spies.reportError = () => {};
     state.client = fakeSupabase(openDrawRoute({ actuals: true }), calls);
     const res = await createProgressReportInvoice(JOB, "progress");
@@ -1531,7 +1531,7 @@ describe("recordPayment — the payment push is paired with its bell line (W1-10
  * you send it" for any draft whose date nobody picked, and email / text / share keep that through
  * markInvoiceSent's restamp. The ⋯ declaration lands in setInvoiceStatus instead, so it runs the
  * same guarded second write - only for a draft that never went out (no sent_at); a draft that came
- * Back To Draft after it went out keeps the date the customer has been holding.
+ * Back to Draft after it went out keeps the date the customer has been holding.
  */
 describe("setInvoiceStatus — a draft marked sent by hand starts its terms from today (W1-27)", () => {
   const DRAFT = "d4af0000-0000-4000-8000-000000000081";
@@ -1569,7 +1569,7 @@ describe("setInvoiceStatus — a draft marked sent by hand starts its terms from
     expect(new Date(updates[1].payload.due_date).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" })).toBe(due);
   });
 
-  it("a bill that went out and came Back To Draft keeps the date the customer holds", async () => {
+  it("a bill that went out and came Back to Draft keeps the date the customer holds", async () => {
     const updates: Q[] = [];
     state.client = fakeSupabase(route({ status: "draft", sent_at: "2026-08-01T18:00:00Z" }, updates), calls);
     expect(await setInvoiceStatus(DRAFT, "sent")).toEqual({ ok: true });
@@ -1885,7 +1885,7 @@ describe("importCostsIntoInvoice — the same ticket on two jobs, asked before i
     const src = readFileSync(join(process.cwd(), "src/app/(app)/billing/[id]/invoice-detail.tsx"), "utf8");
     expect(src).toContain("same_ticket_two_jobs");
     expect(src).toContain('href="/reconcile#same-ticket-two-jobs"');
-    expect(src).toContain("Pick Which Job The Ticket Is On");
+    expect(src).toContain("Pick Which Job the Ticket Is On");
     // Drawn only when there is one, so it is never a door to a page with nothing about it.
     expect(src).toContain("{twoJobTickets > 0 && (");
     const anchors = readFileSync(join(process.cwd(), "src/lib/reconcile-kinds.ts"), "utf8");

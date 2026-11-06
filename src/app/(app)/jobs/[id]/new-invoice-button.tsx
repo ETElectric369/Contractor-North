@@ -48,7 +48,7 @@ const presetParam = createParamClaim();
 
 /**
  * THE PROPS ARE THE FACTS THE JOB PAGE ALREADY HAS (W1-24), so another door can mount the same
- * button (lane 6's Left To Bill card, next wave, with preset "part") and get the same answers.
+ * button (lane 6's Left to Bill card, next wave, with preset "part") and get the same answers.
  * `preset` opens the sheet with that choice made; `label` renames the button.
  */
 export type NewInvoiceButtonProps = {
@@ -61,7 +61,7 @@ export type NewInvoiceButtonProps = {
   /** The estimate a New Invoice would copy, while no bill holds it (fixed price, no draws). */
   wholeEstimate?: number | null;
   /** Approved change orders a new invoice would bring in (fixed price, estimate billed, no draws);
-   *  above 0 offers Bill The Change Orders (newInvoicePageFacts). */
+   *  above 0 offers Bill the Change Orders (newInvoicePageFacts). */
   changeOrdersToBill?: number;
   /** Time & Material work to date; null = couldn't total (said, never $0). */
   worked?: number | null;
@@ -76,7 +76,7 @@ export type NewInvoiceButtonProps = {
   drawBilled?: boolean;
   /** The next New Invoice pulls the job's hours and receipts (nextInvoiceImportsActuals). */
   billsActuals?: boolean;
-  /** The Overview card's unbilled work (staff), and the deposit it nets - Bill The Work So Far's
+  /** The Overview card's unbilled work (staff), and the deposit it nets - Bill the Work So Far's
    *  figure comes from these through the card's own door, so the two never differ. On a job that
    *  bills its actuals, null (or not passed) means it couldn't be read, and the sheet says so. */
   unbilled?: WorkSoFar | null;
@@ -117,7 +117,7 @@ export function NewInvoiceButton(p: NewInvoiceButtonProps) {
   const route = newInvoiceRoute(facts);
   const taxOn = JOB_NEW_INVOICE_STARTS_TAXED && p.salesTax !== false;
 
-  /** A preset from another door (the param, Take A Deposit Instead, a server's "part" door). */
+  /** A preset from another door (the param, Take a Deposit Instead, a server's "part" door). */
   function openWith(preset: NewInvoicePreset | null, refusal: string | null = null) {
     const r = newInvoiceRoute(facts, preset);
     if (r.kind === "draft") {
@@ -224,7 +224,7 @@ export function NewInvoiceButton(p: NewInvoiceButtonProps) {
       </Button>
       {TAKE_A_DEPOSIT_LINK && route.kind === "direct" && (
         <button type="button" onClick={() => openWith("deposit")} className="inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
-          Take A Deposit Instead
+          Take a Deposit Instead
         </button>
       )}
       {/* Pieces taken past the stock, said BEFORE the tap: the one-tap doors have no sheet to say it
@@ -275,16 +275,16 @@ function ScheduleDoor({ jobId }: { jobId: string }) {
 
 const CHOICE_WORDS: Record<NewInvoiceChoice, string> = {
   deposit: "Deposit",
-  part: "Part Of The Estimate",
-  work: "Bill The Work So Far",
+  part: "Part of the Estimate",
+  work: "Bill the Work So Far",
   whole: "The Whole Estimate",
-  changes: "Bill The Change Orders",
+  changes: "Bill the Change Orders",
 };
 
 /**
  * THE NEW INVOICE SHEET. At the top, the money as one thin bar (the estimate its full width,
  * Billed filled, Paid darker) and the figures under it; then one choice of 2 or 3 buttons
- * (newInvoiceChoices), the choice's one box, This Is The Last Bill where a bill can be the last,
+ * (newInvoiceChoices), the choice's one box, This Is the Last Bill where a bill can be the last,
  * and a Save that names what it makes. A refusal stays in the red box with its Open INV-0xx.
  */
 function NewInvoiceSheet(
@@ -350,11 +350,11 @@ function NewInvoiceSheet(
   }, []);
 
   const workAmount = workDoor && (workDoor.kind === "create" || workDoor.kind === "draw") ? workDoor.amount : null;
-  /** Bill The Work So Far makes a standard invoice (the only path a rate reaches) unless it is the
+  /** Bill the Work So Far makes a standard invoice (the only path a rate reaches) unless it is the
    *  last bill or the job already bills with draws - then it is a progress report, never taxed. */
   const workIsStandard = workDoor?.kind === "create" && !last;
-  // Bill The Change Orders makes a new standard invoice too (the job door's blank branch), so it
-  // starts at the rate shown here, exactly like Bill The Work So Far.
+  // Bill the Change Orders makes a new standard invoice too (the job door's blank branch), so it
+  // starts at the rate shown here, exactly like Bill the Work So Far.
   const showTax = p.taxOn && ((choice === "work" && workIsStandard) || choice === "changes");
   const partAmount = partDollars ? Math.round((partAmt || 0) * 100) / 100 : drawAmount("percent", partPct, left ?? 0);
   const amount =
@@ -368,7 +368,7 @@ function NewInvoiceSheet(
             : workAmount
           : choice === "whole"
             ? (p.wholeEstimate ?? null)
-            : null; // Bill The Change Orders: the server decides which are new, so no figure is guessed.
+            : null; // Bill the Change Orders: the server decides which are new, so no figure is guessed.
   const canLast = choice === "part" || choice === "work";
   const saveLabel = newInvoiceSaveLabel(choice, canLast && last, amount, money);
   const canSave = !pending && !opening && (choice === "changes" || (amount != null && amount > 0.005));
@@ -407,7 +407,7 @@ function NewInvoiceSheet(
         res = await createInvoiceForJob(p.jobId);
       }
       if (!res.ok || !res.id) {
-        // THE REFUSAL IS A DOOR: a job billed in parts takes its next bill as Part Of The Estimate,
+        // THE REFUSAL IS A DOOR: a job billed in parts takes its next bill as Part of the Estimate,
         // so the sheet moves there, with the server's sentence saying why.
         if ((res as { door?: string }).door === "part-of-estimate" && choices.includes("part")) setChoice("part");
         setErrorDoor(res.billedOn ?? res.openDraft ?? (p.openDraft?.number ? { id: p.openDraft.id, number: p.openDraft.number } : null));
@@ -441,7 +441,7 @@ function NewInvoiceSheet(
       footer={<ModalActions onCancel={p.onClose} onSave={save} saving={pending || opening} saveLabel={saveLabel} disabled={!canSave} />}
     >
       <div className="space-y-4">
-        {/* Why the sheet opened on Part Of The Estimate, when a door said so (a job billed in parts). */}
+        {/* Why the sheet opened on Part of the Estimate, when a door said so (a job billed in parts). */}
         {p.refusal && !error && <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{p.refusal}</p>}
         {error && (
           <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -553,7 +553,7 @@ function NewInvoiceSheet(
               onClick={() => setPartDollars((d) => !d)}
               className="inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline"
             >
-              {partDollars ? "Use A Percent Instead" : "Type An Amount Instead"}
+              {partDollars ? "Use a Percent Instead" : "Type an Amount Instead"}
             </button>
             {!partDollars && left != null && left <= 0.005 && (
               <p className="text-sm text-amber-700">
@@ -572,7 +572,7 @@ function NewInvoiceSheet(
             {workDoor.note && <p className="mt-1 text-xs text-slate-500">{workDoor.note}</p>}
           </div>
         )}
-        {/* Why Bill The Work So Far isn't a choice on a job that bills its work: nothing to bill, or
+        {/* Why Bill the Work So Far isn't a choice on a job that bills its work: nothing to bill, or
             the work couldn't be read (never a choice that silently isn't there). */}
         {workNote && <p className={`text-sm ${p.unbilled == null ? "text-amber-700" : "text-slate-500"}`}>{workNote}</p>}
 
@@ -589,7 +589,7 @@ function NewInvoiceSheet(
         {canLast && (
           <label className="flex min-h-11 items-center gap-2 text-sm text-slate-700">
             <input type="checkbox" checked={last} onChange={(e) => setLast(e.target.checked)} className="h-5 w-5 rounded border-slate-300" />
-            This Is The Last Bill
+            This Is the Last Bill
           </label>
         )}
 

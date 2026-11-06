@@ -73,7 +73,7 @@ export function JobActionDock({
   isDrawBilled: boolean;
   customers: { id: string; name: string }[];
   templates: { id: string; name: string }[];
-  /** The database holds photos on tasks (0358): the Photo slot's toast then offers Make It A Task. */
+  /** The database holds photos on tasks (0358): the Photo slot's toast then offers Make It a Task. */
   taskPhotos?: boolean;
 }) {
   // Same lifecycle gate the old header row used for Finish job.

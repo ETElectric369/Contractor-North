@@ -23,7 +23,7 @@ import type { SupplierActionResult } from "./supplier-balance";
  * update is a 204 that reads exactly like success.
  *
  * BEFORE 0346 IS APPLIED the columns are not there, and the button says so in words rather than
- * failing: "Waiting On A Credit needs one database update."
+ * failing: "Waiting on a Credit needs one database update."
  */
 
 type Ctx = { supabase: any; userId: string; orgId: string };
@@ -40,7 +40,7 @@ function revalidate() {
   revalidatePath("/planner"); // My Day's supplier cards read these same papers
 }
 
-/** "Waiting On A Credit": stamp who and when. Pressed again on a card that came back, it waits
+/** "Waiting on a Credit": stamp who and when. Pressed again on a card that came back, it waits
  *  another CREDIT_WAIT_DAYS from today. */
 export async function waitOnCredit(invoiceId: string): Promise<SupplierActionResult> {
   const ctx = await staffCtx();

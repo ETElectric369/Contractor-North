@@ -89,25 +89,25 @@ describe("where the file goes", () => {
 });
 
 describe("the buttons", () => {
-  it("DownloadButton renders its label at rest, with no Save The File until the shell keeps a file", () => {
+  it("DownloadButton renders its label at rest, with no Save the File until the shell keeps a file", () => {
     const html = renderToStaticMarkup(createElement(DownloadButton, { href: "/export", fileName: "Harbor 2026.zip", label: "Download Everything" }));
     expect(html).toContain("Download Everything");
     expect(html).not.toContain(MAKING_IT);
     expect(html).not.toContain(SAVE_THE_FILE);
     expect(html).not.toContain('role="alert"');
     expect(MAKING_IT).toBe("Making It…");
-    expect(SAVE_THE_FILE).toBe("Save The File");
+    expect(SAVE_THE_FILE).toBe("Save the File");
   });
 
   it("the accountant card keeps its words on the shared hook", () => {
     const html = renderToStaticMarkup(createElement(AccountantDownload, { xlsxHref: "/x", csvHref: "/c", xlsxName: "Harbor 2026 Q3.xlsx", csvName: "Harbor 2026 Q3 CSV.zip" }));
-    expect(html).toContain("Download For Your Accountant");
-    expect(html).toContain("Same Thing As CSV Files");
+    expect(html).toContain("Download for Your Accountant");
+    expect(html).toContain("Same Thing as CSV Files");
     expect(html).toContain("File: Harbor 2026 Q3.xlsx");
     const src = readFileSync(join(process.cwd(), "src/app/(app)/analytics/accountant/accountant-download.tsx"), "utf8");
     expect(src).toContain("useFileDownload()");
     expect(src).not.toContain("navigator.share");
     expect(src).toContain('"Making It…"');
-    expect(src).toContain("Save The File");
+    expect(src).toContain("Save the File");
   });
 });

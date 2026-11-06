@@ -11,8 +11,8 @@ import { reportError } from "@/lib/observe";
  *
  * A visit records two typed things: its TASKS (the sheet's answers → tasksAnswered → tasksFromVisit,
  * each with its own minutes and parts, through the kits a task picked) and its TAKE-OFF
- * (appointments.capture.items, the rows typed on site). Start The Job (createJobFromAppointment)
- * read both and carried them onto the job it made; Won · Pick The Job (linkAppointmentTo) linked an
+ * (appointments.capture.items, the rows typed on site). Start the Job (createJobFromAppointment)
+ * read both and carried them onto the job it made; Won · Pick the Job (linkAppointmentTo) linked an
  * EXISTING job and carried nothing, so a visit won onto a job somebody had already made left its
  * tasks and parts on the visit. One read here, two doors on it.
  *

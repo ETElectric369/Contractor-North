@@ -9,7 +9,7 @@ import { renderToStaticMarkup } from "react-dom/server";
  * MY DAY AND THE SWITCH BOARD (0352), and MY DAY'S ONE ADD LINE (0358). There is no Open Leads card
  * for anyone (a lead is a Needs You row, and the Sales tile's badge counts the new ones); the Daily
  * Reports card goes with Daily Reports once nothing is left to review (until then it stays, Off line
- * on top). The 6-field task box is gone: Tasks & Reminders leads with one line ("Add A Reminder Or
+ * on top). The 6-field task box is gone: Tasks & Reminders leads with one line ("Add a Reminder Or
  * Task") and an optional job chip, and asks no priority whatever To-Do Extras says (the switch is the
  * Reminders page's now). Everything on = My Day as it was otherwise.
  *
@@ -63,9 +63,9 @@ const row = (over: Partial<SixSlot> = {}): SixSlot => ({
 describe("Tasks & Reminders: the one Add line up top (Erik, 2026-09-26)", () => {
   it("one line, Title Case, 44px: type the words, an optional job chip, Add", () => {
     const html = line();
-    expect(html).toContain('placeholder="Add A Reminder Or Task…"');
+    expect(html).toContain('placeholder="Add a Reminder or Task…"');
     expect(html).toContain('aria-label="Job (optional)"');
-    expect(html).toContain("No Job: A Reminder For Me");
+    expect(html).toContain("No Job: A Reminder for Me");
     expect(html).toContain("On J-055 Smith Panel");
     // 44px, all three: the input, the chip and the Add button.
     expect(html).toMatch(/<input[^>]*class="[^"]*h-11[^"]*"/);
@@ -89,7 +89,7 @@ describe("Tasks & Reminders: the one Add line up top (Erik, 2026-09-26)", () => 
       createElement(YourList, { rows: [], subtasks: [], todayStr: TODAY, doneToday: 0, restCount: 0, jobs: JOBS }),
     );
     expect(html).toContain("Tasks &amp; Reminders");
-    expect(html).toContain("Add A Reminder Or Task");
+    expect(html).toContain("Add a Reminder or Task");
     expect(html).toContain("Nothing urgent today.");
     expect(html).not.toContain("Grab One");
   });
@@ -112,7 +112,7 @@ describe("Tasks & Reminders: the one Add line up top (Erik, 2026-09-26)", () => 
     expect(src).not.toContain("{ title, focus_date: todayStr }");
     // The words live in lib/words/myday since cn-v1138 (English unchanged); the door reads them through t().
     expect(src).toContain('toast(t("md_addedToReminders"), "success")');
-    expect(dict("en").md_addedToReminders).toBe("Added To Tasks & Reminders");
+    expect(dict("en").md_addedToReminders).toBe("Added to Tasks & Reminders");
     expect(src).not.toMatch(/Reminder added and pinned/);
   });
 
@@ -121,7 +121,7 @@ describe("Tasks & Reminders: the one Add line up top (Erik, 2026-09-26)", () => 
       createElement(YourList, { rows: [row({ due_date: TODAY })], subtasks: [], todayStr: TODAY, doneToday: 0, restCount: 4, jobs: JOBS }),
     );
     // "For You": the count is the Reminders for this person; /tasks also lists the ones they made for others.
-    expect(html).toContain("All Reminders · 4 More For You");
+    expect(html).toContain("All Reminders · 4 More for You");
     expect(html).toContain('href="/tasks"');
   });
 });
@@ -141,7 +141,7 @@ describe("Tasks & Reminders: a carried pin says so on the row (Erik, 2026-09-30)
 
   it("a pin from an earlier day wears Carried From <Day>, in Title Case, and keeps the pin glyph", () => {
     const html = draw("2026-09-25");
-    expect(html).toContain("Carried From Yesterday");
+    expect(html).toContain("Carried from Yesterday");
     expect(html).toMatch(/lucide-pin/);
   });
 
@@ -187,7 +187,7 @@ describe("Tasks & Reminders: the polish (progress marks, 44px steps, one ⋯ per
 
   it("one mark per thing on the day, filled for each done: the total is the DAY's, never a hard 6", () => {
     const html = render(2);
-    const header = html.slice(0, html.indexOf("Add A Reminder Or Task"));
+    const header = html.slice(0, html.indexOf("Add a Reminder or Task"));
     expect(header).toContain("Tasks &amp; Reminders");
     // 2 done + 2 open on the card = 4 marks, 2 filled. It used to be six marks whatever the day held.
     expect(header).toContain('aria-label="2 of 4 done today"');
@@ -208,7 +208,7 @@ describe("Tasks & Reminders: the polish (progress marks, 44px steps, one ⋯ per
         jobs: JOBS,
       }),
     );
-    const header = html.slice(0, html.indexOf("Add A Reminder Or Task"));
+    const header = html.slice(0, html.indexOf("Add a Reminder or Task"));
     expect(header).toContain('aria-label="5 of 25 done today"');
     expect((header.match(/data-mark=/g) ?? []).length).toBe(PROGRESS_MARKS);
     // All twenty rows are DRAWN — only the marks abbreviate (Erik: "lets not limit it").
@@ -232,8 +232,8 @@ describe("Tasks & Reminders: the polish (progress marks, 44px steps, one ⋯ per
     const src = readFileSync(join(process.cwd(), "src/app/(app)/planner/your-list.tsx"), "utf8");
     expect(src).toContain('{pinned ? t("md_unpin") : t("md_pinToTop")}');
     expect(dict("en").md_unpin).toBe("Unpin");
-    expect(dict("en").md_pinToTop).toBe("Pin To Top (Carries Until You Unpin It)");
-    expect(src).not.toContain("Unpin From Today");
+    expect(dict("en").md_pinToTop).toBe("Pin to Top (Carries Until You Unpin It)");
+    expect(src).not.toContain("Unpin from Today");
   });
 
   /**
@@ -265,8 +265,8 @@ describe("Tasks & Reminders: the polish (progress marks, 44px steps, one ⋯ per
 
   it("each Reminder's ⋯ is the app's one row sheet: 44px, named for its row", () => {
     const html = render(0);
-    expect(html).toMatch(/<button type="button" aria-label="More For Call PUD"[^>]*class="[^"]*h-11 w-11/);
-    expect(html).toMatch(/aria-label="More For Order the meter base"/);
+    expect(html).toMatch(/<button type="button" aria-label="More for Call PUD"[^>]*class="[^"]*h-11 w-11/);
+    expect(html).toMatch(/aria-label="More for Order the meter base"/);
     const src = readFileSync(join(process.cwd(), "src/app/(app)/planner/your-list.tsx"), "utf8");
     expect(src).toContain('import { RowMoreSheet, SheetLink, SHEET_ROW } from "@/components/row-more-sheet";');
     expect(src).not.toMatch(/const SHEET_ROW\s*=/);
@@ -277,10 +277,10 @@ describe("Tasks & Reminders: the polish (progress marks, 44px steps, one ⋯ per
   });
 });
 
-describe("nothing goes quiet without a day: In A Week, not Someday (Erik's open question, the plan's pick)", () => {
-  it("the sheet's later row is In A Week, due seven days out on the company's day", () => {
+describe("nothing goes quiet without a day: In a Week, not Someday (Erik's open question, the plan's pick)", () => {
+  it("the sheet's later row is In a Week, due seven days out on the company's day", () => {
     expect(LATER_CHOICE).toBe("in_a_week");
-    expect(laterRow(LATER_CHOICE, "2026-09-26")).toEqual({ label: "In A Week", due: "2026-10-03" });
+    expect(laterRow(LATER_CHOICE, "2026-09-26")).toEqual({ label: "In a Week", due: "2026-10-03" });
     expect(addDaysStr("2026-12-29", 7)).toBe("2027-01-05");
     // One line flips it back.
     expect(laterRow("someday", "2026-09-26")).toEqual({ label: "Someday (Clear Date)", due: null });
@@ -324,7 +324,7 @@ describe("nothing goes quiet without a day: In A Week, not Someday (Erik's open 
 describe("the Reminders page's one-line add", () => {
   it("one line and Add, Title Case; no category, job, person, due date or priority", () => {
     const html = renderToStaticMarkup(createElement(NewReminderBox));
-    expect(html).toContain('placeholder="Add A Reminder…"');
+    expect(html).toContain('placeholder="Add a Reminder…"');
     expect(html).toContain("Add");
     for (const gone of ['aria-label="Priority"', 'aria-label="Due date"', 'aria-label="Job"', 'aria-label="Assigned to"', 'aria-label="Category"']) {
       expect(html).not.toContain(gone);
@@ -514,10 +514,10 @@ describe("the Now card (rendered)", () => {
     expect(render({ open: punch({ clock_in: at(1), shift_start: at(13) }), job })).toContain("Set When You Stopped");
   });
 
-  it("on the clock with no job: the timer, the question and ONE Pick The Job; no job doors", () => {
+  it("on the clock with no job: the timer, the question and ONE Pick the Job; no job doors", () => {
     const html = render({ open: punch({ job_id: null }), job: null });
     expect(html).toContain("Which job are you on?");
-    expect(html.match(/Pick The Job/g)).toHaveLength(1);
+    expect(html.match(/Pick the Job/g)).toHaveLength(1);
     expect(html).not.toContain("THE-DOORS");
     expect(html).toContain("Clock Out");
     expect(html).toContain(LUNCH_LABEL);
@@ -525,7 +525,7 @@ describe("the Now card (rendered)", () => {
 
   it("a punch on a job the page couldn't read says so instead of asking which job", () => {
     const html = render({ open: punch({ job_id: "j55" }), job: null });
-    expect(html).not.toContain("Pick The Job");
+    expect(html).not.toContain("Pick the Job");
     expect(html).toContain("Your punch is on a job this page couldn’t load just now. Timeclock shows it.");
   });
 

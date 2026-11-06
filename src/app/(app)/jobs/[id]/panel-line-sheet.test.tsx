@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 /**
  * FILLING AN OPEN LINE (the panel-first wave, P1), pinned on "Snowbell": the form a person picks
- * (Single · Tandem · 2-Pole · 3-Pole) is the space, half and poles Add A Circuit gets; a form that
+ * (Single · Tandem · 2-Pole · 3-Pole) is the space, half and poles Add a Circuit gets; a form that
  * would sit on a breaker already there, on No Stab or past the end is said in the model's words in
  * the sheet and Keep waits (never a silent save); a tandem the panel label doesn't allow is said and
  * still kept; a stand-in Panel 1 sends no panel, so the server makes the real one with the circuit.
@@ -132,7 +132,7 @@ describe("the form is where the circuit goes", () => {
     expect(lineProblems(SNOWBELL, [loose], d, V, { livePanels: 2 }).block).toBeNull();
   });
 
-  it("Keep sends Add A Circuit the space, half and poles of the form, with the words, the room and the work", async () => {
+  it("Keep sends Add a Circuit the space, half and poles of the form, with the words, the room and the work", async () => {
     const r = await sendLine("job-snowbell", SNOWBELL, CIRCUITS, V, lineDraft({ space: 5, half: null }, "pole2"));
     expect(r.ok).toBe(true);
     expect(s.calls).toEqual([
