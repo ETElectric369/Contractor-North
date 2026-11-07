@@ -111,8 +111,9 @@ export function PayrollView({
   /**
    * ── THE ANSWER COMES TO HIS EYE ───────────────────────────────────────────────────────────────
    *
-   * THE FAILURE THIS FIXES. The banner is at the TOP of the page and the only door to the pay form is
-   * at the FOOT of an open statement, past that person's payment list. Record a payment from there and
+   * THE FAILURE THIS FIXES. The banner is at the TOP of the page and the only door to the pay form was
+   * at the FOOT of an open statement, past that person's payment list (it sits under the owed figure
+   * since cn-v1150, still a screen or more below the banner). Record a payment from there and
    * the sheet closes, nothing scrolls, and the sentence that says what happened — "Aug 16 to Aug 31
    * could not be locked yet… Close it on Timecards", or a refusal from Undo or That's Right — lands
    * hundreds of pixels above the top of the screen. The tap looks like it did nothing, which is the
@@ -434,7 +435,8 @@ export function PayrollView({
           inside it — one thumb, one target, no mis-taps on a ladder. What it OPENS has changed: it
           used to be the form that pays the man, which is why his detail could only be read from
           inside it. Now it opens HIS STATEMENT, in place, and the form has a named door of its own
-          at the foot of that (Erik, dfe1f59b: separate the detail from the button to pay them). */}
+          under the owed figure in that (Erik, dfe1f59b: separate the detail from the button to pay
+          them; 2026-11-07: "move the record payment button up to under the total"). */}
       {balances.length === 0 ? (
         <p className="px-1 py-8 text-center text-sm text-slate-400">No hours and no payments on record yet.</p>
       ) : (

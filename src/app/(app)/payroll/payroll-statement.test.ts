@@ -13,7 +13,7 @@ import { renderToStaticMarkup } from "react-dom/server";
  * /payroll had NO test at the view level, so not one of the guards on the money here was pinned: not
  * the empty amount, not the disabled Record button, not the withheld figure while a shift runs. This
  * file pins them, and it pins the separation itself — a person's card is a disclosure now, and the
- * form that pays him has one named door at the foot of his statement.
+ * form that pays him has one named door under the owed figure in his statement.
  *
  * EVERY NAME AND FIGURE BELOW IS INVENTED (tests/no-real-names.test.ts is the tripwire).
  */
@@ -397,9 +397,11 @@ describe("the payment list has a floor under it", () => {
     expect(count(html.slice(0, fold), "Undo")).toBe(6);
     // And not one of the ten is unreachable: the other four are inside the fold.
     expect(count(html, "Undo")).toBe(10);
-    // Still exactly one door to the form, still at the foot (the second-tap guard is untouched).
+    // Still exactly one door to the form, under the owed figure and above the payment list (Erik,
+    // 2026-11-07: "move the record payment button up to under the total so i can find it").
     expect(count(html, "Record Payment…")).toBe(1);
-    expect(html.indexOf("Record Payment…")).toBeGreaterThan(fold);
+    expect(html.indexOf("Record Payment…")).toBeGreaterThan(html.indexOf(">Owed<"));
+    expect(html.indexOf("Record Payment…")).toBeLessThan(html.indexOf(">Payments<"));
   });
 
   it("the fold counts what is HIDDEN, never how many he has ever been paid", () => {
@@ -425,7 +427,7 @@ describe("the payment list has a floor under it", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-describe("a payment row inside a statement, and the one door at the foot", () => {
+describe("a payment row inside a statement, and the one door under the total", () => {
   it("this person's payments, in full, each with its own Undo", () => {
     const html = statement(OWED, {
       payments: [payment(), payment({ id: "pay-2", amount: 150.75, paidOn: "2026-09-14", method: "check", voided: true })],
@@ -458,8 +460,16 @@ describe("a payment row inside a statement, and the one door at the foot", () =>
     expect(THREE_FIGURES_FACTS.length).toBeGreaterThanOrEqual(8);
   });
 
-  it("ONE door to the pay form, at the foot of the statement", () => {
-    expect(count(statement(OWED), "Record Payment…")).toBe(1);
+  it("ONE door to the pay form, under the total, above the payments and the held miles", () => {
+    const html = statement(
+      person({ earned: 1240.5, paid: 1040.25, owed: 200.25, heldMiles: 12 }),
+      { heldMileage: [{ ...VIEWED, miles: 12, offset: 0 }], payments: [payment()] },
+    );
+    expect(count(html, "Record Payment…")).toBe(1);
+    const door = html.indexOf("Record Payment…");
+    expect(door).toBeGreaterThan(html.indexOf("all time."));
+    expect(door).toBeLessThan(html.indexOf("business miles are held"));
+    expect(door).toBeLessThan(html.indexOf(">Payments<"));
   });
 });
 
@@ -567,7 +577,8 @@ describe("the form that records a payment", () => {
  * TWO DEFECTS, BOTH OF THEM GEOMETRY RATHER THAN A MISSING MESSAGE, AND BOTH ABOUT MONEY.
  *
  *  · THE ANSWER LANDED OFF SCREEN. The banner is at the top of the page; the only door to the pay form
- *    is at the FOOT of an open statement, past that person's payment list. A good write closed the
+ *    was at the FOOT of an open statement, past that person's payment list (under the owed figure
+ *    since cn-v1150, still well below the banner). A good write closed the
  *    sheet, set the sentence and scrolled nothing — so "Aug 16 to Aug 31 could not be locked yet…
  *    Close it on Timecards", and every refusal from Undo or That's Right, landed hundreds of pixels
  *    above the top of the screen. The tap looked dead.

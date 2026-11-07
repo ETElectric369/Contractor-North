@@ -19,11 +19,13 @@ import { HELD_MILEAGE_FACTS, THREE_FIGURES_FACTS } from "./payroll-facts";
 /**
  * HOW MANY PAYMENTS THE STATEMENT DRAWS BEFORE IT FOLDS THE REST AWAY.
  *
- * THE FAILURE THIS PREVENTS. The only door to the pay form is at the FOOT of this statement, past the
- * payment list, and the list was every payment the person had ever been handed. A year of weekly pay
- * put that door about 3,500px down — and every row he scrolled past on the way carried a one-tap Undo
- * that voids a payment and can unlock a pay period with no confirm. Six is enough to recognise the
- * last few weeks; the rest are one tap behind a fold, and `Paid` above is still the all-time sum.
+ * THE FAILURE THIS PREVENTS. When this cap was written the only door to the pay form was at the FOOT
+ * of this statement, past the payment list, and the list was every payment the person had ever been
+ * handed. A year of weekly pay put that door about 3,500px down — and every row he scrolled past on
+ * the way carried a one-tap Undo that voids a payment and can unlock a pay period with no confirm.
+ * The door sits under the owed figure now (Erik, 2026-11-07), and the cap stays: a year of Undos is
+ * still a year of Undos. Six is enough to recognise the last few weeks; the rest are one tap behind
+ * a fold, and `Paid` in the proof line is still the all-time sum.
  */
 const STATEMENT_PAYMENTS = 6;
 
@@ -45,8 +47,8 @@ const STATEMENT_PAYMENTS = 6;
  * where a figure wants to live; and the page's own answer banner (what a payment locked, with its
  * Undo) stays visible at the top instead of being covered by an overlay.
  *
- * THE STATEMENT PAYS NOBODY. It reads. One distinct Record Payment button, at the FOOT of it past
- * the detail, opens the form — which is unchanged, down to an amount that starts empty.
+ * THE STATEMENT PAYS NOBODY. It reads. One distinct Record Payment button, under the owed figure,
+ * opens the form — which is unchanged, down to an amount that starts empty.
  */
 
 /** "Sep 12" — the short form the board, the statement and the payment list all read in. ONE copy:
@@ -134,8 +136,8 @@ export function PersonStatement({
   /** THIS person's payments, newest first, voided ones included — all of them, not a window. The
    *  cross-person feed's "Showing 12 of 40 payments" had nowhere to go; a man's own list is where
    *  the rest of his payments were always supposed to be. It still is: the newest few are drawn and
-   *  the remainder sit behind one fold, so none of them is out of reach and none of them stands
-   *  between him and the pay door at the foot (paymentsToShow says what that cap may not hide). */
+   *  the remainder sit behind one fold, so none of them is out of reach and a year of Undos is
+   *  never a scroll (paymentsToShow says what that cap may not hide). */
   payments: PayPaymentRow[];
   /** A shift still running. The figure rule is owedReading's, shared with the card. */
   onClock: boolean;
@@ -235,6 +237,15 @@ export function PersonStatement({
           {`Earned ${formatCurrency(balance.earned)} less paid ${formatCurrency(balance.paid)}, all time.`}
         </p>
       </div>
+
+      {/* THE ONLY DOOR TO THE PAY FORM, under the figure it acts on. Erik, 2026-11-07: "move the
+          record payment button up to under the total so i can find it". It sat at the FOOT of the
+          statement, past the payment list, so that the tap which opened the statement could not
+          reach it by accident with a second tap. That guard is the form's own now and always was:
+          it opens with an EMPTY amount and a dead Record button, so a stray tap pays nothing. */}
+      <Button variant="primary" className="mt-3 w-full" disabled={pending} onClick={onRecord}>
+        Record Payment…
+      </Button>
 
       {/* HELD MILEAGE IS ITS OWN LINE AND ITS OWN BUCKET (0095's two-lock rule): miles here, never
           dollars, and never added into any of the three figures above.
@@ -336,14 +347,6 @@ export function PersonStatement({
           </details>
         )}
       </div>
-
-      {/* THE ONLY DOOR TO THE PAY FORM, and it is at the FOOT of the statement on purpose: the tap
-          that opened this statement landed at the top of it, so a button directly under that tap is
-          a button a second tap reaches by accident. Opening the form still pays nothing — the amount
-          starts empty — but money is not where we practise being nearly careful enough. */}
-      <Button variant="primary" className="mt-4 w-full" disabled={pending} onClick={onRecord}>
-        Record Payment…
-      </Button>
     </div>
   );
 }
