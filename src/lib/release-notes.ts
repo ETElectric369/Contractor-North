@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1149", date: "2026-11-07", line: "Payroll: each open pay period shows what is left on it, with the money you have paid landed on the oldest first, so the rows add up to what you owe." },
   { version: "cn-v1148", date: "2026-11-07", line: "English buttons and titles follow standard title case: the small words (a, the, to, of, on, by…) stay lowercase, the way Chicago and Apple write a title — Back to Schedule, Who's on the Clock." },
   { version: "cn-v1147", date: "2026-11-07", line: "Spanish buttons and titles follow Spanish capitalization: the small words (a, de, la, y…) stay lowercase, the way the RAE writes a name — Mover a un Día, Lista de Precios. English unchanged." },
   { version: "cn-v1146", date: "2026-11-07", line: "The Sales side in Spanish — leads, inspections and customers, their sheets, doors and sort bars, and every server message follow your language; lead and customer statuses too. No migration." },

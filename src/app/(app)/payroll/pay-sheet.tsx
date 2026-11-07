@@ -6,7 +6,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Input, Label } from "@/components/ui/input";
 import { InfoPopup } from "@/components/info-popup";
 import { formatCurrency } from "@/lib/utils";
-import { alreadyAppliedTo, periodLabel, type PayMethod, type PersonBalance } from "@/lib/payroll-math";
+import { leftByPeriod, periodLabel, type PayMethod, type PersonBalance } from "@/lib/payroll-math";
 import { PAYMENT_LANDS_FACTS } from "./payroll-facts";
 
 const METHODS: { value: PayMethod; label: string }[] = [
@@ -76,7 +76,10 @@ export function PaySheet({
   const [reference, setReference] = useState("");
   const [note, setNote] = useState("");
 
-  const applied = alreadyAppliedTo(periods, person.owed);
+  // The same rows the statement draws: what is LEFT on each open period, the money already paid
+  // landed oldest first — so the figure he is about to type is measured against what each period
+  // still costs to close, not against a gross a sentence then subtracts from.
+  const { rows } = leftByPeriod(periods, person.owed);
   const dirty = amount !== null || reference !== "" || note !== "" || paidOn !== today || method !== "cash";
   const ready = amount !== null && amount > 0;
 
@@ -119,13 +122,10 @@ export function PaySheet({
                 ? `${formatCurrency(-person.owed)} ahead`
                 : "Paid up"}
           </div>
-          {periods.length > 0 && (
+          {rows.length > 0 && (
             <div className="mt-0.5 text-xs text-slate-500">
-              {periods.map((p) => `${periodLabel(p.start, p.end)} ${formatCurrency(p.gross)}`).join(" · ")}
+              {rows.map((r) => `${periodLabel(r.start, r.end)} ${r.left > 0.005 ? `${formatCurrency(r.left)} left` : "covered"}`).join(" · ")}
             </div>
-          )}
-          {applied > 0.005 && person.owed > 0.005 && (
-            <div className="mt-0.5 text-xs text-slate-500">Less {formatCurrency(applied)} you have already paid against these.</div>
           )}
           {onClock && <div className="mt-1 text-xs text-amber-700">A shift is still on the clock, so this is not final yet.</div>}
         </div>

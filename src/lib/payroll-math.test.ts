@@ -10,6 +10,7 @@ import {
   sumPayments,
   sumLockedGross,
   runningCredit,
+  leftByPeriod,
   paymentSentence,
   voidSentence,
   sayMoney,
@@ -459,6 +460,85 @@ describe("sumPayments / sumLockedGross / runningCredit", () => {
 
   it("credit goes negative when a locked period is no longer covered (what a void has to unwind)", () => {
     expect(runningCredit([p(100)], [{ period_start: "2026-08-01", period_end: "2026-08-16", gross: 320 }])).toBe(-220);
+  });
+});
+
+describe("leftByPeriod: what is left on each open pay period, the money paid landed oldest first", () => {
+  // The owner's card, 2026-11-07: two open periods, one $1,000 payment, $1,846.80 owed.
+  const P1 = { start: "2026-10-12", end: "2026-10-26", gross: 1366 };
+  const P2 = { start: "2026-10-26", end: "2026-11-09", gross: 1480.8 };
+
+  it("a partial payment lands on the oldest period, and the rows add up to Owed", () => {
+    const { rows, earlier } = leftByPeriod([P1, P2], 1846.8);
+    expect(rows).toEqual([
+      { start: "2026-10-12", end: "2026-10-26", gross: 1366, paid: 1000, left: 366 },
+      { start: "2026-10-26", end: "2026-11-09", gross: 1480.8, paid: 0, left: 1480.8 },
+    ]);
+    expect(earlier).toBe(0);
+    expect(rows.reduce((s, r) => s + r.left, 0) + earlier).toBe(1846.8);
+  });
+
+  it("money past the oldest period spills onto the next", () => {
+    const { rows } = leftByPeriod([{ start: "2026-08-16", end: "2026-09-01", gross: 520 }, { start: "2026-09-01", end: "2026-09-16", gross: 892.5 }], 200.25);
+    expect(rows.map((r) => [r.paid, r.left])).toEqual([[520, 0], [692.25, 200.25]]);
+  });
+
+  it("nothing paid yet: every period is owed in full", () => {
+    const { rows, earlier } = leftByPeriod([P1, P2], 2846.8);
+    expect(rows.map((r) => [r.paid, r.left])).toEqual([[0, 1366], [0, 1480.8]]);
+    expect(earlier).toBe(0);
+  });
+
+  it("one open period, part paid: the owner's usual case", () => {
+    const { rows, earlier } = leftByPeriod([P2], 980.8);
+    expect(rows).toEqual([{ ...P2, paid: 500, left: 980.8 }]);
+    expect(earlier).toBe(0);
+  });
+
+  it("owed beyond the open periods is said as `earlier`, so the rows still add up", () => {
+    const { rows, earlier } = leftByPeriod([P1, P2], 3000);
+    expect(rows.map((r) => r.left)).toEqual([1366, 1480.8]);
+    expect(earlier).toBe(153.2);
+  });
+
+  it("rounding is not money: a gap within a cent per period lands on the newest period, never as an `earlier` row or a cent paid", () => {
+    // Owed a cent MORE than the periods come to (the whole-sum rounding fell the other way).
+    const over = leftByPeriod([P1, P2], 2846.81);
+    expect(over.rows.map((r) => [r.gross, r.paid, r.left])).toEqual([[1366, 0, 1366], [1480.81, 0, 1480.81]]);
+    expect(over.earlier).toBe(0);
+    // Owed a cent LESS: the newest period gives the cent back, and the oldest does not read "$0.01 paid".
+    const under = leftByPeriod([P1, P2], 2846.79);
+    expect(under.rows.map((r) => [r.gross, r.paid, r.left])).toEqual([[1366, 0, 1366], [1480.79, 0, 1480.79]]);
+    // Two cents with two periods is still inside the tolerance; three is money.
+    expect(leftByPeriod([P1, P2], 2846.82).earlier).toBe(0);
+    expect(leftByPeriod([P1, P2], 2846.83).earlier).toBe(0.03);
+    expect(leftByPeriod([P1, P2], 2846.83).rows[1].gross).toBe(1480.8);
+    // With no open period there is nothing to fold into: a cent owed is a cent owed.
+    expect(leftByPeriod([], 0.01).earlier).toBe(0.01);
+  });
+
+  it("paid up, or ahead, covers every row", () => {
+    expect(leftByPeriod([P1, P2], 0).rows.map((r) => r.left)).toEqual([0, 0]);
+    const ahead = leftByPeriod([P1, P2], -50);
+    expect(ahead.rows.map((r) => [r.paid, r.left])).toEqual([[1366, 0], [1480.8, 0]]);
+    expect(ahead.earlier).toBe(0);
+  });
+
+  it("oldest first, whatever order the periods arrive in", () => {
+    const { rows } = leftByPeriod([P2, P1], 1846.8);
+    expect(rows.map((r) => r.start)).toEqual(["2026-10-12", "2026-10-26"]);
+    expect(rows[0].left).toBe(366);
+  });
+
+  it("to the cent, no float drift", () => {
+    const { rows } = leftByPeriod([{ start: "2026-09-01", end: "2026-09-16", gross: 0.1 }, { start: "2026-09-16", end: "2026-10-01", gross: 0.2 }], 0.15);
+    expect(rows.map((r) => [r.paid, r.left])).toEqual([[0.1, 0], [0.05, 0.15]]);
+  });
+
+  it("no open periods: everything owed is earlier, and nothing is when paid up", () => {
+    expect(leftByPeriod([], 200.25)).toEqual({ rows: [], earlier: 200.25 });
+    expect(leftByPeriod(null, 0)).toEqual({ rows: [], earlier: 0 });
+    expect(leftByPeriod(undefined, -20)).toEqual({ rows: [], earlier: 0 });
   });
 });
 

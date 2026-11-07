@@ -464,6 +464,61 @@ export function alreadyAppliedTo(periods: { gross: number }[] | null | undefined
   return r2(sum - fin(owed));
 }
 
+/** What is left on ONE open pay period once the money already paid has landed on it. */
+export type PeriodLeft = { start: string; end: string; gross: number; paid: number; left: number };
+
+/**
+ * ── WHAT IS LEFT ON EACH OPEN PAY PERIOD — the per-period half of Owed ────────────────────────
+ *
+ * THE FAILURE THIS CLOSES (Erik, 2026-11-07). The statement listed each open period at its GROSS
+ * and then said "Less $1,000.00 you have already paid against these" underneath, so two periods
+ * read $1,366.00 and $1,480.80 under an Owed of $1,846.80, and no line said where the $1,000 went.
+ * He was "staring at it … it's not telling me anything I need to know": exactly how much he owes,
+ * and what is left on each timecard.
+ *
+ * THE RULE IS THE LOCK RULE'S. recordPayment spends a payment on whole periods OLDEST FIRST. The
+ * money that has not bought a lock yet (alreadyAppliedTo: the open periods' gross less what is
+ * owed) lands here the same way — on the oldest open period first, then the next — so the figure
+ * a period shows is what a payment would still have to cover to lock it.
+ *
+ * THE ROWS ADD UP TO OWED, TO THE CENT: `left` summed, plus `earlier`. Owed at or below zero (paid
+ * up, or ahead) covers every row: `left` 0 all the way down. Cents arithmetic, so $0.10 + $0.20
+ * lands where it should.
+ *
+ * ROUNDING IS NOT MONEY. Owed is priced in one sum (balanceForPerson rounds the whole live total
+ * once) and the periods are priced one at a time (page.tsx rounds each), so the two can differ by
+ * up to half a cent per open period. A gap inside one cent per period is that rounding and is
+ * folded into the NEWEST period's figure, so the rows still add up and nobody reads a "$0.01 paid"
+ * on a week nothing was paid against. Only a gap past that is `earlier`: money owed beyond the open
+ * periods, which happens one way — a payment was undone and its unwind stopped partway (voidPayment
+ * stops on a bad read and says so), leaving hours locked behind money that is gone. The lock is only
+ * ever taken by a payment (applyLocks → markPeriodPaid), so nothing else can put money there.
+ */
+export function leftByPeriod(
+  periods: { start: string; end: string; gross: number }[] | null | undefined,
+  owed: number,
+): { rows: PeriodLeft[]; earlier: number } {
+  const open = (periods ?? [])
+    .filter((p) => !!p)
+    .map((p) => ({ start: String(p.start), end: String(p.end), grossCents: Math.round(fin(p.gross) * 100) }))
+    .sort((a, b) => a.start.localeCompare(b.start));
+  const owedCents = Math.round(fin(owed) * 100);
+  // Money already handed over against these periods — ONE subtraction, the same one the pay form
+  // and the statement have always read — as cents. Positive: payments to land, oldest first.
+  // Negative: owed past what the open periods come to.
+  const gapCents = -Math.round(alreadyAppliedTo(open.map((p) => ({ gross: p.grossCents / 100 })), owed) * 100);
+  // Rounding noise (see above): within a cent per open period, the newest period absorbs it.
+  if (open.length > 0 && gapCents !== 0 && Math.abs(gapCents) <= open.length) open[open.length - 1].grossCents += gapCents;
+  const grossCents = open.reduce((s, p) => s + p.grossCents, 0);
+  let credit = Math.max(0, grossCents - owedCents);
+  const rows: PeriodLeft[] = open.map((p) => {
+    const paid = Math.min(credit, p.grossCents);
+    credit -= paid;
+    return { start: p.start, end: p.end, gross: p.grossCents / 100, paid: paid / 100, left: (p.grossCents - paid) / 100 };
+  });
+  return { rows, earlier: Math.max(0, owedCents - grossCents) / 100 };
+}
+
 // ── WHO IS ON THE WAGES BOARD (0286) ─────────────────────────────────────────
 // Erik, 2026-09-23: "get rid of the owners wages". The owner is paid by owner's draw, so he has no
 // balance, no owed periods and no line on the accountant's wage file. The Pay board used to list

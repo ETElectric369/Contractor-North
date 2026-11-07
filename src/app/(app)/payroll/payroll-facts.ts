@@ -40,6 +40,14 @@ export const THREE_FIGURES_FACTS = [
   "Unlocked hours older than 18 months are not in Earned. Locked pay periods are, however old.",
   "A shift still running is in neither figure, because its hours are not known until it is closed.",
   "Paid is every payment you have recorded, all time, not counting any you have undone.",
+  // leftByPeriod lands the credit oldest first — the order recordPayment's lock rule spends it in.
+  "What you have paid lands on the oldest open pay period first, so what is left sits on the newest periods.",
+  // The rows are leftByPeriod's; left summed plus `earlier` is owed to the cent.
+  "The pay period rows add up to Owed.",
+  // applyLocks locks only on a payment, and markPeriodPaid refuses a period with a shift still open.
+  "A period your money already covers but that has not locked yet reads Covered. It locks with the next payment, once every shift in it has closed.",
+  // owedReading withholds the total on the clock; the statement draws no period row then either.
+  "While a shift is running no period shows a figure, because its hours are not in any row yet.",
   "A minus means you have paid ahead. It comes off the next hours rather than being owed back.",
   "Mileage is in none of the three. It is settled on its own.",
 ] as const;

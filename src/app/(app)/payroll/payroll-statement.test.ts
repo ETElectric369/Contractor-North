@@ -31,7 +31,7 @@ import { PayrollView } from "./payroll-view";
 import { PersonStatement } from "./person-statement";
 import { PaySheet } from "./pay-sheet";
 import { BASE_PAY_FACTS, HELD_MILEAGE_FACTS, PAYMENT_LANDS_FACTS, THREE_FIGURES_FACTS } from "./payroll-facts";
-import { alreadyAppliedTo, noAnswerSentence, owedReading, type PayPaymentRow, type PersonBalance } from "@/lib/payroll-math";
+import { alreadyAppliedTo, leftByPeriod, noAnswerSentence, owedReading, type PayPaymentRow, type PersonBalance } from "@/lib/payroll-math";
 
 const count = (hay: string, needle: string) => hay.split(needle).length - 1;
 
@@ -167,18 +167,29 @@ describe("the figure rule, shared by the card and the statement", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-describe("a person's statement says Owed is Earned less Paid", () => {
-  it("all three figures, to the cent, in that order", () => {
-    const html = statement(OWED);
-    expect(html).toContain("Owed Is Earned Less Paid");
-    expect(html).toContain(">Earned<");
-    expect(html).toContain("$1,240.50");
-    expect(html).toContain(">Paid<");
-    expect(html).toContain("$1,040.25");
+describe("a person's statement says what is left on each pay period, then Owed, then the proof", () => {
+  /**
+   * Erik, 2026-11-07, on a tech's card: two open periods at their gross under an Owed that matched
+   * neither, and a sentence saying $1,000 had "already gone against these". What he needed was
+   * exactly how much he owes and what is left on each timecard. So ONE box: each open period with
+   * what is LEFT on it (the money paid landed oldest first), the owed figure, and under it the one
+   * line of proof — Earned less Paid, all time — instead of three big all-time numbers on top.
+   */
+  it("the rows, the owed figure, then the all-time proof, in that order, to the cent", () => {
+    const html = statement(OWED, { periods: [{ start: "2026-09-01", end: "2026-09-16", gross: 892.5 }] });
+    expect(html).toContain("Left on Each Pay Period");
+    expect(html).toContain("Sep 1 to Sep 15");
+    // $892.50 earned, $692.25 of the $1,040.25 paid landed on it, $200.25 left — which IS the owed figure.
+    expect(html).toContain("$892.50 earned · $692.25 paid");
     expect(html).toContain(">Owed<");
-    expect(html).toContain("$200.25");
-    expect(html.indexOf("$1,240.50")).toBeLessThan(html.indexOf("$1,040.25"));
-    expect(html.indexOf("$1,040.25")).toBeLessThan(html.indexOf("$200.25"));
+    expect(count(html, "$200.25")).toBe(2); // the row's left, and the total
+    expect(html).toContain("Earned $1,240.50 less paid $1,040.25, all time.");
+    expect(html.indexOf("Left on Each Pay Period")).toBeLessThan(html.indexOf(">Owed<"));
+    expect(html.indexOf(">Owed<")).toBeLessThan(html.indexOf("Earned $1,240.50"));
+    // The sentence that made two numbers fail to add up is gone, and so is the box of all-time figures.
+    expect(html).not.toContain("already paid against");
+    expect(html).not.toContain("Owed Is Earned Less Paid");
+    expect(html).not.toContain(">Earned<");
   });
 
   it("paid ahead: the third line is Ahead, and it says so in his own name", () => {
@@ -200,26 +211,65 @@ describe("a person's statement says Owed is Earned less Paid", () => {
     expect(count(html, "$500.00")).toBe(2);
   });
 
-  it("on the clock: the statement withholds the owed figure, exactly as the card does", () => {
-    const html = statement(ON_CLOCK);
+  it("on the clock: the statement withholds the owed figure, exactly as the card does — and draws no period row", () => {
+    const html = statement(ON_CLOCK, { periods: [{ ...VIEWED, gross: 300 }] });
     expect(html).toContain("On the clock");
     expect(html).toContain("A shift is still running, so the amount is not final.");
-    // $300.00 is what he has EARNED. If the Owed row had drawn it too there would be two.
+    // The running shift's hours are in no row yet, so a "left" on its period would be short a
+    // day's work: no period row at all, by the same rule that withholds the total. $300.00 is
+    // drawn once, in the all-time proof, which has always printed the closed figures.
+    expect(html).not.toContain("Oct 1 to Oct 15");
+    expect(html).not.toContain("Covered");
     expect(count(html, "$300.00")).toBe(1);
+    expect(html).toContain("Earned $300.00 less paid $0.00, all time.");
+    // The locked-and-still-owed row waits too: nothing per period while the hours are moving.
+    expect(statement(person({ ...ON_CLOCK, earned: 1500, paid: 100, owed: 1400 }), { periods: [{ ...VIEWED, gross: 300 }] })).not.toContain("Locked Pay Periods Still Owed");
   });
 
-  it("the open pay periods and what has already gone against them", () => {
-    const html = statement(OWED, {
-      periods: [
-        { start: "2026-08-16", end: "2026-09-01", gross: 520 },
-        { start: "2026-09-01", end: "2026-09-16", gross: 892.5 },
-      ],
-    });
-    expect(html).toContain("Pay Periods Still Open");
+  it("the open pay periods say what is LEFT on each, the money paid landed on the oldest first", () => {
+    const periods = [
+      { start: "2026-08-16", end: "2026-09-01", gross: 520 },
+      { start: "2026-09-01", end: "2026-09-16", gross: 892.5 },
+    ];
+    const html = statement(OWED, { periods });
+    // $1,212.25 has gone against these two: the oldest is covered outright, the rest lands on the next.
     expect(html).toContain("Aug 16 to Aug 31");
-    expect(html).toContain("$520.00");
-    expect(html).toContain("$892.50");
-    expect(html).toContain("Less $1,212.25 you have already paid against these.");
+    expect(html).toContain(">Covered<");
+    expect(html).toContain("$520.00 earned · $520.00 paid");
+    expect(html).toContain("Sep 1 to Sep 15");
+    expect(html).toContain("$892.50 earned · $692.25 paid");
+    expect(html.indexOf("Aug 16 to Aug 31")).toBeLessThan(html.indexOf("Sep 1 to Sep 15"));
+    // The rows add up to the owed figure, by the same function the screen read.
+    const { rows, earlier } = leftByPeriod(periods, OWED.owed);
+    expect(rows.map((r) => r.left)).toEqual([0, 200.25]);
+    expect(rows.reduce((s, r) => s + r.left, 0) + earlier).toBe(OWED.owed);
+    expect(html).not.toContain("already paid against");
+    // Nothing paid yet on a period says so in words, not as a $0.00.
+    expect(statement(person({ earned: 892.5, paid: 0, owed: 892.5 }), { periods: [periods[1]] })).toContain("$892.50 earned · nothing paid yet");
+    // Owed beyond the open periods (an undone payment whose unwind stopped partway left hours
+    // locked) is its own row, so the rows never fall short of the total with nothing saying why.
+    const beyond = statement(person({ earned: 1500, paid: 100, owed: 1400 }), { periods: [periods[1]] });
+    expect(beyond).toContain("Locked Pay Periods Still Owed");
+    expect(beyond).toContain("An undone payment left these hours locked.");
+    expect(beyond).toContain("$507.50");
+  });
+
+  it("paid ahead, or paid up, with periods still open: every row reads Covered under the word, and no locked row", () => {
+    const periods = [
+      { start: "2026-08-16", end: "2026-09-01", gross: 520 },
+      { start: "2026-09-01", end: "2026-09-16", gross: 280 },
+    ];
+    const ahead = statement(AHEAD, { periods });
+    expect(count(ahead, ">Covered<")).toBe(2);
+    expect(ahead).toContain("$520.00 earned · $520.00 paid");
+    expect(ahead).toContain("$280.00 earned · $280.00 paid");
+    expect(ahead).toContain(">Ahead<");
+    expect(ahead).toContain("Dana is $200 ahead. It comes off the next hours.");
+    expect(ahead).not.toContain("Locked Pay Periods Still Owed");
+    const square = statement(SQUARE, { periods: [{ ...periods[0], gross: 500 }] });
+    expect(count(square, ">Covered<")).toBe(1);
+    expect(square).toContain("Paid Up");
+    expect(square).not.toContain("Locked Pay Periods Still Owed");
   });
 
   it("held mileage is its own line and is in none of the three figures", () => {
@@ -482,8 +532,17 @@ describe("the form that records a payment", () => {
     const html = sheet();
     expect(html).toContain("Pay Sam Tillery");
     expect(html).toContain("Owed $200.25");
-    expect(html).toContain("Sep 1 to Sep 15 $892.50");
-    expect(html).toContain("Less $692.25 you have already paid against these.");
+    // What is LEFT on the period, the same row the statement draws — not the gross with a sentence
+    // subtracting from it.
+    expect(html).toContain("Sep 1 to Sep 15 $200.25 left");
+    expect(html).not.toContain("$892.50");
+    expect(html).not.toContain("already paid against");
+    // A period the money already covers says so in the same line, and two periods read oldest first.
+    const covered = sheet({
+      person: AHEAD,
+      periods: [{ start: "2026-09-01", end: "2026-09-16", gross: 280 }, { start: "2026-08-16", end: "2026-09-01", gross: 520 }],
+    });
+    expect(covered).toContain("Aug 16 to Aug 31 covered · Sep 1 to Sep 15 covered");
   });
 
   it("a refusal from the server is drawn inside the form, over the typed figure", () => {

@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button";
 import { InfoPopup } from "@/components/info-popup";
 import { formatCurrency } from "@/lib/utils";
 import {
-  alreadyAppliedTo,
   firstName,
+  leftByPeriod,
   owedReading,
   paymentsToShow,
   periodLabel,
@@ -146,7 +146,7 @@ export function PersonStatement({
 }) {
   const who = firstName(balance.name);
   const reading = owedReading({ name: balance.name, owed: balance.owed, onClock });
-  const applied = alreadyAppliedTo(periods, balance.owed);
+  const { rows, earlier } = leftByPeriod(periods, balance.owed);
   const inView = periodLabel(period.start, period.end);
   // How much of the held figure the Mileage block below is actually holding, and which other pay
   // periods hold the rest. Matched on the period's own bounds, not on an index or a count.
@@ -157,12 +157,18 @@ export function PersonStatement({
 
   return (
     <div className="border-t border-slate-200 bg-slate-50/70 px-4 py-4 sm:px-5">
-      {/* OWED = EARNED − PAID, in that order, with the line above Owed that makes it a subtraction
-          on sight. Erik's own framing, and until now the page never said it: both halves were
-          computed and handed over, and only the answer was drawn. */}
+      {/* ONE BOX, THREE LAYERS, ONE SUM. Erik, 2026-11-07, staring at a tech's card: two open periods
+          at their gross ($1,366.00, $1,480.80) under an Owed of $1,846.80 and a sentence saying $1,000
+          had "already gone against these" — "it's not telling me anything I need to know", which is
+          exactly how much he owes and what is left on each timecard. So:
+            · each open pay period shows what is LEFT on it, the money already paid landed oldest
+              first (leftByPeriod — the lock rule's own order), with earned and paid as small print;
+            · the total row is the owed figure, by the one rule the card above reads (owedReading);
+            · one line under it is the all-time proof, Earned less Paid, instead of a box of its own.
+          The rows add up to the total to the cent, and the sentence is gone. */}
       <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Owed Is Earned Less Paid</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Left on Each Pay Period</h3>
           <InfoPopup
             title="How These Three Figures Are Worked Out"
             label="About Earned, Paid and Owed"
@@ -170,15 +176,43 @@ export function PersonStatement({
             className="-my-2 -mr-2"
           />
         </div>
-        <div className="mt-1 flex items-baseline justify-between gap-3">
-          <span className="text-sm text-slate-600">Earned</span>
-          <span className="text-base font-semibold tabular-nums text-slate-900">{formatCurrency(balance.earned)}</span>
-        </div>
-        <div className="mt-1 flex items-baseline justify-between gap-3">
-          <span className="text-sm text-slate-600">Paid</span>
-          <span className="text-base font-semibold tabular-nums text-slate-900">{formatCurrency(balance.paid)}</span>
-        </div>
-        <div className="mt-2 flex items-baseline justify-between gap-3 border-t border-slate-200 pt-2">
+        {/* WHILE A SHIFT RUNS, NO PERIOD GETS A FIGURE — the same rule that withholds the total
+            (owedReading): the running shift's hours are not in any row yet, so a "left" on the
+            period it belongs to would be short a day's work, and "Covered" could be a lie. The
+            amber line under the total says why there is nothing here. */}
+        {reading.kind !== "onClock" && rows.length > 0 && (
+          <div className="mt-1 divide-y divide-slate-100">
+            {rows.map((r) => (
+              <div key={`${r.start}|${r.end}`} className="py-2">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-sm text-slate-700">{periodLabel(r.start, r.end)}</span>
+                  {/* A period the money already covers, that has not locked yet, says so in a word
+                      rather than drawing a $0.00 that looks like a figure he owes. */}
+                  <span className={`text-base font-semibold tabular-nums ${r.left > 0.005 ? "text-slate-900" : "text-slate-500"}`}>
+                    {r.left > 0.005 ? formatCurrency(r.left) : "Covered"}
+                  </span>
+                </div>
+                <div className="text-xs text-slate-500">
+                  {`${formatCurrency(r.gross)} earned · ${r.paid > 0.005 ? `${formatCurrency(r.paid)} paid` : "nothing paid yet"}`}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {/* Money owed beyond the open periods. It happens one way (leftByPeriod says why): a payment
+            was undone and its unwind stopped partway, so hours stayed locked behind money that is
+            gone. Ordinarily zero, and then this row is not drawn; when it is not, the rows would
+            otherwise fall short of the total with nothing saying why. */}
+        {reading.kind !== "onClock" && earlier > 0.005 && (
+          <div className="border-t border-slate-100 py-2">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-sm text-slate-700">Locked Pay Periods Still Owed</span>
+              <span className="text-base font-semibold tabular-nums text-slate-900">{formatCurrency(earlier)}</span>
+            </div>
+            <div className="text-xs text-slate-500">An undone payment left these hours locked.</div>
+          </div>
+        )}
+        <div className="mt-1 flex items-baseline justify-between gap-3 border-t border-slate-200 pt-2">
           <span className="text-sm font-semibold text-slate-900">{reading.kind === "ahead" ? "Ahead" : "Owed"}</span>
           {/* THE SAME RULE AS THE CARD, from the same function: a withheld figure has no number to
               print, so this cannot quietly draw a balance that is short a running shift. */}
@@ -195,26 +229,12 @@ export function PersonStatement({
         {reading.line && (
           <p className={`mt-1.5 text-xs ${reading.kind === "onClock" ? "text-amber-700" : "text-slate-500"}`}>{reading.line}</p>
         )}
+        {/* OWED = EARNED − PAID, Erik's own framing, kept — as the one line of proof under the
+            figure it proves, not as three big all-time numbers above the ones he acts on. */}
+        <p className="mt-1.5 text-xs text-slate-500">
+          {`Earned ${formatCurrency(balance.earned)} less paid ${formatCurrency(balance.paid)}, all time.`}
+        </p>
       </div>
-
-      {periods.length > 0 && (
-        <div className="mt-3">
-          <h3 className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Pay Periods Still Open</h3>
-          <div className="mt-1 divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200 bg-white">
-            {periods.map((p) => (
-              <div key={`${p.start}|${p.end}`} className="flex items-baseline justify-between gap-3 px-4 py-2">
-                <span className="text-sm text-slate-700">{periodLabel(p.start, p.end)}</span>
-                <span className="text-sm font-medium tabular-nums text-slate-900">{formatCurrency(p.gross)}</span>
-              </div>
-            ))}
-          </div>
-          {/* Two numbers on one card that fail to add up: the open periods come to more than is
-              owed exactly when money has already gone against those same hours. Say it. */}
-          {applied > 0.005 && reading.kind === "owed" && (
-            <p className="mt-1 px-1 text-xs text-slate-500">Less {formatCurrency(applied)} you have already paid against these.</p>
-          )}
-        </div>
-      )}
 
       {/* HELD MILEAGE IS ITS OWN LINE AND ITS OWN BUCKET (0095's two-lock rule): miles here, never
           dollars, and never added into any of the three figures above.
