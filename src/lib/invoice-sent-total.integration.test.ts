@@ -25,6 +25,9 @@ import { customerHoldsOlderCopy } from "@/lib/invoice-revision";
  * every other suite's read of invoices. Erik applies 0405 on the test database before the deploy,
  * so on CI that branch is skipped; on a fresh rebuild it runs once, twice-safe.
  *
+ * Every stamp this suite writes after the first send is now() plus an offset: inside one transaction
+ * now() never moves, and the rule compares instants.
+ *
  * One TEST company minted inside the transaction (throwaway-org.db-fixture.ts), every row named
  * TEST. Never run outside CI by hand; it skips without the test database's credentials.
  *   TEST_DB_HOST=… TEST_DB_USER=… TEST_DBPW=… npx vitest run <this file>
@@ -111,7 +114,10 @@ d("0405: every write that moves sent_at records the total it carried", () => {
   });
 
   it("a change to total after the send leaves the recorded figure where it was", async () => {
-    await c.query("update public.invoices set total = 150, revised_at = now() where id = $1", [invId]);
+    // INSIDE ONE TRANSACTION now() IS ONE INSTANT, the transaction's start, so a change stamped now()
+    // would share the send's instant and the rule's "changed strictly after it went out" could never
+    // hold (CI run 42462123874 proved it). Half a second later: after the send, before the re-send's +1s.
+    await c.query("update public.invoices set total = 150, revised_at = now() + interval '500 milliseconds' where id = $1", [invId]);
     const r = await facts();
     expect(r.total).toBe(150);
     expect(r.sent_total).toBe(100);
