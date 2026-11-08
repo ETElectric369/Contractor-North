@@ -117,6 +117,10 @@ describe("a row", () => {
     expect(s).not.toContain("Card on File");
     expect(s).toContain('type="date"');
     expect(s).toContain('aria-label="Comp Until Date"');
+    // The date box is THE day field (cn-v1153): the native type="date" above is DayField's, not a box of this row's own.
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/bugs/company-list.tsx"), "utf8");
+    expect(src).toMatch(/<DayField aria-label="Comp Until Date"/);
+    expect(src).not.toContain('type="date"');
     expect(doorWords(s)).toEqual(["Comp Until"]);
     // No date picked yet: the door waits.
     expect(s).toMatch(/<button[^>]*disabled=""[^>]*>Comp Until<\/button>/);

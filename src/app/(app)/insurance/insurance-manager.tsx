@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { FileText, Paperclip, Plus, Pencil, Umbrella, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { NumberInput } from "@/components/ui/number-input";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -154,8 +155,8 @@ export function InsuranceManager({ items, orgId, canEdit, canAdd = canEdit }: { 
             <div className="col-span-2 sm:col-span-1"><Label htmlFor="i-name">Carrier / name</Label><Input autoComplete="off" id="i-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. State Farm (optional — file name used if blank)" /></div>
             <div><Label htmlFor="i-policy">Policy #</Label><Input id="i-policy" value={policy} onChange={(e) => setPolicy(e.target.value)} /></div>
             <div><Label htmlFor="i-amount">Annual premium</Label><NumberInput id="i-amount" value={amount} onValueChange={setAmount} /></div>
-            <div><Label htmlFor="i-issued">Effective</Label><Input id="i-issued" type="date" value={issued} onChange={(e) => setIssued(e.target.value)} /></div>
-            <div><Label htmlFor="i-expires">Expires</Label><Input id="i-expires" type="date" value={expires} onChange={(e) => setExpires(e.target.value)} /></div>
+            <div><Label htmlFor="i-issued">Effective</Label><DayField id="i-issued" value={issued} onChange={(iso) => setIssued(iso)} /></div>
+            <div><Label htmlFor="i-expires">Expires</Label><DayField id="i-expires" value={expires} onChange={(iso) => setExpires(iso)} /></div>
           </div>
           <div><Label htmlFor="i-notes">Notes</Label><Textarea id="i-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Coverage limit, agent, renewal contact…" /></div>
           <div>
@@ -236,8 +237,8 @@ export function InsuranceManager({ items, orgId, canEdit, canAdd = canEdit }: { 
           <div className="col-span-2 sm:col-span-1"><Label htmlFor="ie-name">Carrier / name</Label><Input autoComplete="off" id="ie-name" value={eName} onChange={(e) => setEName(e.target.value)} placeholder="e.g. State Farm (optional)" /></div>
           <div><Label htmlFor="ie-policy">Policy #</Label><Input id="ie-policy" value={ePolicy} onChange={(e) => setEPolicy(e.target.value)} /></div>
           <div><Label htmlFor="ie-amount">Annual premium</Label><NumberInput id="ie-amount" value={eAmount} onValueChange={setEAmount} /></div>
-          <div><Label htmlFor="ie-issued">Effective</Label><Input id="ie-issued" type="date" value={eIssued} onChange={(e) => setEIssued(e.target.value)} /></div>
-          <div><Label htmlFor="ie-expires">Expires</Label><Input id="ie-expires" type="date" value={eExpires} onChange={(e) => setEExpires(e.target.value)} /></div>
+          <div><Label htmlFor="ie-issued">Effective</Label><DayField id="ie-issued" value={eIssued} onChange={(iso) => setEIssued(iso)} /></div>
+          <div><Label htmlFor="ie-expires">Expires</Label><DayField id="ie-expires" value={eExpires} onChange={(iso) => setEExpires(iso)} /></div>
         </div>
         <div className="mt-3"><Label htmlFor="ie-notes">Notes</Label><Textarea id="ie-notes" rows={2} value={eNotes} onChange={(e) => setENotes(e.target.value)} placeholder="Coverage limit, agent, renewal contact…" /></div>
         {editing && (

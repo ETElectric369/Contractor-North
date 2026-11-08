@@ -7,6 +7,7 @@ import Link from "next/link";
 import { MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { SupplierInput } from "@/components/supplier-input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -689,7 +690,7 @@ function BillEditModal({
           </div>
           <div>
             <Label htmlFor="be-date">Bill Date</Label>
-            <Input id="be-date" type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} />
+            <DayField id="be-date" value={billDate} onChange={(iso) => setBillDate(iso)} />
           </div>
           <div className={follows ? "hidden" : undefined}>
             <Label htmlFor="be-status">Status</Label>

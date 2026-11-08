@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1153", date: "2026-11-08", line: "One day field everywhere: every date box opens the phone's own picker, Move to a Day drops the 14-day strip, the come-back shortcuts stay, and a row of boxes is one height." },
   { version: "cn-v1152", date: "2026-11-08", line: "Invoices: billing-type switch, one add box, lines move up/down, Send Again only on a stale paid figure; a zip of bills opens; one payment-method list; Pay at the Register; Report Back gone." },
   { version: "cn-v1151", date: "2026-11-07", line: "Calendars: the day header stays put while you scroll a week; each box says its hours, state and notes; schedule boxes say Done, Paid or On Hold with the reason; every pop-up drags by its title bar." },
   { version: "cn-v1150", date: "2026-11-07", line: "Payroll: the Record Payment button sits right under what you owe, above the payment list, where you look for it." },

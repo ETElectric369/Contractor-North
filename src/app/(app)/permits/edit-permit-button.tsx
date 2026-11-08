@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Pencil } from "lucide-react";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { updatePermit } from "./actions";
 import { PERMIT_TYPES as TYPES, permitStatusOptions } from "@/lib/permit-options";
 
@@ -109,9 +110,9 @@ export function EditPermitButton({ permit, jobId, defaultType }: { permit: Permi
             <div><Label htmlFor="ep-num">Permit #</Label><Input id="ep-num" value={num} onChange={(e) => setNum(e.target.value)} /></div>
             <div><Label htmlFor="ep-auth">Authority</Label><Input id="ep-auth" value={authority} onChange={(e) => setAuthority(e.target.value)} placeholder="e.g. County Building Department" /></div>
             <div><Label htmlFor="ep-status">Status</Label><Select id="ep-status" value={status} onChange={(e) => setStatus(e.target.value)}>{permitStatusOptions(status).map((o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}</Select></div>
-            <div><Label htmlFor="ep-applied">Applied date</Label><Input id="ep-applied" type="date" value={applied} onChange={(e) => setApplied(e.target.value)} /></div>
-            <div><Label htmlFor="ep-issued">Issued date</Label><Input id="ep-issued" type="date" value={issued} onChange={(e) => setIssued(e.target.value)} /></div>
-            <div><Label htmlFor="ep-expires">Expires</Label><Input id="ep-expires" type="date" value={expires} onChange={(e) => setExpires(e.target.value)} /></div>
+            <div><Label htmlFor="ep-applied">Applied date</Label><DayField id="ep-applied" value={applied} onChange={(iso) => setApplied(iso)} /></div>
+            <div><Label htmlFor="ep-issued">Issued date</Label><DayField id="ep-issued" value={issued} onChange={(iso) => setIssued(iso)} /></div>
+            <div><Label htmlFor="ep-expires">Expires</Label><DayField id="ep-expires" value={expires} onChange={(iso) => setExpires(iso)} /></div>
           </div>
           {/* NO INSPECTION FIELDS HERE (0378): a permit needs several inspections, from different
               authorities, in order — they are booked and written up on the permit's own card. */}

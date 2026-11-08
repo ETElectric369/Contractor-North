@@ -4,7 +4,8 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Label, Select } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { setCrewOffRange, clearCrewOffRange } from "../timeclock/crew-actions";
 import { useLang } from "@/components/lang-provider";
@@ -112,11 +113,11 @@ export function TimeOffButton({
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <Label htmlFor="to-from">{t("ag_rail_firstDay")}</Label>
-                <Input id="to-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+                <DayField id="to-from" value={from} onChange={(iso) => setFrom(iso)} />
               </div>
               <div>
                 <Label htmlFor="to-to">{t("ag_rail_lastDay")}</Label>
-                <Input id="to-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+                <DayField id="to-to" value={to} onChange={(iso) => setTo(iso)} />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2">

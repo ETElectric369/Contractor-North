@@ -2,6 +2,7 @@
 
 import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { DayField } from "@/components/day-field";
 import { useLang } from "@/components/lang-provider";
 import { translator, fillText } from "@/lib/i18n";
 import {
@@ -24,7 +25,8 @@ import {
  *               line under it says why: the reason IS the reminder the job comes back with (setJobHold
  *               refuses a hold with no reason). Snooze and Still Waiting show it only when no reason is
  *               saved yet (askWhy), and never require it.
- *   the chips   Tomorrow · Mon · In a Week (picked) · Pick a Day (a date, today or later).
+ *   the chips   Tomorrow · Mon · In a Week (picked) · Pick a Day (THE one DayField, cn-v1153: the
+ *               phone's own picker; today or later when the company's today is known here).
  *   the button  its words are the caller's: Hold It, Snooze, Still Waiting.
  *
  * WHOSE TODAY. Given `todayStr` (the company's today, from the server) the picker works the day out
@@ -141,14 +143,7 @@ export function ComeBackPicker({
         </button>
       </div>
       {choice === "date" && (
-        <input
-          type="date"
-          value={date}
-          min={todayStr}
-          onChange={(e) => setDate(e.target.value)}
-          aria-label={t("ag_rail_dayItComesBack")}
-          className="h-11 rounded-lg border border-slate-300 px-3 text-sm"
-        />
+        <DayField value={date} min={todayStr} onChange={(iso) => setDate(iso)} aria-label={t("ag_rail_dayItComesBack")} />
       )}
       {/* The day, in words, before anything is saved (text to visual: the chip says what it means). */}
       {picked && picked.ok && todayStr && (

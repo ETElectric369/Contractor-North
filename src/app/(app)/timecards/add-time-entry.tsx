@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { Input, Label, Select } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { LunchCheckbox } from "@/components/lunch-checkbox";
 import { clockDoorWords } from "@/lib/long-shift";
 import { lunchMinutesFor } from "@/lib/lunch-rule";
@@ -517,13 +518,11 @@ export function AddTimeEntry({
 
           <div>
             <Label htmlFor="ate-day">Day</Label>
-            <Input
+            <DayField
               id="ate-day"
-              type="date"
-              className="h-11"
               value={day}
-              onChange={(e) => {
-                setDay(e.target.value);
+              onChange={(iso) => {
+                setDay(iso);
                 whoOrDayChanged();
               }}
             />

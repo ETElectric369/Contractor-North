@@ -6,6 +6,7 @@ import { Copy, Pencil, Scissors, Trash2, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { NumberInput } from "@/components/ui/number-input";
 import { updateTimeEntry, deleteTimeEntry, joinTimeEntries, moveTimeEntryCut, splitTimeEntry } from "../timeclock/actions";
 import { buildShiftSpan } from "../timeclock/shift-span";
@@ -721,12 +722,10 @@ export function EditEntryButton({
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div>
               <Label htmlFor="e-date">Date</Label>
-              <Input
+              <DayField
                 id="e-date"
-                type="date"
                 value={date}
-                onChange={(e) => {
-                  const v = e.target.value;
+                onChange={(v) => {
                   // A same-day shift's end date follows the start date; a shift that
                   // already ends on another day keeps its own end date.
                   setEndDate((prev) => (prev === date ? v : prev));
@@ -736,15 +735,15 @@ export function EditEntryButton({
             </div>
             <div>
               <Label htmlFor="e-start">Start</Label>
-              <Input id="e-start" type="time" value={startT} onChange={(e) => setStartT(e.target.value)} />
+              <Input id="e-start" className="h-11" type="time" value={startT} onChange={(e) => setStartT(e.target.value)} />
             </div>
             <div>
               <Label htmlFor="e-end">End</Label>
-              <Input id="e-end" type="time" value={endT} onChange={(e) => setEndT(e.target.value)} />
+              <Input id="e-end" className="h-11" type="time" value={endT} onChange={(e) => setEndT(e.target.value)} />
             </div>
             <div>
               <Label htmlFor="e-end-date">End date</Label>
-              <Input id="e-end-date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+              <DayField id="e-end-date" value={endDate} onChange={(iso) => setEndDate(iso)} />
               {span?.overnight && <p className="mt-1 text-xs text-slate-500">Overnight shift</p>}
             </div>
           </div>

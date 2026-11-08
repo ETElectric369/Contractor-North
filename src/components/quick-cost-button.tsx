@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Wallet, DollarSign, Camera, Check, Paperclip, Keyboard } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Input, Label, Select } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { SupplierInput } from "@/components/supplier-input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
@@ -740,7 +741,7 @@ function SnapCostButton({
             </div>
             <div>
               <Label htmlFor="qc-date">Date</Label>
-              <Input id="qc-date" type="date" value={billDate} onChange={(e) => { setBillDate(e.target.value); setDateTouched(true); }} />
+              <DayField id="qc-date" value={billDate} onChange={(iso) => { setBillDate(iso); setDateTouched(true); }} />
             </div>
           </div>
           {!jobId && pickerJobs && pickerJobs.length > 0 && (
@@ -1228,13 +1229,12 @@ function TypeItInButton({
             </div>
             <div>
               <Label htmlFor="ti-date">Date</Label>
-              <Input
+              <DayField
                 id="ti-date"
-                type="date"
                 value={date}
-                onChange={(e) => {
+                onChange={(iso) => {
                   dateTouched.current = true;
-                  setDate(e.target.value);
+                  setDate(iso);
                 }}
               />
             </div>

@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarPlus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DayField } from "@/components/day-field";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
@@ -269,12 +270,10 @@ function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToS
 
         <section>
           <Heading>{t("ag_btn_day")}</Heading>
-          <input
-            type="date"
+          <DayField
             value={day}
-            onChange={(ev) => setDay(ev.target.value)}
+            onChange={(iso) => setDay(iso)}
             aria-label={t("ag_btn_day")}
-            className="h-11 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-900"
           />
           {day && <p className="mt-1 text-xs text-slate-500">{fillText(t("ag_rail_dayKeepsOthers"), { day: dayWords(day, lang) })}</p>}
         </section>

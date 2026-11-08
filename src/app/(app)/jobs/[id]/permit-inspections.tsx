@@ -7,6 +7,7 @@ import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { InfoPopup } from "@/components/info-popup";
 import { useToast } from "@/components/toast";
 import {
@@ -396,7 +397,7 @@ function BookingForm({
         </div>
         <div>
           <Label htmlFor={`id-${id}`}>Day</Label>
-          <Input id={`id-${id}`} className="h-11" type="date" value={day} onChange={(e) => setDay(e.target.value)} />
+          <DayField id={`id-${id}`} value={day} onChange={(iso) => setDay(iso)} />
         </div>
         <div>
           <Label htmlFor={`iw-${id}`}>Part of the Day</Label>
@@ -472,7 +473,7 @@ function ResultForm({
         </div>
         <div>
           <Label htmlFor={`ro-${row.id}`}>Day They Came</Label>
-          <Input id={`ro-${row.id}`} className="h-11" type="date" value={on} onChange={(e) => setOn(e.target.value)} />
+          <DayField id={`ro-${row.id}`} value={on} onChange={(iso) => setOn(iso)} />
         </div>
         <div>
           <Label htmlFor={`rw-${row.id}`}>Who Came</Label>

@@ -7,6 +7,7 @@ import { CalendarPlus, Copy, MessageSquare, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { createScheduleProposal, cancelScheduleProposal } from "../../schedule/actions";
 
 type Slot = { date: string; time: string };
@@ -173,13 +174,13 @@ export function ProposeDatesButton({
               <div className="space-y-2">
                 {slots.map((sl, i) => (
                   <div key={i} className="grid grid-cols-2 gap-2">
-                    <Input
-                      type="date"
+                    <DayField
                       value={sl.date}
-                      onChange={(e) => setSlots((arr) => arr.map((x, xi) => (xi === i ? { ...x, date: e.target.value } : x)))}
+                      onChange={(iso) => setSlots((arr) => arr.map((x, xi) => (xi === i ? { ...x, date: iso } : x)))}
                       aria-label={`Option ${i + 1} date`}
                     />
                     <Input
+                      className="h-11"
                       type="time"
                       value={sl.time}
                       onChange={(e) => setSlots((arr) => arr.map((x, xi) => (xi === i ? { ...x, time: e.target.value } : x)))}

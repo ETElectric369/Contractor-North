@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { WorkShapeControls } from "@/components/work-shape-controls";
 import { useRouter } from "next/navigation";
 import { Phone, Mail, Globe, MapPin, UserPlus } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { InquiryModal } from "./inquiry-modal";
@@ -370,13 +370,12 @@ export function LeadDetails({
               <label htmlFor={`follow-${inquiry.id}`} className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">
                 {t("ld_followUp")}
               </label>
-              <Input
+              <DayField
                 id={`follow-${inquiry.id}`}
-                type="date"
                 value={followUp}
                 min={todayYmd}
-                onChange={(e) => pickFollowUp(e.target.value)}
-                className="h-11 w-40 text-xs"
+                onChange={(iso) => pickFollowUp(iso)}
+                className="w-40 text-xs"
               />
             </div>
             <button type="button" disabled={pending} onClick={markContacted} className={PANEL_BTN}>

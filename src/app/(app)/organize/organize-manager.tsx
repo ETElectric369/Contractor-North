@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Trash2, Receipt, StickyNote, FileText, Briefcase, Check, AlertCircle, Archive, RotateCcw, Pencil, ListTodo } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { NumberInput } from "@/components/ui/number-input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Badge } from "@/components/ui/badge";
@@ -407,7 +408,7 @@ export function OrganizeManager({
             </div>
             <div>
               <Label htmlFor="oi-date">Date</Label>
-              <Input id="oi-date" type="date" value={itemDate} onChange={(e) => setItemDate(e.target.value)} />
+              <DayField id="oi-date" value={itemDate} onChange={(iso) => setItemDate(iso)} />
             </div>
             <div>
               <Label htmlFor="oi-category">Category</Label>

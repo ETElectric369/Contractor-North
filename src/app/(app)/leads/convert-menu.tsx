@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { NewInspectionButton } from "../appointments/new-inspection-button";
 import { convertInquiry, suggestVisitSlots } from "./actions";
 import { workKind } from "@/lib/schedule/work-shape";
@@ -316,7 +317,7 @@ export function ConvertMenu({
             {mode === "book" ? (
               <div>
                 <Label htmlFor="inspect-date">{isWork ? t("ld_startDate") : t("ld_day")}</Label>
-                <Input id="inspect-date" type="date" value={inspectDate} onChange={(e) => { touchedRef.current = true; setSlotNote(null); setInspectDate(e.target.value); }} />
+                <DayField id="inspect-date" value={inspectDate} onChange={(iso) => { touchedRef.current = true; setSlotNote(null); setInspectDate(iso); }} />
                 {slotNote && <p className="mt-1 text-xs text-brand">{slotNote}</p>}
                 <p className="mt-1 text-xs text-slate-400">{t("ld_defaultsToNine")}</p>
               </div>
@@ -326,13 +327,13 @@ export function ConvertMenu({
                 {slotNote && <p className="text-xs text-brand">{slotNote}</p>}
                 {slots.map((sl, i) => (
                   <div key={i} className="grid grid-cols-2 gap-2">
-                    <Input
-                      type="date"
+                    <DayField
                       value={sl.date}
-                      onChange={(ev) => { touchedRef.current = true; setSlots((a) => a.map((x, xi) => (xi === i ? { ...x, date: ev.target.value } : x))); }}
+                      onChange={(iso) => { touchedRef.current = true; setSlots((a) => a.map((x, xi) => (xi === i ? { ...x, date: iso } : x))); }}
                       aria-label={fillText(t("ld_optionDate"), { n: String(i + 1) })}
                     />
                     <Input
+                      className="h-11"
                       type="time"
                       value={sl.time}
                       onChange={(ev) => { touchedRef.current = true; setSlots((a) => a.map((x, xi) => (xi === i ? { ...x, time: ev.target.value } : x))); }}

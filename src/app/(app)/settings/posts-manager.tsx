@@ -6,6 +6,7 @@ import { ExternalLink, Eye, FileText, Pencil, Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input, Label, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
@@ -285,11 +286,10 @@ export function PostsManager({
             </div>
             <div>
               <Label htmlFor="post-date">Publish date</Label>
-              <Input
+              <DayField
                 id="post-date"
-                type="date"
                 value={editing.published_at}
-                onChange={(e) => setEditing({ ...editing, published_at: e.target.value })}
+                onChange={(iso) => setEditing({ ...editing, published_at: iso })}
                 className="max-w-[12rem]"
               />
               <p className="mt-1 text-xs text-slate-400">

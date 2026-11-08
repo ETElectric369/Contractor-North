@@ -8,6 +8,7 @@ import Link from "next/link";
 import { Trash2, Pencil, Check, X, ArrowUpDown, ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, Layers, PackagePlus, CalendarClock, Ban, Undo2, Send, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { NumberInput } from "@/components/ui/number-input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Card, CardContent } from "@/components/ui/card";
@@ -922,17 +923,16 @@ export function InvoiceDetail({
               Due Date
             </Label>
             {dueEditing && !linesLocked ? (
-              <Input
+              <DayField
                 id="inv-due"
-                type="date"
                 defaultValue={toDateInput(invoice.due_date)}
-                onChange={(e) => pickDue(e.target.value)}
+                onChange={(iso) => pickDue(iso)}
                 onBlur={() => {
                   flushDue();
                   setDueEditing(false);
                 }}
                 disabled={pending}
-                className="h-11 w-48"
+                className="w-48"
                 autoFocus
               />
             ) : (
@@ -1582,8 +1582,8 @@ export function InvoiceDetail({
                       </Select>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Input type="date" value={payEditDate} onChange={(e) => setPayEditDate(e.target.value)} className="w-40" aria-label="Payment date" />
-                      <Input value={payEditNote} onChange={(e) => setPayEditNote(e.target.value)} placeholder="Note" />
+                      <DayField value={payEditDate} onChange={(iso) => setPayEditDate(iso)} className="w-40" aria-label="Payment date" />
+                      <Input value={payEditNote} className="h-11" onChange={(e) => setPayEditNote(e.target.value)} placeholder="Note" />
                       <button
                         onClick={() =>
                           start(async () => {
@@ -1870,7 +1870,7 @@ function SetAsideSheet({
         <p className="text-sm text-slate-600">It leaves your list until that day, then comes back on it. Nothing is sent, and nothing on the invoice changes.</p>
         <div>
           <Label htmlFor="sa-date">Until</Label>
-          <Input id="sa-date" type="date" value={date} min={todayStrInTz(tz)} onChange={(e) => setDate(e.target.value)} className="h-11 w-48" />
+          <DayField id="sa-date" value={date} noPast tz={tz} onChange={(iso) => setDate(iso)} className="w-48" />
         </div>
         <div>
           <Label htmlFor="sa-why">Why?</Label>

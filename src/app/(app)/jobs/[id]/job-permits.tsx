@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Trash2, ClipboardCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { NumberInput } from "@/components/ui/number-input";
 import { formatDate } from "@/lib/utils";
 import { useToast } from "@/components/toast";
@@ -106,7 +107,7 @@ export function JobPermits({
             <div><Label htmlFor="p-num">Permit #</Label><Input id="p-num" value={num} onChange={(e) => setNum(e.target.value)} /></div>
             <div><Label htmlFor="p-auth">Authority</Label><Input id="p-auth" value={authority} onChange={(e) => setAuthority(e.target.value)} placeholder="e.g. County Building Department" /></div>
             <div><Label htmlFor="p-status">Status</Label><Select id="p-status" value={status} onChange={(e) => setStatus(e.target.value)}>{STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></div>
-            <div><Label htmlFor="p-applied">Applied date</Label><Input id="p-applied" type="date" value={applied} onChange={(e) => setApplied(e.target.value)} /></div>
+            <div><Label htmlFor="p-applied">Applied date</Label><DayField id="p-applied" value={applied} onChange={(iso) => setApplied(iso)} /></div>
             <div><Label htmlFor="p-fee">Fee</Label><NumberInput id="p-fee" value={fee} onValueChange={setFee} /></div>
           </div>
           <div>

@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { BadgeDollarSign, Check, Copy, Loader2, Mail, MessageSquare, QrCode, Share } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
+import { DayField } from "@/components/day-field";
 import { ACTIONS_ROW_CLS } from "@/components/section-actions-menu";
 import { useToast } from "@/components/toast";
 import { collectArtifacts, emailInvoice, invoiceCollectStatus, recordPayment, settleUp, textInvoice, venmoQrFor } from "@/app/(app)/billing/actions";
@@ -1590,7 +1591,7 @@ function useOtherWay(
           {props.source === "invoice" && (
             <div>
               <label htmlFor="rp-date" className="mb-1 block text-xs font-medium text-slate-600">{t("su_datePaid")}</label>
-              <input id="rp-date" type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} className="h-11 w-full rounded-lg border border-slate-200 px-2 text-sm" />
+              <DayField id="rp-date" value={paidAt} onChange={(iso) => setPaidAt(iso)} />
             </div>
           )}
           <div className={props.source === "invoice" ? "" : "col-span-2"}>

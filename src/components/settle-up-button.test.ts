@@ -326,7 +326,10 @@ describe("the one Get Paid sheet", () => {
   it("every door into it is 44px: the method chips, the fields and the small Getting Paid Now? link", () => {
     const out = html({ ...INV_078, cardEnabled: true, methods: ["Cash", "Check"] });
     expect(out).toMatch(/class="inline-flex min-h-11 items-center rounded-lg border px-3 text-sm font-semibold capitalize/);
-    expect(out).toMatch(/id="rp-date"[^>]*class="h-11/);
+    // The day is the one DayField (cn-v1153): its Input wrapper writes class before id, so read the tag.
+    const dayField = out.match(/<input[^>]*id="rp-date"[^>]*>/)?.[0] ?? "";
+    expect(dayField).toContain('type="date"');
+    expect(dayField).toMatch(/class="(?:[^"]* )?h-11(?: [^"]*)?"/);
     const link = html({ ...INV_078, trigger: "link" });
     expect(link).toMatch(/<button type="button" class="inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline">Getting Paid Now\?<\/button>/);
   });

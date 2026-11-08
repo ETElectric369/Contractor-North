@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { formatDateShort } from "@/lib/utils";
 import { setBooksBegin } from "./books-begin-actions";
 
@@ -36,7 +36,7 @@ export function BooksBeginLine({ since, named, canChange }: { since: string | nu
           Supplier bills dated before this day never wait on you.
         </label>
         <div className="flex flex-wrap items-center gap-2">
-          <Input id="books-begin" type="date" className="h-11 w-44" value={day} onChange={(e) => setDay(e.target.value)} />
+          <DayField id="books-begin" className="w-44" value={day} onChange={(iso) => setDay(iso)} />
           <Button onClick={() => save(day || null)} disabled={pending || !day}>
             {pending ? "Saving…" : "Save"}
           </Button>

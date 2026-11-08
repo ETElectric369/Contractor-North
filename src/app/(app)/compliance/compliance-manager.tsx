@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { FileText, Plus, Pencil, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { NumberInput } from "@/components/ui/number-input";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -133,8 +134,8 @@ export function ComplianceManager({ items, orgId, canEdit, canAdd = canEdit }: {
             <div className="col-span-2 sm:col-span-1"><Label htmlFor="c-name">Provider / name</Label><Input autoComplete="off" id="c-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. State Farm GL (optional)" /></div>
             <div><Label htmlFor="c-policy">Policy / # </Label><Input id="c-policy" value={policy} onChange={(e) => setPolicy(e.target.value)} /></div>
             <div><Label htmlFor="c-amount">Annual cost</Label><NumberInput id="c-amount" value={amount} onValueChange={setAmount} /></div>
-            <div><Label htmlFor="c-issued">Issued</Label><Input id="c-issued" type="date" value={issued} onChange={(e) => setIssued(e.target.value)} /></div>
-            <div><Label htmlFor="c-expires">Expires</Label><Input id="c-expires" type="date" value={expires} onChange={(e) => setExpires(e.target.value)} /></div>
+            <div><Label htmlFor="c-issued">Issued</Label><DayField id="c-issued" value={issued} onChange={(iso) => setIssued(iso)} /></div>
+            <div><Label htmlFor="c-expires">Expires</Label><DayField id="c-expires" value={expires} onChange={(iso) => setExpires(iso)} /></div>
           </div>
           <div><Label htmlFor="c-notes">Notes</Label><Textarea id="c-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Agent, renewal contact, submission portal…" /></div>
           <div className="flex justify-end gap-2">
@@ -200,8 +201,8 @@ export function ComplianceManager({ items, orgId, canEdit, canAdd = canEdit }: {
           <div className="col-span-2 sm:col-span-1"><Label htmlFor="ce-name">Provider / name</Label><Input autoComplete="off" id="ce-name" value={eName} onChange={(e) => setEName(e.target.value)} placeholder="e.g. State Farm GL (optional)" /></div>
           <div><Label htmlFor="ce-policy">Policy / # </Label><Input id="ce-policy" value={ePolicy} onChange={(e) => setEPolicy(e.target.value)} /></div>
           <div><Label htmlFor="ce-amount">Annual cost</Label><NumberInput id="ce-amount" value={eAmount} onValueChange={setEAmount} /></div>
-          <div><Label htmlFor="ce-issued">Issued</Label><Input id="ce-issued" type="date" value={eIssued} onChange={(e) => setEIssued(e.target.value)} /></div>
-          <div><Label htmlFor="ce-expires">Expires</Label><Input id="ce-expires" type="date" value={eExpires} onChange={(e) => setEExpires(e.target.value)} /></div>
+          <div><Label htmlFor="ce-issued">Issued</Label><DayField id="ce-issued" value={eIssued} onChange={(iso) => setEIssued(iso)} /></div>
+          <div><Label htmlFor="ce-expires">Expires</Label><DayField id="ce-expires" value={eExpires} onChange={(iso) => setEExpires(iso)} /></div>
         </div>
         <div className="mt-3"><Label htmlFor="ce-notes">Notes</Label><Textarea id="ce-notes" rows={2} value={eNotes} onChange={(e) => setENotes(e.target.value)} placeholder="Agent, renewal contact, submission portal…" /></div>
       </Modal>

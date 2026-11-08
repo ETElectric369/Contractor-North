@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { Play, ArrowLeftRight, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Label, Select } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { NumberInput } from "@/components/ui/number-input";
 import { todayStrInTz } from "@/lib/tz";
 import { LONG_SHIFT_HOURS, isLongOpenShift } from "@/lib/long-shift";
@@ -226,7 +227,7 @@ export function JobTimeButton({
       <div className="grid grid-cols-2 gap-2">
         <div>
           <Label htmlFor="jt-date">{t("jb_date")}</Label>
-          <Input id="jt-date" type="date" value={workDate} onChange={(e) => setWorkDate(e.target.value)} />
+          <DayField id="jt-date" value={workDate} onChange={(iso) => setWorkDate(iso)} />
         </div>
         <div>
           <Label htmlFor="jt-hours">{t("jb_hours")}</Label>

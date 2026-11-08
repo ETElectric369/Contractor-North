@@ -9,6 +9,7 @@ import { Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { formatCurrency } from "@/lib/utils";
 import { saveRecurring, deleteRecurring } from "./actions";
 import { BUSINESS_COST_BUCKETS, bucketOf } from "@/lib/business-cost-buckets";
@@ -151,7 +152,7 @@ export function RecurringButton({
 
           <div>
             <Label htmlFor="r-next">Next date</Label>
-            <Input id="r-next" name="next_date" type="date" defaultValue={template?.next_date ?? ""} required />
+            <DayField id="r-next" name="next_date" defaultValue={template?.next_date ?? ""} required />
           </div>
 
           {kind === "job" ? (

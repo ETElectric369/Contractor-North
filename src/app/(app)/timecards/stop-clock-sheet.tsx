@@ -29,6 +29,7 @@ import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { NumberInput } from "@/components/ui/number-input";
 import { useToast } from "@/components/toast";
 import { jobLabel } from "@/lib/schedule-options";
@@ -340,7 +341,7 @@ export function StopClockSheet({
         <div className="grid grid-cols-2 gap-3">
           <div>
             <Label htmlFor="s-start-date">Clocked in</Label>
-            <Input id="s-start-date" type="date" className="h-11" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            <DayField id="s-start-date" value={startDate} onChange={(iso) => setStartDate(iso)} />
           </div>
           <div>
             <Label htmlFor="s-start-time" className="invisible">Clock-in time</Label>
@@ -348,14 +349,12 @@ export function StopClockSheet({
           </div>
           <div>
             <Label htmlFor="s-stop-date">Clocked out</Label>
-            <Input
+            <DayField
               id="s-stop-date"
-              type="date"
-              className="h-11"
               value={stopDate}
-              onChange={(e) => {
+              onChange={(iso) => {
                 followNow.current = false;
-                setStopDate(e.target.value);
+                setStopDate(iso);
               }}
             />
           </div>

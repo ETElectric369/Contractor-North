@@ -8,6 +8,7 @@ import { Pencil, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { NumberInput } from "@/components/ui/number-input";
 import { openFoldsTo } from "@/components/fold-opener";
@@ -1297,7 +1298,7 @@ export function SuppliersCard({
 
             <div>
               <Label htmlFor="supplier-pay-on">Paid On</Label>
-              <Input id="supplier-pay-on" type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} />
+              <DayField id="supplier-pay-on" value={paidOn} onChange={(iso) => setPaidOn(iso)} />
             </div>
 
             <div>

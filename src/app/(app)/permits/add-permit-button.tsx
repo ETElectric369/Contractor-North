@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { createPermit } from "./actions";
 import { PERMIT_TYPES as TYPES, PERMIT_PICKABLE_STATUSES as STATUSES } from "@/lib/permit-options";
 
@@ -76,7 +77,7 @@ export function AddPermitButton({ jobs, defaultType }: { jobs: JobOpt[]; default
             <div><Label htmlFor="ap-num">Permit #</Label><Input id="ap-num" value={num} onChange={(e) => setNum(e.target.value)} /></div>
             <div><Label htmlFor="ap-auth">Authority</Label><Input id="ap-auth" value={authority} onChange={(e) => setAuthority(e.target.value)} placeholder="e.g. County Building Department" /></div>
             <div><Label htmlFor="ap-status">Status</Label><Select id="ap-status" value={status} onChange={(e) => setStatus(e.target.value)}>{STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></div>
-            <div><Label htmlFor="ap-applied">Applied date</Label><Input id="ap-applied" type="date" value={applied} onChange={(e) => setApplied(e.target.value)} /></div>
+            <div><Label htmlFor="ap-applied">Applied date</Label><DayField id="ap-applied" value={applied} onChange={(iso) => setApplied(iso)} /></div>
           </div>
           {/* No inspection field (0378): a permit's inspections are booked on the permit's own card,
               one per authority that has to come, in the order they come. */}

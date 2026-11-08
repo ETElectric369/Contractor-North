@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Pencil, Trash2, ClipboardCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/page-header";
@@ -104,8 +105,8 @@ export function AuditsManager({ items, canEdit, canAdd = canEdit }: { items: Com
             <div><Label htmlFor="a-type">Audit type</Label><Select id="a-type" value={type} onChange={(e) => setType(e.target.value)}>{AUDIT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
             <div className="col-span-2 sm:col-span-1"><Label htmlFor="a-name">Subject / auditor *</Label><Input autoComplete="off" id="a-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. OSHA inspector, Internal" /></div>
             <div><Label htmlFor="a-ref">Report / ref #</Label><Input id="a-ref" value={ref} onChange={(e) => setRef(e.target.value)} /></div>
-            <div><Label htmlFor="a-date">Audit date</Label><Input id="a-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
-            <div><Label htmlFor="a-due">Next due / follow-up</Label><Input id="a-due" type="date" value={nextDue} onChange={(e) => setNextDue(e.target.value)} /></div>
+            <div><Label htmlFor="a-date">Audit date</Label><DayField id="a-date" value={date} onChange={(iso) => setDate(iso)} /></div>
+            <div><Label htmlFor="a-due">Next due / follow-up</Label><DayField id="a-due" value={nextDue} onChange={(iso) => setNextDue(iso)} /></div>
           </div>
           <div><Label htmlFor="a-find">Findings / result</Label><Textarea id="a-find" rows={2} value={findings} onChange={(e) => setFindings(e.target.value)} placeholder="Pass / fail, corrective actions, deadlines…" /></div>
           <div className="flex justify-end gap-2">
@@ -165,8 +166,8 @@ export function AuditsManager({ items, canEdit, canAdd = canEdit }: { items: Com
           <div><Label htmlFor="ae-type">Audit type</Label><Select id="ae-type" value={eType} onChange={(e) => setEType(e.target.value)}>{AUDIT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
           <div className="col-span-2 sm:col-span-1"><Label htmlFor="ae-name">Subject / auditor *</Label><Input autoComplete="off" id="ae-name" value={eName} onChange={(e) => setEName(e.target.value)} placeholder="e.g. OSHA inspector, Internal" /></div>
           <div><Label htmlFor="ae-ref">Report / ref #</Label><Input id="ae-ref" value={eRef} onChange={(e) => setERef(e.target.value)} /></div>
-          <div><Label htmlFor="ae-date">Audit date</Label><Input id="ae-date" type="date" value={eDate} onChange={(e) => setEDate(e.target.value)} /></div>
-          <div><Label htmlFor="ae-due">Next due / follow-up</Label><Input id="ae-due" type="date" value={eNextDue} onChange={(e) => setENextDue(e.target.value)} /></div>
+          <div><Label htmlFor="ae-date">Audit date</Label><DayField id="ae-date" value={eDate} onChange={(iso) => setEDate(iso)} /></div>
+          <div><Label htmlFor="ae-due">Next due / follow-up</Label><DayField id="ae-due" value={eNextDue} onChange={(iso) => setENextDue(iso)} /></div>
         </div>
         <div className="mt-3"><Label htmlFor="ae-find">Findings / result</Label><Textarea id="ae-find" rows={2} value={eFindings} onChange={(e) => setEFindings(e.target.value)} placeholder="Pass / fail, corrective actions, deadlines…" /></div>
       </Modal>

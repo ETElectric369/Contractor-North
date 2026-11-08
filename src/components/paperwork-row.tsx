@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { SupplierInput } from "@/components/supplier-input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
@@ -284,7 +285,7 @@ function FixDetails({ item, onClose, onSaved }: { item: PaperRowItem; onClose: (
           </div>
           <div>
             <Label htmlFor={`fd-date-${item.id}`}>Date on It</Label>
-            <Input id={`fd-date-${item.id}`} type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-11" />
+            <DayField id={`fd-date-${item.id}`} value={date} onChange={(iso) => setDate(iso)} />
           </div>
           <div>
             <Label htmlFor={`fd-number-${item.id}`}>Number on It</Label>

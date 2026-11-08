@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import type { OrgSettings } from "@/lib/org-settings";
 import { TEXTS_NOT_READY_LINE, TEXTING_CARD_PLACE } from "@/lib/sms-readiness";
 import { updateOrgSettings } from "./actions";
@@ -208,7 +209,7 @@ export function SchedulingSettings({
             {(paySchedule === "weekly" || paySchedule === "biweekly") && (
               <div>
                 <Label htmlFor="pay-anchor">A period start date</Label>
-                <Input id="pay-anchor" type="date" value={payAnchor} onChange={(e) => setPayAnchor(e.target.value)} />
+                <DayField id="pay-anchor" value={payAnchor} onChange={(iso) => setPayAnchor(iso)} />
               </div>
             )}
           </div>

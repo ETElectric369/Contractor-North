@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Camera, ChevronRight, Copy, ExternalLink, FileText, Loader2, Palette, Plus, RotateCcw, Trash2, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { useToast } from "@/components/toast";
 import { createClient } from "@/lib/supabase/client";
 import { prepareImageForUpload } from "@/lib/image-prep";
@@ -320,11 +321,11 @@ function StretchesCard({
           </label>
           <label className="text-xs font-medium text-slate-600">
             Starts
-            <Input type="date" value={startsOn} onChange={(e) => setStartsOn(e.target.value)} className="mt-1 h-11" />
+            <DayField value={startsOn} onChange={(iso) => setStartsOn(iso)} className="mt-1" />
           </label>
           <label className="text-xs font-medium text-slate-600">
             Ends
-            <Input type="date" value={endsOn} min={startsOn || undefined} onChange={(e) => setEndsOn(e.target.value)} className="mt-1 h-11" />
+            <DayField value={endsOn} min={startsOn || undefined} onChange={(iso) => setEndsOn(iso)} className="mt-1" />
           </label>
         </div>
         <Button className="mt-2" onClick={add} disabled={pending || !label.trim() || !startsOn}>
@@ -426,11 +427,10 @@ function StretchEditor({ row, onSaved, who }: { row: StretchRow; onSaved: (r: St
       </label>
       <label className="text-xs font-medium text-slate-600">
         Starts
-        <Input
-          type="date"
+        <DayField
           value={startsOn}
-          className="mt-1 h-11"
-          onChange={(e) => setStartsOn(e.target.value)}
+          className="mt-1"
+          onChange={(iso) => setStartsOn(iso)}
           onBlur={() => {
             if (startsOn && startsOn !== row.starts_on) void save({ startsOn }, { startsOn: row.starts_on });
             else if (!startsOn) setStartsOn(row.starts_on);
@@ -439,12 +439,11 @@ function StretchEditor({ row, onSaved, who }: { row: StretchRow; onSaved: (r: St
       </label>
       <label className="text-xs font-medium text-slate-600">
         Ends
-        <Input
-          type="date"
+        <DayField
           value={endsOn}
           min={startsOn || undefined}
-          className="mt-1 h-11"
-          onChange={(e) => setEndsOn(e.target.value)}
+          className="mt-1"
+          onChange={(iso) => setEndsOn(iso)}
           onBlur={() => {
             if (endsOn && endsOn !== row.ends_on) void save({ endsOn }, { endsOn: row.ends_on });
             else if (!endsOn) setEndsOn(row.ends_on);

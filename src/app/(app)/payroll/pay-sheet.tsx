@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { NumberInput } from "@/components/ui/number-input";
 import { Input, Label } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { InfoPopup } from "@/components/info-popup";
 import { formatCurrency } from "@/lib/utils";
 import { leftByPeriod, periodLabel, type PayMethod, type PersonBalance } from "@/lib/payroll-math";
@@ -158,7 +159,7 @@ export function PaySheet({
           <Label htmlFor="pay-on">Paid On</Label>
           {/* Defaults to the org's today and stays editable: he pays early, and he pays for last
               Friday on a Monday. */}
-          <Input id="pay-on" type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} />
+          <DayField id="pay-on" value={paidOn} onChange={(iso) => setPaidOn(iso)} />
         </div>
 
         <div>

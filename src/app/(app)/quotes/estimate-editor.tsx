@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { NumberInput } from "@/components/ui/number-input";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { LineItemText } from "@/components/line-item-text";
@@ -1591,7 +1592,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                 )}
                 <div>
                   <Label htmlFor="valid">{t("qe_validUntil")}</Label>
-                  <Input id="valid" type="date" value={header.validUntil} disabled={busy} onChange={(e) => typeField("validUntil", e.target.value)} onBlur={() => commitField("validUntil")} />
+                  <DayField id="valid" value={header.validUntil} disabled={busy} onChange={(iso) => typeField("validUntil", iso)} onBlur={() => commitField("validUntil")} />
                   {fieldWords("header:validUntil")}
                 </div>
               </div>

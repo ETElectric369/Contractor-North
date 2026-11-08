@@ -8,6 +8,7 @@ import { ChevronRight } from "lucide-react";
 import { billedOnLabel, nothingToBillWhy, openOwnNote, pileCount, type JobCostGroups } from "@/lib/job-cost-groups";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { SupplierInput } from "@/components/supplier-input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -495,7 +496,7 @@ function JobBillEditModal({
           </div>
           <div>
             <Label htmlFor="be-date">Bill date</Label>
-            <Input id="be-date" type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} />
+            <DayField id="be-date" value={billDate} onChange={(iso) => setBillDate(iso)} />
           </div>
           {follows && (
             <p className="col-span-2 text-sm text-slate-600">

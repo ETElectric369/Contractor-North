@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { NumberInput } from "@/components/ui/number-input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { executeAction } from "@/lib/actions/execute";
@@ -149,7 +150,7 @@ export function CorrectBillModal({
           </div>
           <div className="col-span-2 sm:col-span-1">
             <Label htmlFor="cb-date">Paper Date</Label>
-            <Input id="cb-date" type="date" value={paperDate} onChange={(e) => setPaperDate(e.target.value)} />
+            <DayField id="cb-date" value={paperDate} onChange={(iso) => setPaperDate(iso)} />
           </div>
           <div className="col-span-2">
             <Label htmlFor="cb-total">Paper Total</Label>

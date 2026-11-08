@@ -6,6 +6,7 @@ import { ChevronDown, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { useDraft } from "@/lib/use-draft";
 import { useToast } from "@/components/toast";
@@ -408,11 +409,10 @@ export function NewJobButton({
               <Label htmlFor="nj-date">{t("ag_rail_date")}</Label>
               {form.scheduled_date ? (
                 <div className="flex flex-wrap items-center gap-2">
-                  <Input
+                  <DayField
                     id="nj-date"
-                    type="date"
                     value={form.scheduled_date}
-                    onChange={(e) => patch({ scheduled_date: e.target.value })}
+                    onChange={(iso) => patch({ scheduled_date: iso })}
                     className="w-auto"
                   />
                   <button

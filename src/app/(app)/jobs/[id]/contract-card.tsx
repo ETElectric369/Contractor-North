@@ -6,6 +6,7 @@ import { FileSignature } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
@@ -95,7 +96,7 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
         </div>
         <div>
           <Label className="mb-1.5">Date signed</Label>
-          <Input type="date" value={paperDate} onChange={(e) => setPaperDate(e.target.value)} />
+          <DayField value={paperDate} onChange={(iso) => setPaperDate(iso)} />
           <p className="mt-1 text-xs text-slate-400">Leave blank for today.</p>
         </div>
       </div>

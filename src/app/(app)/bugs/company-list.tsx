@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { AlertTriangle, Building2 } from "lucide-react";
 import { EmptyState } from "@/components/page-header";
-import { Input } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { toneClasses, type Tone } from "@/components/ui/badge";
 import { formatDate, formatDateShort } from "@/lib/utils";
 import { tzDayStartUtc } from "@/lib/tz";
@@ -94,7 +94,7 @@ export function CompanyRowView({ row, onComp, onEndComp }: { row: CompanyRow; on
           <div className="mt-0.5 text-xs text-slate-400">{`Since ${formatDate(row.createdAt, row.tz)}${row.stripeCustomer ? " · Stripe Customer" : ""}`}</div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Input type="date" aria-label="Comp Until Date" value={date} onChange={(e) => setDate(e.target.value)} className="h-8 w-40 text-xs" />
+          <DayField aria-label="Comp Until Date" value={date} onChange={(iso) => setDate(iso)} className="w-40" />
           <button type="button" disabled={!iso} onClick={() => iso && onComp(iso)} className={DOOR}>
             Comp Until
           </button>

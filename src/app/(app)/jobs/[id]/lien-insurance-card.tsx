@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ShieldAlert, FileWarning, ScrollText } from "lucide-react";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { NumberInput } from "@/components/ui/number-input";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatDate } from "@/lib/utils";
@@ -168,8 +169,8 @@ function LienEditor({ jobId, lien, defaults, onClose, onSaved }: { jobId: string
         {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">CN tracks deadlines and generates the Preliminary Notice. Recording the lien itself is done at the county. Not legal advice.</p>
         <div className="grid grid-cols-2 gap-3">
-          <div><Label htmlFor="l-ff">First work date</Label><Input id="l-ff" type="date" value={f.first_furnished_date ?? ""} onChange={(e) => set({ first_furnished_date: e.target.value })} /></div>
-          <div><Label htmlFor="l-comp">Completion date</Label><Input id="l-comp" type="date" value={f.completion_date ?? ""} onChange={(e) => set({ completion_date: e.target.value })} /></div>
+          <div><Label htmlFor="l-ff">First work date</Label><DayField id="l-ff" value={f.first_furnished_date ?? ""} onChange={(iso) => set({ first_furnished_date: iso })} /></div>
+          <div><Label htmlFor="l-comp">Completion date</Label><DayField id="l-comp" value={f.completion_date ?? ""} onChange={(iso) => set({ completion_date: iso })} /></div>
         </div>
         <div><Label htmlFor="l-own">Property owner</Label><Input id="l-own" value={f.owner_name ?? ""} onChange={(e) => set({ owner_name: e.target.value })} placeholder="Owner / reputed owner" /></div>
         <div><Label htmlFor="l-owna">Owner address</Label><Input id="l-owna" value={f.owner_address ?? ""} onChange={(e) => set({ owner_address: e.target.value })} /></div>
@@ -190,8 +191,8 @@ function LienEditor({ jobId, lien, defaults, onClose, onSaved }: { jobId: string
           <span>Owner recorded a Notice of Completion / Cessation<span className="block text-xs text-slate-500">Shortens the California lien deadline to 60 days (30 if you&apos;re a subcontractor).</span></span>
         </label>
         <div className="grid grid-cols-2 gap-3">
-          <div><Label htmlFor="l-ps">Prelim served on</Label><Input id="l-ps" type="date" value={f.prelim_sent_at ?? ""} onChange={(e) => set({ prelim_sent_at: e.target.value })} /></div>
-          <div><Label htmlFor="l-lr">Lien recorded on</Label><Input id="l-lr" type="date" value={f.lien_recorded_at ?? ""} onChange={(e) => set({ lien_recorded_at: e.target.value })} /></div>
+          <div><Label htmlFor="l-ps">Prelim served on</Label><DayField id="l-ps" value={f.prelim_sent_at ?? ""} onChange={(iso) => set({ prelim_sent_at: iso })} /></div>
+          <div><Label htmlFor="l-lr">Lien recorded on</Label><DayField id="l-lr" value={f.lien_recorded_at ?? ""} onChange={(iso) => set({ lien_recorded_at: iso })} /></div>
         </div>
       </div>
     </Modal>
@@ -229,7 +230,7 @@ function InsuranceEditor({ jobId, insurance, onClose, onSaved }: { jobId: string
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div><Label htmlFor="i-pol">Policy #</Label><Input id="i-pol" value={f.policy_number ?? ""} onChange={(e) => set({ policy_number: e.target.value })} /></div>
-          <div><Label htmlFor="i-loss">Date of loss</Label><Input id="i-loss" type="date" value={f.date_of_loss ?? ""} onChange={(e) => set({ date_of_loss: e.target.value })} /></div>
+          <div><Label htmlFor="i-loss">Date of loss</Label><DayField id="i-loss" value={f.date_of_loss ?? ""} onChange={(iso) => set({ date_of_loss: iso })} /></div>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div><Label htmlFor="i-adj">Adjuster</Label><Input id="i-adj" value={f.adjuster_name ?? ""} onChange={(e) => set({ adjuster_name: e.target.value })} /></div>

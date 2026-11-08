@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Plus, X } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { applyRangeEdit } from "@/lib/schedule-math";
 import { dayWords, type JobBlock } from "@/lib/schedule/job-block";
 import { BlockTimeControls, type BlockPatch } from "@/components/block-time-controls";
@@ -122,21 +122,19 @@ export function JobScheduleControl({
       <div className="space-y-2">
         {ranges.map((r, i) => (
           <div key={i} className="flex flex-wrap items-center gap-2">
-            <Input
-              type="date"
+            <DayField
               value={r.start}
-              onChange={(ev) => update(i, { start: ev.target.value })}
+              onChange={(iso) => update(i, { start: iso })}
               disabled={pending}
-              className="h-11 w-[150px]"
+              className="w-[150px]"
               aria-label={fillText(t("jb_startDateN"), { n: String(i + 1) })}
             />
             <span className="text-xs text-slate-400">{t("jb_to")}</span>
-            <Input
-              type="date"
+            <DayField
               value={r.end}
-              onChange={(ev) => update(i, { end: ev.target.value })}
+              onChange={(iso) => update(i, { end: iso })}
               disabled={pending}
-              className="h-11 w-[150px]"
+              className="w-[150px]"
               aria-label={fillText(t("jb_endDateN"), { n: String(i + 1) })}
             />
             {ranges.length > 1 && (

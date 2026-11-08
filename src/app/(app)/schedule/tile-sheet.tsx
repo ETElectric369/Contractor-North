@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { CalendarOff, CalendarSync } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
+import { DayField } from "@/components/day-field";
 import { useToast } from "@/components/toast";
 import { BlockTimeControls, type BlockPatch } from "@/components/block-time-controls";
 import { JobCrewChips, type CrewMember } from "../jobs/[id]/job-crew-card";
@@ -255,14 +256,13 @@ function DayRow({
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
-        <input
+        <DayField
           id={`${idPrefix}-day`}
-          type="date"
           value={to}
           disabled={pending}
-          onChange={(e) => setTo(e.target.value)}
+          onChange={(iso) => setTo(iso)}
           aria-label={t("ag_btn_day")}
-          className="h-11 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-900 disabled:opacity-60"
+          className="w-auto"
         />
         <Button
           type="button"

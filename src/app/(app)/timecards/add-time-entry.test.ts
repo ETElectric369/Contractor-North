@@ -247,7 +247,8 @@ describe("the job's own page: the job is said, not picked", () => {
 describe("Day, Start, End", () => {
   it("the Day starts on the COMPANY's today on both pages, not the browser's; 8 to 4 by default", () => {
     for (const html of [form(), form({ fixedJob: { id: "j28", label: "41 Larkspur" } })]) {
-      expect(html).toMatch(new RegExp(`id="ate-day" type="date" value="${todayStrInTz(TZ)}"`));
+      // The Day is the one DayField (cn-v1153): a native type="date" holding the company's today.
+      expect(html).toMatch(new RegExp(`<input(?=[^>]*type="date")(?=[^>]*id="ate-day")[^>]*value="${todayStrInTz(TZ)}"`));
       expect(html).toMatch(/id="ate-start" type="time" value="08:00"/);
       expect(html).toMatch(/id="ate-end" type="time" value="16:00"/);
     }

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Pencil, ArrowDownCircle, ArrowUpCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { NumberInput } from "@/components/ui/number-input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -83,7 +84,7 @@ export function PettyCashManager({ items, balance }: { items: PettyTx[]; balance
           <div><Label htmlFor="pc-amt">Amount</Label><NumberInput id="pc-amt" value={amount} onValueChange={setAmount} /></div>
           <div><Label htmlFor="pc-cat">Category</Label><Input id="pc-cat" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Fuel, parts…" /></div>
           <div className="col-span-2 sm:col-span-1"><Label htmlFor="pc-desc">Description</Label><Input id="pc-desc" value={description} onChange={(e) => setDescription(e.target.value)} /></div>
-          <div><Label htmlFor="pc-date">Date</Label><Input id="pc-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
+          <div><Label htmlFor="pc-date">Date</Label><DayField id="pc-date" value={date} onChange={(iso) => setDate(iso)} /></div>
         </div>
         <div className="mt-3 flex justify-end">
           <Button onClick={add} disabled={pending || !amount}><Plus className="h-4 w-4" /> Add</Button>
@@ -165,7 +166,7 @@ function EditPettyCashButton({ tx }: { tx: PettyTx }) {
           </div>
           <div><Label htmlFor="epc-amt">Amount</Label><NumberInput id="epc-amt" value={amount} onValueChange={setAmount} /></div>
           <div><Label htmlFor="epc-cat">Category</Label><Input id="epc-cat" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Fuel, parts…" /></div>
-          <div><Label htmlFor="epc-date">Date</Label><Input id="epc-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
+          <div><Label htmlFor="epc-date">Date</Label><DayField id="epc-date" value={date} onChange={(iso) => setDate(iso)} /></div>
           <div className="col-span-2"><Label htmlFor="epc-desc">Description</Label><Input id="epc-desc" value={description} onChange={(e) => setDescription(e.target.value)} /></div>
         </div>
       </Modal>

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Clock } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { clockInputValue } from "@/lib/split-preview";
 import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
 import { fillText, translator } from "@/lib/i18n";
@@ -133,16 +134,15 @@ export function ClockStartPicker({
   return (
     <div className={className}>
       <div className="flex flex-wrap items-center gap-2">
-        <Input
-          type="date"
+        <DayField
           value={date}
-          onChange={(e) => {
-            setDate(e.target.value);
-            emit(e.target.value, time);
+          onChange={(iso) => {
+            setDate(iso);
+            emit(iso, time);
           }}
           // 44px when the picker IS the control (a stop time picked on a phone), 36px as the quiet
           // clock-in extra.
-          className={startExpanded ? "h-11 w-[9.5rem]" : "h-9 w-[9.5rem]"}
+          className={startExpanded ? "w-[9.5rem]" : "h-9 w-[9.5rem]"}
           aria-label={fillText(t("tc_fieldDate"), { field })}
         />
         <Input

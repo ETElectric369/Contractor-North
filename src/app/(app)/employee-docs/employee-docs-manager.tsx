@@ -6,6 +6,7 @@ import { Upload, Trash2, FileText, Loader2, Camera, Pencil } from "lucide-react"
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -102,7 +103,7 @@ export function EmployeeDocsManager({
           </div>
           <div>
             <Label htmlFor="ed-exp">Expires (optional)</Label>
-            <Input id="ed-exp" type="date" value={expires} onChange={(e) => setExpires(e.target.value)} />
+            <DayField id="ed-exp" value={expires} onChange={(iso) => setExpires(iso)} />
           </div>
           <div className="flex items-end gap-2">
             <input ref={fileRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { uploadFiles(Array.from(e.target.files ?? [])); if (fileRef.current) fileRef.current.value = ""; }} />
@@ -223,7 +224,7 @@ function EditDocModal({
         </div>
         <div>
           <Label htmlFor="edoc-exp">Expires (optional)</Label>
-          <Input id="edoc-exp" type="date" value={expires} onChange={(e) => setExpires(e.target.value)} />
+          <DayField id="edoc-exp" value={expires} onChange={(iso) => setExpires(iso)} />
         </div>
         <div>
           <Label htmlFor="edoc-notes">Notes (optional)</Label>

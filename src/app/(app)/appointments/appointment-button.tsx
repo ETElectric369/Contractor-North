@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { useToast } from "@/components/toast";
 import { useDraft } from "@/lib/use-draft";
 import { createClient } from "@/lib/supabase/client";
@@ -733,15 +734,15 @@ export function AppointmentButton({
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <Label htmlFor="ap-date">{t("vp_date")}</Label>
-                <Input id="ap-date" name="date" type="date" value={form.date} onChange={(e) => patch({ date: e.target.value })} required />
+                <DayField id="ap-date" name="date" value={form.date} onChange={(iso) => patch({ date: iso })} required />
               </div>
               <div>
                 <Label htmlFor="ap-start">{t("vp_start")}</Label>
-                <Input id="ap-start" name="start_time" type="time" value={form.start_time} onChange={(e) => patch({ start_time: e.target.value })} />
+                <Input id="ap-start" className="h-11" name="start_time" type="time" value={form.start_time} onChange={(e) => patch({ start_time: e.target.value })} />
               </div>
               <div>
                 <Label htmlFor="ap-end">{t("vp_end")}</Label>
-                <Input id="ap-end" name="end_time" type="time" value={form.end_time} onChange={(e) => patch({ end_time: e.target.value })} />
+                <Input id="ap-end" className="h-11" name="end_time" type="time" value={form.end_time} onChange={(e) => patch({ end_time: e.target.value })} />
               </div>
               {/* NOTHING SILENT: on a laptop set to another zone these hours are no longer the
                   hours on that laptop's clock, and nobody should have to work that out. */}
@@ -752,13 +753,13 @@ export function AppointmentButton({
               <Label>{t("vp_offerUpToThreeTimes")}</Label>
               {slots.map((sl, i) => (
                 <div key={i} className="grid grid-cols-2 gap-2">
-                  <Input
-                    type="date"
+                  <DayField
                     value={sl.date}
-                    onChange={(ev) => setSlots((a) => a.map((x, xi) => (xi === i ? { ...x, date: ev.target.value } : x)))}
+                    onChange={(iso) => setSlots((a) => a.map((x, xi) => (xi === i ? { ...x, date: iso } : x)))}
                     aria-label={fillText(t("vp_optionDateAria"), { n: String(i + 1) })}
                   />
                   <Input
+                    className="h-11"
                     type="time"
                     value={sl.time}
                     onChange={(ev) => setSlots((a) => a.map((x, xi) => (xi === i ? { ...x, time: ev.target.value } : x)))}

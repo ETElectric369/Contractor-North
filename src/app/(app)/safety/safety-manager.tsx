@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Pencil, Trash2, AlertTriangle, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { DayField } from "@/components/day-field";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -135,7 +136,7 @@ function SafetyPanel({
       {canAdd && <Card className="space-y-3 p-4">
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div><Label htmlFor="s-date">Date</Label><Input id="s-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
+          <div><Label htmlFor="s-date">Date</Label><DayField id="s-date" value={date} onChange={(iso) => setDate(iso)} /></div>
           <div className="col-span-2 sm:col-span-3"><Label htmlFor="s-title">{isIncident ? "What happened *" : "Topic *"}</Label><Input id="s-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={isIncident ? "e.g. Cut hand on a sharp edge" : "e.g. Ladder safety"} /></div>
           {isIncident ? (
             <>
@@ -258,7 +259,7 @@ function EditSafetyButton({
         <div className="space-y-3">
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div><Label htmlFor="e-date">Date</Label><Input id="e-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
+            <div><Label htmlFor="e-date">Date</Label><DayField id="e-date" value={date} onChange={(iso) => setDate(iso)} /></div>
             <div className="col-span-2 sm:col-span-3"><Label htmlFor="e-title">{isIncident ? "What happened *" : "Topic *"}</Label><Input id="e-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={isIncident ? "e.g. Cut hand on a sharp edge" : "e.g. Ladder safety"} /></div>
             {isIncident ? (
               <>
