@@ -13,7 +13,9 @@ import { renderToStaticMarkup } from "react-dom/server";
  * 2026-09-23, added an amber line under the row; the button stayed unpressable.)
  *
  * So: the Add button on a live invoice is always pressable, and the rule for what is still missing is
- * one function both the press and the line read.
+ * one function both the press and the line read. Since cn-v1152 the row is drawn by the one picker
+ * (components/add-line-items, `typed`) under its box, which is also the line's description box, and the
+ * rule is lib/invoice-math addLineAsk, handed to it by this page - the same row, in the same place.
  */
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
@@ -31,7 +33,8 @@ vi.mock("@/app/(app)/billing/actions", () => ({
   ),
 }));
 
-import { InvoiceDetail, addLineAsk } from "./[id]/invoice-detail";
+import { InvoiceDetail } from "./[id]/invoice-detail";
+import { addLineAsk } from "@/lib/invoice-math";
 
 /** What createBlankInvoice makes from /billing → New Invoice → a customer: a draft, no lines. */
 const blank = {
@@ -76,18 +79,30 @@ describe("a brand new blank invoice can take an amount", () => {
   it("a VOID invoice still has no add row at all (its lines are set)", () => {
     const html = render({ status: "void" });
     expect(html).not.toContain('placeholder="Price"');
+    expect(html).not.toContain('aria-label="What this charge is for"');
     expect(html).toContain("This invoice is void, so its lines are set.");
+  });
+
+  it("ONE box (cn-v1152): with no price list it says the line is typed, and no second picker stands above the table", () => {
+    const html = render();
+    expect((html.match(/aria-label="What this charge is for"/g) ?? []).length).toBe(1);
+    expect(html).toContain('placeholder="Add a line item…"');
+    expect(html).not.toContain("Add from Price List");
   });
 });
 
 describe("what a new line is still missing (the one rule the press and the line both read)", () => {
-  it("no words: the ask, in the words the row says", () => {
-    expect(addLineAsk("")).toBe("Type what this charge is for in the box above, then tap Add.");
-    expect(addLineAsk("   ")).toBe("Type what this charge is for in the box above, then tap Add.");
+  it("no words: the box above is asked for, whatever the price says", () => {
+    expect(addLineAsk({ words: "", price: null })).toBe("words");
+    expect(addLineAsk({ words: "   ", price: 500 })).toBe("words");
   });
 
-  it("words: nothing missing — the amount goes on, whatever it is", () => {
-    expect(addLineAsk("Service call")).toBeNull();
-    expect(addLineAsk(" Referral fee ")).toBeNull();
+  it("words and a price — a 0 typed on purpose included — nothing missing: the amount goes on, whatever it is", () => {
+    expect(addLineAsk({ words: "Service call", price: 500 })).toBeNull();
+    expect(addLineAsk({ words: " Referral fee ", price: 0 })).toBeNull();
+  });
+
+  it("words and a BLANK price: the Price box is asked for, never a $0 line (skeptic #56b: Enter on a book search put one on)", () => {
+    expect(addLineAsk({ words: "wire", price: null })).toBe("price");
   });
 });

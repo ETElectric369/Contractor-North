@@ -21,10 +21,9 @@ describe("migration 0404: a job knows where it is", () => {
   /** The statements alone, without the header's words. */
   const code = sql.replace(/--.*$/gm, "");
 
-  it("is the one 0404 and nothing sits past it", () => {
+  it("is the one 0404 (what sits past it is the newest migration's own test: migration-0405.test.ts)", () => {
     const names = readdirSync(migrations);
     expect(names.filter((n) => n.startsWith("0404_"))).toEqual(["0404_a_job_knows_where_it_is.sql"]);
-    expect(names.some((n) => /^040[5-9]_|^04[1-9]\d_|^0[5-9]\d\d_/.test(n))).toBe(false);
   });
 
   it("exists, names itself, and runs under the house timeouts", () => {

@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { translator } from "@/lib/i18n";
+import { DEFAULT_PAYMENT_METHODS, paymentMethodKey } from "@/lib/payment-method";
 
 /** The sheet's English, by key (lib/words/settle-up, the visit-page-in-Spanish wave): what a pin on the source reads through. */
 const en = translator("en");
@@ -228,8 +229,18 @@ describe("Or They Paid Another Way (Record Payment's machine) records Venmo like
   });
 
   it("drops Card by its key, so a \"Credit Card\" chip can't file a manual payment as a Stripe card", () => {
-    expect(BODY).toContain('source.filter((m) => paymentMethodKey(m) !== "card")');
+    expect(BODY).toContain('paymentMethodChoices(props.methods).filter((c) => c.key !== "card")');
     expect(BODY).toContain("const key = paymentMethodKey(method);");
+  });
+
+  it("draws its chips from the one list (cn-v1152): no word list of its own, the house default when Settings is empty", () => {
+    // Erik, 2026-11-07: "there are some payment entry windows that show venmo as an option then others
+    // that dont". This sheet's own fallback was four words; it reads lib/payment-method's now.
+    expect(BODY).not.toContain('["Cash", "Check", "Venmo", "Other"]');
+    expect(BODY).not.toMatch(/props\.methods\?\.length \? props\.methods :/);
+    const out = renderToStaticMarkup(createElement(GetPaidButton as any, { source: "invoice", invoiceId: "09ff65de-2ec8-4884-a31f-583a8943b09a", balance: 10, cardEnabled: true, methods: [] }));
+    for (const m of DEFAULT_PAYMENT_METHODS.filter((m) => paymentMethodKey(m) !== "card")) expect(out, m).toContain(`>${m}<`);
+    expect(out).not.toContain(">Card<");
   });
 
   it("says the QR sends the bill when it does, and never reads Saving over a read", () => {

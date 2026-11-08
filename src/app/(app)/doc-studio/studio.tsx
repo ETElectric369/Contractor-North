@@ -11,6 +11,7 @@ import { useToast } from "@/components/toast";
 import { updateOrgSettings, setDocTemplateFor } from "../settings/actions";
 import { DEFAULT_DOC_STYLE, TAGLINE_MAX, normalizeDocStyle, type DocStyle } from "@/lib/doc-style";
 import {
+  SAMPLE_BILLING_LABEL,
   SAMPLE_CUSTOMER,
   SAMPLE_DESCRIPTION,
   SAMPLE_INVOICE_ITEMS,
@@ -339,7 +340,7 @@ export function DocStudio({
         </span>
       </div>
 
-      {/* Tagline (every document), closing line + breakdown for the doc being viewed. */}
+      {/* Tagline (every document), closing line + the breakdown and billing-type switches for the doc being viewed. */}
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
         <div className="min-w-64 flex-1">
           <Label htmlFor="studio-tagline">Tagline Under Your Name</Label>
@@ -378,6 +379,25 @@ export function DocStudio({
             Labor / Materials Box
           </label>
         )}
+        {/* THE BILLING-TYPE LINE (cn-v1152). Erik, 2026-11-07, on a bill whose paper read "Time & Material ·
+            Progress Payment" over a title he had changed to "Kitchen lighting": "How do i remove this Progress
+            Payment tag", and the line "only needs to be there if its carrying new and needed information".
+            One per-company switch, on by default (today's paper); the sample sheet carries the line, so the
+            switch shows its effect on the page below. */}
+        {docKind === "invoice" && (
+          <label
+            className="mb-2 flex items-center gap-2 text-sm text-slate-700"
+            title="The 'Time & Material · Progress Payment' line over the invoice title. Off, the title carries the paper."
+          >
+            <input
+              type="checkbox"
+              checked={style.show_billing_type}
+              onChange={(e) => apply({ ...style, show_billing_type: e.target.checked })}
+              className="h-4 w-4 rounded border-slate-300"
+            />
+            Billing Type Line
+          </label>
+        )}
         {/* HOW A TASK LINE READS (0386). Erik: the customer sees the estimate "in a per-company
             format". Tasks Only prints each task with its price; Tasks with Labor and Parts prints
             each labor row (its hours at its rate) and each part beneath it. Only a line BUILT from a
@@ -410,6 +430,7 @@ export function DocStudio({
               createdAt={"2026-08-29"}
               dueDate={"2026-09-28"}
               title={SAMPLE_TITLE}
+              billingLabel={SAMPLE_BILLING_LABEL}
               description={SAMPLE_DESCRIPTION}
               customer={SAMPLE_CUSTOMER}
               site={SAMPLE_SITE}

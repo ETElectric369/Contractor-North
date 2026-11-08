@@ -1,19 +1,15 @@
 /**
- * HOW A SUPPLIER WAS PAID, IN WORDS. One label per method (0270's five), shared by the pay sheet,
- * the payments list and the bill row, so "transfer" reads "ACH / Transfer" everywhere (task 4 E).
+ * HOW A SUPPLIER WAS PAID, IN WORDS. One label per method, shared by the pay sheet, the payments
+ * list and the bill row (task 4 E). Since cn-v1152 the label is THE one every door renders
+ * (lib/payment-method paymentMethodLabel: Check, Transfer, Venmo, Apple Cash) — this module kept a
+ * five-word table of its own ("ACH / Transfer") until Erik, 2026-11-07: "there are some payment
+ * entry windows that show venmo as an option then others that dont". The supplier's method is a
+ * 0287 key from the company's one list, and it reads the same here as on an invoice.
  */
-import type { SupplierPayMethod } from "@/app/(app)/bills/supplier-balance";
-
-export const SUPPLIER_PAY_METHOD_LABELS: Record<SupplierPayMethod, string> = {
-  cash: "Cash",
-  check: "Check",
-  transfer: "ACH / Transfer",
-  card: "Card",
-  other: "Other",
-};
+import { paymentMethodLabel } from "@/lib/payment-method";
 
 export function supplierPayMethodLabel(method: string | null | undefined): string {
-  return SUPPLIER_PAY_METHOD_LABELS[String(method ?? "") as SupplierPayMethod] ?? String(method ?? "Other");
+  return paymentMethodLabel(method);
 }
 
 /** The recorded payment that paid a bill: how, and the day. */

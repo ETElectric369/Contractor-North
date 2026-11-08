@@ -1,6 +1,7 @@
 import { hoursBetween } from "@/lib/utils";
 import { summarizeMileage } from "@/lib/mileage-math";
 import { todayStrInTz } from "@/lib/tz";
+import { isPaymentMethod, paymentMethodKey, paymentMethodLabel } from "@/lib/payment-method";
 
 /** Coerce to a finite number, else 0 — payroll feeds real wages; one bad row must
  *  not poison gross pay or an employee's hours. */
@@ -193,13 +194,18 @@ export function aggregatePayrollEntries(
 
 const r2 = (n: number) => Math.round(fin(n) * 100) / 100;
 
-export type PayMethod = "cash" | "check" | "transfer" | "other";
+/** HOW A PERSON WAS PAID: a 0287 KEY (cash, check, venmo, zelle, "apple cash"…), the same key
+ *  payments.method holds for a customer's money. It was one of four words the 0264 CHECK allowed
+ *  until cn-v1152 — Erik, 2026-11-07: "there are some payment entry windows that show venmo as an
+ *  option then others that dont … i had to add venmo in the notes". The company's one list (Settings
+ *  › Payment methods) names the chips, lib/payment-method turns a chip into its key, and 0406 lets
+ *  the column hold any key. Rendered through paymentMethodLabel, never printed raw. */
+export type PayMethod = string;
 
-/** The four the DB check constraint allows (0264). One list, so no surface invents a fifth. */
-export const PAY_METHODS: PayMethod[] = ["cash", "check", "transfer", "other"];
-
+/** A word that reads as a way money moves: a non-blank string (its key is then never empty). The
+ *  one rule is lib/payment-method's isPaymentMethod; this keeps the name the pay action imports. */
 export function isPayMethod(v: unknown): v is PayMethod {
-  return typeof v === "string" && (PAY_METHODS as string[]).includes(v);
+  return isPaymentMethod(v);
 }
 
 /** One recorded payment, camel-cased for the app. `voided` is a FACT derived from voided_at:
@@ -221,7 +227,9 @@ export type PayPaymentRow = {
  *  it, so `voided` can never be read as `voided_at` truthiness on one surface and something else
  *  on the other. */
 export function toPayPaymentRow(row: any): PayPaymentRow {
-  const method = isPayMethod(row?.method) ? row.method : "other";
+  // The stored key, read through the one normalizer (a row 0406's trigger has not touched yet still
+  // comes out a key); a value that is not a word at all reads as other.
+  const method = isPayMethod(row?.method) ? paymentMethodKey(row.method) : "other";
   return {
     id: String(row?.id ?? ""),
     profileId: String(row?.profile_id ?? ""),
@@ -707,8 +715,10 @@ export function paymentSentence(input: {
   inactive?: boolean;
 }): string {
   const who = firstName(input.name);
-  // "other" is not a word anyone says about money leaving their hand, so it is simply left out.
-  const method = input.method === "other" ? "" : `, ${input.method}`;
+  // "other" is not a word anyone says about money leaving their hand, so it is simply left out. The
+  // rest read as the chip he tapped (paymentMethodLabel, never the raw key), lower-cased inside the
+  // sentence the way the customer's and the supplier's doors say theirs ("by check").
+  const method = paymentMethodKey(input.method) === "other" ? "" : `, ${paymentMethodLabel(input.method).toLowerCase()}`;
   const parts = [`Recorded ${sayMoney(input.amount)} to ${who}${method}, ${dayPhrase(input.paidOn, input.today)}.`];
   if (input.locked.length) {
     parts.push(`That covers ${joinLabels(input.locked)} in full, so those hours are locked now.`);

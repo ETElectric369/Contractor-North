@@ -541,13 +541,18 @@ export async function invoiceShareText(
   /**
    * A REVISED BILL SHARED AGAIN SETTLES ITS OWN RECORD (0269).
    *
-   * Editing a delivered invoice leaves `revised_at > sent_at` standing — the page says the
-   * customer is holding an older copy, and only a real re-delivery makes that false. The share
-   * sheet is a delivery this app cannot watch (the OS takes over, and a cancelled sheet leaves no
-   * trace), so it does the one thing it can: it ASKS, through the same needsSend door the draft
-   * branch has used since cn-v700, and stamps only on the yes. A tap that was really "copy the
-   * link for my own notes" then costs one "no" instead of quietly telling the office a corrected
-   * bill went out that never did.
+   * Editing a delivered invoice leaves `revised_at > sent_at` standing, and only a real re-delivery
+   * makes that false. The share sheet is a delivery this app cannot watch (the OS takes over, and a
+   * cancelled sheet leaves no trace), so it does the one thing it can: it ASKS, through the same
+   * needsSend door the draft branch has used since cn-v700, and stamps only on the yes. A tap that
+   * was really "copy the link for my own notes" then costs one "no" instead of quietly telling the
+   * office a corrected bill went out that never did.
+   *
+   * THE RECORD QUESTION, NOT THE NOTICE (2026-11-07). The page's "send it again" notice is about
+   * the money now (customerHoldsOlderCopy: paid against a figure that has since moved). This door
+   * still asks whether the bill CHANGED since it went out (hasUnsentRevision = changedSinceSent),
+   * because re-sharing a changed bill is a delivery of the current one whatever the notice says:
+   * sent_at moves, and 0405's trigger records the figure it carried in the same write.
    */
   const isDraft = String((invoice as { status?: string | null }).status ?? "") === "draft";
   const resendNeeded = !isDraft && (await hasUnsentRevision(ctx.supabase, id));
@@ -558,7 +563,7 @@ export async function invoiceShareText(
         needsSend: true,
         error: isDraft
           ? `Sharing marks ${invoice.invoice_number} as sent — the customer link only works on a sent invoice.`
-          : `${invoice.invoice_number ?? "This invoice"} has changed since it went out, so the customer is holding an older copy. Sharing the link again records it as re-sent.`,
+          : `${invoice.invoice_number ?? "This invoice"} has changed since it went out. Sharing the link again records that they have the current one.`,
       };
     }
     // A re-send moves the DATE and nothing else — never the status, or sharing a paid invoice
@@ -3697,6 +3702,11 @@ export async function setInvoiceStatus(
   // office corrected a line, printed the corrected bill and handed it over again. Refusing to
   // move the date there would leave `revised_at > sent_at` true forever, and a banner that cannot
   // be cleared by doing the thing it asks for is worse than no banner.
+  // hasUnsentRevision is the RECORD question (changed since it went out), not the page's money-only
+  // notice (2026-11-07): the ⋯ offers Mark Sent Again for ANY change since the send (nav-tree reads
+  // changedSinceSent, whatever the notice says - skeptic #56), so the hand door serves an unpaid
+  // bill that changed as well as a paid one; the date moves and 0405's trigger records the total the
+  // hand-over carried, which settles the record - and clears the notice where it stood.
   const redelivered = status === "sent" && sentAtKnown && !!cur.sent_at && (await hasUnsentRevision(supabase, id));
   const patch: { status: string; sent_at?: string } =
     status === "sent" && sentAtKnown && (!cur.sent_at || redelivered)

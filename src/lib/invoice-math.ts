@@ -581,6 +581,57 @@ export function handLineKind(line: { description?: string | null; unit?: string 
   return null;
 }
 
+/**
+ * WHAT A NEW LINE IS STILL MISSING — which box of the row, or null when it can go on (44aeec9c).
+ *
+ * A charge needs words: "$500" alone on a customer's invoice is a line they ring up about. But that
+ * is a thing to SAY, not a reason to grey out the only button on a blank invoice — which is how
+ * Erik's "I could not add an amount to a new blank invoice" happened (2026-09-22). And words need a
+ * price somebody typed (skeptic #56b): he types "wire" to search the book and presses Enter, and a
+ * "wire" line at $0 landed on the customer's invoice. A BLANK Price box is a question, not a zero; a
+ * 0 typed on purpose is a no-charge line, which is a real thing, and goes on. The words come first:
+ * both missing, and the cursor belongs in the box above.
+ *
+ * One rule, read by the press (which asks and puts the cursor in the box that is missing) and by the
+ * line under the row (which says the same thing), so the two can never tell different stories. It
+ * lived on the invoice page until cn-v1152 moved the row itself into the one picker
+ * (components/add-line-items), which takes the rule from its caller. This lib decides only WHICH box;
+ * the sentence for each is the catalog's (lib/words/quotes qt_askWords, qt_askPrice), read by the
+ * picker in the person's own language.
+ */
+export type AddLineAsk = "words" | "price";
+export function addLineAsk(row: { words: string; price: number | null }): AddLineAsk | null {
+  if (!row.words.trim()) return "words";
+  if (row.price == null) return "price";
+  return null;
+}
+
+/**
+ * THE COUNT A LINE GOES ON WITH: the Qty box's figure when it is a positive number, else one. The
+ * typed line and a pick from the book read the same rule (skeptic #56b: Qty 5 and a tap on a book row
+ * put ONE on and left the box saying 5). A kit is its own count and never reads the box.
+ */
+export function lineQuantity(qty: number): number {
+  return Number.isFinite(qty) && qty > 0 ? qty : 1;
+}
+
+/**
+ * THE LINE A TYPED ROW BECOMES (cn-v1152): the words as typed (trimmed — a stray space is not part of
+ * a charge), the count by lineQuantity, the unit box's word (the server reads an empty one as "ea"),
+ * and the price box's figure (a blank box is stopped by addLineAsk before it gets here, and would be
+ * 0 if it did). The same four the invoice's hand row always posted (its addItem, before the row moved
+ * into the one picker); the line carries no kind, so the server reads it by its words against the
+ * price book, as it always did (kindFromPriceBook).
+ */
+export function typedLine(row: { words: string; qty: number; unit: string; price: number | null }): {
+  description: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+} {
+  return { description: row.words.trim(), quantity: lineQuantity(row.qty), unit: row.unit, unit_price: row.price || 0 };
+}
+
 /** Group an invoice's line items into Labor / Materials / Credits / Other with a
  *  subtotal for each — so a progress report can show "Labor $X, Materials $Y" at a
  *  glance instead of a flat list. Keys off import_source ("labor"/"costs" from the
@@ -655,6 +706,76 @@ export function groupInvoiceLines(items: InvoiceLine[]): LineBreakdown {
   const fromImport = (items ?? []).some((it) => it.import_source === "labor" || it.import_source === "costs");
   g.hasBreakdown = (g.labor.lines.length > 0 || g.materials.lines.length > 0) && (filled > 1 || fromImport);
   return g;
+}
+
+/** The fields the grouped order reads: the id to place, and what the line is — its stored kind first
+ *  (0342), then who imported it, then the importer's own wording — the same first read as
+ *  groupInvoiceLines above. */
+export type OrderedLine = { id: string; description?: string | null; import_source?: string | null; line_kind?: string | null };
+
+/**
+ * THE ORDER "GROUP MATERIALS & LABOR" PUTS THE LINES IN (the invoice page's foot button; the rule moved
+ * here from the page in cn-v1152 so the button can say BEFORE it is tapped whether anything would move —
+ * Erik, 2026-11-07: "i pressed it once and it didnt seem to do anything").
+ *
+ * LABOR LEADS. Erik: "it sent all the labor down to the bottom when it should all go to the top" — the
+ * story of an invoice starts with the work done, then what it took; everything else after, credits
+ * last. Each bucket keeps its own internal order, so a tidy never scrambles a sequence he set by hand.
+ *
+ * HAND-ADDED LINES STAY WHERE THE HAND PUT THEM. Grouping is about the imported piles; a line a person
+ * typed and placed (a referral he moved to the top) must not get re-sunk to "everything else" every
+ * time the button is pressed. Pinned = no import_source; the imported lines fill the other slots in
+ * their grouped order. The paper prints the stored order (components/invoice-document), so this order
+ * is the customer's order.
+ */
+export function groupedOrder(items: ReadonlyArray<OrderedLine>): string[] {
+  const rank = (it: OrderedLine): number => {
+    // What the line was said to be leads (0342), the same first read as the Cost Breakdown.
+    const said = storedLineKind(it.line_kind);
+    if (said) return said === "labor" ? 0 : said === "materials" ? 1 : said === "credit" ? 3 : 2;
+    const src = it.import_source;
+    const d = it.description ?? "";
+    if (src === "draw_credit" || /less previous billings/i.test(d)) return 3;
+    if (src === "labor" || /^labor — /i.test(d)) return 0;
+    if (src === "costs" || /^materials — /i.test(d)) return 1;
+    return 2;
+  };
+  const entries = items.map((it, i) => ({ it, i }));
+  const pinned = (e: { it: OrderedLine }) => !e.it.import_source;
+  const movable = entries.filter((e) => !pinned(e)).sort((a, b) => rank(a.it) - rank(b.it) || a.i - b.i);
+  const ids: string[] = new Array(items.length);
+  for (const e of entries) if (pinned(e)) ids[e.i] = e.it.id;
+  let mi = 0;
+  for (let i = 0; i < ids.length; i++) if (ids[i] === undefined) ids[i] = movable[mi++].it.id;
+  return ids;
+}
+
+/** How many lines Group Materials & Labor would move — 0 = already grouped, and the button says so and
+ *  does nothing. Never 1: when any line changes places, at least two do, so the count reads plural. */
+export function linesToGroup(items: ReadonlyArray<OrderedLine>): number {
+  const order = groupedOrder(items);
+  let n = 0;
+  for (let i = 0; i < items.length; i++) if (order[i] !== items[i].id) n++;
+  return n;
+}
+
+/**
+ * THE ORDER AFTER ONE MOVE (cn-v1152: a line's Move strip — Up, Down, Top, Bottom; Erik, 2026-11-07: "i
+ * cant move line items up or down one just move to top or move to bottom, can we put those little
+ * arrows back in"). The whole-order grammar: the caller sends the whole list once (reorderInvoiceItems),
+ * never two rows swapping numbers and racing. null when the move would change nothing — the line is
+ * already at that edge, or is not in the list — so the caller writes nothing and says nothing.
+ */
+export type LineMove = "up" | "down" | "top" | "bottom";
+export function movedOrder(ids: ReadonlyArray<string>, id: string, move: LineMove): string[] | null {
+  const at = ids.indexOf(id);
+  if (at < 0) return null;
+  const last = ids.length - 1;
+  if ((move === "up" || move === "top") && at === 0) return null;
+  if ((move === "down" || move === "bottom") && at === last) return null;
+  const rest = ids.filter((x) => x !== id);
+  const to = move === "top" ? 0 : move === "bottom" ? last : move === "up" ? at - 1 : at + 1;
+  return [...rest.slice(0, to), id, ...rest.slice(to)];
 }
 
 /** The one label the customer's copy prints for every receipt's "Supplies & tax" row. */

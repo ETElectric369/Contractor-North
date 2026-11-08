@@ -475,6 +475,8 @@ export default async function PayrollPage({
         offset={offset}
         settledMileage={settledMileage}
         frozenBase={frozenBase}
+        // The one list of the ways money moves (Settings › Payment methods), for the pay form's chips.
+        paymentMethods={settings.payment_methods}
         taxNumber={settings.tax_number}
       />
     </div>

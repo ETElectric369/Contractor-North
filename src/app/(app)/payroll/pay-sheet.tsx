@@ -7,18 +7,16 @@ import { Input, Label } from "@/components/ui/input";
 import { InfoPopup } from "@/components/info-popup";
 import { formatCurrency } from "@/lib/utils";
 import { leftByPeriod, periodLabel, type PayMethod, type PersonBalance } from "@/lib/payroll-math";
+import { paymentMethodChoices } from "@/lib/payment-method";
 import { PAYMENT_LANDS_FACTS } from "./payroll-facts";
 
-const METHODS: { value: PayMethod; label: string }[] = [
-  { value: "cash", label: "Cash" },
-  { value: "check", label: "Check" },
-  { value: "transfer", label: "Transfer" },
-  { value: "other", label: "Other" },
-];
+/** A chip's element id, from its key ("apple cash" → pay-method-apple-cash). The How label points at the first. */
+const chipId = (key: string) => `pay-method-${key.replace(/[^a-z0-9]+/g, "-")}`;
 
 export type PayFields = {
   amount: number;
   paidOn: string;
+  /** The KEY of the chip he tapped (lib/payment-method: Venmo → venmo), never its words. */
   method: PayMethod;
   reference?: string;
   note?: string;
@@ -41,6 +39,17 @@ export type PayFields = {
  *
  * THE WRITE IS NOT HERE. The page owns it (recordPayment, its refusal, its sentence and its Undo),
  * so this sheet cannot grow a second write path of its own.
+ *
+ * ── HOW HE PAID COMES FROM THE ONE LIST (cn-v1152) ────────────────────────────────────────────
+ *
+ * Erik, 2026-11-07: "there are some payment entry windows that show venmo as an option then others
+ * that dont … i had to add venmo in the notes and now in the invoice im creating … i just recorded a
+ * payment with a venmo button". This form kept a list of four words of its own (cash, check,
+ * transfer, other — the 0264 CHECK's), so the Venmo he actually paid with had to go in the note.
+ * The chips are now the company's Settings › Payment methods, the same list the customer's Get Paid
+ * sheet draws (lib/payment-method paymentMethodChoices: one chip per key, the company's own spelling
+ * as its words), the first one pressed to begin with, and what is submitted is the chip's KEY
+ * (Venmo → venmo), which 0406 lets the column hold. An empty list draws the house default.
  */
 export function PaySheet({
   person,
@@ -49,6 +58,7 @@ export function PaySheet({
   today,
   saving,
   error,
+  methods,
   onCancel,
   onSubmit,
 }: {
@@ -63,6 +73,9 @@ export function PaySheet({
   saving: boolean;
   /** A refusal from the server, kept by the page so it survives this component's own state. */
   error: string | null;
+  /** The company's ways money moves, as typed in Settings › Payment methods (settings.payment_methods).
+   *  The chips, in this order; the first is pressed to begin with. Empty draws the house default. */
+  methods: string[];
   onCancel: () => void;
   onSubmit: (fields: PayFields) => void;
 }) {
@@ -72,7 +85,10 @@ export function PaySheet({
   // no reset to forget.
   const [amount, setAmount] = useState<number | null>(null);
   const [paidOn, setPaidOn] = useState(today);
-  const [method, setMethod] = useState<PayMethod>("cash");
+  // THE CHIPS: the company's list, one per key, the first pressed. The state holds the KEY.
+  const choices = paymentMethodChoices(methods);
+  const firstMethod: PayMethod = choices[0]?.key ?? "other";
+  const [method, setMethod] = useState<PayMethod>(firstMethod);
   const [reference, setReference] = useState("");
   const [note, setNote] = useState("");
 
@@ -80,7 +96,7 @@ export function PaySheet({
   // landed oldest first — so the figure he is about to type is measured against what each period
   // still costs to close, not against a gross a sentence then subtracts from.
   const { rows } = leftByPeriod(periods, person.owed);
-  const dirty = amount !== null || reference !== "" || note !== "" || paidOn !== today || method !== "cash";
+  const dirty = amount !== null || reference !== "" || note !== "" || paidOn !== today || method !== firstMethod;
   const ready = amount !== null && amount > 0;
 
   return (
@@ -146,17 +162,18 @@ export function PaySheet({
         </div>
 
         <div>
-          <Label htmlFor="pay-method-cash">How</Label>
-          <div className="grid grid-cols-4 gap-2">
-            {METHODS.map((m) => (
+          <Label htmlFor={chipId(firstMethod)}>How</Label>
+          {/* The company's own words on each chip (as typed in Settings); the KEY goes with the write. */}
+          <div className="grid grid-cols-3 gap-2">
+            {choices.map((m) => (
               <button
-                key={m.value}
-                id={`pay-method-${m.value}`}
+                key={m.key}
+                id={chipId(m.key)}
                 type="button"
-                onClick={() => setMethod(m.value)}
-                aria-pressed={method === m.value}
+                onClick={() => setMethod(m.key)}
+                aria-pressed={method === m.key}
                 className={`min-h-[44px] rounded-lg border px-2 text-sm font-medium transition-colors ${
-                  method === m.value
+                  method === m.key
                     ? "border-[rgb(var(--glass-ink))] bg-[rgb(var(--glass-ink))] text-white"
                     : "border-slate-300 bg-white text-slate-700"
                 }`}

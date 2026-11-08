@@ -25,6 +25,7 @@ import {
   type PersonBalance,
 } from "@/lib/payroll-math";
 import { summarizeMileage } from "@/lib/mileage-math";
+import { paymentMethodKey } from "@/lib/payment-method";
 
 export type Result = { ok: boolean; error?: string };
 
@@ -826,6 +827,7 @@ export async function recordPayment(input: {
   profileId: string;
   amount: number;
   paidOn: string; // YYYY-MM-DD, the ORG's day
+  /** The KEY of the chip he tapped (lib/payment-method), from the company's one list. */
   method: PayMethod;
   reference?: string;
   note?: string;
@@ -843,8 +845,15 @@ export async function recordPayment(input: {
     return { ok: false, error: "That amount is bigger than this app can record. Check the figure and enter it again." };
   }
 
-  const method: PayMethod = (input.method ?? "cash") || "cash";
-  if (!isPayMethod(method)) return { ok: false, error: "Pick how you paid: cash, check, transfer or other." };
+  // HOW HE PAID (cn-v1152): the KEY of the chip he tapped, from the company's one list (Settings ›
+  // Payment methods; lib/payment-method turns Venmo into venmo) — Erik, 2026-11-07: "there are some
+  // payment entry windows that show venmo as an option then others that dont … i had to add venmo in
+  // the notes". This door used to hold him to four words (the 0264 CHECK's); 0406 lets the column hold
+  // any key, and its trigger runs the same normalizer, so an old build's label still lands as a key.
+  // A caller that says nothing gets the column's own default (cash, as 0264 always gave it); a word
+  // that is not a method is refused, never filed under one he did not pick.
+  const method: PayMethod = input.method == null ? "cash" : isPayMethod(input.method) ? paymentMethodKey(input.method) : "";
+  if (!method) return { ok: false, error: "Pick how you paid." };
 
   const { tz, schedule, anchor } = await orgPay(supabase);
   const today = todayStrInTz(tz);

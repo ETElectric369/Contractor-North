@@ -237,6 +237,31 @@ describe("the wage doors refuse the owner (0286)", () => {
     expect(calls.find((c) => c.table === "pay_payments")).toBeUndefined();
   });
 
+  /** HOW HE PAID IS A KEY FROM THE ONE LIST (cn-v1152; Erik, 2026-11-07: "there are some payment entry
+   *  windows that show venmo as an option then others that dont"). The door used to hold him to four
+   *  words; now any method the company lists is a word, a blank is refused in three words, and nothing
+   *  past the caller's own staff check is read before the refusal. */
+  it("recordPayment refuses a blank method with 'Pick how you paid.' before any money read, and takes a Venmo chip's key", async () => {
+    state.client = fakeSupabase({ "profiles.select": [{ data: { role: "owner" }, error: null }] }, calls);
+    const res = await recordPayment({ profileId: ERIK, amount: 500, paidOn: "2026-09-20", method: "   " });
+    expect(res).toEqual({ ok: false, error: "Pick how you paid." });
+    expect(calls.filter((c) => c.table !== "profiles")).toEqual([]);
+    // A real method is not what refuses: with venmo the door walks on to the owner check and refuses THERE.
+    calls.length = 0;
+    state.client = fakeSupabase(
+      {
+        "profiles.select": [
+          { data: { role: "owner" }, error: null },
+          { data: { id: ERIK, full_name: "Erik Taylor", active: true, role: "owner" }, error: null },
+        ],
+        "organizations.select": [{ data: { settings: { timezone: "America/Los_Angeles" } }, error: null }],
+      },
+      calls,
+    );
+    expect(await recordPayment({ profileId: ERIK, amount: 500, paidOn: "2026-09-20", method: "Venmo" })).toEqual({ ok: false, error: said });
+    expect(calls.find((c) => c.table === "pay_payments")).toBeUndefined();
+  });
+
   it("a crew member still goes through markPeriodPaid exactly as before", async () => {
     state.client = fakeSupabase(scriptFor({ entries: BRIAN_JUNE, claimed: BRIAN_JUNE.map((e) => e.id) }), calls);
     expect(await markPeriodPaid(PERIOD)).toEqual({ ok: true });

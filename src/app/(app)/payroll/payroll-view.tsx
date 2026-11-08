@@ -23,6 +23,7 @@ import {
   type PersonBalance,
 } from "@/lib/payroll-math";
 import { ownerRegister } from "@/lib/owner-draw";
+import { paymentMethodLabel } from "@/lib/payment-method";
 import { clockDoorWords } from "@/lib/long-shift";
 import { confirmImportedPayment, recordPayment, settleMileage, unsettleMileage, voidPayment } from "./actions";
 import { fmtDay, PaymentLine, PersonStatement } from "./person-statement";
@@ -58,6 +59,7 @@ export function PayrollView({
   offset,
   settledMileage,
   frozenBase,
+  paymentMethods,
   taxNumber = "",
 }: {
   /** One per person with hours, a payment, or a locked period — sorted most-owed first.
@@ -96,6 +98,11 @@ export function PayrollView({
   /** The FROZEN hours/gross/rates of this period's locked runs, per profileId. The CSV reads
    *  these instead of re-pricing locked hours at today's rate. */
   frozenBase: Record<string, { hours: number; gross: number; rates: number[] }>;
+  /** THE WAYS MONEY MOVES, the company's own list (Settings › Payment methods), for the pay form's
+   *  chips — the same list the customer's Get Paid sheet draws. Erik, 2026-11-07: "there are some
+   *  payment entry windows that show venmo as an option then others that dont … i had to add venmo
+   *  in the notes". The form stores the chip's key (lib/payment-method); the board renders the label. */
+  paymentMethods: string[];
   /** The org's EIN / tax # (Settings → Company) — stamped on the CSV export's
    *  company header so the accountant file says which employer it belongs to. */
   taxNumber?: string;
@@ -155,7 +162,8 @@ export function PayrollView({
 
   // THE PAY FORM. Its fields live on PaySheet, which the page mounts only while the form is open, so
   // the empty amount is structural rather than five resets anybody could forget (pay-sheet.tsx says
-  // why). The WRITE stays here, with its refusal and its sentence.
+  // why). The WRITE stays here, with its refusal and its sentence. Its How chips are the company's
+  // one list (paymentMethods), since cn-v1152 — no word list of this page's own.
   const [payFor, setPayFor] = useState<PersonBalance | null>(null);
   const [modalError, setModalError] = useState<string | null>(null);
 
@@ -270,7 +278,7 @@ export function PayrollView({
         sayDone({
           text:
             res.message ??
-            `Recorded ${sayMoney(fields.amount)} paid to ${firstName(person.name)} on ${fmtDay(fields.paidOn)} by ${fields.method}.`,
+            `Recorded ${sayMoney(fields.amount)} paid to ${firstName(person.name)} on ${fmtDay(fields.paidOn)} by ${paymentMethodLabel(fields.method).toLowerCase()}.`,
           paymentId: res.paymentId ?? null,
         });
         // His statement stays open underneath, so the payment he just recorded appears in his own
@@ -454,7 +462,7 @@ export function PayrollView({
             if (b.unpaidHours > 0) bits.push(`${b.unpaidHours.toFixed(1)} h unpaid`);
             if (b.oldestUnpaid) bits.push(`oldest ${fmtDay(b.oldestUnpaid)}`);
             if (b.lastPayment) {
-              bits.push(`last paid ${sayMoney(b.lastPayment.amount)} ${b.lastPayment.method} on ${fmtDay(b.lastPayment.paidOn)}`);
+              bits.push(`last paid ${sayMoney(b.lastPayment.amount)} ${paymentMethodLabel(b.lastPayment.method).toLowerCase()} on ${fmtDay(b.lastPayment.paidOn)}`);
             }
             const open = openFor === b.profileId;
             return (
@@ -673,6 +681,7 @@ export function PayrollView({
           today={today}
           saving={pending && busy === `pay:${payFor.profileId}`}
           error={modalError}
+          methods={paymentMethods}
           onCancel={closePay}
           onSubmit={submitPay}
         />

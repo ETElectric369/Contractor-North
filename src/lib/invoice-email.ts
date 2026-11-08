@@ -120,10 +120,11 @@ export async function deliverInvoiceEmail(
   //
   // EVERY SEND STAMPS, NOT ONLY THE FIRST (0269, caught by all three reviewers of cn-v962). This
   // used to run only for a draft, which was right while a sent invoice could not be edited. Now
-  // that it can, the page tells Erik when the customer is holding an older bill than his and
-  // offers Send Invoice as the fix - and that button lands HERE. Stamping only on the first send
-  // meant the one door the notice points at could never clear the notice: he would email the
-  // corrected bill, watch it go, and be told again that they have the old one. A banner you
+  // that it can, the page tells Erik when the customer paid on an older figure and the money has
+  // changed since (lib/invoice-revision customerHoldsOlderCopy, narrowed to the money 2026-11-07)
+  // and offers Send Invoice as the fix - and that button lands HERE. Stamping only on the first
+  // send meant the one door the notice points at could never clear the notice: he would email the
+  // corrected bill, watch it go, and be told again that they paid on the old figure. A banner you
   // cannot clear by doing what it asks is worse than no banner at all.
   //
   // The two halves are deliberately different functions. markInvoiceSent writes the STATUS as
@@ -146,7 +147,7 @@ export async function deliverInvoiceEmail(
       ok: false,
       error: first
         ? `The email went out, but ${invoice.invoice_number ?? "this invoice"} didn't get marked as sent - reload and set its status to Sent. (${(stamped as { error?: string }).error ?? "try again"})`
-        : `The email went out, but ${invoice.invoice_number ?? "this invoice"} still shows the customer holding an older copy - reload and send it again. (${(stamped as { error?: string }).error ?? "try again"})`,
+        : `The email went out, but ${invoice.invoice_number ?? "this invoice"} didn't get recorded as sent again - reload and send it again. (${(stamped as { error?: string }).error ?? "try again"})`,
     };
   }
   if (first) {

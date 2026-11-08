@@ -3,10 +3,11 @@ import { readFileSync } from "node:fs";
 import { paidByLine, paidByOfBills, supplierPayMethodLabel } from "./supplier-pay-words";
 
 describe("how a bill was paid, in words", () => {
-  it("names the method the way the pay sheet does", () => {
-    expect(supplierPayMethodLabel("transfer")).toBe("ACH / Transfer");
+  it("names the method the way every pay door does (lib/payment-method paymentMethodLabel, cn-v1152)", () => {
+    expect(supplierPayMethodLabel("transfer")).toBe("Transfer");
     expect(supplierPayMethodLabel("check")).toBe("Check");
-    expect(supplierPayMethodLabel("venmo")).toBe("venmo");
+    expect(supplierPayMethodLabel("venmo")).toBe("Venmo");
+    expect(supplierPayMethodLabel("apple cash")).toBe("Apple Cash");
     expect(supplierPayMethodLabel(null)).toBe("Other");
   });
 
@@ -33,7 +34,8 @@ describe("how a bill was paid, in words", () => {
 
   it("says how and when, and only how when the day is missing", () => {
     const day = (iso: string) => (iso === "2026-10-03" ? "Oct 3" : iso);
-    expect(paidByLine({ method: "transfer", paidOn: "2026-10-03" }, day)).toBe("Paid by ACH / Transfer on Oct 3");
+    expect(paidByLine({ method: "transfer", paidOn: "2026-10-03" }, day)).toBe("Paid by Transfer on Oct 3");
+    expect(paidByLine({ method: "venmo", paidOn: "2026-10-03" }, day)).toBe("Paid by Venmo on Oct 3");
     expect(paidByLine({ method: "cash", paidOn: "" }, day)).toBe("Paid by Cash");
     expect(paidByLine(null, day)).toBeNull();
   });
@@ -44,7 +46,9 @@ describe("how a bill was paid, in words", () => {
     const page = readFileSync(new URL("../app/(app)/bills/page.tsx", import.meta.url), "utf8");
     expect(page).toContain("paid_by: paidByOfBill.get(String(b.id)) ?? null");
     const card = readFileSync(new URL("../app/(app)/bills/suppliers-card.tsx", import.meta.url), "utf8");
-    expect(card).toContain("SUPPLIER_PAY_METHOD_LABELS");
-    expect(card).not.toMatch(/const METHOD_LABELS: Record<SupplierPayMethod, string> = \{/);
+    // The card reads the one label too (cn-v1152): no table of its own, no supplier-only table either.
+    expect(card).toContain("paymentMethodLabel(p.method)");
+    expect(card).not.toContain("SUPPLIER_PAY_METHOD_LABELS");
+    expect(card).not.toMatch(/const METHOD_LABELS\b/);
   });
 });

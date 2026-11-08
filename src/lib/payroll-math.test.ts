@@ -16,6 +16,7 @@ import {
   sayMoney,
   periodLabel,
   toPayPaymentRow,
+  isPayMethod,
   lockRefusalReason,
   drawIdsFrom,
   wagesOnly,
@@ -551,6 +552,19 @@ describe("the sentences Erik reads back", () => {
     ).toBe("Recorded $400 to Brian, cash, today. $1,012 left.");
   });
 
+  it("says the method as the chip reads (paymentMethodLabel), lower-cased inside the sentence — never the raw key (cn-v1152)", () => {
+    expect(paymentSentence({ name: "Sam Tillery", amount: 400, method: "venmo", paidOn: today, today, locked: [], owed: 0 })).toBe(
+      "Recorded $400 to Sam, venmo, today. Nothing left owing.",
+    );
+    expect(paymentSentence({ name: "Sam Tillery", amount: 400, method: "cashapp", paidOn: today, today, locked: [], owed: 0 })).toBe(
+      "Recorded $400 to Sam, cash app, today. Nothing left owing.",
+    );
+    // A label an old build sent is read as its key first, and "Other" is still left out.
+    expect(paymentSentence({ name: "Sam Tillery", amount: 400, method: "Other", paidOn: today, today, locked: [], owed: 0 })).toBe(
+      "Recorded $400 to Sam, today. Nothing left owing.",
+    );
+  });
+
   it("says which period a payment locked", () => {
     expect(
       paymentSentence({
@@ -601,13 +615,31 @@ describe("the sentences Erik reads back", () => {
 });
 
 describe("toPayPaymentRow", () => {
-  it("reads voided_at as the fact 'voided', and an unknown method as 'other'", () => {
+  it("reads voided_at as the fact 'voided', and keeps any stored key (zelle is a way he pays, cn-v1152, not 'other')", () => {
     expect(
-      toPayPaymentRow({ id: "x", profile_id: "brian", amount: "137.50", paid_on: "2026-08-20", method: "zelle", needs_check: true, voided_at: "2026-09-01T00:00:00Z" }),
+      toPayPaymentRow({ id: "x", profile_id: "p-1", amount: "137.50", paid_on: "2026-08-20", method: "zelle", needs_check: true, voided_at: "2026-09-01T00:00:00Z" }),
     ).toEqual({
-      id: "x", profileId: "brian", amount: 137.5, paidOn: "2026-08-20", method: "other",
+      id: "x", profileId: "p-1", amount: 137.5, paidOn: "2026-08-20", method: "zelle",
       reference: null, note: null, needsCheck: true, voided: true,
     });
+  });
+
+  it("reads the method through the one normalizer: a label a trigger has not touched yet is its key, a non-word is other", () => {
+    expect(toPayPaymentRow({ method: "Venmo" }).method).toBe("venmo");
+    expect(toPayPaymentRow({ method: " Apple  Cash " }).method).toBe("apple cash");
+    expect(toPayPaymentRow({ method: "cash" }).method).toBe("cash");
+    expect(toPayPaymentRow({ method: null }).method).toBe("other");
+    expect(toPayPaymentRow({ method: 3 }).method).toBe("other");
+    expect(toPayPaymentRow({}).method).toBe("other");
+  });
+});
+
+describe("isPayMethod: a word that reads as a way money moves (the one rule, lib/payment-method)", () => {
+  it("takes any non-blank word — the company's list is the only list, so venmo, zelle and apple cash are methods", () => {
+    for (const v of ["cash", "check", "transfer", "other", "venmo", "Venmo", "zelle", "apple cash", "card"]) expect(isPayMethod(v)).toBe(true);
+  });
+  it("refuses a blank, and anything that is not a string", () => {
+    for (const v of ["", "   ", null, undefined, 3, {}, []]) expect(isPayMethod(v)).toBe(false);
   });
 });
 

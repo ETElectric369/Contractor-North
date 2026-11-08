@@ -5,7 +5,7 @@ import { NewCustomerInline } from "@/components/new-customer-inline";
 import { useRouter } from "next/navigation";
 import { taxFieldShown } from "@/lib/sales-tax-switch";
 import Link from "next/link";
-import { Plus, Trash2, Pencil, Check, X, ChevronsUp, ChevronsDown, Layers, PackagePlus, CalendarClock, Ban, Undo2, Send } from "lucide-react";
+import { Trash2, Pencil, Check, X, ArrowUpDown, ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, Layers, PackagePlus, CalendarClock, Ban, Undo2, Send, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
@@ -13,11 +13,12 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/toast";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { customerLineWords, invoiceBalance, invoiceDiscountSplit, invoiceOverpayment, isDrawKind, supplierNameSet, storedLineKind, discountRowLabel } from "@/lib/invoice-math";
+import { addLineAsk, customerLineWords, groupedOrder, invoiceBalance, invoiceDiscountSplit, invoiceOverpayment, isDrawKind, linesToGroup, movedOrder, supplierNameSet, storedLineKind, discountRowLabel, type LineMove } from "@/lib/invoice-math";
+import { UNIT_DATALIST_ID } from "@/lib/pricing/units";
 import { LineKindChips } from "./line-kind-chips";
 import { processorFeeLabel } from "@/lib/processor-fee";
 import { markupBoxApplied, markupBoxOnSeed, markupBoxStart, markupBoxTyped, markupBoxWords, materialsImportPlan, type MarkupSeed } from "@/lib/invoice-markup";
-import { paymentMethodKey, paymentMethodLabel } from "@/lib/payment-method";
+import { paymentMethodChoices, paymentMethodKey, paymentMethodLabel } from "@/lib/payment-method";
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
@@ -45,8 +46,8 @@ import {
 } from "../actions";
 import { AddLineItems } from "@/components/add-line-items";
 /* The same Send sheet the header's Send and the ⋯ Send Again open (W1-26) — one send door, not a
-   second one written here. It rides inside the "they are holding an older bill" notice so the fix is
-   where the problem is said, and nobody has to scroll back up hunting for it. */
+   second one written here. It rides inside the "they paid against an older figure" notice so the fix
+   is where the problem is said, and nobody has to scroll back up hunting for it. */
 import { SendButton } from "@/components/send-sheet";
 import { ACTIONS_NOTE_CLS, ACTIONS_ROW_CLS } from "@/components/section-actions-menu";
 import { bringInNewWorkSteps, bringInSentence, BRING_IN_NEW_WORK, type BringInOutcome, type BringInStep } from "@/lib/actuals-draw";
@@ -467,34 +468,15 @@ export function InvoiceDetail({
   const linkJobObj = jobs.find((j) => j.id === linkJob) ?? null;
   const customerOf = (jobObj: JobLite | null) => jobObj?.customer_id ?? "";
 
-  // add-item state
-  const [desc, setDesc] = useState("");
-  const [qty, setQty] = useState(1);
-  const [unit, setUnit] = useState("ea");
-  const [price, setPrice] = useState(0);
   // ADD A DISCOUNT (0389; Erik, INV-089): what for + a positive amount, stored as a negative line
   // of its own kind so the paper prints it between Subtotal and Tax, never as a payment.
   const [discountOpen, setDiscountOpen] = useState(false);
   const [discountFor, setDiscountFor] = useState("");
   const [discountAmount, setDiscountAmount] = useState(0);
-  /**
-   * ADD WAS PRESSED ON A LINE WITH NO WORDS (bug report 44aeec9c, Erik on /billing 2026-09-22: "I
-   * could not add an amount to a new blank invoice", and INV-073 the same day).
-   *
-   * A new blank invoice is nothing but this row, so he typed the amount into Price and tapped Add.
-   * Add was DISABLED until the description had something in it, so the tap did nothing: the only
-   * control that could have told him what was missing was the one he could not press. The first fix
-   * (2026-09-23) put an amber line under the row — which only appears once he has touched Qty or
-   * Price, and still leaves a button that refuses to be pressed.
-   *
-   * So the dead end is gone rather than explained: Add is always pressable, and pressing it with no
-   * words says what is missing and puts the cursor in the box. A line still needs words — a charge
-   * with no description is a line the customer rings up about — but a refusal is said, not greyed.
-   */
-  const [descAsked, setDescAsked] = useState(false);
-  const descBox = useRef<HTMLInputElement>(null);
-  /** Whether to say it yet: he has typed a figure, changed the count, or pressed Add. */
-  const needsDesc = !!addLineAsk(desc) && (price !== 0 || qty !== 1 || descAsked);
+  /* THE HAND-TYPED ROW IS THE PICKER'S (cn-v1152): its words, count, unit and price, the "Add was
+     pressed with no words" ask (44aeec9c: Add is never greyed, a refusal is said and the cursor goes to
+     the box) and the reset after a save all live in components/add-line-items now, under its one box.
+     The rule it asks with is lib/invoice-math addLineAsk, handed over where the box is drawn. */
 
   // payment state
 
@@ -736,11 +718,12 @@ export function InvoiceDetail({
   const [payEditMethod, setPayEditMethod] = useState("check");
   const [payEditNote, setPayEditNote] = useState("");
   const [payEditDate, setPayEditDate] = useState("");
-  // Settings' methods, one per stored key ("Cash" and "cash" in Settings are one option).
-  const editMethods = paymentMethods.filter(
-    (m, i) => paymentMethods.findIndex((o) => paymentMethodKey(o) === paymentMethodKey(m)) === i,
-  );
-  const editMethodKeys = new Set(editMethods.map(paymentMethodKey));
+  // Settings' methods through the one helper every pay door reads (cn-v1152): one option per stored
+  // key ("Cash" and "cash" in Settings are one option), worded as the company spells it, and the
+  // house default when the company's list is empty — so this select never has to invent a fallback
+  // of its own (it used to offer a lone Check).
+  const editMethods = paymentMethodChoices(paymentMethods);
+  const editMethodKeys = new Set(editMethods.map((c) => c.key));
 
   // edit-item state
   const [editId, setEditId] = useState<string | null>(null);
@@ -748,9 +731,15 @@ export function InvoiceDetail({
    *  a draft while this page is open (INV-069: Pay Now promoted it mid-edit), an open editor would
    *  otherwise keep offering a Save that updateInvoiceItem can only refuse — and saveEdit clears
    *  editId only on res.ok, so that refusal left everything he had typed stranded on screen with
-   *  no way back out of the form. Deriving it means the form closes with the lock, and the Save,
-   *  Move to Top and Move to Bottom buttons inside it are gated by the same single decision. */
+   *  no way back out of the form. Deriving it means the form closes with the lock, and the Save
+   *  button inside it is gated by the same single decision. (Move to Top / Move to Bottom sat in this
+   *  form too until cn-v1152; moving is the row's own Move strip now, under the same gate.) */
   const editingId = linesLocked ? null : editId;
+  /** WHICH ROW'S MOVE STRIP IS OPEN (cn-v1152) — derived the same way, so the strip is inside the one
+   *  gate by derivation: one row at a time, none on a void bill, none once the lines are down to one
+   *  (nothing to move past). It stays open after a move so a second nudge is one tap. */
+  const [movingId, setMovingId] = useState<string | null>(null);
+  const movingRow = !linesLocked && items.length > 1 ? movingId : null;
   const [editDesc, setEditDesc] = useState("");
   const [editQty, setEditQty] = useState(1);
   const [editPrice, setEditPrice] = useState(0);
@@ -761,6 +750,7 @@ export function InvoiceDetail({
   // the edit if it would turn the discount into a charge or take the bill below $0.
   const editingDiscount = storedLineKind(items.find((i) => i.id === editId)?.line_kind) === "discount";
   function startEdit(it: InvoiceItem) {
+    setMovingId(null); // one open thing per row: the edit form closes the Move strip
     setEditId(it.id);
     setEditDesc(it.description);
     setEditQty(Number(it.quantity));
@@ -814,45 +804,32 @@ export function InvoiceDetail({
     });
   }
 
-  function addItem() {
-    if (addLineAsk(desc)) {
-      // The ask, with the cursor put where the answer goes (44aeec9c — the press used to do nothing).
-      setDescAsked(true);
-      descBox.current?.focus();
-      return;
-    }
-    setDescAsked(false);
-    start(async () => {
-      const res = await addInvoiceItem(invoice.id, {
-        description: desc,
-        quantity: qty || 1,
-        unit,
-        unit_price: price || 0,
-      });
-      if (!res?.ok) { toast(res?.error ?? "Couldn't add the line item — try again.", "error"); return; }
-      setDesc("");
-      setQty(1);
-      setUnit("ea");
-      setPrice(0);
-      refresh();
-    });
-  }
-
   /**
    * MOVE ONE LINE (Erik: "just like the playbook"). The whole sequence is written every time —
    * one atomic order rather than two rows swapping numbers and racing.
+   *
+   * ONE MOVE DOOR PER LINE (cn-v1152). Erik, 2026-11-07: "i cant move line items up or down one just
+   * move to top or move to bottom, can we put those little arrows back in and integrate all those
+   * move buttons a little smoother". The one-step chevrons went in W1-27 and Move to Top / Move to
+   * Bottom lived inside the line's edit form; now a row's Move glyph arms the strip under it — Up,
+   * Down, Top, Bottom (MoveStrip, below) — and the edit form is for the words, the count and the
+   * price only. Top and Bottom keep the reason they were born: Erik added a referral line, wanted it
+   * first, and the only road was the single-step chevron — "without having to hit the arrow and
+   * follow it 65 times or whatever." Same one-call reorder grammar as Group Materials & Labor: the
+   * whole order (lib/invoice-math movedOrder), sent once.
+   *
+   * A nudge up or down is not toasted: the row moves under the thumb, the strip stays armed so the
+   * next nudge is one tap, and the toasts stack, so three taps would leave three "Moved" notes to
+   * read. A jump to an edge can take the row off the screen, so that one is said.
    */
-  /* ONE TAP TO THE EDGE. Erik added a referral line, wanted it first, and the only road was the
-     single-step chevron — "without having to hit the arrow and follow it 65 times or whatever."
-     Same one-call reorder grammar as groupByKind: compute the whole order, send it once. */
-  function moveToEdge(id: string, edge: "top" | "bottom") {
-    const rest = items.map((i) => i.id).filter((x) => x !== id);
-    const ids = edge === "top" ? [id, ...rest] : [...rest, id];
+  function moveLine(id: string, move: LineMove) {
+    const ids = movedOrder(items.map((i) => i.id), id, move);
+    if (!ids) return; // already at that edge: the strip disables those buttons; nothing to write
     start(async () => {
       const res = await reorderInvoiceItems(invoice.id, ids);
       if (!res?.ok) { toast(res?.error ?? "Couldn't move that line — try again.", "error"); return; }
-      setEditId(null);
-      toast(edge === "top" ? "Moved to the top" : "Moved to the bottom", "success");
+      if (move === "top") toast("Moved to the top", "success");
+      if (move === "bottom") toast("Moved to the bottom", "success");
       refresh();
     });
   }
@@ -861,39 +838,28 @@ export function InvoiceDetail({
    * GROUP THE LABOR TOGETHER (Erik: "itll be showing up at the bottom of the list").
    *
    * Sorts into the SAME buckets the customer's copy already prints its breakdown from
-   * (groupInvoiceLines) — materials, then labor, then everything else, credits last — while
+   * (groupInvoiceLines) — labor first, then materials, then everything else, credits last — while
    * keeping each bucket's existing internal order, so a tidy never scrambles a sequence he set
-   * by hand. It is one button, and the arrows still win afterwards.
+   * by hand. It is one button, and the arrows still win afterwards. The order itself is
+   * lib/invoice-math groupedOrder (LABOR LEADS — Erik: "it sent all the labor down to the bottom
+   * when it should all go to the top"; HAND-ADDED LINES STAY WHERE THE HAND PUT THEM — pinned = no
+   * import_source), so the foot can read beforehand how many lines would move (linesToGroup).
+   *
+   * THE BUTTON TELLS THE TRUTH (cn-v1152). Erik, 2026-11-07: "review the actual benefit/functionality
+   * of the Group Materials & Labor button … i pressed it once and it didnt seem to do anything". On
+   * lines already in that order it moved nothing and still said "Grouped" — a success word over a
+   * no-op. Now, when nothing would move, the button reads Already Grouped, is disabled, and neither
+   * writes nor toasts; when N lines would move it says so beside the button, and the toast after
+   * says how many did. (N is never 1: when any line changes places, at least two do.)
    */
+  const toGroup = linesToGroup(items);
   function groupByKind() {
-    // LABOR LEADS. Erik: "it sent all the labor down to the bottom when it should all go to the
-    // top" — the story of an invoice starts with the work done, then what it took; credits stay
-    // last. Order inside each group is untouched.
-    const rank = (it: (typeof items)[number]) => {
-      const src = (it as { import_source?: string | null }).import_source;
-      const d = it.description ?? "";
-      // What the line was said to be leads (0342), the same first read as the Cost Breakdown.
-      const said = storedLineKind(it.line_kind);
-      if (said) return said === "labor" ? 0 : said === "materials" ? 1 : said === "credit" ? 3 : 2;
-      if (src === "draw_credit" || /less previous billings/i.test(d)) return 3;
-      if (src === "labor" || /^labor — /i.test(d)) return 0;
-      if (src === "costs" || /^materials — /i.test(d)) return 1;
-      return 2;
-    };
-    /* HAND-ADDED LINES STAY WHERE THE HAND PUT THEM. Grouping is about the imported piles;
-       a line a person typed and placed (a referral he moved to the top) must not get re-sunk
-       to "everything else" every time the button is pressed. Pinned = no import_source. */
-    const entries = items.map((it, i) => ({ it, i }));
-    const pinned = (e: (typeof entries)[number]) => !(e.it as { import_source?: string | null }).import_source;
-    const movable = entries.filter((e) => !pinned(e)).sort((a, b) => rank(a.it) - rank(b.it) || a.i - b.i);
-    const ids: string[] = new Array(items.length);
-    for (const e of entries) if (pinned(e)) ids[e.i] = e.it.id;
-    let mi = 0;
-    for (let i = 0; i < ids.length; i++) if (!ids[i]) ids[i] = movable[mi++].it.id;
+    if (toGroup === 0) return; // Already Grouped: the button is disabled too; nothing to write, nothing to say
+    const ids = groupedOrder(items);
     start(async () => {
       const res = await reorderInvoiceItems(invoice.id, ids);
       if (!res?.ok) { toast(res?.error ?? "Couldn't group the lines — try again.", "error"); return; }
-      toast("Grouped — labor first, then materials", "success");
+      toast(`Grouped: ${toGroup} lines moved, labor first, then materials.`, "success");
       refresh();
     });
   }
@@ -1035,41 +1001,6 @@ export function InvoiceDetail({
             Void Invoice) are ⋯ rows (InvoiceStatusMenuItems below, lib/nav-tree invoiceStatusItems),
             with the sentence that says why Draft is gone where it is. Parking is the ⋯'s Set Aside
             Until… and the one line above. */}
-        {/* THE SAME PICKER AS THE COMPOSER. This surface had its own thinner copy: it returned
-            NOTHING on an empty query (so you had to guess a search term against a catalog you
-            couldn't see) and capped at 6 rows where the composer shows 200 — and it never offered
-            kits at all. That divergence is exactly what "different options for new invoice vs edit
-            invoice" meant, and it is why a browse-on-empty fix reached one surface and not this one. */}
-        {/* Open at every live status since cn-v962. It is hidden only on a VOID invoice, where
-            addInvoiceItem can still only refuse — a catalog you can browse, price, tick and submit
-            whose one possible ending is a red toast is the dead end, not the lock. */}
-        {!linesLocked && (
-        <AddLineItems
-          priceItems={priceItems}
-          kits={kits as never}
-          pricing={{ levelPct: levelMarkupPct ?? null, orgDefaultPct: defaultMarkupPct }}
-          onAdd={(lines) =>
-            start(async () => {
-              for (const l of lines) {
-                const res = await addInvoiceItem(invoice.id, {
-                  description: l.description,
-                  quantity: l.quantity,
-                  unit: l.unit,
-                  unit_price: l.unit_price,
-                  // A price-book line says what it is (0342), so it files under Materials, not Other.
-                  kind: l.kind ?? null,
-                });
-                if (!res?.ok) {
-                  toast(res?.error ?? "Couldn't add the line item — try again.", "error");
-                  return;
-                }
-              }
-              refresh();
-            })
-          }
-        />
-        )}
-
         {/* Re-import is hidden on deposit/progress/final DRAWS: a draw is itemized
             at creation with a frozen "Less previous billings" credit, so a manual
             re-import would desync that credit and mis-bill. To refresh a draw,
@@ -1241,13 +1172,17 @@ export function InvoiceDetail({
               allowed, and it is never silent. It reads off sent_at, NEVER status — a pay door can
               promote a row to 'sent' without a customer ever seeing it (0267), and telling Erik
               that the draft he is still building is "with the customer" would be the INV-069 lie in
-              a new costume. Nobody has it, so it says nothing at all. */}
+              a new costume. Nobody has it, so it says nothing at all.
+              NARROWED TO THE MONEY (Erik, 2026-11-07; 0405): the link the customer holds is live, so
+              a change never leaves them reading an older document. The amber notice stands only when
+              they paid against a figure that has since moved and a difference remains; a change on an
+              unpaid or squared-up bill, or a wording change, gets the quiet line below instead. */}
           {!linesLocked && wasDelivered && (
             customerHoldsOlderCopy ? (
               <div className="flex flex-wrap items-center gap-3 border-b border-amber-200 bg-amber-50 p-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-amber-900">
-                    {who} is holding an older bill than this one. Send it again so they have what you see.
+                    {who} paid on an older version of this bill, and the money on it has changed since. Send it again so they see where it stands.
                   </p>
                   {/* The two stamps, because "older" is a claim and these are the facts behind it. */}
                   <p className="mt-0.5 text-xs text-amber-700">
@@ -1269,8 +1204,8 @@ export function InvoiceDetail({
               </div>
             ) : (
               <p className="border-b border-slate-100 bg-slate-50/60 p-3 text-sm text-slate-500">
-                {who} has this bill already. Change anything here and their copy is older than yours, so send
-                it again when you&rsquo;re done.
+                {who} has this bill already, and their link always shows what you see. If the money changes after
+                they have paid, send it again.
               </p>
             )
           )}
@@ -1287,7 +1222,7 @@ export function InvoiceDetail({
                       className="w-16 text-center"
                       placeholder="unit"
                       aria-label="Unit"
-                      list="cn-units"
+                      list={UNIT_DATALIST_ID}
                     />
                     <span className="text-slate-400">×</span>
                     <NumberInput value={editPrice} onValueChange={setEditPrice} className="flex-1 text-right" />
@@ -1310,82 +1245,95 @@ export function InvoiceDetail({
                   {/* WHAT THE LINE IS on the customer's breakdown (0342): saved on the tap, apart
                       from the words and price above, which still wait for the check mark. */}
                   <LineKindChips item={it} invoiceId={invoice.id} invoiceKind={(invoice as any).invoice_kind ?? null} disabled={pending} onDone={refresh} />
-                  {/* From TWO lines: with the one-step chevrons gone these are the only way to swap
-                      a pair (Group Materials & Labor leaves hand-typed lines where they are). */}
-                  {items.length > 1 && (
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => moveToEdge(it.id, "top")}
-                        disabled={pending || items[0]?.id === it.id}
-                        className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-                      >
-                        <ChevronsUp className="h-4 w-4" /> Move to Top
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => moveToEdge(it.id, "bottom")}
-                        disabled={pending || items[items.length - 1]?.id === it.id}
-                        className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-                      >
-                        <ChevronsDown className="h-4 w-4" /> Move to Bottom
-                      </button>
-                    </div>
-                  )}
+                  {/* No moving here since cn-v1152: a line moves from the strip under its own row (one
+                      place for it); this form is for the words, the count and the price. */}
                 </li>
               ) : (
-                <li key={it.id} className="group flex items-center gap-3 px-4 py-3 text-sm transition-colors hover:bg-slate-50">
-                  {/* THE ROW'S TEXT IS A FORK, NOT A GATE. On a VOID invoice the same words sit
-                      in a plain <div>: it reads identically, it just isn't a promise. A button
-                      titled "Edit line item" whose only possible ending is a refusal is the
-                      dead end Erik walked into, and the whole-row target made it the easiest
-                      thing on the page to hit by accident. Since cn-v962 void is the only status
-                      that takes this branch; a sent or paid bill gets the real button back. */}
-                  {linesLocked ? (
-                    <div className="min-w-0 flex-1">
-                      <LineRowText item={it} notes={lineNotes} />
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => startEdit(it)}
-                      disabled={pending}
-                      className="min-w-0 flex-1 cursor-pointer text-left"
-                      title="Edit line item"
-                    >
-                      <LineRowText item={it} notes={lineNotes} />
-                    </button>
-                  )}
-                  <div className="shrink-0 font-medium text-slate-900">{formatCurrency(it.line_total)}</div>
-                  {/* ONE GATE FOR THE WHOLE CLUSTER. These three controls call reorderInvoiceItems,
-                      updateInvoiceItem and deleteInvoiceItem. They used to be gated one at a time,
-                      and only the chevrons ever got the gate; the trash Erik pressed never did. A
-                      fourth control added here is gated by construction — which is the point, and
-                      it is why moving the rule from "draft" to "void" was a one-line change here
-                      instead of four blocks to remember. */}
-                  {!linesLocked && (
-                    <>
-                      {/* One step up or down went (W1-27): Move to Top / Move to Bottom in the line's
-                          edit form and Group Materials & Labor below do the moving, 44px each. */}
+                <li key={it.id} className="group px-4 py-3 text-sm transition-colors hover:bg-slate-50">
+                  {/* The row, then — when its Move glyph is armed — the Move strip under it (cn-v1152):
+                      four 44px buttons never have to fit beside the words and the price on a phone. */}
+                  <div className="flex items-center gap-3">
+                    {/* THE ROW'S TEXT IS A FORK, NOT A GATE. On a VOID invoice the same words sit
+                        in a plain <div>: it reads identically, it just isn't a promise. A button
+                        titled "Edit line item" whose only possible ending is a refusal is the
+                        dead end Erik walked into, and the whole-row target made it the easiest
+                        thing on the page to hit by accident. Since cn-v962 void is the only status
+                        that takes this branch; a sent or paid bill gets the real button back. */}
+                    {linesLocked ? (
+                      <div className="min-w-0 flex-1">
+                        <LineRowText item={it} notes={lineNotes} />
+                      </div>
+                    ) : (
                       <button
+                        type="button"
                         onClick={() => startEdit(it)}
                         disabled={pending}
-                        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-brand"
-                        aria-label="Edit"
-                        title="Edit"
+                        className="min-w-0 flex-1 cursor-pointer text-left"
+                        title="Edit line item"
                       >
-                        <Pencil className="h-4 w-4" />
+                        <LineRowText item={it} notes={lineNotes} />
                       </button>
-                      <button
-                        onClick={() => start(async () => { const res = await deleteInvoiceItem(it.id, invoice.id); if (!res?.ok) { toast(res?.error ?? "Couldn't remove the line item — try again.", "error"); return; } refresh(); })}
-                        disabled={pending}
-                        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-red-600"
-                        aria-label="Remove"
-                        title="Remove"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </>
+                    )}
+                    <div className="shrink-0 font-medium text-slate-900">{formatCurrency(it.line_total)}</div>
+                    {/* ONE GATE FOR THE WHOLE CLUSTER. These controls — Move, the pencil, the trash —
+                        call reorderInvoiceItems, updateInvoiceItem and deleteInvoiceItem. They used to
+                        be gated one at a time, and only the chevrons ever got the gate; the trash Erik
+                        pressed never did. A control added here is gated by construction — which is the
+                        point, and it is why moving the rule from "draft" to "void" was a one-line
+                        change here instead of four blocks to remember. */}
+                    {!linesLocked && (
+                      <>
+                        {/* ONE MOVE DOOR PER LINE (cn-v1152): the glyph arms the strip under the row
+                            (Up · Down · Top · Bottom, 44px each, MoveStrip); tapping it again, arming
+                            another row, or opening the edit form closes it. From two lines — one line
+                            has nowhere to go. The one-step chevrons went in W1-27 and the edge moves
+                            sat in the edit form until this wave; Group Materials & Labor below is the
+                            only other mover. */}
+                        {items.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setMovingId((cur) => (cur === it.id ? null : it.id))}
+                            disabled={pending}
+                            aria-label="Move This Line"
+                            title="Move This Line"
+                            aria-expanded={movingRow === it.id}
+                            aria-controls={movingRow === it.id ? `move-line-${it.id}` : undefined}
+                            className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md hover:bg-slate-100 hover:text-brand ${movingRow === it.id ? "bg-slate-100 text-brand" : "text-slate-500"}`}
+                          >
+                            <ArrowUpDown className="h-4 w-4" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => startEdit(it)}
+                          disabled={pending}
+                          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-brand"
+                          aria-label="Edit"
+                          title="Edit"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => start(async () => { const res = await deleteInvoiceItem(it.id, invoice.id); if (!res?.ok) { toast(res?.error ?? "Couldn't remove the line item — try again.", "error"); return; } refresh(); })}
+                          disabled={pending}
+                          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-red-600"
+                          aria-label="Remove"
+                          title="Remove"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  {/* movingRow is null on a void bill and on a one-line bill (derived above, like
+                      editingId), so this sits inside the same gate as the glyph that opened it. */}
+                  {movingRow === it.id && (
+                    <MoveStrip
+                      id={`move-line-${it.id}`}
+                      first={items[0]?.id === it.id}
+                      last={items[items.length - 1]?.id === it.id}
+                      pending={pending}
+                      onMove={(move) => moveLine(it.id, move)}
+                    />
                   )}
                 </li>
               ),
@@ -1398,24 +1346,32 @@ export function InvoiceDetail({
               </li>
             )}
           </ul>
-          {/* Reordering is a line control like the chevrons beside it, so it follows the same
+          {/* Reordering is a line control like the Move strip above it, so it follows the same
               word. Leaving this one on `isDraft` after the unlock would have meant the arrows
-              worked on a sent bill and the tidy button silently didn't exist. */}
+              worked on a sent bill and the tidy button silently didn't exist.
+              THE BUTTON TELLS THE TRUTH (cn-v1152): Already Grouped, disabled, when no line would
+              move — never a "Grouped" over a no-op; otherwise how many lines would, beside it
+              (groupByKind above holds the story). */}
           {!linesLocked && items.length > 1 && (
-            <div className="flex items-center justify-end border-t border-slate-100 px-3 py-2">
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-3 py-2">
+              {toGroup > 0 && <span className="text-xs text-slate-400">{toGroup} lines move</span>}
               <button
                 type="button"
                 onClick={groupByKind}
-                disabled={pending}
+                disabled={pending || toGroup === 0}
                 className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                title="Labor first, then materials — lines you added by hand stay where you put them"
+                title={
+                  toGroup === 0
+                    ? "Labor first, then materials: these lines already are. Lines you added by hand stay where you put them."
+                    : "Labor first, then materials — lines you added by hand stay where you put them"
+                }
               >
-                <Layers className="h-4 w-4" /> Group Materials & Labor
+                <Layers className="h-4 w-4" /> {toGroup === 0 ? "Already Grouped" : "Group Materials & Labor"}
               </button>
             </div>
           )}
           {/* The words a contractor actually bills in — suggestions, never a limit. */}
-          <datalist id="cn-units">
+          <datalist id={UNIT_DATALIST_ID}>
             {["ea", "hrs", "hr", "lot", "ft", "day", "days", "sq ft", "roll", "box", "trip"].map((u) => (
               <option key={u} value={u} />
             ))}
@@ -1439,37 +1395,46 @@ export function InvoiceDetail({
             </div>
           ) : (
           <div className="space-y-2 border-t border-slate-100 bg-slate-50/60 p-3">
-            <Input
-              ref={descBox}
-              aria-label="What this charge is for"
-              placeholder="Add a line item…"
-              value={desc}
-              onChange={(e) => setDesc(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addItem()}
+            {/* ONE ADD BOX (cn-v1152). Erik, 2026-11-07: "add from pricelist should be with or integrated
+                into the add a line item on the bottom". The price-list picker stood above the table and
+                this row's own box sat here — two front doors for one table. The picker is THE SAME ONE the
+                estimate editor draws (components/add-line-items; this surface once had a thinner copy that
+                returned nothing on an empty query and never offered kits, which is how a browse-on-empty
+                fix reached one surface and not this one). Given `typed` it draws the hand row under its
+                box, and its box is the line's: a pick adds at the book price, a kit's lines keep their
+                kinds, words that match nothing are the line — all three through the one save below, whose
+                answer says whether the row may clear (a line the server refused keeps its words under the
+                toast). Open at every live status since cn-v962; void hides this whole box, above. */}
+            <AddLineItems
+              priceItems={priceItems}
+              kits={kits as never}
+              pricing={{ levelPct: levelMarkupPct ?? null, orgDefaultPct: defaultMarkupPct }}
+              typed={{ ask: addLineAsk, saving: pending }}
+              onAdd={(lines) =>
+                new Promise<boolean>((landed) =>
+                  start(async () => {
+                    for (const l of lines) {
+                      const res = await addInvoiceItem(invoice.id, {
+                        description: l.description,
+                        quantity: l.quantity,
+                        unit: l.unit,
+                        unit_price: l.unit_price,
+                        // A price-book line says what it is (0342), so it files under Materials, not Other.
+                        // A typed line carries none and is read by its words (kindFromPriceBook), as before.
+                        kind: l.kind ?? null,
+                      });
+                      if (!res?.ok) {
+                        toast(res?.error ?? "Couldn't add the line item — try again.", "error");
+                        landed(false);
+                        return;
+                      }
+                    }
+                    refresh();
+                    landed(true);
+                  }),
+                )
+              }
             />
-            <div className="flex items-center gap-2">
-              <NumberInput value={qty} onValueChange={setQty} className="w-16 text-center" placeholder="Qty" />
-              {/* THE UNIT, TYPEABLE (Erik 8/18). "hrs" is not "ea", and a line that says the
-                  wrong word is a line he has to explain to a customer. Free text with a
-                  suggestion list — his trade's words are his, not a dropdown we curate. */}
-              <Input
-                value={unit}
-                onChange={(e) => setUnit(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addItem()}
-                className="w-16 text-center"
-                placeholder="unit"
-                aria-label="Unit"
-                list="cn-units"
-              />
-              <span className="text-slate-400">×</span>
-              <NumberInput value={price} onValueChange={setPrice} className="flex-1 text-right" placeholder="Price" />
-              {/* ALWAYS PRESSABLE (44aeec9c): a tap with no words says what's missing and puts the
-                  cursor in the box. It used to be greyed out, so the tap did nothing at all. */}
-              <Button onClick={addItem} disabled={pending}>
-                <Plus className="h-4 w-4" /> Add
-              </Button>
-            </div>
-            {needsDesc && <p className="text-xs text-amber-700">{addLineAsk(desc)}</p>}
             {/* A DISCOUNT IS ITS OWN LINE (0389; Erik, INV-089: a traded part of the work). The
                 price box above takes no minus sign on purpose — a discount has its own door, with
                 the one thing a discount needs that a price does not: what it is for. */}
@@ -1611,11 +1576,9 @@ export function InvoiceDetail({
                         {payEditMethod && !editMethodKeys.has(paymentMethodKey(payEditMethod)) && (
                           <option value={payEditMethod}>{paymentMethodLabel(payEditMethod)}</option>
                         )}
-                        {editMethods.length ? (
-                          editMethods.map((m) => <option key={paymentMethodKey(m)} value={paymentMethodKey(m)}>{m}</option>)
-                        ) : (
-                          <option value="check">Check</option>
-                        )}
+                        {editMethods.map((c) => (
+                          <option key={c.key} value={c.key}>{c.label}</option>
+                        ))}
                       </Select>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1776,16 +1739,36 @@ function shortDay(value: string | null | undefined): string {
 }
 
 /**
- * WHAT A NEW LINE IS STILL MISSING, in the row's own words — null when it can go on (44aeec9c).
- *
- * A charge needs words: "$500" alone on a customer's invoice is a line they ring up about. But that
- * is a thing to SAY, not a reason to grey out the only button on a blank invoice — which is how
- * Erik's "I could not add an amount to a new blank invoice" happened. One rule, read by the press
- * (which asks and puts the cursor in the box) and by the line under the row (which says the same
- * thing), so the two can never tell different stories.
+ * THE MOVE STRIP (cn-v1152): the four ways a line moves, drawn under the row whose Move glyph armed it.
+ * Up and Down nudge one place; Top and Bottom jump. The edges are disabled — the first line cannot go
+ * up or to the top, the last cannot go down or to the bottom — and every button waits while a move is
+ * in flight (`pending`). 44px each; the word beside each arrow from sm: up, the aria-label on a phone.
+ * Exported so the markup test can draw it armed (the page arms it by state).
  */
-export function addLineAsk(desc: string): string | null {
-  return desc.trim() ? null : "Type what this charge is for in the box above, then tap Add.";
+export function MoveStrip({ id, first, last, pending, onMove }: { id: string; first: boolean; last: boolean; pending: boolean; onMove: (move: LineMove) => void }) {
+  const doors: { move: LineMove; label: string; word: string; Icon: LucideIcon; off: boolean }[] = [
+    { move: "up", label: "Move Up", word: "Up", Icon: ChevronUp, off: first },
+    { move: "down", label: "Move Down", word: "Down", Icon: ChevronDown, off: last },
+    { move: "top", label: "Move to Top", word: "Top", Icon: ChevronsUp, off: first },
+    { move: "bottom", label: "Move to Bottom", word: "Bottom", Icon: ChevronsDown, off: last },
+  ];
+  return (
+    <div id={id} className="mt-2 flex flex-wrap items-center gap-2">
+      {doors.map(({ move, label, word, Icon, off }) => (
+        <button
+          key={move}
+          type="button"
+          onClick={() => onMove(move)}
+          disabled={pending || off}
+          aria-label={label}
+          title={label}
+          className="inline-flex h-11 w-11 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 sm:w-auto sm:px-3"
+        >
+          <Icon className="h-4 w-4" /> <span className="hidden sm:inline">{word}</span>
+        </button>
+      ))}
+    </div>
+  );
 }
 
 /**
@@ -1947,19 +1930,22 @@ export function InvoiceStatusMenuItems({
   status,
   sentAt,
   amountPaid,
-  customerHoldsOlderCopy = false,
+  changedSinceSent = false,
 }: {
   invoiceId: string;
   invoiceNumber?: string | null;
   status: string;
   sentAt?: string | null;
   amountPaid?: number | null;
-  customerHoldsOlderCopy?: boolean;
+  /** THE RECORD: the bill changed since it last went out (lib/invoice-revision changedSinceSent,
+   *  decided on the server). Gates Mark Sent Again whatever the body's money-only notice says
+   *  (2026-11-07): a menu row is a door, not a nag. */
+  changedSinceSent?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
-  const items = invoiceStatusItems({ status, invoiceNumber, sentAt, amountPaid, customerHoldsOlderCopy });
+  const items = invoiceStatusItems({ status, invoiceNumber, sentAt, amountPaid, changedSinceSent });
   function run(value: string, confirmText?: string) {
     if (confirmText && !confirm(confirmText)) return;
     const next = statusToSend(value);

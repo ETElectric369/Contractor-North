@@ -1,10 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { ListPlus } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { ListPlus, Plus } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { NumberInput } from "@/components/ui/number-input";
 import { formatCurrency } from "@/lib/utils";
-import { priceBookLineKind } from "@/lib/invoice-math";
+import { lineQuantity, priceBookLineKind, typedLine, type AddLineAsk } from "@/lib/invoice-math";
+import { UNIT_DATALIST_ID } from "@/lib/pricing/units";
 import {
   hasItemOptions,
   pickerChoices,
@@ -81,6 +84,35 @@ export type PriceItemLite = {
   price_list_item_options?: PriceItemOptionRow[] | null;
 };
 
+/**
+ * THE TYPED LINE (cn-v1152). Erik, 2026-11-07, on an invoice: "add from pricelist should be with or
+ * integrated into the add a line item on the bottom".
+ *
+ * The invoice page drew two add doors: this picker above its lines table, and under the table its own
+ * hand-typed row — a box, then Qty · unit · × · Price · Add — because this component had no way to add
+ * words that match nothing. Given `typed`, the picker's box is ALSO that row's description box, and the
+ * row is drawn under it: a pick from the book still adds at once, at THE price; words that match nothing
+ * are the line, and Enter (in any box of the row) or Add puts them on with the count, the unit and the
+ * price from the row. Without `typed` the component is what it always was — the estimate editor types
+ * its lines in rows of its own and hands this nothing.
+ *
+ * The typed line goes through the same onAdd as a pick and a kit (one save model, one loop on the page);
+ * onAdd's answer says whether the row may clear. The words the row says (Qty, unit, Price, Add) are the
+ * catalog's, like the rest of this component's, and so are the two asks; WHICH box is asked for is the
+ * caller's rule. The row's Qty is honored by a pick from the book too (skeptic #56b): Qty 5 and a tap
+ * on a row put five on, and the row starts over after any add — a typed line, a pick, a kit.
+ */
+export type TypedLineDoor = {
+  /** Which box the line is still missing (null = none): the words, or a price nobody typed — a blank
+   *  Price box asks, a 0 typed on purpose is a no-charge line (lib/invoice-math addLineAsk). Said under
+   *  the row, in the catalog's words, once he has typed a figure, changed the count or pressed Add — and
+   *  the press puts the cursor in the box that is missing (44aeec9c: Add is never greyed; a refusal is said). */
+  ask: (row: { words: string; price: number | null }) => AddLineAsk | null;
+  /** While the page's save is on the wire the Add button waits, and Enter does nothing. The box itself does
+   *  NOT wait: a disabled box drops the cursor, and the cursor is where the next line goes. */
+  saving?: boolean;
+};
+
 export function AddLineItems({
   priceItems = [],
   kits = [],
@@ -96,6 +128,7 @@ export function AddLineItems({
   /** Measurements from the inspection, so a self-sizing kit opens with real numbers. */
   measured,
   onAdd,
+  typed,
   className = "",
   disabled = false,
 }: {
@@ -103,7 +136,12 @@ export function AddLineItems({
   kits?: KitForPicker[];
   pricing: BookPricing;
   measured?: { sqft?: number | null; linearFt?: number | null; byKey?: Record<string, number | null> | null };
-  onAdd: (lines: DraftLineItem[]) => void;
+  /** Every line this component adds — a pick, a kit's lines, a typed line — goes through here. The answer
+   *  matters only for a typed line: `false` (or a promise of it) keeps its words in the row, because the
+   *  page's toast has said why the server refused; anything else clears the row. A pick clears at once. */
+  onAdd: (lines: DraftLineItem[]) => void | boolean | Promise<void | boolean>;
+  /** The hand-typed row under the box (TypedLineDoor). Absent on the estimate editor. */
+  typed?: TypedLineDoor;
   className?: string;
   /** While the document's save is on the wire: the box and the kit chips wait, so a pick cannot
    *  land mid-flight (the one save model). */
@@ -137,16 +175,45 @@ export function AddLineItems({
     return pool.slice(0, q ? 25 : 200);
   }, [query, priceItems]);
 
+  // THE TYPED LINE'S OWN THREE (cn-v1152): the count, the unit and the price under the box; its words
+  // are `query`, the same box a pick is searched from. Unused, and unseen, without `typed` (the count
+  // stays 1, so a pick on the estimate editor adds one, as it always did). The price is null while the
+  // box is blank: a blank is a question, and a 0 typed on purpose is a no-charge line (skeptic #56b).
+  const [qty, setQty] = useState(1);
+  const [unit, setUnit] = useState("ea");
+  const [price, setPrice] = useState<number | null>(null);
+  /** Add was pressed with a box missing: the ask shows from then on, until the answer comes. */
+  const [askPressed, setAskPressed] = useState(false);
+  const box = useRef<HTMLInputElement>(null);
+  const priceBox = useRef<HTMLInputElement>(null);
+  const missing = typed ? typed.ask({ words: query, price }) : null;
+  /** The ask in the person's language: the words are the box above, the price is the Price box. */
+  const missingLine = missing === "words" ? t("qt_askWords") : missing === "price" ? t("qt_askPrice") : null;
+  /** Whether to say it yet: a figure typed, the count changed, or Add pressed (the invoice page's rule,
+   *  moved here with the row). */
+  const sayMissing = !!missing && (price !== null || qty !== 1 || askPressed);
+
+  /** The row after ANY add — a typed line, a pick, a kit: the words gone, the count back to one, the
+   *  unit to ea, the price blank, the ask quiet, the list closed. A row that kept its 5 would put five
+   *  of the next thing on too (skeptic #56b). */
+  const resetRow = () => {
+    setQuery("");
+    setQty(1);
+    setUnit("ea");
+    setPrice(null);
+    setAskPressed(false);
+    setOpen(false);
+  };
+
   /** A code with no vendors adds on the first tap, at THE price (priceBookLine): the same function
-   *  and the same inputs as every vendor row below it. */
+   *  and the same inputs as every vendor row below it. The count is the row's Qty when there is one. */
   const addOne = (p: PriceItemLite) => {
     const line = priceBookLine(p, pricing);
     // A LINE FROM THE BOOK SAYS WHAT IT IS WHEN THE BOOK DOES (0342): labor when the book sells it
     // by the hour, materials when the item names a supplier. Neither, and it says nothing.
     const kind = priceBookLineKind(p.unit, line.unit, p.supplier);
-    onAdd([{ description: line.description, quantity: 1, unit: line.unit, unit_price: line.unitPrice, ...(kind ? { kind } : {}) }]);
-    setQuery("");
-    setOpen(false);
+    onAdd([{ description: line.description, quantity: lineQuantity(qty), unit: line.unit, unit_price: line.unitPrice, ...(kind ? { kind } : {}) }]);
+    resetRow();
   };
 
   /**
@@ -158,20 +225,42 @@ export function AddLineItems({
    */
   const addChoice = (choice: ItemOptionChoice, item: PriceItemLite) => {
     const kind = priceBookLineKind(item.unit, choice.unit, item.supplier);
-    onAdd([{ description: choice.description, quantity: 1, unit: choice.unit, unit_price: choice.unitPrice, ...(kind ? { kind } : {}) }]);
-    setQuery("");
-    setOpen(false);
+    onAdd([{ description: choice.description, quantity: lineQuantity(qty), unit: choice.unit, unit_price: choice.unitPrice, ...(kind ? { kind } : {}) }]);
+    resetRow();
     setMakersFor(null);
   };
 
-  if (!priceItems.length && !kits.length) return null;
+  /** Enter in any box of the row, or the Add button: the words are the line. */
+  const addTyped = async () => {
+    if (!typed || typed.saving) return;
+    if (missing) {
+      // The ask, with the cursor put where the answer goes (44aeec9c — the press used to do nothing):
+      // the box above for the words, the Price box for a price nobody typed. The words stay.
+      setAskPressed(true);
+      (missing === "price" ? priceBox : box).current?.focus();
+      return;
+    }
+    setAskPressed(false);
+    const landed = await onAdd([typedLine({ words: query, qty, unit, price })]);
+    if (landed === false) return; // the page said why; the words stay for the retry
+    resetRow();
+    box.current?.focus();
+  };
+  const onRowEnter = (e: { key: string }) => e.key === "Enter" && void addTyped();
+
+  // With a typed row there is always something to draw, book or no book.
+  if (!typed && !priceItems.length && !kits.length) return null;
 
   return (
     <div className={className}>
-      {priceItems.length > 0 && (
-        <div className="relative mb-3">
+      {(priceItems.length > 0 || typed) && (
+        <div className={typed ? "relative" : "relative mb-3"}>
+          {/* ONE BOX: with `typed` it is the line's description box too, and says so; with no book to
+              pick from it says only that. */}
           <Input
-            placeholder={t("qt_addFromPriceList")}
+            ref={box}
+            placeholder={typed ? t(priceItems.length > 0 ? "qt_addLineOrPick" : "qt_addALineItem") : t("qt_addFromPriceList")}
+            aria-label={typed ? t("qt_whatThisChargeIsFor") : undefined}
             value={query}
             disabled={disabled}
             onChange={(e) => {
@@ -181,8 +270,9 @@ export function AddLineItems({
             onFocus={() => setOpen(true)}
             // The blur delay lets a click on a row land before the list unmounts.
             onBlur={() => setTimeout(() => setOpen(false), 150)}
+            onKeyDown={typed ? onRowEnter : undefined}
           />
-          {open && (
+          {open && priceItems.length > 0 && (
             <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
               {matches.map((p) => {
                 const makers = hasItemOptions(p);
@@ -261,11 +351,42 @@ export function AddLineItems({
         </div>
       )}
 
+      {/* THE ROW UNDER THE BOX (cn-v1152), as the invoice page drew it under its own box: the count, the
+          unit, × the price, Add. Enter in any of them is Add. */}
+      {typed && (
+        <div className="mt-2 flex items-center gap-2">
+          <NumberInput value={qty} onValueChange={setQty} onKeyDown={onRowEnter} className="w-16 text-center" placeholder={t("qt_qty")} />
+          {/* THE UNIT, TYPEABLE (Erik 8/18). "hrs" is not "ea", and a line that says the wrong word is a
+              line he has to explain to a customer. Free text with a suggestion list — his trade's words
+              are his, not a dropdown we curate. The list is the page's one <datalist> (lib/pricing/units
+              UNIT_DATALIST_ID): the invoice draws it once for this row and its line editor alike. */}
+          <Input
+            value={unit}
+            onChange={(e) => setUnit(e.target.value)}
+            onKeyDown={onRowEnter}
+            className="w-16 text-center"
+            placeholder={t("qt_unitPh")}
+            aria-label={t("qt_unitAria")}
+            list={UNIT_DATALIST_ID}
+          />
+          <span className="text-slate-400">×</span>
+          {/* Blank is blank, not 0: the box reports whether it is empty, and a reset empties it even after a typed "0". */}
+          <NumberInput ref={priceBox} value={price} onValueChange={(n, blank) => setPrice(blank ? null : n)} onKeyDown={onRowEnter} className="flex-1 text-right" placeholder={t("qt_price")} />
+          {/* ALWAYS PRESSABLE (44aeec9c): a tap with no words says what's missing and puts the cursor in
+              the box. It used to be greyed out, so the tap did nothing at all. It waits only while the
+              page's save is on the wire. */}
+          <Button onClick={() => void addTyped()} disabled={disabled || typed.saving}>
+            <Plus className="h-4 w-4" /> {t("qt_btn_add")}
+          </Button>
+        </div>
+      )}
+      {typed && sayMissing && <p className="mt-2 text-xs text-amber-700">{missingLine}</p>}
+
       {/* Categories as BUTTONS. As a <Select> reading "+ Add from a kit…" this was invisible —
           it looked like one more form field, and on iOS it opened the native wheel instead of a
           list. Naming the lists out loud is the whole fix. */}
       {kits.length > 0 && (
-        <div className="mb-3">
+        <div className={typed ? "mt-3" : "mb-3"}>
           <p className="mb-1.5 text-xs font-medium text-slate-500">{t("qt_addFromAList")}</p>
           <div className="flex flex-wrap gap-2">
             {kits.map((k) => (
@@ -292,8 +413,10 @@ export function AddLineItems({
           pricing={kitPricing}
           onClose={() => setPickerKit(null)}
           onAdd={(lines) => {
+            // A kit is its own count: its lines go on as the picker sized them, whatever the Qty box says.
             onAdd(lines);
             setPickerKit(null);
+            resetRow();
           }}
         />
       )}

@@ -11,6 +11,16 @@
  * public.payment_method_key() is the database's (a BEFORE trigger on payments runs it, so an old
  * build's "Cash" is normalized rather than refused). The two must agree alias for alias:
  * payment-method.test.ts reads the migration and holds them to it.
+ *
+ * ONE LIST OF THE WAYS MONEY MOVES (cn-v1152). Erik, 2026-11-07: "there are some payment entry
+ * windows that show venmo as an option then others that dont … i had to add venmo in the notes and
+ * now in the invoice im creating … i just recorded a payment with a venmo button". The customer's
+ * door read Settings › Payment methods; the crew's pay form and the supplier's pay door each kept a
+ * word list of their own (four words from 0264, five from 0270), and a CHECK on each column held them
+ * to it. Every door that records a payment now draws its chips from the one list through
+ * paymentMethodChoices() below and stores the key (0406 took the two CHECKs off and runs the one
+ * normalizer on those columns too). A lib, so it imports no catalog: a chip's label is the company's
+ * own spelling, as typed in Settings.
  */
 
 export const PAYMENT_METHOD_LABELS: Record<string, string> = {
@@ -63,4 +73,46 @@ export function paymentMethodLabel(raw: string | null | undefined): string {
       .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
       .join(" ")
   );
+}
+
+/** Whether a value names a way money moves at all: a non-blank string, whose key is then never empty.
+ *  A blank is the one thing paymentMethodKey files as other, and a blank is not a pick — a door that
+ *  is handed one refuses ("Pick how you paid.") rather than filing the money under a method nobody
+ *  chose. Both pay doors (payroll/actions, bills/supplier-actions) judge by this. */
+export function isPaymentMethod(v: unknown): v is string {
+  return typeof v === "string" && v.trim() !== "" && paymentMethodKey(v) !== "";
+}
+
+/** THE LIST A COMPANY STARTS WITH (Settings › Payment methods; org-settings' DEFAULT_SETTINGS reads
+ *  this one, so there is one copy of it). A door whose company list is empty draws these, so no door
+ *  ever offers no way to pay. Labels as a person reads them; the key of each is its lower-case. */
+export const DEFAULT_PAYMENT_METHODS: readonly string[] = ["Cash", "Check", "Card", "Zelle", "Venmo", "Transfer"];
+
+/** One chip on a pay door: the words it shows (the company's own spelling) and the key it submits. */
+export type PaymentMethodChoice = { key: string; label: string };
+
+/**
+ * THE CHIPS A PAY DOOR DRAWS — the crew's pay form, the supplier's pay door, the customer's Get Paid
+ * sheet all read the same company list (settings.payment_methods) through here. Each spelling keeps
+ * its words as the label and submits paymentMethodKey() of it; two spellings of one key ("Venmo" and
+ * "venmo", "Credit Card" and "Card") are ONE chip, the first spelling's. Blank entries are skipped. An
+ * empty list draws `fallback` — the house default — the same way, so a company that cleared its list
+ * still has a way to say how it was paid.
+ */
+export function paymentMethodChoices(
+  list: readonly (string | null | undefined)[] | null | undefined,
+  fallback: readonly string[] = DEFAULT_PAYMENT_METHODS,
+): PaymentMethodChoice[] {
+  const out: PaymentMethodChoice[] = [];
+  const seen = new Set<string>();
+  for (const raw of list ?? []) {
+    const label = String(raw ?? "").replace(/\s+/g, " ").trim();
+    if (!label) continue;
+    const key = paymentMethodKey(label);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ key, label });
+  }
+  if (out.length === 0 && fallback.length > 0) return paymentMethodChoices(fallback, []);
+  return out;
 }

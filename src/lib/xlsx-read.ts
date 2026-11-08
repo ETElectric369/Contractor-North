@@ -4,8 +4,9 @@
  *
  * Andrew (Vivian Builders) keeps his vendor list in Excel, and dropped it on the Vendors tab as
  * an .xlsx. An .xlsx is a zip of XML parts. This reads exactly the parts a list needs and nothing
- * more: the zip's central directory, the workbook (to find the FIRST sheet by its relationship,
- * never by assuming it is called sheet1.xml), the shared strings, and that one sheet's cells.
+ * more: the zip's central directory (the walk is zip-read.ts's, shared with the zip door since
+ * cn-v1152), the workbook (to find the FIRST sheet by its relationship, never by assuming it is
+ * called sheet1.xml), the shared strings, and that one sheet's cells.
  *
  * ZERO DEPENDENCIES. The one thing a browser can't do in plain code is inflate, so the caller
  * passes it in: DecompressionStream('deflate-raw') in the browser (iOS 16.4 and later), zlib's
@@ -19,10 +20,11 @@
  *   · a device whose browser can't inflate (older WebKit): "Save it as CSV".
  */
 
-/** Inflate raw DEFLATE data (no zlib header). May be sync (zlib) or async (DecompressionStream).
- *  It must stop once the output passes `maxBytes` and throw InflateTooBig: the sizes a zip declares
- *  are written by whoever made the file, so only counting while inflating stops a zip bomb. */
-export type InflateRaw = (bytes: Uint8Array, maxBytes: number) => Uint8Array | Promise<Uint8Array>;
+import { InflateUnavailable, ZipRefusal, readZipEntry, zipDirectory, type InflateRaw, type ZipEntry } from "./zip-read";
+
+/** The inflate contract and the browser's inflate live with the zip walk (zip-read.ts); every caller
+ *  of this reader (open-list-file, the vendor import, the tests) still finds them here. */
+export { InflateUnavailable, InflateTooBig, canInflateRawHere, inflateRawInBrowser, type InflateRaw } from "./zip-read";
 
 export type XlsxResult =
   | { ok: true; rows: string[][]; sheetName: string | null }
@@ -33,77 +35,10 @@ export const XLSX_MAX_ROWS = 1000;
 /** What any one XML part may inflate to. A 2 MB zip that claims 200 MB is a zip bomb, not a list. */
 const PART_MAX_BYTES = 40 * 1024 * 1024;
 
-/** Thrown by an InflateRaw that can't run on this device, so the reader can say so by name. */
-export class InflateUnavailable extends Error {}
-/** Thrown by an InflateRaw whose output passed its maxBytes: stopped mid-inflate, never held whole. */
-export class InflateTooBig extends Error {}
-
-const u16 = (b: Uint8Array, o: number) => b[o] | (b[o + 1] << 8);
-const u32 = (b: Uint8Array, o: number) => (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
-
-type ZipEntry = { name: string; method: number; flags: number; compSize: number; size: number; localOffset: number };
-
-/** The zip's table of contents, read from its end (the central directory is authoritative; the
- *  local headers can carry zeroed sizes when the writer streamed). Null when this isn't a zip. */
-function centralDirectory(b: Uint8Array): ZipEntry[] | null {
-  const floor = Math.max(0, b.length - 22 - 0xffff);
-  let eocd = -1;
-  for (let i = b.length - 22; i >= floor; i--) {
-    if (u32(b, i) === 0x06054b50) {
-      eocd = i;
-      break;
-    }
-  }
-  if (eocd < 0) return null;
-  const count = u16(b, eocd + 10);
-  const offset = u32(b, eocd + 16);
-  if (offset === 0xffffffff || count === 0xffff) return null; // ZIP64: never a 2 MB vendor list
-  const out: ZipEntry[] = [];
-  let p = offset;
-  for (let n = 0; n < count; n++) {
-    if (p + 46 > b.length || u32(b, p) !== 0x02014b50) return null;
-    const flags = u16(b, p + 8);
-    const method = u16(b, p + 10);
-    const compSize = u32(b, p + 20);
-    const size = u32(b, p + 24);
-    const nameLen = u16(b, p + 28);
-    const extraLen = u16(b, p + 30);
-    const commentLen = u16(b, p + 32);
-    const localOffset = u32(b, p + 42);
-    const name = new TextDecoder().decode(b.subarray(p + 46, p + 46 + nameLen));
-    out.push({ name, method, flags, compSize, size, localOffset });
-    p += 46 + nameLen + extraLen + commentLen;
-  }
-  return out;
-}
-
+/** One XML part as text, through the shared walk, capped at what a list's part may be (a part that
+ *  claims little and inflates past the cap is stopped where it inflates, never held whole). */
 async function readEntry(b: Uint8Array, e: ZipEntry, inflate: InflateRaw): Promise<string> {
-  if (e.flags & 1) throw new XlsxRefusal("encrypted");
-  if (e.size > PART_MAX_BYTES) throw new XlsxRefusal("too-big");
-  const lo = e.localOffset;
-  if (u32(b, lo) !== 0x04034b50) throw new XlsxRefusal("broken");
-  const start = lo + 30 + u16(b, lo + 26) + u16(b, lo + 28);
-  const data = b.subarray(start, start + e.compSize);
-  let raw: Uint8Array;
-  if (e.method === 0) raw = data;
-  else if (e.method === 8) {
-    // A DEFLATE stream can grow about 1,032 times at most; a part that claims more is lying.
-    if (e.compSize === 0 && e.size > 0) throw new XlsxRefusal("broken");
-    try {
-      raw = await inflate(data, PART_MAX_BYTES);
-    } catch (err) {
-      if (err instanceof InflateTooBig) throw new XlsxRefusal("too-big");
-      throw err;
-    }
-  } else throw new XlsxRefusal("broken");
-  if (raw.length > PART_MAX_BYTES) throw new XlsxRefusal("too-big");
-  return new TextDecoder().decode(raw);
-}
-
-class XlsxRefusal extends Error {
-  constructor(public why: "encrypted" | "too-big" | "broken") {
-    super(why);
-  }
+  return new TextDecoder().decode(await readZipEntry(b, e, inflate, PART_MAX_BYTES));
 }
 
 /** XML text → plain text: the five named entities, numeric references, and OOXML's own _xHHHH_
@@ -253,9 +188,10 @@ export async function readXlsx(bytes: Uint8Array | ArrayBuffer, inflateRaw: Infl
       ? { ok: false, error: `${name} is the old Excel format. Save it as .xlsx or CSV and drop it again.` }
       : { ok: false, error: `${name} is password-protected. Open it in Excel, take the password off (or save a copy as CSV), and drop it again.` };
   }
-  const entries = centralDirectory(b);
-  if (!entries) return { ok: false, error: `${name} isn't an Excel .xlsx inside, whatever its name says. Save it as .xlsx or CSV and try again.` };
-  const byName = new Map(entries.map((e) => [e.name, e]));
+  // Not a zip, ZIP64 or a broken directory: none of them is a workbook, and the way forward is the same.
+  const dir = zipDirectory(b);
+  if (!dir.ok) return { ok: false, error: `${name} isn't an Excel .xlsx inside, whatever its name says. Save it as .xlsx or CSV and try again.` };
+  const byName = new Map(dir.entries.map((e) => [e.name, e]));
   const read = async (part: string): Promise<string | null> => {
     const e = byName.get(part);
     return e ? readEntry(b, e, inflateRaw) : null;
@@ -291,50 +227,10 @@ export async function readXlsx(bytes: Uint8Array | ArrayBuffer, inflateRaw: Infl
     return { ok: true, rows, sheetName };
   } catch (e) {
     if (e instanceof InflateUnavailable) return { ok: false, error: `This device can't open .xlsx. Save ${name} as CSV and drop that.` };
-    if (e instanceof XlsxRefusal) {
+    if (e instanceof ZipRefusal) {
       if (e.why === "encrypted") return { ok: false, error: `${name} is password-protected. Take the password off in Excel (or save a copy as CSV) and drop it again.` };
       if (e.why === "too-big") return { ok: false, error: `${name} is too large inside to be a vendor list. Save just the list as its own .xlsx or CSV.` };
     }
     return { ok: false, error: `${name} wouldn't open as an Excel file. Save it again from Excel as .xlsx or CSV and drop it again.` };
   }
-}
-
-/** Can this browser inflate raw DEFLATE? DecompressionStream('deflate-raw') arrived in iOS 16.4. */
-export function canInflateRawHere(): boolean {
-  if (typeof DecompressionStream === "undefined") return false;
-  try {
-    new DecompressionStream("deflate-raw" as CompressionFormat);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** The browser's inflate, for readXlsx. Throws InflateUnavailable on a device that has none, and
- *  InflateTooBig (after cancelling the stream) the moment the output passes maxBytes, so a zip
- *  bomb never fills a phone's memory. */
-export async function inflateRawInBrowser(bytes: Uint8Array, maxBytes: number): Promise<Uint8Array> {
-  if (!canInflateRawHere()) throw new InflateUnavailable("deflate-raw");
-  const copy = new Uint8Array(bytes); // a plain ArrayBuffer-backed copy for the Blob
-  const stream = new Blob([copy]).stream().pipeThrough(new DecompressionStream("deflate-raw" as CompressionFormat));
-  const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel().catch(() => undefined);
-      throw new InflateTooBig("too-big");
-    }
-    chunks.push(value);
-  }
-  const out = new Uint8Array(total);
-  let at = 0;
-  for (const c of chunks) {
-    out.set(c, at);
-    at += c.byteLength;
-  }
-  return out;
 }

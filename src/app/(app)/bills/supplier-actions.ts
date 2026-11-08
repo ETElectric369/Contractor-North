@@ -7,13 +7,9 @@ import { reportError } from "@/lib/observe";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
-import {
-  reversedPurchaseIds,
-  SUPPLIER_PAY_METHODS,
-  type PurchaseReversalShape,
-  type SupplierActionResult,
-  type SupplierPayMethod,
-} from "./supplier-balance";
+import { reversedPurchaseIds, type PurchaseReversalShape, type SupplierActionResult } from "./supplier-balance";
+// How he paid is a KEY from the company's one list (cn-v1152), the same normalizer every pay door uses.
+import { isPaymentMethod, paymentMethodKey } from "@/lib/payment-method";
 // sayMoney lives in payroll-math because payroll needed it first. It is pure string formatting
 // with no payroll in it ("$400", not "$400.00"), and a second copy here would drift the moment one
 // of them learned something about cents. One function, two ledgers.
@@ -115,9 +111,6 @@ const text = (v: unknown): string | null => {
  * he read and the rows that moved are two different sets.
  */
 const spellingKey = (raw: unknown): string => aliasKey(String(raw ?? ""));
-
-const isPayMethod = (v: unknown): v is SupplierPayMethod =>
-  typeof v === "string" && (SUPPLIER_PAY_METHODS as readonly string[]).includes(v);
 
 /** A unique index refused the write. The CODE is the reliable half - the message is English and
  *  the app is the thing standing between a race and a double-charged job, so it checks both. */
@@ -249,6 +242,9 @@ async function makeAccount(
  * EDIT AN ACCOUNT. The account number is the one field that is genuinely load-bearing - it is how
  * a payment he sent gets matched to what CED lists when they ask about it - and it arrives wrong
  * often enough (typed off a phone photo) that a read-only field would be a dead end.
+ *
+ * The row's name rides back on the same statement that wrote it, so a caller that says what
+ * happened can name the account without a second read (setSupplierOnAccount's register sentence).
  */
 export async function updateSupplierAccount(input: {
   accountId: string;
@@ -257,7 +253,7 @@ export async function updateSupplierAccount(input: {
   branchCode?: string | null;
   onAccount?: boolean;
   note?: string | null;
-}): Promise<SupplierActionResult> {
+}): Promise<SupplierActionResult & { name?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const org = orgOf(ctx);
@@ -283,7 +279,7 @@ export async function updateSupplierAccount(input: {
     .update(patch)
     .eq("id", accountId)
     .eq("org_id", org.orgId)
-    .select("id");
+    .select("id, name");
   if (error) {
     if (isDuplicateKey(error)) {
       return { ok: false, error: "You already have another supplier with that name. Pick a different one." };
@@ -293,13 +289,25 @@ export async function updateSupplierAccount(input: {
   if (!data?.length) return { ok: false, error: "That supplier isn't here anymore. Reload the page and try again." };
 
   revalidatePath("/bills");
-  return { ok: true };
+  return { ok: true, name: String(data[0].name ?? "") };
 }
 
 /**
- * RUNNING BALANCE, OR PAY AT THE REGISTER. This is the door the card points at when it finds a
- * register supplier carrying unpaid bills: a balance it refuses to show, and no way to say the
- * setting is simply wrong, is a dead end with a number in it.
+ * RUNNING BALANCE, OR PAY AT THE REGISTER. One write, either direction, and the Suppliers card has
+ * a door for each. Turn On a Running Balance is the one the card points at when it finds a register
+ * supplier carrying unpaid bills: a balance it refuses to show, and no way to say the setting is
+ * simply wrong, is a dead end with a number in it. Pay at the Register is the way back (cn-v1152):
+ * a counter store flagged as keeping a balance is found out by no check - its receipts simply sit
+ * on a balance nobody owes - while Reconcile offers to pay the store (a supplier payment, not a
+ * cost) for a card swipe at the counter, and the bank-line matcher leaves an on-account supplier's
+ * receipts out of its matching (bank-download), so the person is asked about purchases whose
+ * receipts are already in the books.
+ *
+ * THE REGISTER SENTENCE NAMES THE STORE. The card says what happened at its top, above every
+ * account, where "Set to paid at the register" would not say which one; the name rides back on the
+ * same statement that wrote the flag. Bills still marked On Account on it are not refused: the
+ * card's register_on_account check then shows them with the door the other way, which is the honest
+ * state of an account that has both.
  */
 export async function setSupplierOnAccount(input: {
   accountId: string;
@@ -311,7 +319,7 @@ export async function setSupplierOnAccount(input: {
     ok: true,
     message: input?.onAccount
       ? "Set to a running balance. What is unpaid on it now adds up into what you owe them."
-      : "Set to paid at the register. It stops carrying a running balance.",
+      : `${res.name || "That supplier"} is paid at the register now.`,
   };
 }
 
@@ -1335,7 +1343,14 @@ export async function recordSupplierPayment(input: {
   // "numeric field overflow" is not a sentence anybody can act on.
   if (amount > 99_999_999.99) return { ok: false, error: "That amount is bigger than this field can hold. Check the number." };
 
-  const method: SupplierPayMethod = isPayMethod(input?.method) ? input.method : "check";
+  // HOW HE PAID (cn-v1152): the KEY of the chip he tapped, from the company's one list (Settings ›
+  // Payment methods; lib/payment-method turns Venmo into venmo) — Erik, 2026-11-07: "there are some
+  // payment entry windows that show venmo as an option then others that dont". This door used to hold
+  // him to five words and quietly filed anything else as a check; 0406 lets the column hold any key.
+  // A caller that says nothing gets the column's own default (check, as 0270 always gave it); a word
+  // that is not a method is refused, never filed under one he did not pick.
+  const method = input?.method == null ? "check" : isPaymentMethod(input.method) ? paymentMethodKey(input.method) : "";
+  if (!method) return { ok: false, error: "Pick how you paid." };
 
   let paidOn = String(input?.paidOn ?? "").trim();
   if (paidOn && !/^\d{4}-\d{2}-\d{2}$/.test(paidOn)) {

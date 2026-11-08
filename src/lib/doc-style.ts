@@ -25,6 +25,12 @@ export interface DocStyle {
   logo_size: "s" | "m" | "l";
   /** The labor/materials cost-breakdown box on invoices (auto-shown today). */
   show_breakdown: boolean;
+  /**
+   * The "Time & Material · Progress Payment" line over the invoice title (cn-v1152). Erik, 2026-11-07,
+   * on a bill he had retitled "Kitchen lighting" so the line said nothing new: it "only needs to be
+   * there if its carrying new and needed information". One per-company switch; true = today's paper.
+   */
+  show_billing_type: boolean;
   /** Closing line on invoices — "" keeps the built-in remit/thank-you sentence. */
   closing_invoice: string;
   /** Closing line on estimates/quotes — "" keeps the built-in fallback. */
@@ -54,6 +60,7 @@ export const DEFAULT_DOC_STYLE: DocStyle = {
   density: "default",
   logo_size: "m",
   show_breakdown: true,
+  show_billing_type: true,
   closing_invoice: "",
   closing_quote: "",
   margin_x: 0.75, // = globals.css .print-page 0.6in 0.75in
@@ -75,6 +82,7 @@ export function normalizeDocStyle(raw: unknown): DocStyle {
     density: r.density === "compact" || r.density === "airy" ? r.density : "default",
     logo_size: r.logo_size === "s" || r.logo_size === "l" ? r.logo_size : "m",
     show_breakdown: r.show_breakdown === undefined ? d.show_breakdown : Boolean(r.show_breakdown),
+    show_billing_type: r.show_billing_type === undefined ? d.show_billing_type : Boolean(r.show_billing_type),
     closing_invoice: typeof r.closing_invoice === "string" ? r.closing_invoice.slice(0, 300) : "",
     closing_quote: typeof r.closing_quote === "string" ? r.closing_quote.slice(0, 300) : "",
     margin_x: clamp(r.margin_x, 0.3, 1.5, d.margin_x),

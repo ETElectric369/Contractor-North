@@ -22,6 +22,13 @@ import { reportError } from "@/lib/observe";
  * It is also the place the silent-write law is kept for that write (a zero-row UPDATE is a 204,
  * not a success): every caller learns whether the row actually moved, because a screen that says
  * "sent" over a database row that still says draft is the whole shape of this incident.
+ *
+ * THE FIGURE RIDES ON THE SAME WRITE (0405, 2026-11-07). A BEFORE trigger on invoices
+ * (invoices_sent_total_follows_send) copies `total` into `sent_total` whenever a write moves
+ * `sent_at`, so every send below, every re-send, and the hand "Sent - I Sent It Myself" record the
+ * figure the customer's copy carried without any of them naming the column. The notice's rule
+ * (lib/invoice-revision customerHoldsOlderCopy) compares it with the total now to tell a wording
+ * change from a money change.
  */
 export async function markInvoiceSent(
   supabase: { from: (t: string) => any },

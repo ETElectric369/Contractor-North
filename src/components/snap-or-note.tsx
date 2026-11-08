@@ -17,6 +17,7 @@ import { sha256Hex } from "@/lib/content-hash";
 import { isPdfBytes, readPdf } from "@/lib/pdf-text";
 import { tableReadsAsList } from "@/lib/pdf-table";
 import { isListFile, LIST_ACCEPT, readListFile, savedOn } from "@/lib/open-list-file";
+import { inflateRawInBrowser, isZipFile, openZip, ZIP_MAX_BYTES, type ZipItem, type ZipRefusedWhy } from "@/lib/zip-read";
 import { captureReceipt } from "@/lib/receipt-capture";
 import { formatCurrency } from "@/lib/utils";
 import { addPaperwork, fingerprintSeen } from "@/app/(app)/organize/paperwork-actions";
@@ -36,9 +37,11 @@ import { routePastedText, snapContext, snapPaperRows, type PastedTextRoute, type
  * events (openSnapOrNote, snapFiles) and draw its lines where they always did (useSnapLines).
  *
  * ONE SET OF RULES FOR EVERY WAY IN, per file, cheapest first:
- *   1. what it is: a PDF, a photo (a HEIC this device can't convert is refused by name), or a
- *      supplier's list or a bank download (Excel, CSV, OFX), which goes to addOpenList;
- *      anything else is named and refused;
+ *   1. what it is: a PDF, a photo (a HEIC this device can't convert is refused by name), a
+ *      supplier's list or a bank download (Excel, CSV, OFX), which goes to addOpenList, or a ZIP
+ *      (cn-v1152), which is opened right here and every file inside joins the queue behind it, an
+ *      ordinary file under these same rules (lib/zip-read; a zip inside it, an encrypted entry and
+ *      a bag with nothing takeable each get one line); anything else is named and refused;
  *   2. the 15 MB cap;
  *   3. the fingerprint of its ORIGINAL bytes, and "Already In" before anything is uploaded;
  *   4. a PDF's own pages, read here in the browser: its TABLE first, so the statement a supplier
@@ -133,8 +136,9 @@ export function clearFinishedSnapLines() {
 
 export const SNAP_OPEN_EVENT = "cn:snap-or-note:open";
 export const SNAP_FILES_EVENT = "cn:snap-or-note:files";
-/** What the sheet's Choose Files and a drop take (anything else still gets a line saying so). */
-export const SNAP_ACCEPT = `application/pdf,.pdf,image/*,.heic,.heif,${LIST_ACCEPT}`;
+/** What the sheet's Choose Files and a drop take (anything else still gets a line saying so). A zip
+ *  of them too: it is opened here and every file inside takes its own turn. */
+export const SNAP_ACCEPT = `application/pdf,.pdf,image/*,.heic,.heif,application/zip,.zip,application/x-zip-compressed,${LIST_ACCEPT}`;
 const MAX_FILE = 15 * 1024 * 1024;
 
 /** Open the sheet from any button on any page (Bills, Organize, the typed sheet's Shop Stock). */
@@ -161,6 +165,16 @@ function say(id: number, name: string, text: string, tone: SnapTone) {
   if (id <= floor) return;
   const line = { id, name, text, tone };
   put({ lines: store.lines.some((l) => l.id === id) ? store.lines.map((l) => (l.id === id ? line : l)) : [...store.lines, line] });
+}
+/**
+ * New lines placed right under line `afterId`, in order: a zip's files follow the zip's own line, not
+ * the lines of whatever was dropped after it. A line of someone no longer signed in here is dropped.
+ */
+function sayAfter(afterId: number, fresh: SnapLine[]) {
+  const kept = fresh.filter((l) => l.id > floor);
+  if (!kept.length) return;
+  const at = store.lines.findIndex((l) => l.id === afterId);
+  put({ lines: at < 0 ? [...store.lines, ...kept] : [...store.lines.slice(0, at + 1), ...kept, ...store.lines.slice(at + 1)] });
 }
 function remember(id: number, paperId: string | null | undefined) {
   if (id <= floor) return;
@@ -306,19 +320,134 @@ async function oneList(
   return { filed: true };
 }
 
-/** One file, the office's way: checked, fingerprinted, stored, a row, and read. */
-async function oneStaff(id: number, file: File, orgId: string) {
-  const name = file.name || "A file with no name";
+/**
+ * WHAT A FILE IS TO THE OFFICE'S DOOR, from its name and type alone (its bytes are asked later).
+ * One judge for oneStaff and for the count a zip's line says, so the two never disagree about what
+ * Snap or Note takes. A paper (a PDF or a photo) comes first, then a list, then a zip: an .xlsx is a
+ * zip inside and a list by name, and it is the list that wins.
+ */
+function kindOf(file: { name?: string; type?: string }) {
+  const name = file.name || "";
   const type = (file.type || "").toLowerCase();
   const pdfByName = /\.pdf$/i.test(name);
   const heic = /image\/hei[cf]/.test(type) || /\.(heic|heif)$/i.test(name);
   const isImage = type.startsWith("image/") || heic;
-  if (!(type === "application/pdf" || pdfByName || isImage) && isListFile(file)) {
+  const paper = type === "application/pdf" || pdfByName || isImage;
+  const list = isListFile(file);
+  return {
+    heic,
+    /** A PDF or a photo: the paper path. */
+    paper,
+    isPdf: type === "application/pdf" || (pdfByName && !isImage),
+    /** A supplier's list or a bank download, when it isn't a paper first. */
+    list: !paper && list,
+    /** A bag of files, when it is neither a paper nor a list. */
+    zip: !paper && !list && isZipFile(file),
+    /** Whether this door takes it at all. */
+    taken: paper || list,
+  };
+}
+
+/** The one sentence for a zip the browser can't take apart, whichever way it is too big. */
+const ZIP_TOO_BIG = "Not added: it is too big to open here. Unzip it and add the files inside.";
+
+/** What an entry's own line says when the zip door turns it away, by name. */
+function zipRefusalLine(name: string, why: ZipRefusedWhy): string {
+  switch (why) {
+    case "nested":
+      return `Not added: ${name} is a zip inside a zip. Unzip that one first.`;
+    case "encrypted":
+      return `Not added: ${name} is password-protected. Unzip it and add the files inside.`;
+    case "too-big":
+      // The same cap a dropped file gets, said the same way (the declared size is checked before a byte inflates).
+      return "Not added: it is over 15 MB. Save a smaller copy and add it again.";
+    case "no-inflate":
+      return "Not added: this browser can't open a zip. Unzip it and add the files inside.";
+    default:
+      return `Not added: ${name} is damaged inside the zip. Unzip it and add the files inside.`;
+  }
+}
+
+/** The zip's own line when nothing inside Snap or Note takes went in: true of a bag of .docx files. */
+const ZIP_NOTHING_TAKEN = "Not added: nothing inside that Snap or Note takes (PDFs, photos, Excel, CSV or OFX).";
+
+/**
+ * THE ZIP'S OWN LINE WHEN NOTHING WENT IN (skeptic #56b). "Nothing inside that Snap or Note takes" was
+ * said of a zip of 50 PDFs on an older iPhone that can't inflate, and it was false: every entry was a
+ * PDF, and every one was refused for the one same reason. When the whole bag was turned away for one
+ * reason, the zip's line says that reason, once, over the lines that each say it too. Mixed reasons, or
+ * files the door simply doesn't take, keep the old line: each entry's own line tells its story.
+ */
+function zipNothingTakenLine(items: ZipItem[]): string {
+  const reasons = new Set(items.map((it) => (it.kind === "refused" ? it.why : "file")));
+  const [only] = reasons.size === 1 ? [...reasons] : [];
+  switch (only) {
+    case "no-inflate":
+      return "Not added: this browser can't open a zip. Unzip it and add the files inside.";
+    case "encrypted":
+      return "Not added: it is password-protected. Unzip it and add the files inside.";
+    case "nested":
+      return "Not added: it is zips inside a zip. Unzip those first.";
+    case "too-big":
+      return "Not added: everything inside is over 15 MB. Save smaller copies and add them again.";
+    case "broken":
+      return "Not added: everything inside is damaged. Unzip it and add the files inside.";
+    default:
+      return ZIP_NOTHING_TAKEN;
+  }
+}
+
+/**
+ * A ZIP IS A BAG OF PAPERS, NOT A KIND OF PAPER (cn-v1152; Erik dropped his supplier's zip of invoice
+ * PDFs on Bills and was told what the door takes). It is opened here, in the browser, and every file
+ * inside joins the queue right behind it as an ordinary File under oneStaff's own rules: kind, the
+ * 15 MB cap, the fingerprint, upload, read. Its lines sit under the zip's own, in the zip's order, so
+ * what became of each paper reads top to bottom. The zip itself is never uploaded.
+ */
+async function oneZip(id: number, file: File) {
+  const name = file.name || "A zip with no name";
+  // Said before a byte is read: a bag past 100 MB is more than a browser should hold whole on a phone.
+  if (file.size > ZIP_MAX_BYTES) return say(id, name, ZIP_TOO_BIG, "error");
+  say(id, name, "Opening the zip…", "busy");
+  const opened = await openZip(await file.arrayBuffer(), inflateRawInBrowser, { maxFile: MAX_FILE });
+  // Someone else signed in while it opened: it was the last person's, and its files go nowhere.
+  if (id <= floor) return;
+  if (!opened.ok) return say(id, name, opened.why === "zip64" ? ZIP_TOO_BIG : "Not added: it isn't a zip inside, or it is damaged.", "error");
+  const fresh: SnapLine[] = [];
+  const inner: typeof queue = [];
+  let taken = 0;
+  for (const it of opened.items) {
+    const lineId = ++seq;
+    if (it.kind === "refused") {
+      fresh.push({ id: lineId, name: it.name, text: zipRefusalLine(it.name, it.why), tone: "error" });
+      continue;
+    }
+    // A file the door won't take still goes through, so oneStaff refuses it by name exactly as it
+    // would the same file dropped on its own; it just isn't counted among what was opened.
+    if (kindOf(it.file).taken) taken++;
+    inner.push({ id: lineId, file: it.file });
+    fresh.push({ id: lineId, name: it.name, text: "Waiting…", tone: "busy" });
+  }
+  sayAfter(id, fresh);
+  queue.unshift(...inner);
+  if (!taken) return say(id, name, zipNothingTakenLine(opened.items), "error");
+  if (opened.left > 0) {
+    return say(id, name, `Opened: the first ${opened.items.length} of ${opened.items.length + opened.left} files inside. Unzip it and add the rest yourself.`, "warn");
+  }
+  say(id, name, `Opened: ${taken} ${taken === 1 ? "file" : "files"} inside.`, "ok");
+}
+
+/** One file, the office's way: checked, fingerprinted, stored, a row, and read. */
+async function oneStaff(id: number, file: File, orgId: string) {
+  const name = file.name || "A file with no name";
+  const kind = kindOf(file);
+  if (kind.list) {
     await oneList(id, file);
     return;
   }
-  if (!(type === "application/pdf" || pdfByName || isImage))
-    return say(id, name, "Not added: Snap or Note takes PDFs, photos, and a supplier's list or a bank download (Excel, CSV or OFX).", "error");
+  if (kind.zip) return oneZip(id, file);
+  if (!kind.paper)
+    return say(id, name, "Not added: Snap or Note takes PDFs, photos, a zip of them, and a supplier's list or a bank download (Excel, CSV or OFX).", "error");
   if (file.size > MAX_FILE) return say(id, name, "Not added: it is over 15 MB. Save a smaller copy and add it again.", "error");
 
   say(id, name, "Checking…", "busy");
@@ -334,7 +463,7 @@ async function oneStaff(id: number, file: File, orgId: string) {
 
   let upload: File = file;
   let pdfText: string | null = null;
-  const isPdf = type === "application/pdf" || (pdfByName && !isImage);
+  const isPdf = kind.isPdf;
   if (isPdf) {
     // A PDF by what is IN it. A file named .pdf that isn't one is refused by name, not read.
     if (!isPdfBytes(raw)) return say(id, name, "Not added: it is named like a PDF but isn't one inside.", "error");
@@ -361,7 +490,7 @@ async function oneStaff(id: number, file: File, orgId: string) {
     }
   } else {
     upload = await prepareImageForUpload(file);
-    if (/hei[cf]/i.test(upload.type) || (heic && upload === file)) {
+    if (/hei[cf]/i.test(upload.type) || (kind.heic && upload === file)) {
       return say(id, name, "Not added: this HEIC photo couldn't be converted on this device. Save it as JPEG and add it again.", "error");
     }
   }
@@ -703,7 +832,7 @@ function touchDevice(): boolean {
 
 /**
  * THE SHEET. Take Photo (the camera, one picture: never `multiple` beside `capture`, or iOS opens the
- * library), Choose Files for the office (several at once: PDFs, photos, Excel, CSV, OFX), and a note
+ * library), Choose Files for the office (several at once: PDFs, photos, Excel, CSV, OFX, or a zip of them), and a note
  * box with a mic. On a desktop or an iPad the whole sheet is also a drop area. Then each file's line,
  * and each paper's card as soon as it has one.
  */
@@ -951,7 +1080,7 @@ export function SnapOrNoteSheet({ isStaff, onClose }: { isStaff: boolean; onClos
           {!lines.length && !pending.length && !(rows?.ok && rows.items.length) && (
             <p className="text-sm text-slate-500">
               {isStaff
-                ? "Snap a receipt, choose a bill's PDF or a supplier's list, or type a note. Each paper is read and waits here for your answer; a note is read and waits in Organize. Nothing is filed until you tap an answer."
+                ? "Snap a receipt, choose a bill's PDF, a supplier's list or a zip of bills, or type a note. Each paper is read and waits here for your answer; a note is read and waits in Organize. Nothing is filed until you tap an answer."
                 : "Snap a receipt for the job you're on, or type a note for the office."}
             </p>
           )}

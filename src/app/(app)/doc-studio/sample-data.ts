@@ -83,6 +83,10 @@ export const SAMPLE_CUSTOMER = {
 /** The job site the sample paper prints, and its title. */
 export const SAMPLE_TITLE = "123 Main St — main floor";
 
+/** The billing-type line over the sample invoice's title (cn-v1152), so the studio's Billing Type Line
+ *  switch shows its effect: the line, then the title moving up when it is off. */
+export const SAMPLE_BILLING_LABEL = "Time & Material · Progress Payment";
+
 export const SAMPLE_SITE = {
   address: "123 Main St",
   unit: null,

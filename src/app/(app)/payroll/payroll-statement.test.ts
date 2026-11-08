@@ -110,6 +110,7 @@ function board(over: Partial<Parameters<typeof PayrollView>[0]> = {}) {
       offset: 0,
       settledMileage: {},
       frozenBase: {},
+      paymentMethods: ["Cash", "Check", "Venmo"],
       ...over,
     }),
   );
@@ -501,7 +502,9 @@ describe("the board card is a disclosure, not the button that pays", () => {
   it("Paid Recently names the person; it is the same row the statement draws", () => {
     const html = board({ payments: [payment()] });
     expect(html).toContain("Paid Recently");
-    expect(html).toContain("Sep 28 · Sam Tillery · $400.00 · cash");
+    // The method reads as the chip does (paymentMethodLabel), never the stored key (cn-v1152).
+    expect(html).toContain("Sep 28 · Sam Tillery · $400.00 · Cash");
+    expect(board({ payments: [payment({ method: "venmo" })] })).toContain("Sep 28 · Sam Tillery · $400.00 · Venmo");
   });
 });
 
@@ -516,6 +519,7 @@ describe("the form that records a payment", () => {
         today: "2026-10-03",
         saving: false,
         error: null,
+        methods: ["Cash", "Check", "Venmo"],
         onCancel: () => {},
         onSubmit: () => {},
         ...over,
@@ -557,6 +561,51 @@ describe("the form that records a payment", () => {
 
   it("a refusal from the server is drawn inside the form, over the typed figure", () => {
     expect(sheet({ error: "That pay period could not be locked." })).toContain("That pay period could not be locked.");
+  });
+
+  /**
+   * ── HOW HE PAID IS THE COMPANY'S ONE LIST (cn-v1152) ──────────────────────────────────────────
+   * Erik, 2026-11-07: "there are some payment entry windows that show venmo as an option then others
+   * that dont … i had to add venmo in the notes". The chips are Settings › Payment methods, the words
+   * as typed there, each chip submitting its KEY (lib/payment-method); the first is pressed to begin
+   * with; two spellings of one key are one chip; an empty list draws the house default.
+   */
+  it("the How chips are the company's own list, the words as typed, the first pressed, each standing for its key", () => {
+    const html = sheet({ methods: ["Check", "Venmo", "Apple Cash"] });
+    expect(html).toContain('id="pay-method-check"');
+    expect(html).toContain('id="pay-method-venmo"');
+    expect(html).toContain('id="pay-method-apple-cash"');
+    expect(html).toContain(">Venmo<");
+    expect(html).toContain(">Apple Cash<");
+    expect(html).not.toContain('id="pay-method-cash"');
+    expect(html).not.toContain(">Other<");
+    // The first chip is pressed to begin with, and the How label points at it.
+    expect(html).toContain('for="pay-method-check"');
+    expect(html).toMatch(/id="pay-method-check"[^>]*aria-pressed="true"/);
+    expect(html).toMatch(/id="pay-method-venmo"[^>]*aria-pressed="false"/);
+  });
+
+  it("two spellings of one method are one chip, and an empty list draws the house default", () => {
+    const two = sheet({ methods: ["Venmo", "venmo", " VENMO "] });
+    expect(two.match(/id="pay-method-venmo"/g)?.length).toBe(1);
+    expect(two).toContain(">Venmo<");
+    const none = sheet({ methods: [] });
+    for (const k of ["cash", "check", "card", "zelle", "venmo", "transfer"]) expect(none).toContain(`id="pay-method-${k}"`);
+    expect(none).toMatch(/id="pay-method-cash"[^>]*aria-pressed="true"/);
+  });
+
+  it("what the form submits is the KEY — the chip sets m.key and that state goes out as method; no word list of its own remains", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/payroll/pay-sheet.tsx"), "utf8");
+    expect(src).toContain("const choices = paymentMethodChoices(methods);");
+    expect(src).toContain("onClick={() => setMethod(m.key)}");
+    expect(src).toContain("onSubmit({ amount, paidOn, method, reference: reference.trim() || undefined, note: note.trim() || undefined })");
+    expect(src).not.toMatch(/const METHODS\b/);
+    expect(src).not.toContain('"cash", label: "Cash"');
+    // The page hands the company's list down from org settings, and the board hands it to the form.
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/payroll/page.tsx"), "utf8");
+    expect(page).toContain("paymentMethods={settings.payment_methods}");
+    const view = readFileSync(join(process.cwd(), "src/app/(app)/payroll/payroll-view.tsx"), "utf8");
+    expect(view).toContain("methods={paymentMethods}");
   });
 
   it("the paragraph under the fields is one line plus bullets, and nothing is cut", () => {

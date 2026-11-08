@@ -122,6 +122,11 @@ export function InvoiceDocument({
   // add up to Amount Paid; a customer credit would make it end on a different figure than the
   // Balance Due box above it.
   const ledger = paymentLedger(total, amountPaid, payments ?? []);
+  // THE BILLING-TYPE LINE IS THE COMPANY'S CALL (cn-v1152). Erik, 2026-11-07, on a bill whose paper
+  // read "Time & Material · Progress Payment" over a title he had changed to "Kitchen lighting": the
+  // line "only needs to be there if its carrying new and needed information". doc_style.show_billing_type
+  // (Document Studio, on by default) decides; off, the title moves up into the line's place.
+  const typeLine = ds.show_billing_type ? billingLabel : null;
 
   return (
     <div className="print-page mx-auto bg-white shadow-sm" style={sheetStyleVars(ds) as React.CSSProperties}>
@@ -156,15 +161,16 @@ export function InvoiceDocument({
         </div>
       </div>
 
-      {/* A clear statement of what this invoice is — Time & Material vs Fixed-Price. */}
-      {billingLabel && (
+      {/* A clear statement of what this invoice is — Time & Material vs Fixed-Price — unless the company
+          turned the line off (typeLine above). */}
+      {typeLine && (
         <div className="mt-5">
           <span className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
-            {billingLabel}
+            {typeLine}
           </span>
         </div>
       )}
-      {title && <div className={`${billingLabel ? "mt-3" : "mt-5"} text-base font-semibold text-slate-900`}>{title}</div>}
+      {title && <div className={`${typeLine ? "mt-3" : "mt-5"} text-base font-semibold text-slate-900`}>{title}</div>}
 
       {/* Scope / description — above the line items. */}
       {description && <DocDescription text={description} />}

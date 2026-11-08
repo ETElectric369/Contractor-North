@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Camera, ChevronDown, ChevronRight, Loader2, Package, Plus } from "lucide-react";
+import { Camera, CheckCircle2, ChevronDown, ChevronRight, Circle, Loader2, Package, Plus } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -23,13 +23,22 @@ import {
   type JobTaskRow,
   type TaskPhoto,
 } from "@/lib/job-tasks";
-import { buyMaterialsTitle, type BuyMaterials } from "@/lib/materials-checklist";
+import { buyLineName, buyLineWords, buyMaterialsTitle, tickBuyLine, type BuyLine, type BuyMaterials } from "@/lib/materials-checklist";
 import { createTask, deleteTask, setTaskDonePhoto, toggleTask, updateTask, type ToggleTaskResult } from "../../tasks/actions";
+import { setMaterialItemPurchased } from "../../materials/actions";
 import { uploadJobPhotos } from "./upload-job-photos";
 import { PhotoTaskSheet } from "./photo-task-sheet";
 
 /** A task's two photos, already signed on the server (lib/job-tasks taskPhoto). */
 export type TaskPhotos = Record<string, { task: TaskPhoto; done: TaskPhoto }>;
+
+/** The set with one id put in or taken out (never mutated: React compares the handle). */
+const withId = (s: ReadonlySet<string>, id: string, on: boolean): ReadonlySet<string> => {
+  const n = new Set(s);
+  if (on) n.add(id);
+  else n.delete(id);
+  return n;
+};
 
 /**
  * THE JOB'S ONE TASK LIST (0358). Erik: tasks "embed with the job so if multiple people are on the job
@@ -56,6 +65,15 @@ export type TaskPhotos = Record<string, { task: TaskPhoto; done: TaskPhoto }>;
  * never a row in the tasks table: there is nothing to sync and nothing to check off by hand. Tapping
  * it opens the Materials tab, where buying is checking lines off. When everything is bought it moves
  * to the tab's Done fold as "Buy Materials · All Bought". It counts as ONE task (jobTaskTally).
+ *
+ * THE OPEN LINES, RIGHT UNDER IT (Erik, 2026-11-07: "tasks showing buy materials should just show the
+ * materials as sub items right there on that screen"). While the row is open, each line still to buy
+ * is a 44px sub-row under it — "12/2 Romex · 250 ft" behind an empty circle — and a tap buys it: the
+ * line is struck at once with a filled check (the way a checked task reads), the write is the editor's
+ * own (setMaterialItemPurchased), the toast says "Bought: 12/2 Romex" with an Undo, and a second tap
+ * on a struck line takes it back in place. The row stays the door to the whole list (tools, the Bought
+ * fold, editing a line). The fold's All Bought row carries no lines. One tick's round trip, with the
+ * write handed in, is lib/materials-checklist tickBuyLine.
  */
 export function JobTaskList({
   jobId,
@@ -106,6 +124,31 @@ export function JobTaskList({
   const total = tally.total;
   const buyOpen = !!materials && materials.open > 0;
   const isDone = (t: JobTaskRow) => override.get(t.id) ?? t.status === "done";
+  // The Buy Materials sub-rows: the lines struck before the write answers (back on a refusal), and the
+  // lines mid-write. Not the card's shared transition: only the line still saving refuses a second
+  // tap, so ticking down the list at the counter is never blocked by the line before it (the
+  // editor's "tick, tick, tick" rule, materials/[id]/item-editor).
+  const [bought, setBought] = useState<ReadonlySet<string>>(new Set());
+  const [saving, setSaving] = useState<ReadonlySet<string>>(new Set());
+
+  function tickLine(line: BuyLine) {
+    if (saving.has(line.id)) return;
+    const next = !bought.has(line.id);
+    const name = buyLineName(line);
+    setSaving((s) => withId(s, line.id, true));
+    void tickBuyLine(line, next, {
+      write: setMaterialItemPurchased,
+      show: (on) => setBought((s) => withId(s, line.id, on)),
+      say: toast,
+      refresh: () => router.refresh(),
+      words: {
+        ticked: fillText(t("mt_tickItem"), { tick: t("mt_bought"), item: name }),
+        undo: t("jb_undo"),
+        failed: t("mt_couldNotUpdate"),
+        offline: t("mt_noServer"),
+      },
+    }).finally(() => setSaving((s) => withId(s, line.id, false)));
+  }
 
   function toggle(task: JobTaskRow) {
     const next = !isDone(task);
@@ -187,6 +230,8 @@ export function JobTaskList({
   };
 
   // The live row: a door to the Materials tab, not a checkbox (buying is checking lines off there).
+  // Under it, while it is open, the open lines themselves: each a 44px tap that buys it, indented past
+  // the row's icon so it reads as the row's own. A line's words are the list's (never re-cased).
   const buyRow = materials && (
     <li key="buy-materials">
       <Link
@@ -200,6 +245,32 @@ export function JobTaskList({
         <span className={`min-w-0 flex-1 text-sm ${buyOpen ? "font-medium text-slate-900" : "text-slate-400"}`}>{buyMaterialsTitle(materials)}</span>
         <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
       </Link>
+      {buyOpen && materials.lines.length > 0 && (
+        <ul className="pb-1">
+          {materials.lines.map((line) => {
+            const struck = bought.has(line.id);
+            const name = buyLineName(line);
+            return (
+              <li key={line.id}>
+                <button
+                  type="button"
+                  onClick={() => tickLine(line)}
+                  disabled={saving.has(line.id)}
+                  aria-label={struck ? fillText(t("mt_notYetTick"), { tick: t("mt_bought"), item: name }) : fillText(t("mt_tickItem"), { tick: t("mt_bought"), item: name })}
+                  className="flex min-h-[44px] w-full items-center gap-2 pl-14 pr-3 text-left hover:bg-slate-50 disabled:opacity-60"
+                >
+                  {struck ? (
+                    <CheckCircle2 className="h-5 w-5 shrink-0 text-brand" aria-hidden />
+                  ) : (
+                    <Circle className="h-5 w-5 shrink-0 text-slate-300" aria-hidden />
+                  )}
+                  <span className={struck ? "min-w-0 flex-1 text-sm text-slate-400 line-through" : "min-w-0 flex-1 text-sm text-slate-700"}>{buyLineWords(line)}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </li>
   );
 

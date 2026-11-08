@@ -38,6 +38,29 @@ import { invoiceBalance, invoiceOverpayment } from "@/lib/invoice-math";
  * eight of them by Christmas - which is exactly what happened to the draft gate it replaces (the
  * tax dropdown was missed for months, audit 8; addInvoiceItem still carried its own inline copy).
  * markInvoiceSent made the send stamp one write path for the same reason. This is its twin.
+ *
+ * ── THE NOTICE NARROWS TO THE MONEY (Erik, 2026-11-07; migration 0405) ─────────────────────────
+ * Since 0269 the record said "the customer is holding an older bill" whenever revised_at passed
+ * sent_at. Erik had been reading that for weeks before he said why it was mostly wrong:
+ *
+ *   "ive noticed this for a while now and think we should remove this notification to 'send again'
+ *    becuase and i actually like this feature a lot, any change i make after its been sent reflects
+ *    on the link already sent so its mostly unnecessary to send it again unless they've paid and
+ *    something changes and a difference remains"
+ *
+ * He is right about the link: the /i page and its PDF render the bill as it is NOW, so nobody is
+ * ever reading an older DOCUMENT. What can go stale is the FIGURE the customer acted on. So the
+ * record splits into two questions, each with one home here:
+ *   - changedSinceSent: did the bill change after it last went out? The RECORD question, asked by
+ *     the doors that re-stamp a delivery (hasUnsentRevision: the share sheet, the hand "Sent").
+ *   - customerHoldsOlderCopy: should the office be TOLD to send it again? Only when the customer
+ *     has paid something, the money on the bill moved since the send (0405's sent_total, which a
+ *     trigger records on every write of sent_at, is the figure the send carried), and a difference
+ *     remains. A wording change, an unpaid bill, a squared-up bill: nothing to say.
+ *     THE ORDER OF EVENTS COUNTS (skeptic #56, 2026-11-07): "unless they've PAID and something
+ *     changes" - paid first. A payment that landed AFTER the change was made against the live link,
+ *     which already showed the new figure, so it is not a payment on an older one; the payments' own
+ *     dates, against revised_at, say which came first.
  */
 
 /** The statuses whose lines may still be edited. Everything except the one ending. */
@@ -69,52 +92,108 @@ export function shouldStampRevision(sentAt: string | null | undefined): boolean 
   return typeof sentAt === "string" && sentAt.trim() !== "";
 }
 
-/** What the customer has paid on the invoice, for the one case that settles a revision without a
- *  re-send. `paidAt` is every payment's paid_at (a voided payment is deleted, not flagged). */
-export type PaidSinceRevision = {
+/** The money facts the notice rule reads. Off the invoice's own row: its total, what has been paid
+ *  on it, and 0405's `sent_total` (the total at the last send; null = sent before 0405, or never
+ *  sent: a figure nobody recorded). Off its payments: WHEN each landed (`paid_at`, every payment on
+ *  the bill; a voided payment is deleted, not flagged, so the rows that exist are the money that
+ *  stands). PostgREST may hand any figure over as a string. The projection law: a page that asks this
+ *  question selects payments(paid_at) too (billing/page.tsx, billing/[id]/page.tsx). */
+export type MoneyFacts = {
   total: number | null | undefined;
   amountPaid: number | null | undefined;
+  sentTotal?: number | null | undefined;
   paidAt: readonly (string | null | undefined)[];
 };
 
 /**
- * THE QUESTION THE PAGE ASKS OUT LOUD: is what the customer is holding older than this?
+ * THE RECORD QUESTION: did the bill change after it last went out? `revised_at` strictly after
+ * `sent_at`, and nothing else.
  *
- * Equal timestamps are NOT a revision. A re-send stamps `sent_at` at the same instant the office
- * is looking at, and a stamp that compared `>=` would nag forever about the copy it had just sent.
- *
- * PAYING THE CORRECTED BILL IN FULL ANSWERS IT TOO (INV-071, Karen Willet, 2026-09-20). Erik
- * changed her bill at 10:21 PM; at 4:40 PM the next day she paid the new $1,875.98 through her
- * own link, which always shows the live bill. Nothing moves `sent_at` when a customer pays (a pay
- * door is never a delivery, 0267), so the board kept telling him to re-send a paid bill forever.
- * Pass `paid` and an invoice whose balance is exactly zero, with a payment that landed AFTER the
- * change, leaves the lane and the banner. Both halves matter:
- *   - after the change: the bill his client asked to have reissued in the owner's name was
- *     settled months BEFORE the revision, and that customer really is holding the old paper;
- *   - exactly zero: a pay link opened on the old bill and paid after a change that LOWERED the
- *     total pays the old figure, and an overpaid bill must stay in front of him, not vanish.
+ * Equal instants are NOT a change. A re-send stamps `sent_at` at the instant the office is looking
+ * at, and a comparison of `>=` would nag forever about the copy it had just sent. A missing or
+ * unparseable stamp is not a change either: never delivered (a draft, or INV-069's promotion by a
+ * pay door) means there is no copy out there to be older, and an alarm has to be earned by two
+ * real dates, not by garbage sorting oddly as a string.
  */
-export function customerHoldsOlderCopy(
-  sentAt: string | null | undefined,
-  revisedAt: string | null | undefined,
-  paid?: PaidSinceRevision,
-): boolean {
+export function changedSinceSent(sentAt: string | null | undefined, revisedAt: string | null | undefined): boolean {
   if (!sentAt || !revisedAt) return false;
   const sent = Date.parse(sentAt);
   const revised = Date.parse(revisedAt);
   if (Number.isNaN(sent) || Number.isNaN(revised)) return false;
-  if (!(revised > sent)) return false;
-  if (paid && paidInFullSince(paid, revised)) return false;
+  return revised > sent;
+}
+
+/** A money figure in whole cents, or NaN when nothing finite was recorded. */
+function cents(x: unknown): number {
+  const n = Number(x);
+  return Number.isFinite(n) ? Math.round(n * 100) : NaN;
+}
+
+/**
+ * THE QUESTION THE PAGE ASKS OUT LOUD: should the office be told to send this bill again?
+ *
+ * Until 2026-11-07 this was the record question with one exception (a bill paid in full after the
+ * change: the customer paid the live figure, so they had the current one). Erik narrowed it to
+ * the money: the link they hold is live, so what they are reading is never stale; only the figure
+ * they paid against can be. Every step below is a reason NOT to interrupt him, in order:
+ *
+ *   (a) not changed since it went out: never delivered, or the copy they hold is the current one
+ *       (a re-send moves sent_at forward, which is how doing what the notice asks clears it);
+ *   (b) nothing paid BEFORE the change: "any change i make after its been sent reflects on the link
+ *       already sent so its mostly unnecessary to send it again unless they've paid and something
+ *       changes" (Erik, 2026-11-07) - paid, THEN changed. A figure nobody has acted on cannot be
+ *       stale for anybody, and a payment that landed AFTER the change was made against the live
+ *       link, which already showed the new figure (skeptic #56: the money changes on an unpaid
+ *       bill, the customer then pays part of it through the link - no notice). The payments' dates
+ *       against revised_at decide (paidBefore below); a date that cannot be read counts as before;
+ *   (c) squared up, to the cent: no balance and no overpayment, so no difference remains. This
+ *       subsumes the old paid-in-full-AFTER-the-change clause, and drops its "after" half on
+ *       purpose: a bill paid in full BEFORE a later change leaves no money difference either, and
+ *       Erik does not want to be asked to re-send it (the live link already says what it says);
+ *   (d) the money did not move since the send: 0405's sent_total, the total the send carried,
+ *       equals the total now, so the change was wording (a title, the scope, a due date: cn-v967
+ *       stamps those too) and the figure they paid against still stands. A payment never changes
+ *       total, so a payment alone never fails this step;
+ *   (e) otherwise: they paid against a figure that has since moved, and money is still owed one
+ *       way or the other. Say so, and offer Send Again.
+ *
+ * WHEN sent_total IS NULL the bill went out before 0405 (or the figure was never recorded), so (d)
+ * cannot be answered and is skipped: the notice stands on (a)-(c) alone. The app does not pretend
+ * to know a figure nobody wrote down; a notice too many beats a guess (the no-speculation law).
+ */
+export function customerHoldsOlderCopy(
+  sentAt: string | null | undefined,
+  revisedAt: string | null | undefined,
+  facts: MoneyFacts,
+): boolean {
+  // (a) the record question first: nothing changed since the send, nothing to say.
+  if (!changedSinceSent(sentAt, revisedAt)) return false;
+  // (b) nothing paid (or nothing recorded as paid): the live link says it all...
+  if (!(cents(facts.amountPaid) > 0)) return false;
+  //     ...and paid BEFORE the change, by the payments' own dates ((a) proved revisedAt parses).
+  if (!paidBefore(facts.paidAt, Date.parse(String(revisedAt)))) return false;
+  // (c) squared up to the cent: no difference remains, whichever way it once leaned.
+  if (invoiceBalance(facts.total, facts.amountPaid) === 0 && invoiceOverpayment(facts.total, facts.amountPaid) === 0) return false;
+  // (d) the figure the send carried is the figure now: a wording change, not a money change.
+  const sentCents = cents(facts.sentTotal);
+  if (facts.sentTotal != null && Number.isFinite(sentCents) && sentCents === cents(facts.total)) return false;
+  // (e) paid against a figure that has since moved, with a difference still standing.
   return true;
 }
 
-/** Balance exactly zero to the cent, and at least one payment dated after `revisedMs`. */
-function paidInFullSince(paid: PaidSinceRevision, revisedMs: number): boolean {
-  if (invoiceBalance(paid.total, paid.amountPaid) !== 0) return false;
-  if (invoiceOverpayment(paid.total, paid.amountPaid) !== 0) return false;
-  return paid.paidAt.some((at) => {
-    const t = at ? Date.parse(at) : NaN;
-    return !Number.isNaN(t) && t > revisedMs;
+/**
+ * Did at least one payment land BEFORE the change - strictly before revised_at? A payment at the same
+ * instant is not before it (the change is what it saw). A payment with no readable date counts as
+ * before, and so does money paid with NO payment dates handed over at all: both mean "we cannot tell",
+ * and on a bill the customer paid against, not knowing resolves towards saying so - a notice too many
+ * beats a guess (the no-speculation law). payments.paid_at is NOT NULL (0003), so either is a
+ * projection miss (a caller that did not select payments(paid_at)), never a real row.
+ */
+function paidBefore(paidAt: readonly (string | null | undefined)[], revised: number): boolean {
+  if (paidAt.length === 0) return true;
+  return paidAt.some((p) => {
+    const t = Date.parse(String(p ?? ""));
+    return Number.isNaN(t) || t < revised;
   });
 }
 
@@ -169,12 +248,18 @@ export async function stampInvoiceRevised(
 }
 
 /**
- * Has this invoice changed since the customer last got it? Asked by the doors that can SETTLE it
- * - the share sheet (which asks before it re-sends) and the manual "Sent - I sent it myself".
+ * Has this invoice changed since the customer last got it? THE RECORD QUESTION (changedSinceSent)
+ * read off the row, for the doors that re-stamp a delivery: the share sheet (which asks before it
+ * records a re-send) and the hand "Sent - I Sent It Myself" (which moves sent_at only for one).
  *
- * False on anything it cannot read. The consequence of a false negative is a banner that stays up
- * one more tap; the consequence of a false positive is telling the office to re-send a bill that
- * never changed, which is how a nag becomes noise nobody reads.
+ * Until 2026-11-07 this gave the NOTICE's answer, so that Share never asked to re-send a bill the
+ * page no longer flagged. The notice is narrower now (money only, customerHoldsOlderCopy) and these
+ * two doors want the record instead: re-sharing or re-handing a changed bill IS a delivery of the
+ * current one, whatever the notice says, so sent_at should move and 0405's trigger should record
+ * the figure it carried. After that re-stamp revised_at <= sent_at and this reads false again.
+ *
+ * False on anything it cannot read. A false negative costs one more tap; a false positive asks the
+ * office to re-send a bill that never changed, which is how a nag becomes noise nobody reads.
  */
 export async function hasUnsentRevision(
   supabase: { from: (t: string) => any },
@@ -183,29 +268,16 @@ export async function hasUnsentRevision(
   try {
     const { data, error } = await supabase
       .from("invoices")
-      .select("status, sent_at, revised_at, total, amount_paid, payments(paid_at)")
+      .select("status, sent_at, revised_at")
       .eq("id", invoiceId)
       .maybeSingle();
     if (error || !data) return false;
-    const row = data as {
-      status?: string | null;
-      sent_at?: string | null;
-      revised_at?: string | null;
-      total?: number | null;
-      amount_paid?: number | null;
-      payments?: { paid_at?: string | null }[] | null;
-    };
+    const row = data as { status?: string | null; sent_at?: string | null; revised_at?: string | null };
     // A VOID invoice is never "waiting to be re-sent". Its lines are refused, so its stamp can
     // only be older than the void itself, and its customer link does not even open - asking the
     // office to re-send a cancelled bill would be a nag with nothing behind it.
     if (String(row.status ?? "") === "void") return false;
-    // The same answer the board and the banner give, paid-in-full case included (INV-071), so the
-    // share sheet never asks to re-send a bill the page says the customer already has.
-    return customerHoldsOlderCopy(row.sent_at, row.revised_at, {
-      total: row.total,
-      amountPaid: row.amount_paid,
-      paidAt: (row.payments ?? []).map((p) => p.paid_at),
-    });
+    return changedSinceSent(row.sent_at, row.revised_at);
   } catch {
     return false;
   }

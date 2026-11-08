@@ -386,7 +386,7 @@ describe("the when line: overdue for a deadline, ago for a day that happened", (
   });
   it("every kind says which its day is, and the happened-day kinds are the ones whose day is the deed", () => {
     expect(Object.keys(WHEN_IS_A_DEADLINE).sort()).toEqual(Object.keys(KIND_STREAM).sort());
-    for (const k of ["inspection_writeup", "visit_unbilled", "time_stray", "job_unbilled_work", "job_report_back", "appointment", "receipt_unbilled"]) expect(WHEN_IS_A_DEADLINE[k as keyof typeof WHEN_IS_A_DEADLINE], k).toBe(false);
+    for (const k of ["inspection_writeup", "visit_unbilled", "time_stray", "job_unbilled_work", "appointment", "receipt_unbilled"]) expect(WHEN_IS_A_DEADLINE[k as keyof typeof WHEN_IS_A_DEADLINE], k).toBe(false);
     for (const k of ["invoice_overdue", "inquiry", "lien_deadline", "supplier_pay", "job_on_hold", "permit_inspection"]) expect(WHEN_IS_A_DEADLINE[k as keyof typeof WHEN_IS_A_DEADLINE], k).toBe(true);
   });
   it("the list reads it: an inspection done yesterday is Yesterday on the row, never overdue", () => {

@@ -9,7 +9,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 vi.mock("@/lib/actions/execute", () => ({ executeAction: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 
-import { SuppliersCard, discountDeadlineSentence, paymentLine, supplierChecks } from "./suppliers-card";
+import { SuppliersCard, discountDeadlineSentence, paymentLine, supplierChecks, type SuppliersCardActions } from "./suppliers-card";
 import { claimableDiscounts, type SupplierInvoiceRow } from "./supplier-reconcile";
 import { supplierBalance, type SupplierAccountRow } from "./supplier-balance";
 
@@ -253,6 +253,48 @@ describe("the supplier detail: Check These", () => {
     expect(live).toContain("Turn On a Running Balance");
   });
 
+  /**
+   * ── HOW HE PAID IS THE COMPANY'S ONE LIST (cn-v1152) ──────────────────────────────────────────
+   * Erik, 2026-11-07: "there are some payment entry windows that show venmo as an option then others
+   * that dont". The sheet's How chips are Settings › Payment methods (lib/payment-method
+   * paymentMethodChoices), the words as typed, each submitting its KEY; Check is pressed to begin with
+   * when the list has it (a supplier's statement is paid by check, this sheet's default since 0270);
+   * the payments list reads the one label. The sheet opens on a tap, so the chips are read from the
+   * source and the list from the markup.
+   */
+  it("the How chips are the company's own list, submit the key, and Check is pressed first when the list has it", () => {
+    expect(CARD).toContain("methods = [],");
+    expect(CARD).toContain("const choices = paymentMethodChoices(methods);");
+    expect(CARD).toContain('const firstMethod = choices.find((c) => c.key === "check")?.key ?? choices[0]?.key ?? "other";');
+    expect(CARD).toContain("const [method, setMethod] = useState<string>(firstMethod);");
+    expect(CARD).toContain("setMethod(firstMethod);");
+    expect(CARD).toContain("onClick={() => setMethod(m.key)}");
+    expect(CARD).toContain("id={chipId(m.key)}");
+    expect(CARD).toContain("{m.label}");
+    expect(CARD).not.toContain("SUPPLIER_PAY_METHODS");
+    expect(CARD).not.toContain("SupplierPayMethod");
+    expect(CARD).not.toContain("METHOD_LABELS");
+    // The bills page hands the company's list down from org settings.
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/bills/page.tsx"), "utf8");
+    expect(page).toContain("methods={orgSettings.payment_methods}");
+  });
+
+  it("a recorded payment's method reads as its label (Venmo, Check), never the stored key", () => {
+    const render = (accounts: SupplierAccountRow[]) =>
+      renderToStaticMarkup(
+        createElement(SuppliersCard, {
+          accounts,
+          today: "2026-09-26",
+          methods: ["Cash", "Check", "Venmo"],
+          actions: { recordPayment: async () => ({ ok: true }), voidPayment: async () => ({ ok: true }), setOnAccount: async () => ({ ok: true }), updateAccount: async () => ({ ok: true }) },
+        }),
+      );
+    const html = render([acct({ bills: [bill("b1", 100)], payments: [{ ...pay("p1", 40, "2026-09-05"), method: "venmo" }, pay("p2", 10, "2026-09-06")] })]);
+    expect(html).toContain("$40.00 · Venmo");
+    expect(html).toContain("$10.00 · Check");
+    expect(html).not.toContain("· venmo");
+  });
+
   it("the card: N To Check replaces the '+ $N they never sent paper for' line; the failure line stays; grids and Why Don't These Subtract? are gone", () => {
     expect(CARD).toContain("{checks.length} to Check");
     expect(CARD).not.toContain("they never sent paper for\n");
@@ -296,5 +338,69 @@ describe("the supplier detail: Check These", () => {
     expect(card).not.toBeNull();
     expect(card![1]).not.toContain("overflow-hidden");
     expect(CARD).not.toContain('<Card key={account.id} className="overflow-hidden">');
+  });
+
+  /**
+   * ── THE DOOR BACK TO PAID AT THE REGISTER (cn-v1152) ─────────────────────────────────────────
+   * Erik, 2026-11-07: three stores he pays at the counter were flagged as keeping a running balance,
+   * and the card had one direction only - Turn On a Running Balance, in Check These, where a register
+   * account holding bills marked On Account is found out. An account flagged the other way round is
+   * found out by no check: its receipts sit on a balance he does not owe, Reconcile offers to pay the
+   * store, and the bank-line matcher leaves its receipts out. So the door back sits with the
+   * balance's own arithmetic, on every account that keeps one, and on no register account.
+   */
+  describe("Pay at the Register, the door back", () => {
+    const ACTIONS: SuppliersCardActions = {
+      recordPayment: async () => ({ ok: true }),
+      voidPayment: async () => ({ ok: true }),
+      setOnAccount: async () => ({ ok: true }),
+      updateAccount: async () => ({ ok: true }),
+    };
+    const render = (accounts: SupplierAccountRow[], actions: SuppliersCardActions = ACTIONS) =>
+      renderToStaticMarkup(createElement(SuppliersCard, { accounts, today: "2026-09-26", actions }));
+    /** The door itself: a button whose words are exactly these. A register account's closed line says
+     *  "Paid at the Register" - a fact, not a door - and this does not match it. */
+    const DOOR = /<button[^>]*>Pay at the Register<\/button>/;
+    const WHY = "For a store you pay at the counter. Their receipts then match the bank on their own.";
+
+    it("sits under the balance's arithmetic on an account that keeps one, with its why under it", () => {
+      const html = render([acct({ bills: [bill("b1", 100)], payments: [pay("p1", 40, "2026-09-05")] })]);
+      expect(html).toMatch(DOOR);
+      expect(html).toContain(WHY);
+      const arithmetic = html.indexOf("$100.00 open on 1 bill.");
+      const door = html.search(DOOR);
+      expect(arithmetic).toBeGreaterThan(-1);
+      expect(door).toBeGreaterThan(arithmetic);
+      expect(html.indexOf(WHY)).toBeGreaterThan(door);
+      expect(html.indexOf("What the Balance Is Made Of")).toBeGreaterThan(html.indexOf(WHY));
+      // At rest it is live; pending is what disables it (pinned on the source below).
+      expect(html).not.toMatch(/<button[^>]*disabled=""[^>]*>Pay at the Register<\/button>/);
+    });
+
+    it("is not drawn on a register account, and not without the action", () => {
+      const register = render([acct({ onAccount: false, bills: [bill("b3", 16.28)] })]);
+      expect(register).not.toMatch(DOOR);
+      expect(register).not.toContain(WHY);
+      expect(register).toContain("Paid at the Register");
+      expect(register).toContain("Turn On a Running Balance");
+      expect(render([acct({ onAccount: false })])).not.toMatch(DOOR);
+      const noDoor = render([acct({ bills: [bill("b1", 100)] })], { recordPayment: ACTIONS.recordPayment, voidPayment: ACTIONS.voidPayment });
+      expect(noDoor).not.toMatch(DOOR);
+      expect(noDoor).not.toContain(WHY);
+    });
+
+    it("runs the one action with onAccount: false, is disabled while pending, and its sentence names the store", () => {
+      // The markup cannot be tapped from here, so the door's own block is read from the source.
+      const block = /\{account\.onAccount && actions\.setOnAccount && \([\s\S]*?Pay at the Register\s*<\/Button>/.exec(CARD)?.[0] ?? "";
+      expect(block).not.toBe("");
+      expect(block).toContain("run(");
+      expect(block).toContain("actions.setOnAccount!({ accountId: account.id, onAccount: false })");
+      expect(block).toContain("disabled={pending}");
+      expect(block).toContain('variant="outline"');
+      expect(block).toContain("`${account.name} is paid at the register now.`");
+      // Its sibling is as it was.
+      expect(CARD).toContain("actions.setOnAccount!({ accountId: account.id, onAccount: true })");
+      expect(CARD).toContain("`${account.name} now keeps a running balance.`");
+    });
   });
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { SUPPLIER_PAY_METHOD_LABELS } from "@/lib/supplier-pay-words";
+import { paymentMethodChoices, paymentMethodLabel } from "@/lib/payment-method";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Pencil, Undo2 } from "lucide-react";
@@ -15,7 +15,6 @@ import { Fold, WhyFold } from "@/components/why-fold";
 import { ACTIONS_ROW_CLS, SectionActionsMenu } from "@/components/section-actions-menu";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import {
-  SUPPLIER_PAY_METHODS,
   isOnAccountBill,
   r2,
   sayAge,
@@ -23,7 +22,6 @@ import {
   type SupplierAccountRow,
   type SupplierActionResult,
   type SupplierBillRow,
-  type SupplierPayMethod,
 } from "./supplier-balance";
 import { notOnAnAccountSentence, openOwed, supplierFigureUnread, type SupplierOwedLine, type WhatISupplierOwed } from "@/lib/supplier-owed";
 import { openPurchasesOf, planPaymentAllocation, type OpenPurchase } from "@/lib/payment-allocation";
@@ -45,15 +43,20 @@ export interface SuppliersCardActions {
     accountId: string;
     amount: number;
     paidOn: string;
-    method: SupplierPayMethod;
+    /** The KEY of the chip he tapped (lib/payment-method: Venmo → venmo), from the company's one list. */
+    method: string;
     reference?: string;
     note?: string;
   }) => Promise<SupplierActionResult>;
   /** Void, never delete: the payment stays on the list crossed out and goes back onto the balance. */
   voidPayment: (paymentId: string) => Promise<SupplierActionResult>;
   /**
-   * Optional: switch an account between "running balance" and "paid at the register". Without it,
-   * a register account carrying unpaid bills is told where the other door is instead.
+   * Optional: switch an account between "running balance" and "paid at the register", both ways.
+   * Turn On a Running Balance sits in Check These, where a register account holding bills marked
+   * On Account is found out; Pay at the Register sits under the balance's own arithmetic on every
+   * account that keeps one (cn-v1152), because an account flagged the wrong way round is found out
+   * by no check. Without it, a register account carrying unpaid bills is told where the other door
+   * is instead, and an on-account one has no door back.
    */
   setOnAccount?: (input: { accountId: string; onAccount: boolean }) => Promise<SupplierActionResult>;
   /**
@@ -88,8 +91,8 @@ export interface SuppliersCardActions {
   stopWaitingOnCredit?: SupplierInvoiceActions["stopWaitingOnCredit"];
 }
 
-/** One set of words for the five methods (lib/supplier-pay-words), shared with the bill row. */
-const METHOD_LABELS = SUPPLIER_PAY_METHOD_LABELS;
+/** A chip's element id, from its key ("apple cash" → supplier-pay-method-apple-cash). */
+const chipId = (key: string) => `supplier-pay-method-${key.replace(/[^a-z0-9]+/g, "-")}`;
 
 /** How many bills or payments one account shows before it says how many more there are. */
 const LIST_LIMIT = 8;
@@ -207,6 +210,7 @@ const ACCOUNT_MENU = { center: { label: "Actions", icon: "more" }, nodes: [] };
 export function SuppliersCard({
   accounts,
   today,
+  methods = [],
   unassigned = null,
   owedToSuppliers = null,
   boughtNotSettled = null,
@@ -223,6 +227,14 @@ export function SuppliersCard({
   accounts: SupplierAccountRow[];
   /** The ORG's today (todayStrInTz), never the browser's day: it dates a payment and ages a bill. */
   today: string;
+  /**
+   * THE WAYS MONEY MOVES, the company's own list (Settings › Payment methods) — the pay sheet's How
+   * chips, the same list the customer's Get Paid sheet and the crew's pay form draw (cn-v1152). Erik,
+   * 2026-11-07: "there are some payment entry windows that show venmo as an option then others that
+   * dont". This card kept five words of its own until then. The chip's KEY goes with the write
+   * (lib/payment-method); an empty list draws the house default.
+   */
+  methods?: string[];
   /** Bills on no account yet. Shown so every dollar on this page is accounted for somewhere. */
   unassigned?: { bills: number; total: number } | null;
   /**
@@ -305,7 +317,12 @@ export function SuppliersCard({
   const [editNote, setEditNote] = useState("");
   const [amount, setAmount] = useState<number | null>(null);
   const [paidOn, setPaidOn] = useState(today);
-  const [method, setMethod] = useState<SupplierPayMethod>("check");
+  // THE HOW CHIPS: the company's list, one per key, the words as typed. The state holds the KEY. The
+  // chip pressed to begin with is Check when the list has it — a supplier's statement is paid by check
+  // far more often than in cash, and that was this sheet's default from 0270 — else the first chip.
+  const choices = paymentMethodChoices(methods);
+  const firstMethod = choices.find((c) => c.key === "check")?.key ?? choices[0]?.key ?? "other";
+  const [method, setMethod] = useState<string>(firstMethod);
   const [reference, setReference] = useState("");
   const [note, setNote] = useState("");
   /** CED's boxes: the purchases he checked, by the original bill's id. Empty = a payment to the account. */
@@ -481,7 +498,7 @@ export function SuppliersCard({
     setSheetError(null);
     setAmount(null);
     setPaidOn(today);
-    setMethod("check");
+    setMethod(firstMethod);
     setReference("");
     setNote("");
     setChecked(new Set());
@@ -567,7 +584,7 @@ export function SuppliersCard({
       setDone({
         text:
           res.message ??
-          `Recorded ${formatCurrency(amt)} paid to ${account.name} on ${formatDate(on)} by ${METHOD_LABELS[how].toLowerCase()}.`,
+          `Recorded ${formatCurrency(amt)} paid to ${account.name} on ${formatDate(on)} by ${paymentMethodLabel(how).toLowerCase()}.`,
         paymentId: res.paymentId ?? null,
       });
       router.refresh();
@@ -820,7 +837,9 @@ export function SuppliersCard({
 
                     <div className="border-t border-slate-100 px-4 py-3">
                       {/* THE DETAIL'S TOP (W1-33): one button, one line of arithmetic, one fold of
-                          checks. The ⋯ at the right holds Edit Account. */}
+                          checks. The ⋯ at the right holds Edit Account. Between the arithmetic and
+                          the checks, on an account that keeps a balance, the one door back to paid
+                          at the register (cn-v1152). */}
                       <div className="flex items-start gap-2">
                         {/* THE ONE Record a Payment. A register supplier has no balance to pay down. */}
                         {owed !== null ? (
@@ -842,6 +861,41 @@ export function SuppliersCard({
                           payments are already inside what the supplier closed, so they are never
                           subtracted; under model A the figure is charged less sent. */}
                       {sayPaid && !unread && <p className="mt-2 text-sm text-slate-600">{sayPaid}</p>}
+
+                      {/* PAY AT THE REGISTER, THE DOOR BACK (Erik, 2026-11-07: three counter stores
+                          were flagged as keeping a running balance, and the card could only turn a
+                          balance ON). Turn On a Running Balance lives in Check These because a
+                          register account holding bills marked On Account is a contradiction a
+                          check can find; an account flagged on account that he pays at the counter
+                          contradicts nothing the card can see - its receipts simply sit on a balance
+                          he does not owe - so the door back sits here, with the balance's own
+                          arithmetic, on every account that keeps one. Why it matters: Reconcile
+                          offers to pay Larkspur (a supplier payment, not a cost) for a card swipe at
+                          the counter, and the bank-line matcher leaves an on-account supplier's
+                          receipts out, so he is asked about purchases already in his books. Bills
+                          still marked On Account afterwards are not refused: register_on_account
+                          then shows them with the door the other way, which is the honest state.
+                          The sentence names the store because the done box sits at the card's top. */}
+                      {account.onAccount && actions.setOnAccount && (
+                        <div className="mt-2">
+                          <Button
+                            variant="outline"
+                            disabled={pending}
+                            onClick={() =>
+                              run(
+                                () => actions.setOnAccount!({ accountId: account.id, onAccount: false }),
+                                `register:${account.id}`,
+                                `${account.name} is paid at the register now.`,
+                              )
+                            }
+                          >
+                            Pay at the Register
+                          </Button>
+                          <p className="mt-1 text-xs text-slate-500">
+                            For a store you pay at the counter. Their receipts then match the bank on their own.
+                          </p>
+                        </div>
+                      )}
 
                       {unread && (
                         <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="alert">
@@ -978,7 +1032,7 @@ export function SuppliersCard({
                               <li key={p.id} className="flex items-start justify-between gap-3 px-3 py-2">
                                 <span className="min-w-0">
                                   <span className={`block truncate text-sm ${p.voided ? "text-slate-400 line-through" : "text-slate-800"}`}>
-                                    {formatDate(p.paidOn)} · {formatCurrency(p.amount)} · {METHOD_LABELS[p.method as SupplierPayMethod] ?? p.method}
+                                    {formatDate(p.paidOn)} · {formatCurrency(p.amount)} · {paymentMethodLabel(p.method)}
                                     {/* WHICH BILLS IT PAID (0383): said on the row, so a chunk is never a mystery. */}
                                     {p.bills !== undefined && !p.voided
                                       ? p.bills > 0
@@ -1247,22 +1301,23 @@ export function SuppliersCard({
             </div>
 
             <div>
-              <Label htmlFor="supplier-pay-method-cash">How</Label>
+              <Label htmlFor={chipId(firstMethod)}>How</Label>
+              {/* The company's own words on each chip (as typed in Settings); the KEY goes with the write. */}
               <div className="grid grid-cols-3 gap-2">
-                {SUPPLIER_PAY_METHODS.map((m) => (
+                {choices.map((m) => (
                   <button
-                    key={m}
-                    id={`supplier-pay-method-${m}`}
+                    key={m.key}
+                    id={chipId(m.key)}
                     type="button"
-                    onClick={() => setMethod(m)}
-                    aria-pressed={method === m}
+                    onClick={() => setMethod(m.key)}
+                    aria-pressed={method === m.key}
                     className={`min-h-[44px] rounded-lg border px-2 text-sm font-medium transition-colors ${
-                      method === m
+                      method === m.key
                         ? "border-[rgb(var(--glass-ink))] bg-[rgb(var(--glass-ink))] text-white"
                         : "border-slate-300 bg-white text-slate-700"
                     }`}
                   >
-                    {METHOD_LABELS[m]}
+                    {m.label}
                   </button>
                 ))}
               </div>

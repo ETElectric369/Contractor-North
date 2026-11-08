@@ -726,3 +726,57 @@ describe("markBothReal - both costs stay where they are, and the pair stops bein
     expect(scoped.filter((c) => c.table === "bills")).toHaveLength(1);
   });
 });
+
+// ── RUNNING BALANCE, OR PAID AT THE REGISTER (cn-v1152) ─────────────────────────────────────────
+
+/**
+ * The one write both doors on the Suppliers card share. The register direction had no door until
+ * tonight (three counter stores were flagged as keeping a balance, so Reconcile offered to pay them
+ * and the bank-line matcher left their receipts out); its sentence names the store, because the
+ * card says what happened at its top, above every account, where "Set to paid at the register"
+ * would not say which one. The write is this company's, by id and org, and reads the name back on
+ * the same statement.
+ */
+describe("setSupplierOnAccount - one write, either direction", () => {
+  const { setSupplierOnAccount } = actions;
+  let scoped: ScopedCall[];
+  beforeEach(() => { scoped = []; });
+
+  it("Pay at the Register writes on_account: false to this company's account and names the store", async () => {
+    state.client = scopedFake(
+      { "profiles.select": [STAFF], "supplier_accounts.update": [{ data: [{ id: "acct-larkspur", name: "Larkspur Hardware" }], error: null }] },
+      scoped,
+    );
+    expect(await setSupplierOnAccount({ accountId: "acct-larkspur", onAccount: false })).toEqual({
+      ok: true,
+      message: "Larkspur Hardware is paid at the register now.",
+    });
+    const write = scoped.find((c) => c.table === "supplier_accounts" && c.verb === "update")!;
+    expect(write.payload).toEqual({ on_account: false });
+    expect(write.filters).toEqual([["eq", "id", "acct-larkspur"], ["eq", "org_id", "org-1"], ["select", "id, name"]]);
+    // One write and nothing else: the name came back on it, not on a second read.
+    expect(scoped.filter((c) => c.verb !== "select")).toHaveLength(1);
+  });
+
+  it("Turn On a Running Balance writes on_account: true and keeps its own sentence", async () => {
+    state.client = scopedFake(
+      { "profiles.select": [STAFF], "supplier_accounts.update": [{ data: [{ id: "acct-snowbell", name: "Snowbell Electric Supply" }], error: null }] },
+      scoped,
+    );
+    expect(await setSupplierOnAccount({ accountId: "acct-snowbell", onAccount: true })).toEqual({
+      ok: true,
+      message: "Set to a running balance. What is unpaid on it now adds up into what you owe them.",
+    });
+    expect(scoped.find((c) => c.table === "supplier_accounts" && c.verb === "update")!.payload).toEqual({ on_account: true });
+  });
+
+  it("zero rows is a refusal said in words (the silent-write law); no account id is refused before any write", async () => {
+    state.client = scopedFake({ "profiles.select": [STAFF, STAFF], "supplier_accounts.update": [{ data: [], error: null }] }, scoped);
+    expect(await setSupplierOnAccount({ accountId: "acct-gone", onAccount: false })).toEqual({
+      ok: false,
+      error: "That supplier isn't here anymore. Reload the page and try again.",
+    });
+    expect(await setSupplierOnAccount({ accountId: "", onAccount: false })).toEqual({ ok: false, error: "Couldn't tell which supplier you meant." });
+    expect(scoped.filter((c) => c.table === "supplier_accounts")).toHaveLength(1);
+  });
+});

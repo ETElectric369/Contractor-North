@@ -126,9 +126,13 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
       // to re-send. `revised_at is not null` alone is not the answer — a re-send moves sent_at
       // forward and leaves revised_at standing (that fact is worth keeping), so the rule below
       // decides, not this filter.
-      // amount_paid and each payment's date ride along for the one case that settles a revision
-      // without a re-send: the customer paid the corrected bill in full after it changed (INV-071).
-      supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, sent_at, revised_at, customers(name), payments(paid_at)").not("revised_at", "is", null).neq("status", "void").order("revised_at", { ascending: false }).limit(1000),
+      // total, amount_paid and 0405's sent_total ride along because the rule is about the MONEY
+      // (Erik, 2026-11-07): the lane holds a bill only when the customer paid against a figure
+      // that has since moved and a difference remains. The payments' dates ride along for the ORDER
+      // (skeptic #56): paid, THEN changed - a payment that landed after the change was made on the
+      // live figure, so it raises nothing. The projection law: the rule cannot read what this does
+      // not select.
+      supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, sent_at, revised_at, sent_total, payments(paid_at), customers(name)").not("revised_at", "is", null).neq("status", "void").order("revised_at", { ascending: false }).limit(1000),
       // The switches (0352): Sales Tax off means a new invoice starts untaxed, with no tax field.
       viewerSwitches(),
       orgP,
@@ -160,14 +164,17 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
   const list = (allInv ?? []) as any[];
 
   const { doneNotInvoiced, drafts, unpaid } = pipeline;
-  // Built from EVERY revised invoice, not from `unpaid`. A revision that lowers a paid invoice's
-  // total leaves its status 'paid' and its balance at zero — and that is the exact case Erik's
-  // client wrote in about (a settled bill reissued in the property owner's name). Filtering this
-  // lane by money owed would miss the one it was built for.
+  // Built from EVERY revised invoice, not from `unpaid`. A change that LOWERS a paid bill's total
+  // leaves its status 'paid' and its balance at zero while the customer is owed the difference,
+  // and that overpayment is one of the two differences the rule stands on. Filtering this lane by
+  // money owed would miss it. The one rule decides (lib/invoice-revision): the customer paid
+  // something BEFORE the change (the payments' dates), the money moved since the send (0405's
+  // sent_total), and a difference remains.
   const needsResend = ((revisedInv ?? []) as any[]).filter((i) =>
     customerHoldsOlderCopy(i.sent_at, i.revised_at, {
       total: i.total,
       amountPaid: i.amount_paid,
+      sentTotal: i.sent_total,
       paidAt: ((i.payments ?? []) as { paid_at?: string | null }[]).map((p) => p.paid_at),
     }),
   );
@@ -179,7 +186,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
   const awaiting = unpaid.filter((i) => !resendIds.has(String(i.id)));
   const heldAbove = unpaid.length - awaiting.length;
   const unpaidById = new Map(unpaid.map((i) => [String(i.id), i]));
-  // "All caught up" may not be printed over a customer holding the wrong bill.
+  // "All caught up" may not be printed over a customer who paid against a figure that has moved.
   const caughtUp = doneNotInvoiced.length === 0 && drafts.length === 0 && unpaid.length === 0 && needsResend.length === 0;
 
   // OWED TO YOU: the one figure, what of it is late, and the bar of current against late. The same
@@ -294,7 +301,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
       {caughtUp && (
         <Card className="mb-4 border-emerald-200 bg-emerald-50/50">
           <CardContent className="flex items-center gap-2 py-4 text-sm font-medium text-emerald-800">
-            <CheckCircle2 className="h-5 w-5" /> All caught up. Every finished job is invoiced, every invoice is paid, and nobody is holding an older copy of one.
+            <CheckCircle2 className="h-5 w-5" /> All caught up. Every finished job is invoiced, every invoice is paid, and nobody paid on a bill whose money changed afterwards.
           </CardContent>
         </Card>
       )}
@@ -363,7 +370,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
           Amber on purpose: the same colour as the banner on the invoice's own page, so the board
           and the page can never look like they are talking about two different problems. */}
       {needsResend.length > 0 && (
-        <Stage tone="amber" icon={<Send className="h-4 w-4" />} title="Revised - Send Again" count={needsResend.length} sub="You changed these after they went out, so the customer is holding an older bill. Open one to send the corrected copy.">
+        <Stage tone="amber" icon={<Send className="h-4 w-4" />} title="Revised - Send Again" count={needsResend.length} sub="The money on these changed after a payment landed, so the figure they paid against is not the figure now. Open one to send it again.">
           {needsResend.map((inv: any) => {
             const u = unpaidById.get(String(inv.id));
             return (
@@ -385,8 +392,9 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
                   </div>
                   <div className="flex shrink-0 items-center gap-3">
                     {/* The same amount language as every row: what is due, and what it is due
-                        against. A paid revised bill still belongs here and reads "$0.00 due of
-                        $T" over "paid in full", so the figure on the corrected copy is on screen. */}
+                        against. A revised bill paid past its new total still belongs here (the
+                        overpayment is the difference) and reads "$0.00 due of $T" over "paid in
+                        full", so the figure that moved is on screen. */}
                     <InvoiceAmount total={Number(inv.total) || 0} paid={Number(inv.amount_paid) || 0} overdue={!!u?.overdue} />
                     <Verb>Review &amp; Send</Verb>
                   </div>

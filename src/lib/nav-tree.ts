@@ -145,8 +145,13 @@ export function invoiceSectionTree(
  * are deeds a person does, each a row calling setInvoiceStatus exactly as the select did:
  *
  *   Mark Sent - I Sent It Myself       a draft: the person handed it over outside the app.
- *   Mark Sent Again - I Re-Sent It     a delivered bill that changed since (customerHoldsOlderCopy):
- *                                      the corrected copy went out by hand.
+ *   Mark Sent Again - I Re-Sent It     a delivered bill that changed since it went out (the RECORD,
+ *                                      lib/invoice-revision changedSinceSent): the corrected copy went
+ *                                      out by hand. Offered whatever the money-only notice says
+ *                                      (skeptic #56, 2026-11-07): a menu row is a door, not a nag, and
+ *                                      without it an unpaid bill that changed could never be
+ *                                      re-stamped by hand - revised_at > sent_at would stand and
+ *                                      0405's sent_total would stay the old figure.
  *   Back to Draft                      only where the server allows it (not with money on a bill
  *                                      the customer holds - INV-069's rule); on a void one, it is
  *                                      the way back from a mistaken Void.
@@ -170,15 +175,17 @@ export function invoiceStatusItems(inv: {
   /** invoices.sent_at: the bill really reached the customer (0267). */
   sentAt?: string | null;
   amountPaid?: number | null;
-  /** lib/invoice-revision's answer, decided on the server (0269). */
-  customerHoldsOlderCopy?: boolean;
+  /** lib/invoice-revision's RECORD answer (changedSinceSent: revised_at after sent_at), decided on
+   *  the server (0269). Not the money-only notice (customerHoldsOlderCopy) - the body's amber notice
+   *  reads that one; this door opens for any change since the send (2026-11-07). */
+  changedSinceSent?: boolean;
 }): InvoiceStatusDeed[] {
   const isDraft = inv.status === "draft";
   const isVoid = inv.status === "void";
   const canReturnToDraft = !(Number(inv.amountPaid ?? 0) > 0 && !!inv.sentAt);
   const items: InvoiceStatusDeed[] = [];
   if (isDraft) items.push({ id: "st-sent", label: "Mark Sent - I Sent It Myself", value: SENT_BY_HAND });
-  else if (!isVoid && inv.customerHoldsOlderCopy) items.push({ id: "st-resent", label: "Mark Sent Again - I Re-Sent It", value: SENT_BY_HAND });
+  else if (!isVoid && inv.changedSinceSent) items.push({ id: "st-resent", label: "Mark Sent Again - I Re-Sent It", value: SENT_BY_HAND });
   if (!isDraft && canReturnToDraft) items.push({ id: "st-draft", label: "Back to Draft", value: "draft" });
   if (!isDraft && !isVoid && !canReturnToDraft) {
     items.push({

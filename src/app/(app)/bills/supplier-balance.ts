@@ -67,9 +67,12 @@
 import { aliasKey } from "@/lib/supplier-identity";
 import { isStillOwed, openOwed } from "@/lib/supplier-owed";
 
-/** The methods migration 0270 lets `supplier_payments.method` be. */
-export const SUPPLIER_PAY_METHODS = ["cash", "check", "transfer", "card", "other"] as const;
-export type SupplierPayMethod = (typeof SUPPLIER_PAY_METHODS)[number];
+// HOW A SUPPLIER WAS PAID IS A 0287 KEY, from the company's one list (cn-v1152). The five words
+// 0270's CHECK allowed (cash, check, transfer, card, other) lived here as SUPPLIER_PAY_METHODS until
+// Erik, 2026-11-07: "there are some payment entry windows that show venmo as an option then others
+// that dont". The pay door's chips are Settings › Payment methods (lib/payment-method
+// paymentMethodChoices), the write stores the chip's key, 0406 took the CHECK off, and every reader
+// renders paymentMethodLabel(). No list of this ledger's own remains.
 
 /** Round to the cent. Money is summed in floats everywhere in this app; this is where it stops. */
 export const r2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
@@ -79,6 +82,7 @@ export interface SupplierPaymentRow {
   amount: number;
   /** A wall-calendar day, "YYYY-MM-DD". Never a timestamp - a payment happened on a DAY. */
   paidOn: string;
+  /** A 0287 KEY (check, venmo, "apple cash"…), rendered through paymentMethodLabel. */
   method: string;
   reference: string | null;
   note: string | null;

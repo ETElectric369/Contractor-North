@@ -25,7 +25,7 @@ vi.mock("@/app/(app)/billing/actions", () => ({
   ),
 }));
 
-import { InvoiceDetail, dueWords, liveHoldDay } from "./invoice-detail";
+import { InvoiceDetail, MoveStrip, dueWords, liveHoldDay } from "./invoice-detail";
 import { markupBoxSeed } from "@/lib/invoice-markup";
 import { bringInNewWorkSteps, bringInSentence } from "@/lib/actuals-draw";
 
@@ -228,24 +228,6 @@ describe("the invoice body (W1-27)", () => {
     expect(out).not.toMatch(/>Save<\/button>/);
   });
 
-  it("the one-step move chevrons are gone from the lines", () => {
-    const two = [...items, { ...items[0], id: "ii-2", description: "Wire" }];
-    const out = renderToStaticMarkup(createElement(InvoiceDetail, { invoice, items: two, payments: [], importMode: "standard" }));
-    expect(out).not.toContain('aria-label="Move up"');
-    expect(out).not.toContain('aria-label="Move down"');
-    expect(out).toContain("Group Materials &amp; Labor");
-  });
-
-  it("a two-line invoice can still swap its lines: Move to Top / Move to Bottom show from two lines", async () => {
-    // The line's edit form opens on a tap (state), so the gate is pinned in the source.
-    const { readFileSync } = await import("node:fs");
-    const { join } = await import("node:path");
-    const src = readFileSync(join(process.cwd(), "src/app/(app)/billing/[id]/invoice-detail.tsx"), "utf8");
-    const at = src.indexOf("/> Move to Top"); // the button itself, not a comment that names it
-    const gate = src.slice(src.lastIndexOf("{items.length", at), at);
-    expect(gate).toMatch(/^\{items\.length > 1 && \(/);
-  });
-
   it("a set-aside draft says until when and why, with Change and Put Back", () => {
     // A day still ahead in the company's timezone (the page's default, Pacific).
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
@@ -287,5 +269,161 @@ describe("the invoice body (W1-27)", () => {
     expect(dueWords({ isDraft: true, dueDate: "2026-08-31", byHand: false, netDays: 30, sentBefore: true })).toBe("Due Aug 31 · Net 30");
     expect(dueWords({ isDraft: true, dueDate: "2026-08-31", byHand: false, netDays: 30, sentBefore: false })).toBe("Due 30 days after you send it");
     expect(html({ due_date: "2026-08-31", due_date_by_hand: false, sent_at: "2026-08-01T18:00:00Z" })).not.toContain("after you send it");
+  });
+});
+
+/**
+ * ONE ADD BOX (cn-v1152). Erik, 2026-11-07: "add from pricelist should be with or integrated into the add a
+ * line item on the bottom". The price-list picker stood above the lines table and the hand-typed row sat
+ * under it with a box of its own; now the one picker (components/add-line-items, `typed`) is in the bottom
+ * box, its box is the line's, and the row is under it, with the discount door after.
+ */
+describe("the one add box (cn-v1152)", () => {
+  const book = [{ id: "p-1", code: "110", description: "Service Call", unit: "ea", buy_price: 100, markup_pct: 0 }];
+  const page = (inv: Record<string, unknown> = {}) =>
+    renderToStaticMarkup(createElement(InvoiceDetail, { invoice: { ...invoice, ...inv }, items, payments: [], priceItems: book, importMode: "standard" } as never));
+
+  it("with a price list the one box names both doors, under the lines and above the discount door; nothing stands above the table", () => {
+    const out = page();
+    expect((out.match(/placeholder="Add a line item — type it, or pick from the Price List…"/g) ?? []).length).toBe(1);
+    expect(out).not.toContain("Add from Price List —");
+    expect((out.match(/aria-label="What this charge is for"/g) ?? []).length).toBe(1);
+    const line = out.indexOf("Flexbox");
+    const box = out.indexOf('aria-label="What this charge is for"');
+    const row = out.indexOf('placeholder="Price"');
+    const discount = out.indexOf(">Add a Discount<");
+    expect(line).toBeGreaterThan(-1);
+    expect(box).toBeGreaterThan(line);
+    expect(row).toBeGreaterThan(box);
+    expect(discount).toBeGreaterThan(row);
+    // The page draws the unit list once, under the lib's id, and the row's unit box points at it.
+    expect((out.match(/<datalist id="cn-units">/g) ?? []).length).toBe(1);
+    expect(out).toMatch(/placeholder="unit"[^>]*list="cn-units"/);
+  });
+
+  it("void: no box, no row, no discount door", () => {
+    const out = page({ status: "void" });
+    expect(out).not.toContain('aria-label="What this charge is for"');
+    expect(out).not.toContain('placeholder="Price"');
+    expect(out).not.toContain(">Add a Discount<");
+  });
+});
+
+/**
+ * ONE MOVE DOOR PER LINE, AND A GROUP BUTTON THAT TELLS THE TRUTH (cn-v1152). Erik, 2026-11-07: "i cant
+ * move line items up or down one just move to top or move to bottom, can we put those little arrows back
+ * in and integrate all those move buttons a little smoother and review the actual benefit/functionality
+ * of the Group Materials & Labor button … (i pressed it once and it didnt seem to do anything …)". Each
+ * row's Move glyph arms a strip of four (Up · Down · Top · Bottom, MoveStrip) under the row; the edit form
+ * carries no Move buttons; the foot reads Already Grouped, disabled, when no line would move, else the
+ * count of lines that would beside Group Materials & Labor (lib/invoice-math groupedOrder / linesToGroup).
+ */
+describe("moving a line and grouping (cn-v1152)", () => {
+  const labor = { ...items[0], id: "ii-l", description: "Labor — Sam Tillery", import_source: "labor", import_key: "labor:p-1", unit: "hrs" };
+  const costs = { ...items[0], id: "ii-m", description: "Materials — Larkspur Supply", import_source: "costs", import_key: "bill:b-1" };
+  const page = (lines: unknown[], inv: Record<string, unknown> = {}) =>
+    renderToStaticMarkup(createElement(InvoiceDetail, { invoice: { ...invoice, ...inv }, items: lines, payments: [], importMode: "standard" } as never));
+  const count = (html: string, s: string) => html.split(s).length - 1;
+  /** The <button …> tag that carries an attribute, so its disabled state can be read. */
+  const tag = (html: string, attr: string) => {
+    const at = html.indexOf(attr);
+    expect(at, attr).toBeGreaterThan(-1);
+    return html.slice(html.lastIndexOf("<button", at), html.indexOf(">", at) + 1);
+  };
+  const STRIP = ['aria-label="Move Up"', 'aria-label="Move Down"', 'aria-label="Move to Top"', 'aria-label="Move to Bottom"'];
+
+  it("two lines: a Move glyph on each row (44px, aria-expanded), beside the pencil and the trash; the strip waits for a tap", () => {
+    const out = page([labor, costs]);
+    expect(count(out, 'aria-label="Move This Line"')).toBe(2);
+    expect(tag(out, 'aria-label="Move This Line"')).toContain("h-11 w-11");
+    expect(tag(out, 'aria-label="Move This Line"')).toContain('aria-expanded="false"');
+    // Move, then Edit, then Remove, on each row.
+    const move = out.indexOf('aria-label="Move This Line"');
+    expect(out.indexOf('aria-label="Edit"')).toBeGreaterThan(move);
+    expect(out.indexOf('aria-label="Remove"')).toBeGreaterThan(out.indexOf('aria-label="Edit"'));
+    expect(count(out, 'aria-label="Edit"')).toBe(2);
+    // The strip is state (a tap arms it), so an unarmed page draws none of its four.
+    for (const s of STRIP) expect(out).not.toContain(s);
+  });
+
+  it("one line has nowhere to go: no glyph, and no group button at the foot either", () => {
+    const out = page([labor]);
+    expect(out).not.toContain('aria-label="Move This Line"');
+    expect(out).toContain('aria-label="Edit"');
+    expect(out).not.toContain("Already Grouped");
+    expect(out).not.toContain("Group Materials &amp; Labor");
+  });
+
+  it("void: no glyph, no pencil, no trash, no group button — one gate for the whole cluster", () => {
+    const out = page([labor, costs], { status: "void" });
+    for (const s of ['aria-label="Move This Line"', 'aria-label="Edit"', 'aria-label="Remove"', "Already Grouped", "Group Materials &amp; Labor", ...STRIP]) {
+      expect(out, s).not.toContain(s);
+    }
+  });
+
+  it("the strip: Up · Down · Top · Bottom, 44px each with a word from sm: up, the edges disabled, every button waiting while a move is in flight", () => {
+    const strip = (p: Partial<Parameters<typeof MoveStrip>[0]>) =>
+      renderToStaticMarkup(createElement(MoveStrip, { id: "move-line-x", first: false, last: false, pending: false, onMove: () => {}, ...p }));
+    const mid = strip({});
+    for (const [label, word] of [["Move Up", "Up"], ["Move Down", "Down"], ["Move to Top", "Top"], ["Move to Bottom", "Bottom"]]) {
+      expect(mid).toContain(`aria-label="${label}"`);
+      expect(mid).toContain(`<span class="hidden sm:inline">${word}</span>`);
+    }
+    expect(count(mid, "<button")).toBe(4);
+    expect(count(mid, "h-11")).toBe(4);
+    expect(mid).toContain('id="move-line-x"');
+    expect(mid).not.toContain('disabled=""');
+    // The first line cannot go up or to the top; the last cannot go down or to the bottom.
+    const first = strip({ first: true });
+    for (const s of ["Move Up", "Move to Top"]) expect(tag(first, `aria-label="${s}"`), s).toContain('disabled=""');
+    for (const s of ["Move Down", "Move to Bottom"]) expect(tag(first, `aria-label="${s}"`), s).not.toContain('disabled=""');
+    const last = strip({ last: true });
+    for (const s of ["Move Down", "Move to Bottom"]) expect(tag(last, `aria-label="${s}"`), s).toContain('disabled=""');
+    for (const s of ["Move Up", "Move to Top"]) expect(tag(last, `aria-label="${s}"`), s).not.toContain('disabled=""');
+    // A move in flight: all four wait.
+    const busy = strip({ pending: true });
+    for (const s of STRIP) expect(tag(busy, s), s).toContain('disabled=""');
+  });
+
+  it("the edit form carries no Move buttons any more, and moveToEdge is gone: one place for moving, one function, one call", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/billing/[id]/invoice-detail.tsx"), "utf8");
+    expect(src).not.toContain("moveToEdge");
+    const chips = src.indexOf("<LineKindChips");
+    const form = src.slice(chips, src.indexOf("</li>", chips));
+    expect(form).not.toContain("Move to");
+    expect(form).not.toContain("MoveStrip");
+    // The one strip, under the row the glyph armed, through the one function.
+    expect(count(src, "<MoveStrip")).toBe(1);
+    expect(src).toContain("onMove={(move) => moveLine(it.id, move)}");
+    // The glyph is drawn inside the gate, from two lines.
+    const glyph = src.indexOf('aria-label="Move This Line"');
+    const gate = src.slice(src.lastIndexOf("{items.length", glyph), glyph);
+    expect(gate).toMatch(/^\{items\.length > 1 && \(/);
+    expect(src.lastIndexOf("{!linesLocked && (", glyph)).toBeGreaterThan(src.lastIndexOf("<li key={it.id}", glyph));
+  });
+
+  it("the foot on lines already labor-first: Already Grouped, disabled, the reason as its title, no count — and nothing to tap", () => {
+    const out = page([labor, costs]);
+    expect(out).toContain("Already Grouped");
+    expect(out).not.toContain("Group Materials &amp; Labor");
+    expect(out).not.toContain("lines move");
+    const button = tag(out, 'title="Labor first, then materials: these lines already are. Lines you added by hand stay where you put them."');
+    expect(button).toContain('disabled=""');
+  });
+
+  it("the foot on lines out of that order: Group Materials & Labor, live, with how many lines would move beside it", () => {
+    const two = page([costs, labor]);
+    expect(two).toContain("Group Materials &amp; Labor");
+    expect(two).not.toContain("Already Grouped");
+    expect(two).toContain("2 lines move");
+    expect(tag(two, 'title="Labor first, then materials — lines you added by hand stay where you put them"')).not.toContain('disabled=""');
+    // One labor line under three material lines: all four change places.
+    const four = page([costs, { ...costs, id: "ii-m2" }, { ...costs, id: "ii-m3" }, labor]);
+    expect(four).toContain("4 lines move");
+    // A hand-typed line between them is pinned and not counted.
+    const pinned = page([costs, { ...items[0], id: "ii-h", description: "Referral fee", import_source: null }, labor]);
+    expect(pinned).toContain("2 lines move");
   });
 });

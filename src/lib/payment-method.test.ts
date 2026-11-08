@@ -3,11 +3,15 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import {
+  DEFAULT_PAYMENT_METHODS,
   PAYMENT_METHOD_ALIASES,
   PAYMENT_METHOD_LABELS,
+  isPaymentMethod,
+  paymentMethodChoices,
   paymentMethodKey,
   paymentMethodLabel,
 } from "./payment-method";
+import { DEFAULT_SETTINGS } from "./org-settings";
 
 describe("paymentMethodKey / paymentMethodLabel", () => {
   const cases: Array<[raw: string, key: string, label: string]> = [
@@ -47,6 +51,52 @@ describe("paymentMethodKey / paymentMethodLabel", () => {
 
   it("maps every alias onto a key that has a label", () => {
     for (const k of Object.values(PAYMENT_METHOD_ALIASES)) expect(PAYMENT_METHOD_LABELS[k]).toBeTruthy();
+  });
+});
+
+/**
+ * ── ONE LIST OF THE WAYS MONEY MOVES (cn-v1152) ────────────────────────────────────────────────
+ * Erik, 2026-11-07: "there are some payment entry windows that show venmo as an option then others
+ * that dont … i had to add venmo in the notes". Every door that records a payment draws its chips
+ * from Settings › Payment methods through paymentMethodChoices and stores the key.
+ */
+describe("paymentMethodChoices: the chips every pay door draws", () => {
+  it("keeps the company's own spelling as the label and submits the key", () => {
+    expect(paymentMethodChoices(["Cash", "Venmo", "Apple Cash", "Credit Card"])).toEqual([
+      { key: "cash", label: "Cash" },
+      { key: "venmo", label: "Venmo" },
+      { key: "apple cash", label: "Apple Cash" },
+      { key: "card", label: "Credit Card" },
+    ]);
+  });
+
+  it("two spellings of one key are one chip, the first spelling's", () => {
+    expect(paymentMethodChoices(["Venmo", "venmo", " VENMO ", "Cheque", "Check"])).toEqual([
+      { key: "venmo", label: "Venmo" },
+      { key: "check", label: "Cheque" },
+    ]);
+  });
+
+  it("skips blanks and tidies spaces, and an empty list draws the house default", () => {
+    expect(paymentMethodChoices(["", "  ", null, undefined, "  Zelle  "])).toEqual([{ key: "zelle", label: "Zelle" }]);
+    const house = DEFAULT_PAYMENT_METHODS.map((m) => ({ key: paymentMethodKey(m), label: m }));
+    expect(paymentMethodChoices([])).toEqual(house);
+    expect(paymentMethodChoices(null)).toEqual(house);
+    expect(paymentMethodChoices(["", "  "])).toEqual(house);
+    expect(paymentMethodChoices([], [])).toEqual([]);
+  });
+
+  it("the house default is the one list a company starts with (org-settings reads this copy)", () => {
+    expect(DEFAULT_PAYMENT_METHODS).toEqual(["Cash", "Check", "Card", "Zelle", "Venmo", "Transfer"]);
+    expect(DEFAULT_SETTINGS.payment_methods).toEqual([...DEFAULT_PAYMENT_METHODS]);
+    for (const m of DEFAULT_PAYMENT_METHODS) expect(paymentMethodLabel(m)).toBe(m);
+  });
+});
+
+describe("isPaymentMethod: a word that reads as a way money moves", () => {
+  it("is any non-blank string; a blank is not a pick and nothing else is a word", () => {
+    for (const v of ["cash", "Venmo", "apple cash", " zelle "]) expect(isPaymentMethod(v)).toBe(true);
+    for (const v of ["", "   ", null, undefined, 0, 3, {}, [], true]) expect(isPaymentMethod(v)).toBe(false);
   });
 });
 
@@ -119,10 +169,12 @@ describe("every screen that shows a method shows its label", () => {
     }
   });
 
-  it("the payment editor's options carry keys, and its fallback is the check key", () => {
+  it("the payment editor's options carry keys, drawn from the one list (cn-v1152: its lone-Check fallback is gone)", () => {
     const src = code("src/app/(app)/billing/[id]/invoice-detail.tsx");
-    expect(src).toContain("value={paymentMethodKey(m)}");
-    expect(src).toContain('<option value="check">Check</option>');
+    expect(src).toContain("const editMethods = paymentMethodChoices(paymentMethods);");
+    expect(src).toContain("<option key={c.key} value={c.key}>{c.label}</option>");
+    expect(src).not.toContain('<option value="check">Check</option>');
+    expect(src).not.toMatch(/findIndex\(\(o\) => paymentMethodKey\(o\)/);
     expect(src).toContain("setPayEditMethod(paymentMethodKey(p.method))");
   });
 
@@ -166,5 +218,77 @@ describe("migration 0287 agrees with the app", () => {
   it("normalizes with a trigger on payments, not a CHECK", () => {
     expect(sql).toMatch(/before insert or update of method on public\.payments/);
     expect(sql).not.toMatch(/add constraint/i);
+  });
+});
+
+describe("migration 0406 runs the same normalizer on the crew's and the supplier's payments", () => {
+  const sql = readFileSync(
+    fileURLToPath(new URL("../../supabase/migrations/0406_one_list_of_ways_money_moves.sql", import.meta.url)),
+    "utf8",
+  ).replace(/--.*$/gm, "");
+
+  it("one generic trigger function, 0287's payment_method_key inside it, before insert or update of method on both", () => {
+    expect(sql).toContain("new.method := public.payment_method_key(new.method);");
+    expect(sql).toMatch(/before insert or update of method on public\.pay_payments/);
+    expect(sql).toMatch(/before insert or update of method on public\.supplier_payments/);
+    expect(sql).toContain("drop constraint if exists pay_payments_method_check");
+    expect(sql).toContain("drop constraint if exists supplier_payments_method_check");
+    expect(sql).not.toMatch(/add constraint/i);
+    // The database's answers the self-check demands are the app's.
+    expect(paymentMethodKey("Venmo")).toBe("venmo");
+    expect(paymentMethodKey("Cheque")).toBe("check");
+    expect(paymentMethodKey(" Apple  Cash ")).toBe("apple cash");
+    expect(paymentMethodKey("")).toBe("other");
+  });
+});
+
+describe("every door that records how money moved reads the one list (cn-v1152)", () => {
+  it("the crew's pay form and the supplier's pay door draw paymentMethodChoices and set the key", () => {
+    for (const f of ["src/app/(app)/payroll/pay-sheet.tsx", "src/app/(app)/bills/suppliers-card.tsx"]) {
+      const src = code(f);
+      expect(src, f).toContain("paymentMethodChoices(methods)");
+      expect(src, f).toContain("onClick={() => setMethod(m.key)}");
+      expect(src, f).toContain("{m.label}");
+    }
+  });
+
+  it("the pages hand down settings.payment_methods, the same prop the customer's door takes", () => {
+    expect(code("src/app/(app)/payroll/page.tsx")).toContain("paymentMethods={settings.payment_methods}");
+    expect(code("src/app/(app)/bills/page.tsx")).toContain("methods={orgSettings.payment_methods}");
+    expect(code("src/app/(app)/billing/page.tsx")).toContain("methods={orgSettings.payment_methods}");
+  });
+
+  it("both actions judge the word by isPaymentMethod and store paymentMethodKey of it; the old refusal is gone", () => {
+    const payroll = code("src/app/(app)/payroll/actions.ts");
+    expect(payroll).toContain('isPayMethod(input.method) ? paymentMethodKey(input.method) : ""');
+    expect(payroll).toContain('"Pick how you paid."');
+    expect(payroll).not.toContain("cash, check, transfer or other");
+    const supplier = code("src/app/(app)/bills/supplier-actions.ts");
+    expect(supplier).toContain('isPaymentMethod(input.method) ? paymentMethodKey(input.method) : ""');
+    expect(supplier).toContain('"Pick how you paid."');
+  });
+
+  it("the customer's two doors read it too: the Get Paid sheet's chips (less the card) and the invoice page's payment editor", () => {
+    const sheet = code("src/components/settle-up-button.tsx");
+    expect(sheet).toContain('paymentMethodChoices(props.methods).filter((c) => c.key !== "card")');
+    expect(sheet).not.toContain('["Cash", "Check", "Venmo", "Other"]');
+    expect(code("src/app/(app)/billing/[id]/invoice-detail.tsx")).toContain("paymentMethodChoices(paymentMethods)");
+  });
+
+  it("no word list of a door's own remains", () => {
+    expect(code("src/components/settle-up-button.tsx")).not.toContain('["Cash", "Check", "Venmo", "Other"]');
+    expect(code("src/lib/payroll-math.ts")).not.toContain("PAY_METHODS");
+    expect(code("src/app/(app)/bills/supplier-balance.ts")).not.toContain("SUPPLIER_PAY_METHODS");
+    expect(code("src/lib/supplier-pay-words.ts")).not.toContain("SUPPLIER_PAY_METHOD_LABELS");
+    expect(code("src/app/(app)/payroll/pay-sheet.tsx")).not.toMatch(/\bMETHODS\b/);
+  });
+
+  it("every screen that shows a crew or supplier payment shows its label, never the raw key", () => {
+    expect(code("src/app/(app)/payroll/person-statement.tsx")).toContain("paymentMethodLabel(p.method)");
+    expect(code("src/app/(app)/payroll/person-statement.tsx")).not.toMatch(/\{p\.method\}/);
+    expect(code("src/app/(app)/bills/suppliers-card.tsx")).toContain("paymentMethodLabel(p.method)");
+    expect(code("src/app/(app)/payroll/payroll-view.tsx")).toContain("paymentMethodLabel(b.lastPayment.method)");
+    expect(code("src/app/(app)/payroll/payroll-view.tsx")).toContain("paymentMethodLabel(fields.method)");
+    expect(code("src/lib/payroll-math.ts")).toContain("paymentMethodLabel(input.method)");
   });
 });

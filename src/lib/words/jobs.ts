@@ -65,7 +65,6 @@ export const words: WordCatalog = {
     jb_jobFinished: "Job finished.",
     jb_time: "Time",
     jb_you: "you",
-    jb_theJob: "the job",
     // ── the tabs (page.tsx) and their More clusters (job-tabs.tsx) ─────────────────────────────
     jb_tabOverview: "Overview",
     jb_tabTasks: "Tasks",
@@ -429,7 +428,6 @@ export const words: WordCatalog = {
     jb_jobFinished: "Trabajo terminado.",
     jb_time: "Tiempo",
     jb_you: "tú",
-    jb_theJob: "el trabajo",
     // ── the tabs and their More clusters ───────────────────────────────────────────────────────
     jb_tabOverview: "Resumen",
     jb_tabTasks: "Tareas",

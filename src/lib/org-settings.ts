@@ -4,6 +4,7 @@
 import type { Block } from "@/lib/site-blocks";
 import { withPlace } from "@/lib/doc-place";
 import { ALL_ON, normalizeFeatures, normalizeTradeKey, type FeatureMap, type TradeKey } from "@/lib/features";
+import { DEFAULT_PAYMENT_METHODS } from "@/lib/payment-method";
 
 export interface OrgSettings {
   // Company
@@ -393,7 +394,9 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   pay_schedule: "biweekly",
   pay_anchor: "2026-01-05", // a Monday; biweekly cycles cascade from here
 
-  payment_methods: ["Cash", "Check", "Card", "Zelle", "Venmo", "Transfer"],
+  // THE ONE COPY of the house list is lib/payment-method (cn-v1152): every pay door draws its chips from
+  // settings.payment_methods and falls back to that same list when a company has cleared it.
+  payment_methods: [...DEFAULT_PAYMENT_METHODS],
   venmo_handle: "",
   card_fee_percent: 0, // off — see the field's comment for what turning it on actually commits you to
   bank_transfer_enabled: false, // off until the two async Stripe events are subscribed — see the field's comment

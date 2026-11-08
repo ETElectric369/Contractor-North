@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker, groupInvoiceLines, paidStatus, invoiceTypeLabel, invoiceBalance, subtotalTaxTotal, isDrawKind, DRAW_KINDS, invoiceOverpayment, handLineKind, isHoursUnit, lumpDrawAmount } from "@/lib/invoice-math";
+import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker, groupInvoiceLines, paidStatus, invoiceTypeLabel, invoiceBalance, subtotalTaxTotal, isDrawKind, DRAW_KINDS, invoiceOverpayment, handLineKind, isHoursUnit, lumpDrawAmount, addLineAsk, lineQuantity, typedLine, groupedOrder, linesToGroup, movedOrder } from "@/lib/invoice-math";
 
 describe("isDrawKind — one draw-vs-standard predicate", () => {
   it("the three draw kinds are draws", () => {
@@ -428,5 +428,124 @@ describe("groupInvoiceLines — a filed discount (0389)", () => {
     expect(g.discounts.subtotal).toBe(-165);
     expect(g.other.lines).toHaveLength(0);
     expect(g.labor.subtotal).toBe(287.5);
+  });
+});
+
+describe("a typed line (cn-v1152: the invoice's hand row, drawn by the one picker)", () => {
+  it("addLineAsk - which box the row is still missing: the words first, then a price nobody typed; nothing once it has both (44aeec9c, skeptic #56b)", () => {
+    expect(addLineAsk({ words: "", price: null })).toBe("words");
+    expect(addLineAsk({ words: " \t ", price: 95 })).toBe("words");
+    // "wire" typed to search the book, Enter pressed, the Price box blank: a question, never a $0 line.
+    expect(addLineAsk({ words: "wire", price: null })).toBe("price");
+    // A 0 typed on purpose is a no-charge line, which is a real thing.
+    expect(addLineAsk({ words: "Service call", price: 0 })).toBeNull();
+    expect(addLineAsk({ words: " Referral fee ", price: 250 })).toBeNull();
+  });
+  it("lineQuantity - the count a line goes on with: the Qty box's figure when it is a positive number, else one", () => {
+    expect([5, 2.5, 1, 0, -3, NaN, Infinity].map(lineQuantity)).toEqual([5, 2.5, 1, 1, 1, 1, 1]);
+  });
+  it("typedLine - the words trimmed, a count of at least one, the unit as typed, the price or 0; no kind (the server reads the words)", () => {
+    expect(typedLine({ words: " Service call ", qty: 0, unit: "ea", price: 0 })).toEqual({ description: "Service call", quantity: 1, unit: "ea", unit_price: 0 });
+    expect(typedLine({ words: "Trenching", qty: 3, unit: "hr", price: 95 })).toEqual({ description: "Trenching", quantity: 3, unit: "hr", unit_price: 95 });
+    expect(typedLine({ words: "Permit", qty: 1, unit: "", price: 250 })).toEqual({ description: "Permit", quantity: 1, unit: "", unit_price: 250 });
+    // A blank price is stopped by addLineAsk before it gets here; it would be 0 if it did.
+    expect(typedLine({ words: "Permit", qty: 1, unit: "ea", price: null }).unit_price).toBe(0);
+    expect("kind" in typedLine({ words: "Permit", qty: 1, unit: "ea", price: 250 })).toBe(false);
+  });
+});
+
+/**
+ * THE GROUPED ORDER, AND HOW MANY LINES IT MOVES (cn-v1152): the invoice page's Group Materials & Labor
+ * reads these BEFORE it is tapped, so it can say Already Grouped and do nothing, or say how many lines
+ * will move and, after, how many did. Erik, 2026-11-07: "i pressed it once and it didnt seem to do
+ * anything". The rank is groupByKind's, moved out of the page unchanged: the stored kind first (0342),
+ * then the importer, then the importer's own wording; hand-typed lines (no import_source) are pinned.
+ */
+describe("groupedOrder / linesToGroup — labor first, then materials, other, credits last; hand-typed lines pinned", () => {
+  const L = (id: string, extra: Record<string, unknown> = {}) => ({ id, description: `Labor — ${id}`, import_source: "labor", ...extra });
+  const M = (id: string, extra: Record<string, unknown> = {}) => ({ id, description: `Materials — ${id}`, import_source: "costs", ...extra });
+  const O = (id: string) => ({ id, description: `Change order ${id}`, import_source: "change_orders" });
+  const C = (id: string) => ({ id, description: "Less previous billings", import_source: "draw_credit" });
+  const H = (id: string, description = "Referral fee") => ({ id, description, import_source: null });
+
+  it("imported lines rank labor 0, materials 1, other 2, credits 3 — each bucket in its own order", () => {
+    expect(groupedOrder([C("c1"), O("o1"), M("m1"), L("l1"), M("m2"), L("l2")])).toEqual(["l1", "l2", "m1", "m2", "o1", "c1"]);
+  });
+
+  it("the stored kind is read first: a costs import filed Labor leads a labor import filed Materials; Other and a discount rank with other", () => {
+    expect(groupedOrder([M("m1", { line_kind: "labor" }), L("l1", { line_kind: "materials" })])).toEqual(["m1", "l1"]);
+    expect(groupedOrder([L("l1", { line_kind: "materials" }), M("m1", { line_kind: "labor" })])).toEqual(["m1", "l1"]);
+    expect(groupedOrder([L("l1", { line_kind: "other" }), M("m1"), L("l2", { line_kind: "credit" }), L("l3")])).toEqual(["l3", "m1", "l1", "l2"]);
+  });
+
+  it("an import with another source is read by the importer's own wording (an estimate's lines)", () => {
+    const q = (id: string, description: string) => ({ id, description, import_source: "quote" });
+    expect(groupedOrder([q("q4", "Permit"), q("q3", "Less previous billings"), q("q2", "Materials — wire"), q("q1", "Labor — Theo Vance")])).toEqual(["q1", "q2", "q4", "q3"]);
+  });
+
+  it("hand-typed lines keep their slot; the imported lines fill the rest in grouped order — even a hand line worded like an import", () => {
+    expect(groupedOrder([M("m1"), H("h1"), L("l1")])).toEqual(["l1", "h1", "m1"]);
+    expect(groupedOrder([H("h1"), M("m1"), L("l1"), H("h2")])).toEqual(["h1", "l1", "m1", "h2"]);
+    expect(groupedOrder([M("m1"), H("h1", "Labor — Dana Rook")])).toEqual(["m1", "h1"]);
+  });
+
+  it("already grouped → 0 lines move (the button reads Already Grouped and writes nothing)", () => {
+    expect(linesToGroup([L("l1"), L("l2"), M("m1"), O("o1"), C("c1")])).toBe(0);
+    expect(linesToGroup([H("h1"), M("m1"), H("h2")])).toBe(0);
+    expect(linesToGroup([L("l1")])).toBe(0);
+    expect(linesToGroup([])).toBe(0);
+    expect(groupedOrder([])).toEqual([]);
+  });
+
+  it("one labor line under three material lines: all four change places", () => {
+    expect(groupedOrder([M("m1"), M("m2"), M("m3"), L("l1")])).toEqual(["l1", "m1", "m2", "m3"]);
+    expect(linesToGroup([M("m1"), M("m2"), M("m3"), L("l1")])).toBe(4);
+  });
+
+  it("a swap of two is two, a pinned line between them is not counted — and the count is never one", () => {
+    expect(linesToGroup([M("m1"), L("l1")])).toBe(2);
+    expect(linesToGroup([M("m1"), H("h1"), L("l1")])).toBe(2);
+    expect(linesToGroup([L("l1"), M("m1"), L("l2")])).toBe(2);
+    // The material line keeps its slot while the lines around it change places: two, not three.
+    expect(linesToGroup([L("l1"), O("o1"), M("m1"), L("l2")])).toBe(2);
+    expect(groupedOrder([L("l1"), O("o1"), M("m1"), L("l2")])).toEqual(["l1", "l2", "m1", "o1"]);
+  });
+
+  it("every id once, none lost, whatever the mix", () => {
+    const lines = [C("c1"), H("h1"), O("o1"), M("m1"), L("l1"), H("h2"), M("m2", { line_kind: "labor" }), L("l2")];
+    expect([...groupedOrder(lines)].sort()).toEqual(lines.map((l) => l.id).sort());
+  });
+});
+
+/**
+ * ONE MOVE ON A LINE, THE WHOLE ORDER BACK (cn-v1152: the invoice row's Move strip — Up, Down, Top,
+ * Bottom). The caller sends the whole list once; null at an edge so it writes nothing and says nothing.
+ */
+describe("movedOrder — the order after Up, Down, Top or Bottom", () => {
+  const ids = ["a", "b", "c", "d"];
+  it("up and down swap with the neighbour", () => {
+    expect(movedOrder(ids, "c", "up")).toEqual(["a", "c", "b", "d"]);
+    expect(movedOrder(ids, "b", "down")).toEqual(["a", "c", "b", "d"]);
+    expect(movedOrder(ids, "d", "up")).toEqual(["a", "b", "d", "c"]);
+    expect(movedOrder(ids, "a", "down")).toEqual(["b", "a", "c", "d"]);
+  });
+  it("top and bottom jump", () => {
+    expect(movedOrder(ids, "c", "top")).toEqual(["c", "a", "b", "d"]);
+    expect(movedOrder(ids, "b", "bottom")).toEqual(["a", "c", "d", "b"]);
+    expect(movedOrder(ids, "d", "top")).toEqual(["d", "a", "b", "c"]);
+    expect(movedOrder(ids, "a", "bottom")).toEqual(["b", "c", "d", "a"]);
+  });
+  it("at an edge, or for a line not in the list, the move changes nothing: null", () => {
+    expect(movedOrder(ids, "a", "up")).toBeNull();
+    expect(movedOrder(ids, "a", "top")).toBeNull();
+    expect(movedOrder(ids, "d", "down")).toBeNull();
+    expect(movedOrder(ids, "d", "bottom")).toBeNull();
+    expect(movedOrder(ids, "zz", "up")).toBeNull();
+    expect(movedOrder(["a"], "a", "down")).toBeNull();
+    expect(movedOrder([], "a", "top")).toBeNull();
+  });
+  it("every id once, none lost; the input is not touched", () => {
+    for (const m of ["up", "down", "top", "bottom"] as const) expect([...(movedOrder(ids, "b", m) ?? [])].sort()).toEqual(ids);
+    expect(ids).toEqual(["a", "b", "c", "d"]);
   });
 });

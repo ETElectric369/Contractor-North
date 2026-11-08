@@ -14,6 +14,7 @@ import {
   type PayPaymentRow,
   type PersonBalance,
 } from "@/lib/payroll-math";
+import { paymentMethodLabel } from "@/lib/payment-method";
 import { HELD_MILEAGE_FACTS, THREE_FIGURES_FACTS } from "./payroll-facts";
 
 /**
@@ -83,7 +84,8 @@ export function PaymentLine({
       <div className="min-w-0">
         <div className={`text-sm ${p.voided ? "text-slate-400 line-through" : "text-slate-800"}`}>
           {fmtDay(p.paidOn)} · {who ? `${who} · ` : ""}
-          {formatCurrency(p.amount)} · {p.method}
+          {/* The chip's words (Venmo, Check, Apple Cash), never the stored key (cn-v1152). */}
+          {formatCurrency(p.amount)} · {paymentMethodLabel(p.method)}
         </div>
         {/* A void never deletes (voidPayment clears nothing), so the row stays and says so. */}
         {p.voided && <div className="mt-0.5 text-xs font-medium text-slate-500">voided</div>}

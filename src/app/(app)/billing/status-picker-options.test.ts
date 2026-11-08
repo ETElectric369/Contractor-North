@@ -22,6 +22,12 @@ import { invoiceStatusItems, statusToSend, SENT_BY_HAND, type InvoiceStatusDeed 
  * the status the invoice already has, the two send declarations keep their own value and are
  * translated back to "sent" before the server sees it, and INV-071's re-send is a deed to do - never
  * shown as what the bill already is.
+ *
+ * THE ROW FOLLOWS THE RECORD, NOT THE NOTICE (skeptic #56, 2026-11-07). The page's amber notice
+ * narrowed to the money that day (paid on an older figure, and the money changed since); Mark Sent
+ * Again kept reading it, so an unpaid bill that changed could never be re-stamped by hand. It reads
+ * changedSinceSent now - the bill changed since it last went out, whatever the notice says: a menu
+ * row is a door, not a nag.
  */
 
 const LIVE_STATUSES = ["sent", "partial", "paid", "overdue"];
@@ -33,10 +39,11 @@ const deeds = (items: InvoiceStatusDeed[]) => items.filter((i): i is Deed => "va
 /** Every shape a bill can be in that changes what the ⋯ offers. */
 const CASES = ALL_STATUSES.flatMap((status) =>
   [
-    { amountPaid: 0, sentAt: null, customerHoldsOlderCopy: false },
-    { amountPaid: 200, sentAt: null, customerHoldsOlderCopy: false }, // INV-069: a deposit on a bill never delivered
-    { amountPaid: 200, sentAt: "2026-09-19T20:54:55.199Z", customerHoldsOlderCopy: false },
-    { amountPaid: 0, sentAt: "2026-09-19T20:54:55.199Z", customerHoldsOlderCopy: true }, // INV-071
+    { amountPaid: 0, sentAt: null, changedSinceSent: false },
+    { amountPaid: 200, sentAt: null, changedSinceSent: false }, // INV-069: a deposit on a bill never delivered
+    { amountPaid: 200, sentAt: "2026-09-19T20:54:55.199Z", changedSinceSent: false },
+    { amountPaid: 0, sentAt: "2026-09-19T20:54:55.199Z", changedSinceSent: true }, // INV-071: changed after the send, nothing paid
+    { amountPaid: 200, sentAt: "2026-09-19T20:54:55.199Z", changedSinceSent: true }, // a deposit, then a change: the notice may stand too
   ].map((f) => ({ status, invoiceNumber: "INV-071", ...f })),
 );
 
@@ -92,9 +99,10 @@ describe("the ⋯ status deeds (invoiceStatusItems)", () => {
 });
 
 describe("INV-071 as the ⋯ offers it", () => {
-  /** The live row: status 'sent', $0.00 paid (so Draft is still on offer), customerHoldsOlderCopy
-   *  true (sent 2026-09-19, revised 2026-09-20). */
-  const items = invoiceStatusItems({ status: "sent", invoiceNumber: "INV-071", amountPaid: 0, sentAt: "2026-09-19T20:54:55.199Z", customerHoldsOlderCopy: true });
+  /** The live row: status 'sent', $0.00 paid (so Draft is still on offer), changedSinceSent true (sent
+   *  2026-09-19, revised 2026-09-20). Nothing paid, so the money-only notice is QUIET on this bill -
+   *  and the hand door is open all the same (2026-11-07). */
+  const items = invoiceStatusItems({ status: "sent", invoiceNumber: "INV-071", amountPaid: 0, sentAt: "2026-09-19T20:54:55.199Z", changedSinceSent: true });
 
   it("offers Mark Sent Again as a deed to do, never as what the invoice already is", () => {
     const resend = deeds(items).find((d) => d.label === "Mark Sent Again - I Re-Sent It");
@@ -105,9 +113,30 @@ describe("INV-071 as the ⋯ offers it", () => {
     expect(page).toContain("<Badge tone={statusTone(inv.status)}>{statusWords}</Badge>");
   });
 
-  it("an up-to-date sent bill offers no re-send at all (the notice isn't up, so there is nothing to declare)", () => {
-    const fresh = invoiceStatusItems({ status: "sent", amountPaid: 0, sentAt: "2026-09-19T20:54:55.199Z", customerHoldsOlderCopy: false });
+  it("an up-to-date sent bill offers no re-send at all (nothing changed since it went out, so there is nothing to declare)", () => {
+    const fresh = invoiceStatusItems({ status: "sent", amountPaid: 0, sentAt: "2026-09-19T20:54:55.199Z", changedSinceSent: false });
     expect(deeds(fresh).some((d) => d.value === SENT_BY_HAND)).toBe(false);
+  });
+
+  it("the row follows the RECORD, not the money-only notice: a changed bill nobody paid still offers Mark Sent Again (skeptic #56)", () => {
+    // Without this door the office could never re-stamp a corrected unpaid bill it handed over by
+    // hand: revised_at > sent_at would stand, and 0405's sent_total would stay the old figure.
+    const unpaid = invoiceStatusItems({ status: "sent", invoiceNumber: "INV-071", amountPaid: 0, sentAt: "2026-09-19T20:54:55.199Z", changedSinceSent: true });
+    expect(deeds(unpaid).find((d) => d.id === "st-resent")?.label).toBe("Mark Sent Again - I Re-Sent It");
+    // The paid one too: the notice may stand on it, the row does not read the notice to find out.
+    const paid = invoiceStatusItems({ status: "partial", invoiceNumber: "INV-071", amountPaid: 200, sentAt: "2026-09-19T20:54:55.199Z", changedSinceSent: true });
+    expect(deeds(paid).find((d) => d.id === "st-resent")?.value).toBe(SENT_BY_HAND);
+    // The notice's answer is not an input here any more: a flag nothing reads is a hole.
+    // @ts-expect-error customerHoldsOlderCopy left invoiceStatusItems on 2026-11-07
+    invoiceStatusItems({ status: "sent", customerHoldsOlderCopy: true });
+    // The gate in the source is the record's word, so a re-wire back to the notice fails here.
+    const tree = readFileSync(join(process.cwd(), "src/lib/nav-tree.ts"), "utf8");
+    expect(tree).toContain('else if (!isVoid && inv.changedSinceSent) items.push({ id: "st-resent"');
+    expect(tree).not.toMatch(/inv\.customerHoldsOlderCopy/);
+    // ...and the page hands the record's answer down, computed by the one lib, beside the notice's.
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/billing/[id]/page.tsx"), "utf8");
+    expect(page).toContain("const changedSince = changedSinceSent(sentAt, revisedAt);");
+    expect(page).toContain("changedSinceSent={changedSince}");
   });
 
   it("the labels name the deed, in Title Case, with no em dash", () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { customerHoldsOlderCopy, hasUnsentRevision, invoiceLineEditRefusal, shouldStampRevision } from "@/lib/invoice-revision";
+import { changedSinceSent, customerHoldsOlderCopy, hasUnsentRevision, invoiceLineEditRefusal, shouldStampRevision, type MoneyFacts } from "@/lib/invoice-revision";
 
 /**
  * 2026-09-18 — "even if i did sent it ill always need to be able to go back and make changes as
@@ -10,10 +10,17 @@ import { customerHoldsOlderCopy, hasUnsentRevision, invoiceLineEditRefusal, shou
  * be reissued in the property owner's name rather than the agent's, and the invoice that started
  * the wave had his own Smartwater billed to the customer, caught on his own review.
  *
- * So the lock comes off and the record goes on (migration 0269). The three decisions that replace
- * it are pinned here, because all three are one-line predicates that will look safe to "simplify"
- * later and are not: WHICH status is still refused, WHEN a change goes on the record, and WHEN the
- * customer is holding something older than what the office is looking at.
+ * So the lock comes off and the record goes on (migration 0269). The decisions that replace it are
+ * pinned here, because each is a short predicate that will look safe to "simplify" later and is
+ * not: WHICH status is still refused, WHEN a change goes on the record, WHEN the bill counts as
+ * changed since it went out (the record question), and WHEN the office is told to send it again.
+ *
+ * 2026-11-07 — "any change i make after its been sent reflects on the link already sent so its
+ * mostly unnecessary to send it again unless they've paid and something changes and a difference
+ * remains". The notice narrowed to the money (0405's sent_total records the figure a send carried);
+ * the record question stayed for the doors that re-stamp a delivery. Both are tables below. Skeptic
+ * #56 the same day: "paid and something changes" is an ORDER - the payments' dates against revised_at
+ * say whether the money landed before the change (on the old figure) or after it (on the live one).
  */
 describe("invoiceLineEditRefusal — paid is not the special case, void is", () => {
   it("every live status may be corrected, paid included", () => {
@@ -70,112 +77,178 @@ describe("shouldStampRevision — delivery decides, never status", () => {
   });
 });
 
-describe("customerHoldsOlderCopy — the sentence the invoice page says out loud", () => {
-  const sent = "2026-09-17T18:04:00.000Z";
+describe("changedSinceSent — the record question: did the bill change after it last went out?", () => {
+  const sent = "2026-10-01T18:04:00.000Z";
 
-  it("a bill revised after it went out means they're holding the older one", () => {
-    expect(customerHoldsOlderCopy(sent, "2026-09-18T21:30:00.000Z")).toBe(true);
+  it("a change after the send is a change; a re-send that moves sent_at past it is not", () => {
+    expect(changedSinceSent(sent, "2026-10-02T21:30:00.000Z")).toBe(true);
+    // 0269 deliberately does not clear revised_at: the comparison is what answers the question, so
+    // a re-send (markInvoiceResent, the share sheet's yes, the hand "Sent") is the whole mechanism.
+    expect(changedSinceSent("2026-10-02T21:31:00.000Z", "2026-10-02T21:30:00.000Z")).toBe(false);
   });
 
-  it("A RE-SEND SETTLES IT — sent_at moves forward and the question goes away", () => {
-    // 0269 deliberately does not clear revised_at: the fact that a revision happened is worth
-    // keeping. The comparison is what answers "do they have this copy?", so a re-send that moves
-    // sent_at past the revision is the whole mechanism. textInvoice, the share sheet's yes, and
-    // "Sent - I sent it myself" all move it (markInvoiceResent).
-    const revised = "2026-09-18T21:30:00.000Z";
-    expect(customerHoldsOlderCopy(sent, revised)).toBe(true);
-    const resentAt = "2026-09-18T21:31:00.000Z";
-    expect(customerHoldsOlderCopy(resentAt, revised)).toBe(false);
+  it("the same instant is not a change — a re-send must not nag about the copy it just sent", () => {
+    expect(changedSinceSent(sent, sent)).toBe(false);
   });
 
-  it("the same instant is not a revision — a re-send must not nag about the copy it just sent", () => {
-    expect(customerHoldsOlderCopy(sent, sent)).toBe(false);
-  });
-
-  it("never revised, or never sent, asks nothing", () => {
-    expect(customerHoldsOlderCopy(sent, null)).toBe(false);
-    expect(customerHoldsOlderCopy(null, "2026-09-18T21:30:00.000Z")).toBe(false);
-    expect(customerHoldsOlderCopy(null, null)).toBe(false);
+  it("never revised, or never sent, is not a change", () => {
+    expect(changedSinceSent(sent, null)).toBe(false);
+    expect(changedSinceSent(null, "2026-10-02T21:30:00.000Z")).toBe(false);
+    expect(changedSinceSent(null, null)).toBe(false);
+    expect(changedSinceSent(undefined, undefined)).toBe(false);
   });
 
   it("an unparseable timestamp raises no alarm it cannot justify", () => {
-    // A banner telling the office to re-send a bill is a real interruption. It has to be earned
-    // by two real dates, not by garbage sorting oddly as a string.
-    expect(customerHoldsOlderCopy("not a date", "2026-09-18T21:30:00.000Z")).toBe(false);
-    expect(customerHoldsOlderCopy(sent, "not a date")).toBe(false);
+    expect(changedSinceSent("not a date", "2026-10-02T21:30:00.000Z")).toBe(false);
+    expect(changedSinceSent(sent, "not a date")).toBe(false);
   });
 
   it("reads the instant, not the text: offsets compare as moments", () => {
-    // 11:05 Pacific is AFTER 18:04 UTC by four minutes. A string comparison would call it earlier
-    // and hide a real revision.
-    expect(customerHoldsOlderCopy(sent, "2026-09-17T11:08:00.000-07:00")).toBe(true);
-    expect(customerHoldsOlderCopy(sent, "2026-09-17T11:00:00.000-07:00")).toBe(false);
+    // 11:08 Pacific is AFTER 18:04 UTC by four minutes. A string comparison would call it earlier.
+    expect(changedSinceSent(sent, "2026-10-01T11:08:00.000-07:00")).toBe(true);
+    expect(changedSinceSent(sent, "2026-10-01T11:00:00.000-07:00")).toBe(false);
   });
 });
 
-describe("customerHoldsOlderCopy — paying the corrected bill in full settles it (INV-071)", () => {
-  // Karen Willet's row, straight off the database: sent, revised that night, paid in full through
-  // her own live link the next afternoon.
-  const sent = "2026-09-19T20:54:55.199Z";
-  const revised = "2026-09-20T05:21:57.343Z";
-  const karen = { total: 1875.98, amountPaid: 1875.98, paidAt: ["2026-09-20T23:40:27.000Z"] };
+/**
+ * THE NOTICE, AS A TABLE (Erik, 2026-11-07). The link the customer holds is live, so the only thing
+ * that can be stale is the figure they paid against. The office is told to send a bill again only
+ * when ALL of: it changed since it went out, the customer paid something BEFORE that change (the
+ * payments' dates), the money moved since the send (sent_total, 0405), and a difference remains. Each
+ * row below is one branch of the rule, and the WHY column is the sentence that keeps it from being
+ * "simplified" back into a nag.
+ */
+describe("customerHoldsOlderCopy — should the office be told to send it again?", () => {
+  const sent = "2026-10-01T18:04:00.000Z";
+  const revised = "2026-10-05T21:30:00.000Z";
+  const resent = "2026-10-05T21:31:00.000Z";
+  /** The payments' dates against the change: a deposit the week before it, a payment the day after. */
+  const before = ["2026-10-02T17:00:00.000Z"];
+  const after = ["2026-10-06T17:00:00.000Z"];
+  type Row = { name: string; sentAt: string | null; revisedAt: string | null; facts: MoneyFacts; expected: boolean };
+  const TABLE: Row[] = [
+    // (b) nothing paid: "unless they've paid" — the live link already says it all.
+    { name: "changed, nothing paid", sentAt: sent, revisedAt: revised, facts: { total: 1250, amountPaid: 0, sentTotal: 1000, paidAt: [] }, expected: false },
+    { name: "changed, nothing paid, figure unknown (sent before 0405)", sentAt: sent, revisedAt: revised, facts: { total: 1250, amountPaid: 0, sentTotal: null, paidAt: [] }, expected: false },
+    // (b) THE ORDER (skeptic #56, 2026-11-07): unpaid, changed, THEN paid part. The payment was made
+    // through the live link, which already showed the new figure — nothing is stale for anybody,
+    // though the money moved and a balance remains.
+    { name: "unpaid, changed, then paid part", sentAt: sent, revisedAt: revised, facts: { total: 1250, amountPaid: 500, sentTotal: 1000, paidAt: after }, expected: false },
+    { name: "unpaid, changed, then paid part, figure unknown", sentAt: sent, revisedAt: revised, facts: { total: 1250, amountPaid: 500, sentTotal: null, paidAt: after }, expected: false },
+    { name: "a payment at the very instant of the change is not before it", sentAt: sent, revisedAt: revised, facts: { total: 1250, amountPaid: 500, sentTotal: 1000, paidAt: [revised] }, expected: false },
+    // (e) paid part BEFORE the change, changed, a balance left: they paid against $1,000 and $1,250 stands.
+    { name: "paid part before the change, then total raised", sentAt: sent, revisedAt: revised, facts: { total: 1250, amountPaid: 500, sentTotal: 1000, paidAt: before }, expected: true },
+    // (e) paid before AND after: the first payment was made on the old figure, so the notice stands.
+    { name: "paid before and after the change, total raised", sentAt: sent, revisedAt: revised, facts: { total: 1250, amountPaid: 700, sentTotal: 1000, paidAt: [...before, ...after] }, expected: true },
+    // (b) a date nobody can read counts as BEFORE: unknown resolves towards saying so. payments.paid_at
+    // is NOT NULL (0003), so each of these is a projection miss, never a real row.
+    { name: "a payment with no date counts as before", sentAt: sent, revisedAt: revised, facts: { total: 1250, amountPaid: 500, sentTotal: 1000, paidAt: [null] }, expected: true },
+    { name: "a payment with a garbage date counts as before", sentAt: sent, revisedAt: revised, facts: { total: 1250, amountPaid: 500, sentTotal: 1000, paidAt: ["not a date"] }, expected: true },
+    { name: "money paid but no payment dates handed over counts as before", sentAt: sent, revisedAt: revised, facts: { total: 1250, amountPaid: 500, sentTotal: 1000, paidAt: [] }, expected: true },
+    // (c) squared up: paid in full and the money did not move — a wording change on a paid bill.
+    { name: "paid in full, money unchanged", sentAt: sent, revisedAt: revised, facts: { total: 1000, amountPaid: 1000, sentTotal: 1000, paidAt: before }, expected: false },
+    // (c) squared up BEFORE the change too: the old rule kept this one (paid before the change =
+    // "holding the old paper"); Erik does not want to be asked — the link shows the new wording.
+    { name: "paid in full long before a later change, figure unknown", sentAt: "2026-06-01T17:00:00.000Z", revisedAt: "2026-09-01T17:00:00.000Z", facts: { total: 4200, amountPaid: 4200, sentTotal: null, paidAt: ["2026-06-05T17:00:00.000Z"] }, expected: false },
+    // (e) a deposit, then the total went up: they paid against $1,000 and $1,250 is owed now.
+    { name: "partial payment, total raised", sentAt: sent, revisedAt: revised, facts: { total: 1250, amountPaid: 500, sentTotal: 1000, paidAt: before }, expected: true },
+    // (d) a deposit, then a wording change: the figure they paid against still stands.
+    { name: "partial payment, wording only (sent_total equals total)", sentAt: sent, revisedAt: revised, facts: { total: 1000, amountPaid: 500, sentTotal: 1000, paidAt: before }, expected: false },
+    // (e) paid in full, then a line added: a balance reappeared on a bill they thought was done.
+    { name: "full payment, then total raised", sentAt: sent, revisedAt: revised, facts: { total: 1250, amountPaid: 1000, sentTotal: 1000, paidAt: before }, expected: true },
+    // (e) paid in full, then the total LOWERED: they are owed the difference, and the bill must stay
+    // in front of the office, not vanish because its balance reads zero.
+    { name: "paid, then total lowered below the payment (overpayment)", sentAt: sent, revisedAt: revised, facts: { total: 900, amountPaid: 1000, sentTotal: 1000, paidAt: before }, expected: true },
+    // (e) the figure unknown (sent before 0405): the app cannot prove the money did not move, so
+    // paid + a balance keeps the notice rather than guess.
+    { name: "figure unknown, paid, balance remains", sentAt: sent, revisedAt: revised, facts: { total: 1000, amountPaid: 500, sentTotal: null, paidAt: before }, expected: true },
+    { name: "figure unknown (undefined), paid, balance remains", sentAt: sent, revisedAt: revised, facts: { total: 1000, amountPaid: 500, paidAt: before }, expected: true },
+    // sent_total 0 is a RECORDED figure, not an unknown one: a $0 bill went out, then got a total.
+    { name: "sent at $0, then a total added, part paid", sentAt: sent, revisedAt: revised, facts: { total: 500, amountPaid: 200, sentTotal: 0, paidAt: before }, expected: true },
+    // (a) re-sent after the change: sent_at moved past revised_at, whatever the money says.
+    { name: "re-sent after the change, money moved and owed", sentAt: resent, revisedAt: revised, facts: { total: 1250, amountPaid: 500, sentTotal: 1250, paidAt: before }, expected: false },
+    { name: "re-sent at the same instant as the change", sentAt: revised, revisedAt: revised, facts: { total: 1250, amountPaid: 500, sentTotal: 1000, paidAt: before }, expected: false },
+    // (a) never delivered (INV-069: a pay door promoted it to 'sent', nobody has a copy), or never changed.
+    { name: "never sent", sentAt: null, revisedAt: revised, facts: { total: 1250, amountPaid: 500, sentTotal: null, paidAt: before }, expected: false },
+    { name: "never changed", sentAt: sent, revisedAt: null, facts: { total: 1250, amountPaid: 500, sentTotal: 1000, paidAt: before }, expected: false },
+    { name: "garbage dates", sentAt: "not a date", revisedAt: revised, facts: { total: 1250, amountPaid: 500, sentTotal: 1000, paidAt: before }, expected: false },
+    // (b) a payment nobody recorded as a number is not a payment.
+    { name: "amount paid unreadable", sentAt: sent, revisedAt: revised, facts: { total: 1250, amountPaid: Number.NaN, sentTotal: 1000, paidAt: before }, expected: false },
+    { name: "amount paid negative", sentAt: sent, revisedAt: revised, facts: { total: 1250, amountPaid: -20, sentTotal: 1000, paidAt: before }, expected: false },
+  ];
 
-  it("leaves the lane and the banner once the new total is paid after the change", () => {
-    expect(customerHoldsOlderCopy(sent, revised)).toBe(true); // the old two-input answer, unchanged
-    expect(customerHoldsOlderCopy(sent, revised, karen)).toBe(false);
-  });
-
-  it("PAID BEFORE THE CHANGE STAYS — the bill reissued in the property owner's name", () => {
-    // Settled in June, corrected in September. What is wrong is the paper in the customer's
-    // hands, and no payment since has shown them the new one.
-    const paidInJune = { total: 4200, amountPaid: 4200, paidAt: ["2026-06-03T17:00:00.000Z"] };
-    expect(customerHoldsOlderCopy("2026-06-01T17:00:00.000Z", "2026-09-01T17:00:00.000Z", paidInJune)).toBe(true);
-  });
-
-  it("a balance still owed after the change stays", () => {
-    // A pay link opened before a change that RAISED the total pays the old figure.
-    expect(customerHoldsOlderCopy(sent, revised, { ...karen, amountPaid: 1800 })).toBe(true);
-  });
-
-  it("an overpaid bill stays — the old, higher figure was paid, so they hold the old bill", () => {
-    expect(customerHoldsOlderCopy(sent, revised, { ...karen, total: 1850 })).toBe(true);
-  });
-
-  it("cent dust is not a balance, and PostgREST's string numerics read the same", () => {
-    expect(customerHoldsOlderCopy(sent, revised, { ...karen, amountPaid: 1875.9800000001 })).toBe(false);
-    const asText = { total: "1875.98", amountPaid: "1875.98", paidAt: karen.paidAt } as unknown as typeof karen;
-    expect(customerHoldsOlderCopy(sent, revised, asText)).toBe(false);
-  });
-
-  it("no payment at all, or only unreadable dates, stays", () => {
-    expect(customerHoldsOlderCopy(sent, revised, { ...karen, paidAt: [] })).toBe(true);
-    expect(customerHoldsOlderCopy(sent, revised, { ...karen, paidAt: [null, undefined, "not a date"] })).toBe(true);
-  });
-
-  it("one payment after the change is enough, beside a deposit taken before it", () => {
-    expect(customerHoldsOlderCopy(sent, revised, { ...karen, paidAt: ["2026-09-19T21:00:00.000Z", "2026-09-20T23:40:27.000Z"] })).toBe(false);
-  });
-
-  it("a re-sent bill is already settled, paid or not", () => {
-    expect(customerHoldsOlderCopy("2026-09-20T06:00:00.000Z", revised, { ...karen, paidAt: [] })).toBe(false);
-  });
-
-  it("the share sheet asks the same question, from the columns the rule needs", async () => {
-    // hasUnsentRevision is what makes Share ask "re-send?". Asking it about a bill the page no
-    // longer flags would put the old nag back one tap later.
-    const asked: string[] = [];
-    const client = (row: Record<string, unknown>) => ({
-      from: () => ({
-        select: (cols: string) => {
-          asked.push(cols);
-          const chain = { eq: () => chain, maybeSingle: async () => ({ data: row, error: null }) };
-          return chain;
-        },
-      }),
+  for (const row of TABLE) {
+    it(`${row.name} -> ${row.expected ? "send it again" : "nothing to say"}`, () => {
+      expect(customerHoldsOlderCopy(row.sentAt, row.revisedAt, row.facts)).toBe(row.expected);
     });
-    const inv071 = { status: "paid", sent_at: sent, revised_at: revised, total: 1875.98, amount_paid: 1875.98 };
-    expect(await hasUnsentRevision(client({ ...inv071, payments: [{ paid_at: karen.paidAt[0] }] }), "inv-071")).toBe(false);
-    expect(await hasUnsentRevision(client({ ...inv071, payments: [] }), "inv-071")).toBe(true);
-    expect(asked[0]).toMatch(/\bamount_paid\b.*\bpayments\(paid_at\)/);
+  }
+
+  it("cent dust is not a difference, and PostgREST's string numerics read the same", () => {
+    // Paid to the cent with float dust on top: squared up (c), not an overpayment.
+    expect(customerHoldsOlderCopy(sent, revised, { total: 1875.98, amountPaid: 1875.9800000001, sentTotal: 1700, paidAt: before })).toBe(false);
+    // A wording change read off PostgREST, every figure a string: (d) still compares in cents.
+    const wording = { total: "1000", amountPaid: "500", sentTotal: "1000", paidAt: before } as unknown as MoneyFacts;
+    expect(customerHoldsOlderCopy(sent, revised, wording)).toBe(false);
+    const moved = { total: "1000", amountPaid: "500", sentTotal: "900", paidAt: before } as unknown as MoneyFacts;
+    expect(customerHoldsOlderCopy(sent, revised, moved)).toBe(true);
+    // A figure a cent off is a figure that moved.
+    expect(customerHoldsOlderCopy(sent, revised, { total: 1000.01, amountPaid: 500, sentTotal: 1000, paidAt: before })).toBe(true);
+  });
+
+  it("the order is read off the payments' own dates, as instants: the same figures, the one difference is WHEN", () => {
+    // Erik's rule has an order in it - "unless they've paid and something changes" - and skeptic #56
+    // found the sequence that broke the amount-only reading: money changes on an unpaid bill, the
+    // customer then pays part of it through the live link (which showed the new figure), notice.
+    const facts = { total: 1250, amountPaid: 500, sentTotal: 1000 };
+    expect(customerHoldsOlderCopy(sent, revised, { ...facts, paidAt: before })).toBe(true);
+    expect(customerHoldsOlderCopy(sent, revised, { ...facts, paidAt: after })).toBe(false);
+    // 14:29 Pacific is a minute BEFORE the 21:30Z change; 14:31 is a minute after. A string comparison
+    // would sort both before it.
+    expect(customerHoldsOlderCopy(sent, revised, { ...facts, paidAt: ["2026-10-05T14:29:00.000-07:00"] })).toBe(true);
+    expect(customerHoldsOlderCopy(sent, revised, { ...facts, paidAt: ["2026-10-05T14:31:00.000-07:00"] })).toBe(false);
+  });
+});
+
+describe("hasUnsentRevision — the RECORD question for the doors that re-stamp a delivery", () => {
+  const sent = "2026-10-01T18:04:00.000Z";
+  const revised = "2026-10-05T21:30:00.000Z";
+  const client = (row: Record<string, unknown> | null, asked: string[] = [], error: unknown = null) => ({
+    from: () => ({
+      select: (cols: string) => {
+        asked.push(cols);
+        const chain = { eq: () => chain, maybeSingle: async () => ({ data: row, error }) };
+        return chain;
+      },
+    }),
+  });
+
+  it("reads only the record: status and the two stamps, no money, no payments", async () => {
+    const asked: string[] = [];
+    await hasUnsentRevision(client({ status: "sent", sent_at: sent, revised_at: revised }, asked), "inv-1");
+    expect(asked).toEqual(["status, sent_at, revised_at"]);
+  });
+
+  it("a changed bill is a changed bill, paid in full or never paid — re-sharing it IS a delivery of the current one", async () => {
+    // The share sheet and the hand "Sent" move sent_at on a yes, and 0405's trigger records the
+    // figure the re-send carried. The money-only notice is a different question (above).
+    expect(await hasUnsentRevision(client({ status: "paid", sent_at: sent, revised_at: revised }), "inv-1")).toBe(true);
+    expect(await hasUnsentRevision(client({ status: "sent", sent_at: sent, revised_at: revised }), "inv-1")).toBe(true);
+  });
+
+  it("a re-stamped bill (sent_at past revised_at) reads false again, so the email door's check settles", async () => {
+    expect(await hasUnsentRevision(client({ status: "sent", sent_at: "2026-10-05T21:31:00.000Z", revised_at: revised }), "inv-1")).toBe(false);
+    expect(await hasUnsentRevision(client({ status: "sent", sent_at: sent, revised_at: null }), "inv-1")).toBe(false);
+    expect(await hasUnsentRevision(client({ status: "sent", sent_at: null, revised_at: revised }), "inv-1")).toBe(false);
+  });
+
+  it("a VOID invoice is never waiting to be re-sent", async () => {
+    expect(await hasUnsentRevision(client({ status: "void", sent_at: sent, revised_at: revised }), "inv-1")).toBe(false);
+  });
+
+  it("false on anything it cannot read: no row, a read error, a throw", async () => {
+    expect(await hasUnsentRevision(client(null), "inv-1")).toBe(false);
+    expect(await hasUnsentRevision(client({ status: "sent", sent_at: sent, revised_at: revised }, [], { message: "boom" }), "inv-1")).toBe(false);
+    const throwing = { from: () => { throw new Error("no"); } };
+    expect(await hasUnsentRevision(throwing, "inv-1")).toBe(false);
   });
 });

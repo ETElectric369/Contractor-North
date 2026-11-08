@@ -13,13 +13,22 @@ import { customerHoldsOlderCopy } from "@/lib/invoice-revision";
  * the day) left no mark on any list, count or badge in the app. The banner that says "send it
  * again" was only ever visible to someone already looking at the invoice that needed it.
  *
- * Live proof, queried 2026-09-20: INV-071, Karen Willet, $1,875.98, status 'sent', sent_at
- * 2026-09-19T20:54:55.199Z, revised_at 2026-09-20T05:21:57.343Z. She is holding the older bill
- * right now, and on /billing that row rendered identically to a bill that is perfectly up to date.
+ * Live proof, queried 2026-09-20: INV-071, $1,875.98, status 'sent', sent_at
+ * 2026-09-19T20:54:55.199Z, revised_at 2026-09-20T05:21:57.343Z, and on /billing that row rendered
+ * identically to a bill that was perfectly up to date.
  *
- * These tests pin the two halves of the fix: the RULE (one function, never re-derived) and the
- * PROJECTION (the board cannot answer a question about fields it does not select — the projection
- * law, which is how this got lost in the first place).
+ * NARROWED TO THE MONEY (Erik, 2026-11-07; 0405): "any change i make after its been sent reflects
+ * on the link already sent so its mostly unnecessary to send it again unless they've paid and
+ * something changes and a difference remains". The lane holds a bill only when the customer paid
+ * against a figure that has since moved (sent_total, the total the send carried) and a difference
+ * remains. INV-071 as it was that night — changed, unpaid — leaves the lane under this rule. THE
+ * ORDER COUNTS (skeptic #56, the same day): paid, THEN changed. A payment made after the change was
+ * made on the live figure, so it raises nothing; the payments' paid_at ride along to say which came
+ * first.
+ *
+ * These tests pin the two halves: the RULE (one function, never re-derived) and the PROJECTION (the
+ * board cannot answer a question about fields it does not select — the projection law, which is
+ * how this got lost in the first place).
  */
 
 const BOARD = "src/app/(app)/billing/page.tsx";
@@ -29,50 +38,84 @@ const src = readFileSync(join(process.cwd(), BOARD), "utf8");
  *  tripped — by prose. This file's comments quote the rule verbatim; the code must not. */
 const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
 
-/** The live INV-071 row, plus the three neighbours that decide whether this lane is built from
- *  the right set. Timestamps and figures are his, straight off the database. */
+/** The live INV-071 row as it was that night, plus the neighbours that decide whether this lane is
+ *  built from the right set: what the board selects (total, amount_paid, the two stamps, 0405's
+ *  sent_total, and each payment's paid_at). Figures are invented; INV-071's timestamps are his,
+ *  straight off the database. */
 const ROWS = [
-  { invoice_number: "INV-071", status: "sent", total: 1875.98, amount_paid: 0, sent_at: "2026-09-19T20:54:55.199Z", revised_at: "2026-09-20T05:21:57.343Z" },
-  // The one his client wrote in about: a bill settled months ago, reissued in the property
-  // owner's name. Status 'paid', balance zero, and it still needs to go out again.
-  { invoice_number: "INV-PAID", status: "paid", total: 4200, amount_paid: 4200, sent_at: "2026-06-01T17:00:00.000Z", revised_at: "2026-09-01T17:00:00.000Z" },
+  // Changed after the send, nothing paid: the live link already shows the change. Not in the lane.
+  { invoice_number: "INV-071", status: "sent", total: 1875.98, amount_paid: 0, sent_at: "2026-09-19T20:54:55.199Z", revised_at: "2026-09-20T05:21:57.343Z", sent_total: 1700, payments: [] as { paid_at: string | null }[] },
+  // A deposit on a $2,000 bill, then a line added: they paid against $2,000 and $2,400 stands now.
+  { invoice_number: "INV-DEPOSIT", status: "partial", total: 2400, amount_paid: 800, sent_at: "2026-10-01T17:00:00.000Z", revised_at: "2026-10-03T17:00:00.000Z", sent_total: 2000, payments: [{ paid_at: "2026-10-02T17:00:00.000Z" }] },
+  // THE ORDER (skeptic #56): the same $2,000 bill, the line added first, THEN the deposit through the
+  // live link, which showed $2,400 already. The money moved and a balance remains - and nothing is
+  // stale for anybody. Not in the lane.
+  { invoice_number: "INV-LATE-PAY", status: "partial", total: 2400, amount_paid: 800, sent_at: "2026-10-01T17:00:00.000Z", revised_at: "2026-10-03T17:00:00.000Z", sent_total: 2000, payments: [{ paid_at: "2026-10-04T17:00:00.000Z" }] },
+  // A deposit before the change and a second payment after it: the first was on the old figure.
+  { invoice_number: "INV-BOTH", status: "partial", total: 2400, amount_paid: 1600, sent_at: "2026-10-01T17:00:00.000Z", revised_at: "2026-10-03T17:00:00.000Z", sent_total: 2000, payments: [{ paid_at: "2026-10-02T17:00:00.000Z" }, { paid_at: "2026-10-04T17:00:00.000Z" }] },
+  // The same deposit, then only the title changed: the figure they paid against still stands.
+  { invoice_number: "INV-WORDING", status: "partial", total: 2000, amount_paid: 800, sent_at: "2026-10-01T17:00:00.000Z", revised_at: "2026-10-03T17:00:00.000Z", sent_total: 2000, payments: [{ paid_at: "2026-10-02T17:00:00.000Z" }] },
+  // Paid in full, then the total LOWERED: status 'paid', balance zero, and they are owed $300.
+  { invoice_number: "INV-OWED-BACK", status: "paid", total: 3900, amount_paid: 4200, sent_at: "2026-06-01T17:00:00.000Z", revised_at: "2026-09-01T17:00:00.000Z", sent_total: 4200, payments: [{ paid_at: "2026-06-05T17:00:00.000Z" }] },
+  // The one his client wrote in about: a bill settled months ago, reissued in the property owner's
+  // name. Status 'paid', balance zero, the money untouched: the link shows the new name already.
+  { invoice_number: "INV-RENAMED", status: "paid", total: 4200, amount_paid: 4200, sent_at: "2026-06-01T17:00:00.000Z", revised_at: "2026-09-01T17:00:00.000Z", sent_total: 4200, payments: [{ paid_at: "2026-06-05T17:00:00.000Z" }] },
   // Already put right: a re-send moved sent_at past the revision. revised_at deliberately stays.
-  { invoice_number: "INV-FIXED", status: "sent", total: 900, amount_paid: 0, sent_at: "2026-09-02T18:00:00.000Z", revised_at: "2026-09-01T17:00:00.000Z" },
+  { invoice_number: "INV-FIXED", status: "partial", total: 900, amount_paid: 300, sent_at: "2026-09-02T18:00:00.000Z", revised_at: "2026-09-01T17:00:00.000Z", sent_total: 900, payments: [{ paid_at: "2026-08-20T17:00:00.000Z" }] },
   // Never delivered. INV-069's shape: a pay door promoted it to 'sent' without a card ever being
   // tapped (0267), so sent_at is NULL and there is no customer holding anything.
-  { invoice_number: "INV-069", status: "sent", total: 6412, amount_paid: 200, sent_at: null, revised_at: "2026-09-18T21:30:00.000Z" },
+  { invoice_number: "INV-069", status: "sent", total: 6412, amount_paid: 200, sent_at: null, revised_at: "2026-09-18T21:30:00.000Z", sent_total: null, payments: [{ paid_at: "2026-09-18T20:00:00.000Z" }] },
+  // Sent before 0405 (no figure recorded), part paid, then changed: the app cannot prove the money
+  // did not move, so it says so rather than guess.
+  { invoice_number: "INV-OLD", status: "partial", total: 1000, amount_paid: 500, sent_at: "2026-09-02T18:00:00.000Z", revised_at: "2026-09-10T17:00:00.000Z", sent_total: null, payments: [{ paid_at: "2026-09-05T17:00:00.000Z" }] },
 ];
 
-const lane = (rows: typeof ROWS) => rows.filter((i) => customerHoldsOlderCopy(i.sent_at, i.revised_at));
+/** Exactly the board's call: the three money columns, the two stamps and the payments' dates, through the one rule. */
+const lane = (rows: typeof ROWS) =>
+  rows.filter((i) =>
+    customerHoldsOlderCopy(i.sent_at, i.revised_at, { total: i.total, amountPaid: i.amount_paid, sentTotal: i.sent_total, paidAt: i.payments.map((p) => p.paid_at) }),
+  );
 
-describe("the Revised - Send Again lane, on his real rows", () => {
-  it("catches INV-071, which is live in this state today", () => {
-    expect(lane(ROWS).map((r) => r.invoice_number)).toContain("INV-071");
+describe("the Revised - Send Again lane, on the rows the board reads", () => {
+  it("holds exactly the bills whose customer paid against a figure that has since moved", () => {
+    expect(lane(ROWS).map((r) => r.invoice_number).sort()).toEqual(["INV-BOTH", "INV-DEPOSIT", "INV-OLD", "INV-OWED-BACK"]);
   });
 
-  it("A PAID INVOICE STILL BELONGS HERE — balance is the wrong filter", () => {
-    // If this lane were built from the board's `unpaid` list it would be empty for INV-PAID,
-    // which is the exact invoice the whole 0269 wave was written for. What is wrong is the piece
-    // of paper in the customer's hands, and that has nothing to do with what they still owe.
-    expect(lane(ROWS).map((r) => r.invoice_number)).toContain("INV-PAID");
-    expect(ROWS.find((r) => r.invoice_number === "INV-PAID")!.total - ROWS.find((r) => r.invoice_number === "INV-PAID")!.amount_paid).toBe(0);
+  it("A PAYMENT MADE AFTER THE CHANGE WAS MADE ON THE LIVE FIGURE — not in the lane (skeptic #56)", () => {
+    // INV-DEPOSIT and INV-LATE-PAY are the same bill with the same figures; only the order differs.
+    expect(lane(ROWS).map((r) => r.invoice_number)).toContain("INV-DEPOSIT");
+    expect(lane(ROWS).map((r) => r.invoice_number)).not.toContain("INV-LATE-PAY");
+    // ...and one payment on the old figure is enough, however many came after it.
+    expect(lane(ROWS).map((r) => r.invoice_number)).toContain("INV-BOTH");
+  });
+
+  it("A CHANGED BILL NOBODY PAID LEAVES THE LANE — the live link already says what it says", () => {
+    // INV-071 as it was on 2026-09-20: changed that night, nothing paid. Under 0269 it was the one
+    // row this lane was built to catch; under Erik's 2026-11-07 rule there is nothing to send.
+    expect(lane(ROWS).map((r) => r.invoice_number)).not.toContain("INV-071");
+  });
+
+  it("A PAID INVOICE CAN STILL BELONG HERE — balance is the wrong filter", () => {
+    // If this lane were built from the board's `unpaid` list it would be empty for INV-OWED-BACK:
+    // status 'paid', balance zero, and the customer owed $300 on a figure they already paid.
+    const owedBack = ROWS.find((r) => r.invoice_number === "INV-OWED-BACK")!;
+    expect(Math.max(0, owedBack.total - owedBack.amount_paid)).toBe(0);
+    expect(lane(ROWS).map((r) => r.invoice_number)).toContain("INV-OWED-BACK");
+  });
+
+  it("a wording change on a paid bill says nothing — the figure they paid against still stands", () => {
+    expect(lane(ROWS).map((r) => r.invoice_number)).not.toContain("INV-WORDING");
+    // The bill reissued in the property owner's name: squared up, money untouched. The old rule
+    // kept it here because its payment came BEFORE the change; the link shows the new name already.
+    expect(lane(ROWS).map((r) => r.invoice_number)).not.toContain("INV-RENAMED");
   });
 
   it("a re-sent bill leaves the lane, so the lane can be emptied by doing what it asks", () => {
     expect(lane(ROWS).map((r) => r.invoice_number)).not.toContain("INV-FIXED");
   });
 
-  it("KAREN PAID THE CORRECTED BILL IN FULL, SO SHE LEAVES (7711aba4)", () => {
-    // What the board reads today: status paid, her $1,875.98 through her own live link, 18 hours
-    // after the change. The link shows the live bill, so she paid the one Erik is looking at.
-    type Row = { total: number; amount_paid: number; sent_at: string; revised_at: string; payments: { paid_at: string }[] };
-    const onBoard = (i: Row) =>
-      customerHoldsOlderCopy(i.sent_at, i.revised_at, { total: i.total, amountPaid: i.amount_paid, paidAt: i.payments.map((p) => p.paid_at) });
-    const karen: Row = { total: 1875.98, amount_paid: 1875.98, sent_at: ROWS[0].sent_at!, revised_at: ROWS[0].revised_at, payments: [{ paid_at: "2026-09-20T23:40:27.000Z" }] };
-    expect(onBoard(karen)).toBe(false);
-    // The paid-in-June bill keeps its place: its only payment came before the change.
-    const june: Row = { total: 4200, amount_paid: 4200, sent_at: ROWS[1].sent_at!, revised_at: ROWS[1].revised_at, payments: [{ paid_at: "2026-06-02T17:00:00.000Z" }] };
-    expect(onBoard(june)).toBe(true);
+  it("a figure nobody recorded is not guessed: sent before 0405, paid, changed stays in the lane", () => {
+    expect(lane(ROWS).map((r) => r.invoice_number)).toContain("INV-OLD");
   });
 
   it("a bill nobody ever received raises nothing", () => {
@@ -82,9 +125,15 @@ describe("the Revised - Send Again lane, on his real rows", () => {
 });
 
 describe("the board asks the question", () => {
-  it("selects what the paid-in-full rule reads, and hands it to the one rule", () => {
-    expect(code).toMatch(/select\("[^"]*\bamount_paid\b[^"]*\bpayments\(paid_at\)[^"]*"\)/);
+  it("selects the money facts the rule reads - the payments' dates included - and hands them to the one rule", () => {
+    expect(code).toMatch(/select\("[^"]*\btotal\b[^"]*\bamount_paid\b[^"]*\bsent_total\b[^"]*"\)/);
     expect(code).toMatch(/customerHoldsOlderCopy\(i\.sent_at, i\.revised_at, \{/);
+    expect(code).toMatch(/sentTotal: i\.sent_total/);
+    // THE ORDER needs the payments' dates (skeptic #56): a rule that reads paid_at off rows the board
+    // did not select would read nothing, and every payment would count as "before" (the conservative
+    // default) - the projection law, and the exact way the lane got lost in the first place.
+    expect(code).toMatch(/select\("[^"]*\bsent_total\b[^"]*payments\(paid_at\)[^"]*"\)/);
+    expect(code).toMatch(/paidAt: \(\(i\.payments \?\? \[\]\) as \{ paid_at\?: string \| null \}\[\]\)\.map\(\(p\) => p\.paid_at\)/);
   });
 
   it("selects both stamps — a field missing at runtime is a select list", () => {
@@ -113,9 +162,13 @@ describe("the board asks the question", () => {
 });
 
 describe("the lane says the true thing, and points at a door that exists", () => {
-  it("has its own stage with words that match the invoice page's banner", () => {
+  it("has its own stage, and its words are about the money, like the invoice page's notice", () => {
     expect(src).toContain('title="Revised - Send Again"');
-    expect(src).toContain("holding an older bill");
+    expect(src).toContain("the figure they paid against is not the figure now");
+    // The old claim is gone from every sentence a person reads: the link they hold is live.
+    const prose = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
+    expect(prose).not.toContain("holding an older");
+    expect(prose).toContain("nobody paid on a bill whose money changed afterwards");
   });
 
   it("opens the invoice instead of inventing a second send path", () => {
@@ -125,14 +178,14 @@ describe("the lane says the true thing, and points at a door that exists", () =>
     expect(src).not.toContain("EmailButton");
   });
 
-  it('"All caught up" cannot be printed over a customer holding the wrong bill', () => {
+  it('"All caught up" cannot be printed over a customer who paid against a figure that has moved', () => {
     expect(code).toMatch(/caughtUp\s*=[^;]*needsResend\.length === 0/);
   });
 
   it("the new copy uses hyphens, like the rest of the copy written this year", () => {
     for (const sentence of [
       "Revised - Send Again",
-      "You changed these after they went out, so the customer is holding an older bill. Open one to send the corrected copy.",
+      "The money on these changed after a payment landed, so the figure they paid against is not the figure now. Open one to send it again.",
     ]) {
       expect(src).toContain(sentence);
       expect(sentence).not.toContain("—");

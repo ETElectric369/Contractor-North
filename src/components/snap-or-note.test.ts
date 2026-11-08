@@ -2,11 +2,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createElement } from "react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { deflateRawSync } from "node:zlib";
 import { renderToStaticMarkup } from "react-dom/server";
+import { buildZip } from "@/lib/zip-write";
+import { patchZipEntry, withDeclaredSize, withEncryptedEntry } from "@/test/zip-fixtures";
 
 /**
  * SNAP OR NOTE: ONE PAPER DOOR (W1-30). One queue for the app and one set of rules for every way in.
- * What these pin: the same file twice adds nothing; a mixed drop names what it skipped; a note is
+ * What these pin: the same file twice adds nothing; a mixed drop names what it skipped; a zip is
+ * opened here and every file inside takes its own turn under the same rules (cn-v1152); a note is
  * saved even when its read fails; pasted supplier text is imported instead of kept as a note; a
  * tech's photo needs a job, runs no read and says no amount; a tech's sheet has no Choose Files; and
  * closing the sheet mid-queue keeps the queue running.
@@ -146,7 +150,7 @@ describe("the office's files: one queue, one set of rules", () => {
     expect(said["bill.pdf"].tone).toBe("ok");
     expect(said["notes.docx"]).toEqual({
       name: "notes.docx",
-      text: "Not added: Snap or Note takes PDFs, photos, and a supplier's list or a bank download (Excel, CSV or OFX).",
+      text: "Not added: Snap or Note takes PDFs, photos, a zip of them, and a supplier's list or a bank download (Excel, CSV or OFX).",
       tone: "error",
     });
     expect(said["huge.jpg"].text).toBe("Not added: it is over 15 MB. Save a smaller copy and add it again.");
@@ -286,6 +290,215 @@ describe("the office's files: one queue, one set of rules", () => {
     expect(snapStillSending()).toBe(0);
     expect(lines().map((l) => l.tone)).toEqual(["ok", "ok"]);
     expect(m.addPaperwork).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * A ZIP IS A BAG OF PAPERS (cn-v1152). Erik dropped his supplier's zip of invoice PDFs on Bills and
+ * was told what the door takes. Now the zip is opened in the browser and every file inside joins the
+ * queue right behind it, an ordinary file under oneStaff's own rules; the zip's line says what was
+ * opened and each file's line says what became of it. The zip itself is never uploaded.
+ */
+describe("a zip is a bag of papers: opened here, every file inside takes its own turn", () => {
+  const deflate = (b: Uint8Array) => new Uint8Array(deflateRawSync(b));
+  /** A PDF by its first bytes, long enough that deflate shrinks it (a tiny one is stored as it is). */
+  const PDF = (tag: string) => `%PDF-1.7\n${tag}\n${"stream ".repeat(40)}`;
+  const zipFile = (zip: Uint8Array, name = "larkspur-bills.zip") => new File([new Uint8Array(zip)], name, { type: "application/zip" });
+  const READ = "Read: Home Depot, $84.12. Picked from the paper: J-011 13897 Honeysuckle. Waiting for your answer.";
+
+  it("a zip of PDFs fans out: the zip's line, then each file through the one paper path, in the zip's order, ahead of what was dropped after it", async () => {
+    const seen = new Set<string>();
+    m.fingerprintSeen.mockImplementation(async (sha: string) => ({ ok: true, seen: seen.has(sha) ? "Already In: added Sep 27, 2026, waiting in the tray to be filed." : null }));
+    m.addPaperwork.mockImplementation(async (input: { sha256: string }) => {
+      seen.add(input.sha256);
+      return { ok: true, id: "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c80", needsRead: true };
+    });
+    const zip = buildZip(
+      [
+        { name: "bills/inv-001.pdf", data: PDF("one") },
+        { name: "bills/inv-002.pdf", data: PDF("two") },
+        // The same bytes as the first, under another name: the fingerprint catches it, as it would a drop.
+        { name: "bills/inv-003.pdf", data: PDF("one") },
+        { name: "__MACOSX/._inv-001.pdf", data: "junk" },
+      ],
+      { deflate },
+    );
+    await snapTake([zipFile(zip), photo()]);
+    expect(lines()).toEqual([
+      { name: "larkspur-bills.zip", text: "Opened: 3 files inside.", tone: "ok" },
+      { name: "inv-001.pdf", text: READ, tone: "ok" },
+      { name: "inv-002.pdf", text: READ, tone: "ok" },
+      { name: "inv-003.pdf", text: "Already In: added Sep 27, 2026, waiting in the tray to be filed. Nothing was added twice.", tone: "warn" },
+      { name: "receipt.jpg", text: READ, tone: "ok" },
+    ]);
+    // Each file inside went through oneStaff as itself: its own name, the PDF's type, its own row and read.
+    expect(m.addPaperwork.mock.calls.map((c) => [c[0].name, c[0].mime])).toEqual([
+      ["inv-001.pdf", "application/pdf"],
+      ["inv-002.pdf", "application/pdf"],
+      ["receipt.jpg", "image/jpeg"],
+    ]);
+    expect(m.addPaperwork.mock.calls[0][0].path).toMatch(/^org-1\/organize\/\d+-inv-001\.pdf$/);
+    expect(m.upload).toHaveBeenCalledTimes(3);
+    expect(fetched).toHaveLength(3);
+    // The zip itself never went up.
+    for (const c of m.upload.mock.calls) expect(c[0]).not.toMatch(/zip/);
+    expect(snapStillSending()).toBe(0);
+  });
+
+  it("a zip with nothing Snap or Note takes is one refusal, and an empty zip the same", async () => {
+    const zip = buildZip([
+      { name: "bills/", data: "" },
+      { name: "__MACOSX/._inv-001.pdf", data: "junk" },
+      { name: ".DS_Store", data: "junk" },
+    ]);
+    await snapTake([zipFile(zip), zipFile(buildZip([]), "empty.zip")]);
+    expect(lines()).toEqual([
+      { name: "larkspur-bills.zip", text: "Not added: nothing inside that Snap or Note takes (PDFs, photos, Excel, CSV or OFX).", tone: "error" },
+      { name: "empty.zip", text: "Not added: nothing inside that Snap or Note takes (PDFs, photos, Excel, CSV or OFX).", tone: "error" },
+    ]);
+    expect(m.addPaperwork).not.toHaveBeenCalled();
+    expect(m.upload).not.toHaveBeenCalled();
+  });
+
+  it("a zip inside the zip, an encrypted entry and a file the door won't take are each one line, by name; what remains still goes in", async () => {
+    m.addPaperwork.mockResolvedValue({ ok: true, id: "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c81", needsRead: true });
+    const zip = withEncryptedEntry(
+      buildZip(
+        [
+          { name: "more.zip", data: "PK" },
+          { name: "locked.pdf", data: PDF("locked") },
+          { name: "notes.docx", data: "PK" },
+          { name: "inv-001.pdf", data: PDF("one") },
+        ],
+        { deflate },
+      ),
+      "locked.pdf",
+    );
+    await snapTake([zipFile(zip)]);
+    expect(lines()).toEqual([
+      { name: "larkspur-bills.zip", text: "Opened: 1 file inside.", tone: "ok" },
+      { name: "more.zip", text: "Not added: more.zip is a zip inside a zip. Unzip that one first.", tone: "error" },
+      { name: "locked.pdf", text: "Not added: locked.pdf is password-protected. Unzip it and add the files inside.", tone: "error" },
+      // The same sentence the same file gets when dropped on its own: oneStaff's, by name.
+      { name: "notes.docx", text: "Not added: Snap or Note takes PDFs, photos, a zip of them, and a supplier's list or a bank download (Excel, CSV or OFX).", tone: "error" },
+      { name: "inv-001.pdf", text: READ, tone: "ok" },
+    ]);
+    expect(m.addPaperwork).toHaveBeenCalledTimes(1);
+  });
+
+  it("a supplier's CSV inside a zip goes to the list door, speaking for the day the zip says it was saved", async () => {
+    m.readListFile.mockResolvedValue({ ok: true, table: [["Invoice #", "Open Balance"], ["8802-1", "10.00"]], listDate: "2026-09-20" });
+    m.addOpenList.mockResolvedValue({ ok: true, id: "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c82", line: "A supplier's open list, 1 paper. Waiting below: press Apply on its card." });
+    const zip = buildZip([{ name: "open.csv", data: "Invoice #,Open Balance\n8802-1,10.00\n" }], { modified: new Date(Date.UTC(2026, 8, 20, 9, 0, 0)) });
+    await snapTake([zipFile(zip)]);
+    expect(lines()).toEqual([
+      { name: "larkspur-bills.zip", text: "Opened: 1 file inside.", tone: "ok" },
+      { name: "open.csv", text: "A supplier's open list, 1 paper. Waiting below: press Apply on its card.", tone: "ok" },
+    ]);
+    const [file] = m.readListFile.mock.calls[0] as [File];
+    expect([file.name, file.type, file.lastModified]).toEqual(["open.csv", "text/csv", new Date(2026, 8, 20, 9, 0, 0).getTime()]);
+    expect(m.addPaperwork).not.toHaveBeenCalled();
+  });
+
+  it("a browser with no DecompressionStream: a stored file still goes in, and a deflated one says so", async () => {
+    vi.stubGlobal("DecompressionStream", undefined);
+    m.addPaperwork.mockResolvedValue({ ok: true, id: "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c83", needsRead: true });
+    const zip = buildZip([{ name: "stored.pdf", data: "%PDF-1.7 x" }, { name: "deflated.pdf", data: PDF("long") }], { deflate });
+    await snapTake([zipFile(zip)]);
+    expect(lines()).toEqual([
+      { name: "larkspur-bills.zip", text: "Opened: 1 file inside.", tone: "ok" },
+      { name: "stored.pdf", text: READ, tone: "ok" },
+      { name: "deflated.pdf", text: "Not added: this browser can't open a zip. Unzip it and add the files inside.", tone: "error" },
+    ]);
+  });
+
+  /**
+   * THE ZIP'S OWN LINE WHEN THE WHOLE BAG WAS TURNED AWAY FOR ONE REASON (skeptic #56b). It read "nothing
+   * inside that Snap or Note takes" over fifty PDFs an older iPhone could not inflate - false. When every
+   * entry was refused for the one same reason, the zip's line says that reason; mixed reasons, or files the
+   * door simply doesn't take, keep the old line. The entries' own lines are unchanged throughout.
+   */
+  const NO_INFLATE = "Not added: this browser can't open a zip. Unzip it and add the files inside.";
+  /** A deflated entry's bytes replaced by noise, so the inflate fails: that is the entry's own story. */
+  const damaged = (zip: Uint8Array, name: string) =>
+    patchZipEntry(zip, name, (v, central, local) => {
+      const start = local + 30 + v.getUint16(local + 26, true) + v.getUint16(local + 28, true);
+      for (let i = 0; i < v.getUint32(central + 20, true); i++) v.setUint8(start + i, 0xff);
+    });
+
+  it("a browser with no DecompressionStream and a zip of deflated PDFs: the zip's line says the browser can't open it, not that nothing inside is taken", async () => {
+    vi.stubGlobal("DecompressionStream", undefined);
+    await snapTake([zipFile(buildZip([{ name: "inv-001.pdf", data: PDF("one") }, { name: "inv-002.pdf", data: PDF("two") }], { deflate }))]);
+    expect(lines()).toEqual([
+      { name: "larkspur-bills.zip", text: NO_INFLATE, tone: "error" },
+      { name: "inv-001.pdf", text: NO_INFLATE, tone: "error" },
+      { name: "inv-002.pdf", text: NO_INFLATE, tone: "error" },
+    ]);
+    expect(m.addPaperwork).not.toHaveBeenCalled();
+  });
+
+  it("every entry password-protected, or every entry a zip: the zip's line says which", async () => {
+    const locked = withEncryptedEntry(withEncryptedEntry(buildZip([{ name: "inv-001.pdf", data: PDF("one") }, { name: "inv-002.pdf", data: PDF("two") }], { deflate }), "inv-001.pdf"), "inv-002.pdf");
+    const bags = buildZip([{ name: "jan.zip", data: "PK" }, { name: "feb.zip", data: "PK" }]);
+    await snapTake([zipFile(locked, "locked.zip"), zipFile(bags, "year.zip")]);
+    expect(lines()).toEqual([
+      { name: "locked.zip", text: "Not added: it is password-protected. Unzip it and add the files inside.", tone: "error" },
+      { name: "inv-001.pdf", text: "Not added: inv-001.pdf is password-protected. Unzip it and add the files inside.", tone: "error" },
+      { name: "inv-002.pdf", text: "Not added: inv-002.pdf is password-protected. Unzip it and add the files inside.", tone: "error" },
+      { name: "year.zip", text: "Not added: it is zips inside a zip. Unzip those first.", tone: "error" },
+      { name: "jan.zip", text: "Not added: jan.zip is a zip inside a zip. Unzip that one first.", tone: "error" },
+      { name: "feb.zip", text: "Not added: feb.zip is a zip inside a zip. Unzip that one first.", tone: "error" },
+    ]);
+  });
+
+  it("every entry over the cap, or every entry damaged: the zip's line says which", async () => {
+    const big = withDeclaredSize(buildZip([{ name: "scan.pdf", data: PDF("scan") }], { deflate }), "scan.pdf", 16 * 1024 * 1024);
+    const torn = damaged(buildZip([{ name: "inv-001.pdf", data: PDF("one") }], { deflate }), "inv-001.pdf");
+    await snapTake([zipFile(big, "big.zip"), zipFile(torn, "torn.zip")]);
+    expect(lines()).toEqual([
+      { name: "big.zip", text: "Not added: everything inside is over 15 MB. Save smaller copies and add them again.", tone: "error" },
+      { name: "scan.pdf", text: "Not added: it is over 15 MB. Save a smaller copy and add it again.", tone: "error" },
+      { name: "torn.zip", text: "Not added: everything inside is damaged. Unzip it and add the files inside.", tone: "error" },
+      { name: "inv-001.pdf", text: "Not added: inv-001.pdf is damaged inside the zip. Unzip it and add the files inside.", tone: "error" },
+    ]);
+  });
+
+  it("mixed reasons, or only files the door doesn't take: the old line, and each entry's own line tells its story", async () => {
+    const mixed = withEncryptedEntry(buildZip([{ name: "more.zip", data: "PK" }, { name: "locked.pdf", data: PDF("locked") }], { deflate }), "locked.pdf");
+    const office = buildZip([{ name: "notes.docx", data: "PK" }]);
+    await snapTake([zipFile(mixed, "mixed.zip"), zipFile(office, "office.zip")]);
+    expect(lines()).toEqual([
+      { name: "mixed.zip", text: "Not added: nothing inside that Snap or Note takes (PDFs, photos, Excel, CSV or OFX).", tone: "error" },
+      { name: "more.zip", text: "Not added: more.zip is a zip inside a zip. Unzip that one first.", tone: "error" },
+      { name: "locked.pdf", text: "Not added: locked.pdf is password-protected. Unzip it and add the files inside.", tone: "error" },
+      { name: "office.zip", text: "Not added: nothing inside that Snap or Note takes (PDFs, photos, Excel, CSV or OFX).", tone: "error" },
+      { name: "notes.docx", text: "Not added: Snap or Note takes PDFs, photos, a zip of them, and a supplier's list or a bank download (Excel, CSV or OFX).", tone: "error" },
+    ]);
+  });
+
+  it("too big to open here is said before a byte is read; a renamed non-zip is said for what it is", async () => {
+    const huge = new File([new Uint8Array(1)], "year.zip", { type: "application/zip" });
+    Object.defineProperty(huge, "size", { value: 100 * 1024 * 1024 + 1 });
+    await snapTake([huge, new File(["%PDF-1.7 not a zip"], "renamed.zip", { type: "application/zip" })]);
+    expect(lines()).toEqual([
+      { name: "year.zip", text: "Not added: it is too big to open here. Unzip it and add the files inside.", tone: "error" },
+      { name: "renamed.zip", text: "Not added: it isn't a zip inside, or it is damaged.", tone: "error" },
+    ]);
+  });
+
+  it("a tech's zip is the office's to add, said by name (a zip is an office thing)", async () => {
+    resetSnapForTest(TECH);
+    await snapTake([zipFile(buildZip([{ name: "inv-001.pdf", data: PDF("one") }]))]);
+    expect(snapStateForTest().pending).toEqual([]);
+    expect(lines()).toEqual([{ name: "larkspur-bills.zip", text: "Not sent: the office adds files. Take a photo instead.", tone: "error" }]);
+  });
+
+  it("the sheet's Choose Files takes a zip, and the hint says so in the same breath", () => {
+    const html = renderToStaticMarkup(createElement(SnapOrNoteSheet, { isStaff: true, onClose: () => {} }));
+    const [files] = html.match(/<input[^>]*multiple[^>]*>/g) ?? [];
+    expect(files).toContain("application/zip");
+    expect(files).toContain(".zip");
+    expect(html).toContain("a supplier&#x27;s list or a zip of bills, or type a note.");
   });
 });
 

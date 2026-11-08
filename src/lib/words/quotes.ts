@@ -200,6 +200,20 @@ export const words: WordCatalog = {
     qt_nothingMatches: "Nothing matches that.",
     qt_showingNofTotal: "Showing {n} of {total} — type to narrow it down.",
     qt_addFromAList: "Add from a list",
+    // The typed line (cn-v1152; Erik, 2026-11-07: "add from pricelist should be with or integrated into the add
+    // a line item on the bottom"): the invoice's hand row, drawn under the picker's box, which is also its
+    // description box. The row's words were the invoice page's own English until the row moved here.
+    qt_addLineOrPick: "Add a line item — type it, or pick from the Price List…",
+    qt_addALineItem: "Add a line item…",
+    qt_whatThisChargeIsFor: "What this charge is for",
+    qt_unitPh: "unit",
+    qt_unitAria: "Unit",
+    qt_price: "Price",
+    qt_btn_add: "Add",
+    // What the row is still missing, said under it (lib/invoice-math addLineAsk decides which; skeptic #56b):
+    // the words, or a price nobody typed. A 0 typed on purpose is a no-charge line and goes on.
+    qt_askWords: "Type what this charge is for in the box above, then tap Add.",
+    qt_askPrice: "Type the price, or 0 if there's no charge, then tap Add.",
 
     // ── The share button (components/share-icon-button; also drawn on billing) ──
     qt_btn_share: "Share",
@@ -380,6 +394,17 @@ export const words: WordCatalog = {
     qt_nothingMatches: "Nada coincide con eso.",
     qt_showingNofTotal: "Mostrando {n} de {total} — escribe para acotar.",
     qt_addFromAList: "Agregar de una lista",
+    // The typed line (cn-v1152): partida, as the catalog says a line item; tú ("escríbela", "elige").
+    qt_addLineOrPick: "Agregar una partida — escríbela, o elige de la Lista de Precios…",
+    qt_addALineItem: "Agregar una partida…",
+    qt_whatThisChargeIsFor: "De qué es este cargo",
+    qt_unitPh: "unidad",
+    qt_unitAria: "Unidad",
+    qt_price: "Precio",
+    qt_btn_add: "Agregar",
+    // The ask under the row: casilla, as the other catalogs say a box; "no se cobra" for a no-charge line.
+    qt_askWords: "Escribe de qué es este cargo en la casilla de arriba y luego toca Agregar.",
+    qt_askPrice: "Escribe el precio, o 0 si no se cobra, y luego toca Agregar.",
 
     // ── The share button (components/share-icon-button; also drawn on billing) ──
     qt_btn_share: "Compartir",

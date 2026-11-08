@@ -27,11 +27,13 @@ import { smsReadiness } from "@/lib/sms";
 import { jobProgressFinancials, receivedBeforeThisInvoice } from "@/lib/job-financials";
 import { invoiceBalance, isDrawKind, invoiceOverpayment } from "@/lib/invoice-math";
 import { listCustomerOptions } from "@/lib/schedule-options";
-/* THE ONE DEFINITION OF "THEY'RE HOLDING AN OLDER BILL" (0269). The same function the server's
-   revision stamp is written against, asked here so the sentence on the page and the rule in the
-   database can never drift apart. It is server-only, which is why the ANSWER crosses to the
-   client component and the rule does not. */
-import { customerHoldsOlderCopy } from "@/lib/invoice-revision";
+/* THE TWO QUESTIONS A REVISED BILL RAISES, each with one home (lib/invoice-revision: 0269, narrowed
+   2026-11-07 with 0405). The NOTICE: they paid on an older figure and the money changed since, with a
+   difference still standing. The RECORD: the bill changed since it last went out. Asked here, against
+   the same functions the server's revision stamp is written against, so the sentences on the page and
+   the rules in the database can never drift apart. The lib is server-only, which is why the ANSWERS
+   cross to the client components and the rules do not. */
+import { changedSinceSent, customerHoldsOlderCopy } from "@/lib/invoice-revision";
 import { ProgressReportCard } from "@/components/progress-report-card";
 import { isActualsDraw } from "@/lib/actuals-draw";
 import { fixedBillingsNotYetNetted } from "@/lib/unbilled-work";
@@ -82,12 +84,13 @@ export default async function InvoicePage({
       })()
     : Promise.resolve(null);
 
-  /* THE PROJECTION IS WHERE THIS PAGE'S TRUTH COMES FROM (the projection law). `*` means the two
-     delivery stamps ride along without being named: 0267's `sent_at` (a real send, never a pay
-     door's promotion to 'sent') and 0269's `revised_at` (money moved after that send). The detail
-     component's notice reads both, so if this ever narrows to a field list, those two names have
-     to be on it or the card goes quiet about the customer holding an older bill — the exact
-     silence cn-v962 traded the edit lock for. */
+  /* THE PROJECTION IS WHERE THIS PAGE'S TRUTH COMES FROM (the projection law). `*` means the three
+     delivery facts ride along without being named: 0267's `sent_at` (a real send, never a pay
+     door's promotion to 'sent'), 0269's `revised_at` (the bill changed after that send) and 0405's
+     `sent_total` (the figure the send carried). The notice's rule reads all three, so if this ever
+     narrows to a field list, those names have to be on it or the card goes quiet about a customer
+     who paid against a figure that has since moved — the exact silence cn-v962 traded the edit
+     lock for. */
   const { data: invoice, error: invoiceErr } = await supabase
     .from("invoices")
     .select("*, customers(id, name, pricing_levels(markup_pct)), quotes(id, quote_number), jobs:job_id(status)")
@@ -361,14 +364,24 @@ export default async function InvoicePage({
   });
   const inFlight = (await inFlightP)?.byInvoice.get(String(inv.id)) ?? [];
   const balance = invoiceBalance(inv.total, inv.amount_paid);
-  /* THE ONE DEFINITION OF "THEY'RE HOLDING AN OLDER BILL" (0269), asked once for the notice in the
-     body and the ⋯'s Mark Sent Again. Paid in full after the change = the customer has the current
-     bill (the board's rule). */
-  const holdsOlderCopy = customerHoldsOlderCopy(
-    (inv as { sent_at?: string | null }).sent_at,
-    (inv as { revised_at?: string | null }).revised_at,
-    { total: inv.total, amountPaid: inv.amount_paid, paidAt: ((payments ?? []) as { paid_at?: string | null }[]).map((p) => p.paid_at) },
-  );
+  /* THE NOTICE (0269, narrowed to the money 2026-11-07 with 0405), asked once for the amber notice
+     in the body: the bill changed since it went out, the customer had paid something BEFORE that
+     change (the payments' own dates against revised_at say which came first), the money moved since
+     the send (sent_total), and a difference remains. The board asks the same function of the same
+     columns - the payments' paid_at included (the projection law). */
+  const sentAt = (inv as { sent_at?: string | null }).sent_at;
+  const revisedAt = (inv as { revised_at?: string | null }).revised_at;
+  const holdsOlderCopy = customerHoldsOlderCopy(sentAt, revisedAt, {
+    total: inv.total,
+    amountPaid: inv.amount_paid,
+    sentTotal: (inv as { sent_total?: number | null }).sent_total,
+    paidAt: ((payments ?? []) as { paid_at?: string | null }[]).map((p) => p.paid_at),
+  });
+  /* THE RECORD, for the ⋯'s Mark Sent Again - I Re-Sent It: did the bill change since it last went
+     out, whatever the notice says? A menu row is a door, not a nag (skeptic #56, 2026-11-07): an
+     unpaid bill that changed must still be re-stampable by hand, or revised_at > sent_at stands and
+     sent_total stays the old figure. */
+  const changedSince = changedSinceSent(sentAt, revisedAt);
   /** The badge: the status, and on a paid bill how much and when (the newest payment). */
   const lastPaidAt = ((payments ?? []) as { paid_at?: string | null }[])[0]?.paid_at ?? null;
   const statusWords =
@@ -543,7 +556,7 @@ export default async function InvoicePage({
               status={inv.status}
               sentAt={(inv as { sent_at?: string | null }).sent_at ?? null}
               amountPaid={Number(inv.amount_paid ?? 0)}
-              customerHoldsOlderCopy={holdsOlderCopy}
+              changedSinceSent={changedSince}
             />
           </SectionActionsMenu>
         </div>

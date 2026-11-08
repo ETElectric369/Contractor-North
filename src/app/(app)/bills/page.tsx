@@ -1335,6 +1335,8 @@ export default async function BillsPage({
           <SuppliersCard
             accounts={supplierAccounts}
             today={today}
+            // The one list of the ways money moves (Settings › Payment methods), for the pay door's chips.
+            methods={orgSettings.payment_methods}
             unassigned={unassigned}
             // THE ANSWER, NOT THE INGREDIENTS. The card used to add an account join to a spelling
             // grouping and call the sum "Owed"; it now reads the figure the one function produced.

@@ -294,6 +294,29 @@ describe("what INV-080 now carries on every surface", () => {
     expect(html).toContain("py-3 pr-2");
     expect(html).toContain("padding-left:12px");
   });
+
+  // THE BILLING-TYPE LINE IS THE COMPANY'S CALL (cn-v1152). Erik, 2026-11-07, on a bill he had retitled
+  // "Kitchen lighting": the "Time & Material · Progress Payment" line over it "only needs to be there if its
+  // carrying new and needed information". doc_style.show_billing_type, on by default, so INV-080 is unchanged;
+  // off, the chip is gone and the title takes its place (mt-5, the margin a bill with no label always had).
+  it("the billing-type line: drawn by default, left off when the company's doc_style says so, the title moving up", async () => {
+    const p = ok(await readInvoiceDocumentProps(client(), INV, { kind: "service", orgId: ORG }));
+    const titled = { ...p, title: "Kitchen Lighting" };
+    const chip = ">Time &amp; Material · Final Payment</span>";
+
+    const on = renderToStaticMarkup(createElement(InvoiceDocument, titled));
+    expect(on).toContain(chip);
+    expect(on).toContain('class="mt-3 text-base font-semibold text-slate-900">Kitchen Lighting</div>');
+
+    const style = { ...(p.docStyle as Record<string, unknown>), show_billing_type: false };
+    const off = renderToStaticMarkup(createElement(InvoiceDocument, { ...titled, docStyle: style }));
+    expect(off).not.toContain(chip);
+    expect(off).not.toContain("Final Payment");
+    expect(off).toContain('class="mt-5 text-base font-semibold text-slate-900">Kitchen Lighting</div>');
+    // Nothing else about the paper moves: same figures, same Progress Summary, same rows.
+    const words = (h: string) => h.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ");
+    expect(words(off)).toBe(words(on).replace(" Time & Material · Final Payment", ""));
+  });
 });
 
 describe("a read that fails degrades honestly", () => {

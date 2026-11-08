@@ -12,7 +12,7 @@ import { useToast } from "@/components/toast";
 import { collectArtifacts, emailInvoice, invoiceCollectStatus, recordPayment, settleUp, textInvoice, venmoQrFor } from "@/app/(app)/billing/actions";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { sendFirstDetail, sendFirstQuestion } from "@/lib/pay-door-words";
-import { paymentMethodKey } from "@/lib/payment-method";
+import { paymentMethodChoices, paymentMethodKey } from "@/lib/payment-method";
 import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
 import type { Lang } from "@/lib/locale";
@@ -1366,9 +1366,11 @@ function useCardDoor(
  */
 function useOtherWay(
   props: Mode & {
-    /** The org's Settings → Payment methods list. Card is filtered OUT here — it belongs to the
-     *  card panel — so an org that lists "Card" can't record a phantom through this door. Filtered by
-     *  KEY, not spelling: "Credit Card" or "Debit" is stored as card too (paymentMethodKey). */
+    /** The org's Settings → Payment methods list, drawn through the one helper every pay door reads
+     *  (lib/payment-method paymentMethodChoices, cn-v1152: one chip per key in the company's own
+     *  spelling; the house default when the list is empty). Card is filtered OUT here — it belongs to
+     *  the card panel — so an org that lists "Card" can't record a phantom through this door. Filtered
+     *  by KEY, not spelling: "Credit Card" or "Debit" is stored as card too (paymentMethodKey). */
     methods?: string[];
     /** false = no Venmo handle: the optional QR button is hidden; recording a Venmo payment always works. */
     venmoConfigured?: boolean;
@@ -1386,9 +1388,12 @@ function useOtherWay(
   const [amount, setAmount] = useState(props.source === "invoice" ? String(props.balance || "") : "");
   const [note, setNote] = useState("");
   const [paidAt, setPaidAt] = useState("");
-  const source = props.methods?.length ? props.methods : ["Cash", "Check", "Venmo", "Other"];
-  const chips = source.filter((m) => paymentMethodKey(m) !== "card");
-  const [method, setMethod] = useState(chips[0] ?? "Cash");
+  // ONE LIST OF THE WAYS MONEY MOVES (cn-v1152). This sheet kept a word list of its own ("Cash",
+  // "Check", "Venmo", "Other") for a company with an empty Settings list; it draws the house default
+  // through the one helper now, like the crew's and the supplier's pay doors. The card stays out by
+  // key. `method` holds the chip's words (the company's spelling); recordPayment stores its key.
+  const chips = paymentMethodChoices(props.methods).filter((c) => c.key !== "card");
+  const [method, setMethod] = useState(chips[0]?.label ?? "Cash");
   const [venmo, setVenmo] = useState<{ qr: string; handle?: string; invoiceId: string; amount: number } | null>(null);
   /**
    * "SEND INV-0xx AS THE BILL FIRST?" (Connected North Phase 1). On a job whose open bill is a
@@ -1552,16 +1557,16 @@ function useOtherWay(
         <div>
           <div className="mb-1 text-xs font-medium text-slate-600">{t("su_howTheyPaidLower")}</div>
           <div className="flex flex-wrap gap-1.5">
-            {chips.map((m) => (
+            {chips.map((c) => (
               <button
-                key={m}
+                key={c.key}
                 type="button"
-                onClick={() => setMethod(m)}
+                onClick={() => setMethod(c.label)}
                 className={`inline-flex min-h-11 items-center rounded-lg border px-3 text-sm font-semibold capitalize ${
-                  method === m ? "border-brand bg-brand text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                  method === c.label ? "border-brand bg-brand text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                 }`}
               >
-                {methodWords(m)}
+                {methodWords(c.label)}
               </button>
             ))}
           </div>

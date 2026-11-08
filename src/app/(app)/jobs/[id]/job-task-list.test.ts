@@ -11,6 +11,12 @@ import { renderToStaticMarkup } from "react-dom/server";
  * been a three-row summary with a "+2 more on the Tasks tab" line and an All Tasks link; it is the
  * whole list now, the same wherever it is drawn, so these tests render it once and ask nothing about
  * where it sits.
+ *
+ * THE BUY MATERIALS SUB-ROWS (Erik, 2026-11-07: "show the materials as sub items right there on that
+ * screen"): the open lines under the row, each a 44px tap. This harness renders markup and clicks
+ * nothing (no DOM library in the repo), so what the tap DOES — the editor's write with (id, list, true),
+ * the strike that comes back on a refusal, the Undo — is pinned in lib/materials-checklist's tests
+ * against a stub write (tickBuyLine), the way undoCheckOff is; here, what the card DRAWS.
  */
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
@@ -26,9 +32,12 @@ vi.mock("@/app/(app)/tasks/actions", () => ({
   setTaskDonePhoto: vi.fn(),
 }));
 vi.mock("./upload-job-photos", () => ({ uploadJobPhotos: vi.fn() }));
+vi.mock("@/app/(app)/materials/actions", () => ({ setMaterialItemPurchased: vi.fn() }));
 
 import { JobTaskList } from "./job-task-list";
+import { LangProvider } from "@/components/lang-provider";
 import type { JobTaskRow } from "@/lib/job-tasks";
+import type { BuyLine } from "@/lib/materials-checklist";
 
 const row = (id: string, over: Partial<JobTaskRow> = {}): JobTaskRow => ({
   id,
@@ -69,6 +78,21 @@ const office = (over: Record<string, unknown> = {}) =>
   renderToStaticMarkup(createElement(JobTaskList, { ...BASE, viewerId: "u-office", viewerIsStaff: true, ...over } as any));
 const tech = (over: Record<string, unknown> = {}) =>
   renderToStaticMarkup(createElement(JobTaskList, { ...BASE, viewerId: "u-brian", viewerIsStaff: false, ...over } as any));
+/** The crew's face in Spanish (the provider is a plain context here; its document effect never runs). */
+const techEs = (over: Record<string, unknown> = {}) =>
+  renderToStaticMarkup(
+    createElement(LangProvider, { lang: "es" } as any, createElement(JobTaskList, { ...BASE, viewerId: "u-brian", viewerIsStaff: false, ...over } as any)),
+  );
+
+/** The live row the way the job page hands it (lib/materials-checklist buyMaterials). */
+const buy = (open: number, lines: BuyLine[] = []) => ({ open, lines });
+/** Two open lines, the way TECH_ITEM_COLUMNS reads them: no price, no vendor. */
+const LINES: BuyLine[] = [
+  { id: "m1", list_id: "L1", description: "12/2 Romex", quantity: 250, unit: "ft" },
+  { id: "m2", list_id: "L1", description: "Wire Nuts", quantity: 2, unit: "ea" },
+];
+/** A sub-row: the button that buys the line, found by its aria. */
+const subRow = (html: string, aria: string) => html.match(new RegExp(`<button[^>]*aria-label="${aria.replace(/[/]/g, "\\/")}"[^>]*>[\\s\\S]*?<\\/button>`))?.[0] ?? "";
 
 /** Every <button> / <a> / <label> element's visible text. */
 const clickables = (html: string) =>
@@ -116,12 +140,12 @@ describe("the one list: the one-line answer, every open task, the Add line, the 
   });
 
   it("a list that couldn't be read gives no count: no 'X of Y done' built from the Buy Materials row alone", () => {
-    const html = office({ tasks: [], photos: {}, failed: true, materials: { open: 3 } });
+    const html = office({ tasks: [], photos: {}, failed: true, materials: buy(3) });
     expect(html).toContain("Couldn’t read this job’s tasks just now. Reload to try again.");
     expect(html).not.toContain("Tasks:");
     // The row is read from the materials list, so it still shows.
     expect(html).toContain("Buy Materials · 3 Open");
-    const bought = office({ tasks: [], photos: {}, failed: true, materials: { open: 0 }, doneOpen: true });
+    const bought = office({ tasks: [], photos: {}, failed: true, materials: buy(0), doneOpen: true });
     expect(bought).not.toContain("Tasks:");
     expect(bought).not.toMatch(/>\d+ Done</);
   });
@@ -134,7 +158,7 @@ describe("the one list: the one-line answer, every open task, the Add line, the 
 });
 
 describe("the laws, on every face", () => {
-  const faces = [office(), tech(), office({ doneOpen: true }), tech({ doneOpen: true })];
+  const faces = [office(), tech(), office({ doneOpen: true }), tech({ doneOpen: true }), office({ materials: buy(2, LINES) }), techEs({ materials: buy(2, LINES) })];
 
   it("no prices: nothing with a dollar sign reaches a task list", () => {
     for (const html of faces) expect(html).not.toMatch(/\$\s?\d/);
@@ -154,8 +178,8 @@ describe("the laws, on every face", () => {
   it("Title Case clickables: Add, Photo, Buy Materials — never a lowercase verb", () => {
     for (const html of faces) {
       for (const words of clickables(html)) {
-        // Task titles are the rows' own words (the crew's typing), not labels.
-        if (/^Task |^Pull|^Set|^Run|^Hang|^Label|^Walk|^Order/.test(words)) continue;
+        // Task titles and materials lines are the rows' own words (the crew's typing), not labels.
+        if (/^Task |^Pull|^Set|^Run|^Hang|^Label|^Walk|^Order|^12\/2 Romex|^Wire Nuts/.test(words)) continue;
         for (const w of words.split(/\s+/)) if (/^[a-z]/.test(w)) throw new Error(`"${words}" isn't Title Case`);
       }
     }
@@ -191,7 +215,7 @@ describe("the live Buy Materials row (Erik, 2026-09-27: open materials create a 
   const buyLink = /<a[^>]*href="\?tab=materials"[^>]*>[\s\S]*?Buy Materials · (\d+) Open[\s\S]*?<\/a>/;
 
   it("leads the list while anything is left to buy, opens the Materials tab, and counts as one task", () => {
-    const html = office({ materials: { open: 3 } });
+    const html = office({ materials: buy(3) });
     expect(html).toMatch(buyLink);
     expect(html.match(buyLink)?.[1]).toBe("3");
     // One more task in the count: 7 tasks + the row = 8, and the row is open.
@@ -203,25 +227,25 @@ describe("the live Buy Materials row (Erik, 2026-09-27: open materials create a 
   });
 
   it("is a door, not a checkbox: no one checks it off by hand, the list does", () => {
-    const html = office({ tasks: [], photos: {}, materials: { open: 2 } });
+    const html = office({ tasks: [], photos: {}, materials: buy(2, LINES) });
     expect(html).not.toMatch(/<input[^>]*type="checkbox"/);
     expect(html).toContain("Tasks: 0 of 1 done");
     expect(html).toMatch(buyLink);
   });
 
   it("the crew sees the same row (no price on it)", () => {
-    const html = tech({ materials: { open: 3 } });
+    const html = tech({ materials: buy(3) });
     expect(html).toMatch(buyLink);
     expect(html).not.toMatch(/\$\s?\d/);
   });
 
   it("gone from the open list once everything is bought; reads All Bought in the Done fold", () => {
-    const closed = office({ materials: { open: 0 } });
+    const closed = office({ materials: buy(0) });
     expect(closed).toContain("Tasks: 3 of 8 done");
     expect(closed).toMatch(/>3 Done<svg|>3 Done</);
     // Closed fold: the row is inside it, not on the open list.
     expect(closed).not.toContain("Buy Materials");
-    const open = office({ materials: { open: 0 }, doneOpen: true });
+    const open = office({ materials: buy(0), doneOpen: true });
     expect(open).toContain("Buy Materials · All Bought");
   });
 
@@ -232,8 +256,72 @@ describe("the live Buy Materials row (Erik, 2026-09-27: open materials create a 
   });
 
   it("keeps the laws: 44px door, Title Case words", () => {
-    const html = office({ materials: { open: 4 } });
+    const html = office({ materials: buy(4) });
     expect(html).toMatch(/<a[^>]*min-h-\[44px\][^>]*href="\?tab=materials"/);
     expect(clickables(html)).toContain("Buy Materials · 4 Open");
+  });
+});
+
+describe("the open lines under the row (Erik, 2026-11-07: the materials as sub items right there)", () => {
+  it("each open line is a sub-row under the row, in the row's own li, above the tasks, with its words", () => {
+    const html = office({ materials: buy(2, LINES) });
+    expect(html).toContain("Buy Materials · 2 Open");
+    expect(html).toContain("12/2 Romex · 250 ft");
+    expect(html).toContain("Wire Nuts · 2 ea");
+    // Under the row's door, in its order, and above the first task.
+    expect(html.indexOf("Buy Materials · 2 Open")).toBeLessThan(html.indexOf("12/2 Romex"));
+    expect(html.indexOf("12/2 Romex")).toBeLessThan(html.indexOf("Wire Nuts"));
+    expect(html.indexOf("Wire Nuts")).toBeLessThan(html.indexOf("Pull the permit"));
+    // The row's li holds the door and then the lines: the nested list opens right after the door's
+    // </a> and closes with the row's own </li>, the two lines inside it.
+    const nested = html.match(/<\/a><ul class="pb-1">([\s\S]*?)<\/ul><\/li>/);
+    expect(nested, html).not.toBeNull();
+    expect(nested![1]).toContain("12/2 Romex · 250 ft");
+    expect(nested![1]).toContain("Wire Nuts · 2 ea");
+    expect(nested![1].match(/<li>/g)?.length).toBe(2);
+    // Still one task in the count: the lines are the row's, not tasks of their own.
+    expect(html).toContain("Tasks: 2 of 8 done");
+  });
+
+  it("a sub-row is a 44px button, indented past the row's icon, behind an empty circle, named by what a tap does", () => {
+    const html = office({ materials: buy(2, LINES) });
+    const row = subRow(html, "Bought: 12/2 Romex");
+    expect(row, html).not.toBe("");
+    expect(row).toMatch(/<button type="button"/);
+    expect(row).toContain("min-h-[44px]");
+    expect(row).toContain("pl-14");
+    expect(row).toContain("lucide-circle ");
+    expect(row).not.toContain("line-through");
+    expect(subRow(html, "Bought: Wire Nuts")).toContain("Wire Nuts · 2 ea");
+    // Not struck until a tap: no filled check anywhere on the card.
+    expect(html).not.toMatch(/lucide-circle-check|lucide-check-circle/);
+  });
+
+  it("the crew gets the same sub-rows, no price on them; in Spanish the tap is named in Spanish and the line's words are the list's", () => {
+    const en = tech({ materials: buy(2, LINES) });
+    expect(subRow(en, "Bought: 12/2 Romex")).not.toBe("");
+    expect(en).not.toMatch(/\$\s?\d/);
+    const es = techEs({ materials: buy(2, LINES) });
+    expect(subRow(es, "Comprado: 12/2 Romex")).toContain("12/2 Romex · 250 ft");
+    expect(subRow(es, "Comprado: Wire Nuts")).toContain("Wire Nuts · 2 ea");
+    expect(es).not.toContain("Bought:");
+  });
+
+  it("no sub-rows in the Done fold (All Bought carries no lines), and none when the row has none to carry", () => {
+    const fold = office({ materials: buy(0, LINES), doneOpen: true });
+    expect(fold).toContain("Buy Materials · All Bought");
+    expect(fold).not.toContain("12/2 Romex");
+    expect(fold).not.toContain("<ul class=\"pb-1\"");
+    const bare = office({ materials: buy(3) });
+    expect(bare).toContain("Buy Materials · 3 Open");
+    expect(bare).not.toContain("<ul class=\"pb-1\"");
+  });
+
+  it("still a door, not a checkbox: the lines are buttons; the row's Link to the whole list stays", () => {
+    const html = office({ tasks: [], photos: {}, materials: buy(2, LINES) });
+    expect(html).not.toMatch(/<input[^>]*type="checkbox"/);
+    expect(html).toMatch(/<a[^>]*href="\?tab=materials"/);
+    expect(html.match(/<button type="button" aria-label="Bought: /g)?.length).toBe(2);
+    expect(html).toContain("Tasks: 0 of 1 done");
   });
 });
