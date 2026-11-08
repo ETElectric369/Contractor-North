@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1156", date: "2026-11-08", line: "The send sheet stays open: it vanished the moment today's words arrived, because the window behind it was remounted and closed itself. The fields now reset in place and the window is never remounted." },
   { version: "cn-v1155", date: "2026-11-08", line: "Every email or text you send opens for review first: the address, the subject, your own words and a copy to you. What went out is kept under the invoice. Send Without Review in Settings turns it off." },
   { version: "cn-v1154", date: "2026-11-08", line: "Reconcile: a receipt of the same money is a tap on its bank line and teaches the store's spelling; a shortened store name matches; the crew's job that day is the first guess; a refund is a return." },
   { version: "cn-v1153", date: "2026-11-08", line: "One day field everywhere: every date box opens the phone's own picker, Move to a Day drops the 14-day strip, the come-back shortcuts stay, and a row of boxes is one height." },

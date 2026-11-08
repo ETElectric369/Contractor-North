@@ -22,7 +22,7 @@ vi.mock("@/components/ui/modal", () => ({
 }));
 vi.mock("@/app/(app)/send-actions", () => ({ previewSend: vi.fn(), sendReviewed: vi.fn() }));
 
-const { SendSheet, SendSheetView, SendButton, sendConfirmSentence, reviewMessage } = await import("./send-sheet");
+const { SendSheet, SendSheetView, SendButton, sendConfirmSentence, reviewMessage, fieldsFrom } = await import("./send-sheet");
 const { TEXT_NOT_READY_REFUSAL } = await import("@/lib/sms-readiness");
 const { SMS_TOTAL_MAX } = await import("@/lib/send-review");
 const { CATALOGS } = await import("@/lib/i18n");
@@ -245,5 +245,32 @@ describe("the doors that send", () => {
     expect(settle).toContain('<SendButton kind="receipt" id={invoiceId}');
     expect(settle).not.toContain("textInvoice(");
     expect(settle).not.toContain("emailInvoice(");
+  });
+});
+
+describe("one Modal for the whole open (the sheet that vanished, cn-v1156)", () => {
+  it("the view is never keyed, so the Modal inside it is never remounted while open", () => {
+    // Erik, 2026-11-08, INV-093: "it quickly showed a popup then gone … did this twice". cn-v1155 keyed
+    // the view on the answer's round; the old Modal's step back popped the entry the new one had just
+    // pushed, which the new one read as the system Back (overlay-history.test pins the sequence).
+    expect(src).not.toMatch(/<SendSheetView[^>]*\bkey=/);
+    expect(src).not.toContain("setRound");
+    expect(src).toContain("if (asked !== seen) {");
+    expect(src).toContain("const fresh = fieldsFrom(first, p.via, textReady);");
+  });
+
+  it("fieldsFrom: the fields start from the answer, blank while asking, Text first only when asked for and ready", () => {
+    expect(fieldsFrom(preview() as any, undefined, true)).toEqual({
+      channel: "email",
+      emailTo: "sam@larkspur.example",
+      phoneTo: "(530) 555-0142",
+      subject: "Invoice INV-078 from Thistlewood Electric",
+      emailBody: "Hi Sam, your invoice is ready.",
+      smsBody: "Hi Sam, invoice INV-078 is ready.",
+      copyMe: false,
+    });
+    expect(fieldsFrom(null, "text", true)).toEqual({ channel: "sms", emailTo: "", phoneTo: "", subject: "", emailBody: "", smsBody: "", copyMe: false });
+    expect(fieldsFrom(preview({ copyMe: true }) as any, "text", false)).toMatchObject({ channel: "email", copyMe: true });
+    expect(fieldsFrom(preview({ to: null, phone: null }) as any, "email", true)).toMatchObject({ emailTo: "", phoneTo: "" });
   });
 });

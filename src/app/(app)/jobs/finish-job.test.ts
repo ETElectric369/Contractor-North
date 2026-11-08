@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeAll, describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dict } from "@/lib/i18n";
@@ -470,22 +470,28 @@ describe("setJobStatus — 'complete' is finishing, not a status write (M2)", ()
 });
 
 describe("Finish & Send Invoice reads the review switch (cn-v1155)", () => {
+  // The button's module pulls the send sheet and its actions behind it; transformed once here, with the
+  // time a loaded machine needs (the first full-suite run of cn-v1156 saw 5 s on the import alone).
+  let btn: typeof import("./[id]/finish-job-button");
+  beforeAll(async () => {
+    btn = await import("./[id]/finish-job-button");
+  }, 60_000);
   const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/finish-job-button.tsx"), "utf8");
 
   it("review on (the default): the press mails nothing, so finishJob is called with sendInvoice false", async () => {
-    const { pressSendsAtOnce } = await import("./[id]/finish-job-button");
+    const { pressSendsAtOnce } = btn;
     expect(pressSendsAtOnce(true, false)).toBe(false);
     expect(src).toContain("sendInvoice: pressSendsAtOnce(wantSend, sendWithoutReview)");
   });
 
   it("review off (Send Without Review on): today's one-shot call, sendInvoice true", async () => {
-    const { pressSendsAtOnce } = await import("./[id]/finish-job-button");
+    const { pressSendsAtOnce } = btn;
     expect(pressSendsAtOnce(true, true)).toBe(true);
     expect(pressSendsAtOnce(false, true)).toBe(false); // an unchecked box never sends
   });
 
   it("the sheet opens on the draft's id; a partial import (finishJob's warning) opens none", async () => {
-    const { opensReviewSheet } = await import("./[id]/finish-job-button");
+    const { opensReviewSheet } = btn;
     expect(opensReviewSheet({ id: "inv-091" }, true)).toBe(true);
     expect(opensReviewSheet({ id: "inv-091", warning: "review the line items before sending" }, true)).toBe(false);
     expect(opensReviewSheet({ id: "inv-091" }, false)).toBe(false); // one-shot path: no sheet

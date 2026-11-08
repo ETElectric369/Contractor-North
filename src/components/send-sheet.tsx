@@ -120,7 +120,6 @@ const FORM_ID = "send-review-form";
 export function SendSheet({ open, onClose, ...p }: SendSheetProps & { open: boolean; onClose: () => void }) {
   const t = translator(useLang());
   const [asked, setAsked] = useState<PreviewResult | null>(null);
-  const [round, setRound] = useState(0);
 
   useEffect(() => {
     if (!open) return;
@@ -131,7 +130,6 @@ export function SendSheet({ open, onClose, ...p }: SendSheetProps & { open: bool
       .then((res) => {
         if (!live) return;
         setAsked(res ?? { ok: false, error: t("sn_didntSend") });
-        setRound((r) => r + 1);
       });
     return () => {
       live = false;
@@ -140,7 +138,29 @@ export function SendSheet({ open, onClose, ...p }: SendSheetProps & { open: bool
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, p.kind, p.id]);
 
-  return <SendSheetView key={round} {...p} open={open} onClose={onClose} asked={asked} />;
+  // ONE VIEW FOR THE WHOLE OPEN, NEVER REMOUNTED (no key). The view holds the one Modal, and a Modal
+  // that remounts while open closes itself: the old instance steps history back to take its entry
+  // off, the new instance has just pushed its own, and that step pops the NEW entry, which the new
+  // instance reads as the system Back (overlay-history). cn-v1155 keyed the view on the answer's
+  // round so its fields would start clean, and the sheet flashed and was gone before anyone could
+  // read it (Erik, INV-093, 2026-11-08). The view resets its own fields when a new answer lands.
+  return <SendSheetView {...p} open={open} onClose={onClose} asked={asked} />;
+}
+
+/**
+ * The fields the review starts from: the server's words once it answered, blank while it is still
+ * asking or when it failed; Text first only when the door asked for Text and texting is set up.
+ */
+export function fieldsFrom(preview: SendPreview | null, via: "email" | "text" | undefined, textReady: boolean) {
+  return {
+    channel: (via === "text" && textReady ? "sms" : "email") as SendChannel,
+    emailTo: preview?.to ?? "",
+    phoneTo: preview?.phone ?? "",
+    subject: preview?.subject ?? "",
+    emailBody: preview?.body ?? "",
+    smsBody: preview?.smsBody ?? "",
+    copyMe: preview?.copyMe ?? false,
+  };
 }
 
 /** The sheet itself, drawn from the server's answer (null while it is on its way). */
@@ -159,13 +179,31 @@ export function SendSheetView({
   const [error, setError] = useState<string | null>(null);
   const first = asked?.ok ? asked.preview : null;
   const textReady = p.textReady !== false;
-  const [channel, setChannel] = useState<SendChannel>(p.via === "text" && textReady ? "sms" : "email");
-  const [emailTo, setEmailTo] = useState(first?.to ?? "");
-  const [phoneTo, setPhoneTo] = useState(first?.phone ?? "");
-  const [subject, setSubject] = useState(first?.subject ?? "");
-  const [emailBody, setEmailBody] = useState(first?.body ?? "");
-  const [smsBody, setSmsBody] = useState(first?.smsBody ?? "");
-  const [copyMe, setCopyMe] = useState(first?.copyMe ?? false);
+  const fresh = fieldsFrom(first, p.via, textReady);
+  const [channel, setChannel] = useState<SendChannel>(fresh.channel);
+  const [emailTo, setEmailTo] = useState(fresh.emailTo);
+  const [phoneTo, setPhoneTo] = useState(fresh.phoneTo);
+  const [subject, setSubject] = useState(fresh.subject);
+  const [emailBody, setEmailBody] = useState(fresh.emailBody);
+  const [smsBody, setSmsBody] = useState(fresh.smsBody);
+  const [copyMe, setCopyMe] = useState(fresh.copyMe);
+  // A NEW ANSWER STARTS THE FIELDS CLEAN, IN PLACE. The sheet asks again each time it opens, and the
+  // asking (null) and then the answer arrive as a new `asked`; the fields follow it here, during the
+  // render, so the Modal stays mounted (see SendSheet). React's own pattern for state that follows a
+  // prop: set it while rendering, and the render is redone before anything is shown.
+  const [seen, setSeen] = useState<PreviewResult | null>(asked);
+  if (asked !== seen) {
+    setSeen(asked);
+    setChannel(fresh.channel);
+    setEmailTo(fresh.emailTo);
+    setPhoneTo(fresh.phoneTo);
+    setSubject(fresh.subject);
+    setEmailBody(fresh.emailBody);
+    setSmsBody(fresh.smsBody);
+    setCopyMe(fresh.copyMe);
+    setError(null);
+    setHow(null);
+  }
 
   const preview: SendPreview | null = asked?.ok ? asked.preview : null;
   const refusal = textNotReadyRefusal(lang, t);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shouldGuardBack, shouldRemoveEntry } from "./overlay-history";
+import { createBackStepper, createOverlayStack, shouldGuardBack, shouldRemoveEntry } from "./overlay-history";
 
 /**
  * Modal pushes a history entry so the system BACK gesture closes the overlay instead of leaving
@@ -41,5 +41,25 @@ describe("shouldGuardBack — a dirty form treats back like any other dismissal"
 
   it("a clean form closes on the first back, no ceremony", () => {
     expect(shouldGuardBack({ dirty: false, confirmDiscard: false })).toBe(false);
+  });
+});
+
+describe("an overlay that remounts while open closes itself — why no Modal may be keyed on changing state", () => {
+  it("the old instance's step pops the entry the new instance pushed, and the new one owns that pop", () => {
+    // The send sheet, cn-v1155: its view was keyed on the server answer's round, so the Modal inside
+    // remounted the moment the words arrived, and the sheet was gone (Erik, INV-093, 2026-11-08).
+    // Pinned as it IS, so a wave that teaches the stack to hand the entry over does it on purpose.
+    const stack = createOverlayStack();
+    const steps: number[] = [];
+    const queue: (() => void)[] = [];
+    const stepBack = createBackStepper((n) => steps.push(n), (fn) => queue.push(fn));
+    stack.open("A"); // the first mount pushed an entry
+    // React runs the old instance's cleanup first (a button-style close: the entry is still ours)...
+    stepBack(stack.close("A", { pushed: true, popped: false, stillOurs: true }));
+    stack.open("B"); // ...then the new instance mounts and pushes its own entry
+    expect(steps).toEqual([]); // the step waits for the end of the tick
+    queue.splice(0).forEach((fn) => fn());
+    expect(steps).toEqual([1]); // history.go(-1) pops the top entry, which is now B's
+    expect(stack.ownsPop("B")).toBe(true); // and B takes the popstate as the system Back: it closes
   });
 });

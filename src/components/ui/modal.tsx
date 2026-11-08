@@ -233,6 +233,13 @@ export function Modal({
    * itself; a Back (or an Escape) closes the one on top and leaves the sheet, and the Move sheet's
    * Cancel taking its own entry off is not a Back for the sheet under it. The order they opened in
    * decides, in overlay-history's stack.
+   *
+   * NEVER REMOUNT AN OPEN MODAL. A `key` that changes while the overlay is open unmounts this
+   * instance and mounts another in the same commit: this one's cleanup steps history back to take
+   * its entry off, the next one has just pushed its own, and the step pops THAT entry, which the
+   * next instance reads as the system Back — it closes itself the moment it appears. Reset what is
+   * inside the overlay (its fields) with state, never by remounting the Modal (the send sheet that
+   * vanished, cn-v1156; overlay-history.test pins the sequence).
    */
   const poppedRef = useRef(false);
   const pushedRef = useRef(false);
