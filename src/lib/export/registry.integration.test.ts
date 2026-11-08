@@ -58,7 +58,7 @@ d("the export registry names real columns", () => {
       if (problem) bad.push(problem);
     }
     expect(bad).toEqual([]);
-    expect(EXPORT_TABLES.length).toBe(87);
+    expect(EXPORT_TABLES.length).toBe(88); // 88 since 0407 (cn-v1155): sent_messages, the words that went out, joined the registry
   });
 
   it("the company's row has every listed column, read by id", async () => {
