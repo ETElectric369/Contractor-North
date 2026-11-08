@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, CalendarClock, Briefcase, ClipboardList, ListTodo, MapPin, Plus, Users, Columns3 } from "lucide-react";
@@ -13,6 +13,8 @@ import { dayLabel, spanLabel } from "@/lib/schedule/span-label";
 import { useEndlessStack } from "@/components/use-endless-stack";
 import { dayWords, jobDayBlock } from "@/lib/schedule/job-block";
 import { crewChips, placeLine, spanShort, streetOf, townOf, visitPlace, type CrewChip, type CrewDayRow } from "@/lib/schedule/block-info";
+import { jobBlockExtras, visitBlockExtras } from "@/lib/schedule/block-extras";
+import { useStickyOffset } from "@/components/use-sticky-offset";
 import { jobWords } from "@/lib/action-items/words";
 import { CrewInitials } from "@/components/crew-initials";
 import { ownHoursByJobDay } from "@/lib/schedule/segment-hours";
@@ -100,6 +102,15 @@ export interface CalJob {
   /** The street (jobs.address) and the town: every block says where (lib/schedule/block-info). */
   address?: string | null;
   city?: string | null;
+  /** WHAT ELSE THE BOX SAYS (cn-v1151, lib/schedule/block-extras): the job's Notes and its Description (the
+   *  note line: the Notes, else the scope), a hold's reason and the day it comes back (0234, 0366), and its
+   *  invoices' statuses alone (Done · Paid / Bill Open, the office's line; never a figure). Each optional:
+   *  a caller that only says where and who compiles unchanged. */
+  notes?: string | null;
+  description?: string | null;
+  hold_reason?: string | null;
+  hold_until?: string | null;
+  invoices?: { status: string }[] | null;
 }
 
 // Internal-only since week-agenda.tsx (the last external importer) died in cn-v507.
@@ -303,6 +314,8 @@ function gridActualOf(a: BlockActual | undefined, personFilter: string | null): 
     initials: p.initials,
     dot: p.dot,
     spans: p.spans,
+    // The minutes the hours rule pays (clock time less lunch): the box's "8 h worked" reads this, never the bars' length.
+    workedMin: p.workedMin,
   }));
   return { people, hollow: a.state === "hollow", sentence: a.sentence };
 }
@@ -311,6 +324,43 @@ function gridActualOf(a: BlockActual | undefined, personFilter: string | null): 
 // every memo and cache keyed on them.
 const EMPTY_DAY_ROWS: Record<string, CrewDayRow[]> = {};
 const EMPTY_PEOPLE: CalPerson[] = [];
+const EMPTY_HOURS: Record<string, number> = {};
+
+/**
+ * ONE WEEK'S CARD, WITH TWO THINGS STUCK (cn-v1151; Erik: the Mon–Sun day header must lock on screen as he
+ * scrolls down a week inside the box, the same ask as on /timecards). The week line sticks at the stack's
+ * top, as it has since "i dont know what month it is on the schedule", and the grid's day-header strip
+ * sticks UNDER it (TimeGrid's `stickyHeader`, at `top: var(--grid-stick-top)`). Only this card knows the
+ * line's height — it wraps on a narrow phone, and grows a line when the clocked time loads back — so
+ * components/use-sticky-offset measures the line and writes it onto the host div as that variable (a
+ * ResizeObserver, no React state: forty mounted weeks never re-render for it). The host is a plain div
+ * INSIDE the Card, because Card forwards no ref and a custom property inherits, so any ancestor of the grid
+ * will do; the line and the grid are that div's only children, so the line's sticky range is the very box
+ * the Card gave it. overflow-CLIP stays on the Card (the week map's note below: `hidden` would make the
+ * Card a scrollport and nothing in it would stick).
+ */
+function WeekCard({ hasToday, line, children }: { hasToday: boolean; line: ReactNode; children: ReactNode }) {
+  const lineRef = useRef<HTMLDivElement>(null);
+  const hostRef = useRef<HTMLDivElement>(null);
+  useStickyOffset(lineRef, hostRef);
+  return (
+    <Card className="overflow-clip">
+      <div ref={hostRef}>
+        <div
+          ref={lineRef}
+          className={`sticky top-0 z-20 border-b px-3 py-1.5 text-xs font-semibold backdrop-blur ${
+            hasToday
+              ? "border-brand/30 bg-brand-light/70 text-brand"
+              : "border-slate-100 bg-white/90 text-slate-500"
+          }`}
+        >
+          {line}
+        </div>
+        {children}
+      </div>
+    </Card>
+  );
+}
 /* AND FOR THE LIST PROPS, for the same reason and one more. The week cache's key holds these arrays'
    IDENTITY, and so does the release of a just-placed day's held column — a caller that leaves one of
    them off used to get a brand new `[]` every render, which emptied the cache on every keystroke and
@@ -379,6 +429,8 @@ export function CalendarView({
   people = EMPTY_PEOPLE,
   actuals,
   actualsCappedBefore = null,
+  hoursByJob = EMPTY_HOURS,
+  jobHoursDropped = false,
 }: {
   jobs: CalJob[];
   segments?: CalSegment[];
@@ -424,6 +476,14 @@ export function CalendarView({
   /** When the clocked-time read hit its cap: the first day it holds whole. Older days say "Clocked time
    *  loads back to <date>." and are never drawn hollow (blank is not zero). */
   actualsCappedBefore?: string | null;
+  /** THE JOB'S HOURS OVER EVERY DAY, by job id (cn-v1151), for the box's hours line ("22 h on the job").
+   *  The office's alone: the panel reads it under canEdit (time_entries RLS hands a member their own rows,
+   *  so no other figure would be whole), and hands {} when the read was cut or failed. Absent: no figure. */
+  hoursByJob?: Record<string, number>;
+  /** THE FIGURE WAS DROPPED, AND SAID (skeptic #55): true when the office's hours read was cut at its page
+   *  bound or failed, so hoursByJob is {} by choice, not by fact. Each week line then says so in one small
+   *  line (ag_cal_jobHoursDropped): a blank where "22 h on the job" stood would read as no hours. */
+  jobHoursDropped?: boolean;
 }) {
   const searchParams = useSearchParams();
   const toast = useToast();
@@ -880,6 +940,15 @@ export function CalendarView({
       const { startMin, endMin } = jobBlockOn(job, k);
       const id = `j-${job.id}-${k}`;
       const actual = judged ? gridActualOf(pva?.byKey.get(id), personFilter) : undefined;
+      /* WHAT ELSE THE BOX SAYS (cn-v1151; Erik: "totals of hours worked and any job notes displayed in the
+         space inside the box and closed and paid or if its open and needing attention with the hold details
+         etc"): the hours WORKED that day by the one hours rule (lunch off — each person's workedMin rides
+         on the block's actual; the bars stay clock time) and, the office's alone, the job's hours over
+         every day (hoursByJob is {} for anyone else), where the job stands (on hold with the day it comes
+         back, its reason leading the note; done, and for the office paid or a bill still open; in
+         progress), and the job's own notes — ONE rule, lib/schedule/block-extras, with the words through
+         the catalog. The grid draws them after the where and who, as tall as the block has room for. */
+      const extras = jobBlockExtras(job, { actual, jobHours: hoursByJob[job.id] ?? null, canEdit, todayStr: todayK }, lang, t);
       events.push({
         id,
         dayStr: k,
@@ -895,6 +964,7 @@ export function CalendarView({
           town: job.city ?? null,
           time: pos ? `${spanShort(startMin, endMin)} · ${pos}` : spanShort(startMin, endMin),
           crew: judged && k < todayK ? null : jobCrewOn(job, k),
+          ...extras,
         },
         ...(actual ? { actual } : {}),
         color: JOB_GRID_TONE,
@@ -950,12 +1020,15 @@ export function CalendarView({
         // A block titled during the three days the visit was a "Walk-Through" reads today's word
         // here too (lib/statuses visitTitle); a title a person typed is untouched.
         label: visitTitle(a.title),
-        // A visit likewise: its street (or who, when the title is the street), its one person going.
+        // A visit likewise: its street (or who, when the title is the street), its one person going — and
+        // since cn-v1151 the time clocked to its job that day, where it stands (done, or waiting on the
+        // customer's pick) and its notes (lib/schedule/block-extras; never a whole-job figure on a visit).
         info: {
           place: placeLine({ name: a.title, street: streetOf(visitPlace(a)), customer: a.customers?.name ?? a.jobs?.name ?? null })?.text ?? null,
           town: townOf(visitPlace(a)) || null,
           time: spanShort(startMin, endMin),
           crew: actual ? null : visitCrewOn(a, k),
+          ...visitBlockExtras(a, { actual }, lang, t),
         },
         ...(actual ? { actual } : {}),
         color: apptGridColor(a),
@@ -1116,7 +1189,7 @@ export function CalendarView({
        place just landed on keeps its column while un-arming and the refresh pass each other. */
     const key = [
       jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs,
-      personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed, justPlaced,
+      personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed, justPlaced, hoursByJob,
     ];
     const cache = weekCacheRef.current;
     if (key.length !== cache.key.length || key.some((v, i) => v !== cache.key[i])) weekCacheRef.current = { key, map: new Map() };
@@ -1180,7 +1253,7 @@ export function CalendarView({
     });
     // gridDataFor and townFor read only what the key names (and what is derived from it).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stackWeeks, jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs, personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed, justPlaced, lang]);
+  }, [stackWeeks, jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs, personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed, justPlaced, hoursByJob, lang]);
   /** The day header's tap: drill into that day (stable, so a mounted week's grid never redraws for it). */
   const drillInto = useCallback((ds: string) => {
     window.history.pushState(null, "", `${window.location.pathname}?view=day&date=${ds}`);
@@ -1424,48 +1497,59 @@ export function CalendarView({
                  week. `clip` still trims the grid to the rounded corners without creating a
                  scrollport, so the header pins to the real scroller and answers "what month is
                  this" the whole way down, which was the entire point of adding it. */
-              <Card key={weekKey} className="overflow-clip">
-                <div
-                  className={`sticky top-0 z-20 border-b px-3 py-1.5 text-xs font-semibold backdrop-blur ${
-                    hasToday
-                      ? "border-brand/30 bg-brand-light/70 text-brand"
-                      : "border-slate-100 bg-white/90 text-slate-500"
-                  }`}
-                >
-                  {label}
-                  {hasToday && <span className="ml-2 text-[10px] font-bold uppercase tracking-wide">{t("ag_cal_thisWeek")}</span>}
-                  {/* THE WEEKEND IT FOLDED AWAY, NAMED AND STILL A DOOR. Nothing is drawn with work on
-                      it, so a hidden day is a day that is clear — but the week says which days those
-                      are (so growing a Saturday column next time is something it already warned you
-                      about), and each one opens as a day, where Add to Schedule lives. 20px of look and
-                      44px of thumb through the bleed idiom (`before` past every edge, the header's own
-                      grammar), so the law is kept without the header growing a line. */}
-                  {hiddenWeekend.length > 0 && (
-                    <span className="ml-2 text-[11px] font-normal text-slate-400">
-                      {t("ag_cal_nothingOn")}{" "}
-                      {hiddenWeekend.map((k, i) => (
-                        <span key={k}>
-                          {i > 0 && ", "}
-                          <button
-                            type="button"
-                            onClick={() => drillInto(k)}
-                            title={fillText(t("ag_cal_btn_openDay"), { day: shortDayWords(k, lang) })}
-                            className="relative inline-flex h-5 items-center align-middle underline-offset-2 hover:text-slate-600 hover:underline before:absolute before:-inset-x-1.5 before:-inset-y-3 before:content-['']"
-                          >
-                            {shortDayWords(k, lang)}
-                          </button>
-                        </span>
-                      ))}
-                    </span>
-                  )}
-                  {/* NOTHING SILENT: older than the clocked time loaded, a past block is never drawn
-                      hollow (missing data is not nobody), and the week says why it shows no bars. */}
-                  {loadsBack && actualsCappedBefore && (
-                    <span className="block text-[11px] font-normal text-slate-500">
-                      {fillText(t("ag_cal_clockedLoadsBack"), { day: dayWords(actualsCappedBefore, lang) })}
-                    </span>
-                  )}
-                </div>
+              /* The Card, its stuck week line and the host div the grid's own stuck strip measures against are
+                 WeekCard's (cn-v1151): the line's words are handed in, the grid is its child. */
+              <WeekCard
+                key={weekKey}
+                hasToday={hasToday}
+                line={
+                  <>
+                    {label}
+                    {hasToday && <span className="ml-2 text-[10px] font-bold uppercase tracking-wide">{t("ag_cal_thisWeek")}</span>}
+                    {/* THE WEEKEND IT FOLDED AWAY, NAMED AND STILL A DOOR. Nothing is drawn with work on
+                        it, so a hidden day is a day that is clear — but the week says which days those
+                        are (so growing a Saturday column next time is something it already warned you
+                        about), and each one opens as a day, where Add to Schedule lives. 20px of look and
+                        44px of thumb through the bleed idiom (`before` past every edge, the header's own
+                        grammar), so the law is kept without the header growing a line. */}
+                    {hiddenWeekend.length > 0 && (
+                      <span className="ml-2 text-[11px] font-normal text-slate-400">
+                        {t("ag_cal_nothingOn")}{" "}
+                        {hiddenWeekend.map((k, i) => (
+                          <span key={k}>
+                            {i > 0 && ", "}
+                            <button
+                              type="button"
+                              onClick={() => drillInto(k)}
+                              title={fillText(t("ag_cal_btn_openDay"), { day: shortDayWords(k, lang) })}
+                              className="relative inline-flex h-5 items-center align-middle underline-offset-2 hover:text-slate-600 hover:underline before:absolute before:-inset-x-1.5 before:-inset-y-3 before:content-['']"
+                            >
+                              {shortDayWords(k, lang)}
+                            </button>
+                          </span>
+                        ))}
+                      </span>
+                    )}
+                    {/* NOTHING SILENT: older than the clocked time loaded, a past block is never drawn
+                        hollow (missing data is not nobody), and the week says why it shows no bars. */}
+                    {loadsBack && actualsCappedBefore && (
+                      <span className="block text-[11px] font-normal text-slate-500">
+                        {fillText(t("ag_cal_clockedLoadsBack"), { day: dayWords(actualsCappedBefore, lang) })}
+                      </span>
+                    )}
+                    {/* NOTHING SILENT (skeptic #55): the office's whole-job figure was dropped — a chunk of
+                        the hours read hit its page bound or failed, and a short number under a job's name
+                        is a lie the office would act on — so the blocks say the day's hours alone, and the
+                        week says why, where the blank would otherwise read as "no hours on the job". */}
+                    {jobHoursDropped && (
+                      <span className="block text-[11px] font-normal text-slate-500">{t("ag_cal_jobHoursDropped")}</span>
+                    )}
+                  </>
+                }
+              >
+                {/* THE DAY HEADER LOCKS UNDER THE WEEK LINE (cn-v1151, `stickyHeader`): the Mon–Sun strip
+                    sticks against the stack at the line's measured height, so scrolling down a tall week
+                    never loses which column is which day. */}
                 <TimeGrid
                   days={days}
                   events={ev}
@@ -1478,8 +1562,9 @@ export function CalendarView({
                   placement={armedProp}
                   onEventTap={canEdit ? onEventTap : undefined}
                   onSlotTap={canEdit && !target.armed ? onSlotTap : undefined}
+                  stickyHeader
                 />
-              </Card>
+              </WeekCard>
             );
           })}
         </div>
@@ -1498,6 +1583,10 @@ export function CalendarView({
             </button>
           )}
           {(dayGrid.events.length > 0 || dayGrid.allDay.length > 0) && (
+            /* NOT STICKY HERE, ON PURPOSE (cn-v1151): the day view has no scrolling box of its own — this one
+               grid scrolls with the page, under the app's top bar — so a stuck day header would ride up under
+               that bar instead of locking under a week line, and there is one column to lose track of anyway.
+               The week stack's grids (WeekCard, above) are the ones that lock. */
             <Card className="overflow-hidden">
               <TimeGrid
                 days={[

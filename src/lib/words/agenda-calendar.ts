@@ -140,6 +140,8 @@ export const words: WordCatalog = {
     ag_cal_thisWeek: "this week",
     ag_cal_nothingOn: "Nothing on",
     ag_cal_clockedLoadsBack: "Clocked time loads back to {day}.",
+    // The office's whole-job figure was dropped (its read cut or failed), and the week says so (skeptic #55).
+    ag_cal_jobHoursDropped: "Hours on the job are not shown this time: more shifts than this page counts.",
     ag_cal_appointments: "Appointments",
     ag_cal_nothingBookedDay: "Nothing booked this day.",
     ag_cal_scheduledJobs: "Scheduled jobs",
@@ -264,6 +266,7 @@ export const words: WordCatalog = {
     ag_cal_thisWeek: "esta semana",
     ag_cal_nothingOn: "Nada el",
     ag_cal_clockedLoadsBack: "El tiempo marcado carga hasta el {day}.",
+    ag_cal_jobHoursDropped: "Las horas en el trabajo no se muestran esta vez: más turnos de los que esta página cuenta.",
     ag_cal_appointments: "Citas",
     ag_cal_nothingBookedDay: "Nada agendado este día.",
     ag_cal_scheduledJobs: "Trabajos programados",

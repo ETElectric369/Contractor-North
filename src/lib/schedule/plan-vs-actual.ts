@@ -27,13 +27,15 @@
  *   never clocked   an open entry on a past day (a runaway clock) runs to the block's end, is marked
  *   out             open, and the sentence says "never clocked out";
  *   late/over/short compare the block's edges with the first in and the last out, on the wall clock,
- *                   never person-hours. No hour total is ever printed, so this can never disagree with
- *                   /timecards.
+ *                   never person-hours. The SENTENCE prints no hour total; the one figure a block says
+ *                   (lib/schedule/block-extras, "8 h worked") is each person's `workedMin` below — the ONE
+ *                   hours rule (lib/utils hoursBetween: in to out, lunch off), so it can never disagree
+ *                   with /timecards. The bars stay clock time: a bar is where the person was.
  *
  * The sentence is at most 140 characters of plain words: "Booked 9–5 · Erik 10–7:30 · Jimmy 10–7:30 ·
  * 1h late · 2.5h over"; a block with none of it is "Booked 9–5 · No time clocked to this job" (HOLLOW) —
  * what the read can see, since a punch with no job never reaches a block.
- * No money here: no rate, no pay column, ever.
+ * No money here: no rate, no pay column, ever (lunch_minutes is the hours rule's third column, not pay).
  */
 import { todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
 import { PAGE_ROWS } from "@/lib/read-all-pages";
@@ -50,6 +52,9 @@ export type ActualEntry = {
   jobId: string | null;
   clockIn: string;
   clockOut: string | null;
+  /** The lunch that comes off the shift (time_entries.lunch_minutes), the ONE hours rule's third column
+   *  (lib/utils hoursBetween). Absent or null: none. Not a pay column: no rate rides with it. */
+  lunchMinutes?: number | null;
 };
 
 /** One entry's piece of one past day, in minutes past the company's midnight. `endMin` null: the
@@ -61,6 +66,10 @@ export type ActualSpan = {
   dayStr: string;
   startMin: number;
   endMin: number | null;
+  /** The shift's lunch, ON THE CLOCK-IN DAY'S SPAN OF A CLOSED ENTRY ALONE (skeptic #55, cn-v1151): a shift
+   *  over midnight is split per day, and the deduction counts once, on the day /timecards files the shift
+   *  under; a continuation day's span and an open punch carry none. Absent: none. */
+  lunchMin?: number;
 };
 
 const DAY_MIN = 24 * 60;
@@ -87,9 +96,16 @@ export function actualSpans(entries: readonly ActualEntry[], tz: string, todaySt
     const name = String(e.name ?? "").trim() || someone;
     const day = todayStrInTz(tz, inAt);
     const startMin = tzMinutesOfDay(inAt, tz);
-    const push = (dayStr: string, s: number, en: number | null) => {
+    // The lunch as hoursBetween reads it: a negative or non-numeric one is none (it would ADD paid time).
+    const lunch = Math.max(0, Number(e.lunchMinutes) || 0);
+    /* `lunchMin` rides on the span the caller marks — the CLOCK-IN day's span of a closed entry, below —
+       and on no other: a shift over midnight is split per day for drawing, and the deduction counts once,
+       on the day /timecards files the shift under (its clock-in day). An open punch is not hours yet. */
+    const push = (dayStr: string, s: number, en: number | null, lunchMin = 0) => {
       if (dayStr > todayStr) return;
-      out.push({ profileId: e.profileId, name, jobId: e.jobId as string, dayStr, startMin: s, endMin: en });
+      const span: ActualSpan = { profileId: e.profileId, name, jobId: e.jobId as string, dayStr, startMin: s, endMin: en };
+      if (lunchMin > 0) span.lunchMin = lunchMin;
+      out.push(span);
     };
     if (!e.clockOut) {
       push(day, startMin, null);
@@ -98,16 +114,16 @@ export function actualSpans(entries: readonly ActualEntry[], tz: string, todaySt
     const outAt = new Date(e.clockOut);
     if (isNaN(outAt.getTime()) || outAt.getTime() <= inAt.getTime()) {
       // An out before the in is bad data: a sliver where it started, never a day-long bar.
-      push(day, startMin, Math.min(DAY_MIN, startMin + 1));
+      push(day, startMin, Math.min(DAY_MIN, startMin + 1), lunch);
       continue;
     }
     const outDay = todayStrInTz(tz, outAt);
     const outMin = tzMinutesOfDay(outAt, tz);
     if (outDay === day) {
-      push(day, startMin, Math.max(startMin + 1, outMin));
+      push(day, startMin, Math.max(startMin + 1, outMin), lunch);
       continue;
     }
-    push(day, startMin, DAY_MIN);
+    push(day, startMin, DAY_MIN, lunch);
     let d = day;
     for (let i = 1; i <= maxDays; i++) {
       d = nextDay(d);
@@ -123,11 +139,13 @@ export function actualSpans(entries: readonly ActualEntry[], tz: string, todaySt
 }
 
 /** The spans as the server hands them to the calendar: each person and job once, each span a tuple
- *  [job index, person index, day, start minute, end minute or null]. */
+ *  [job index, person index, day, start minute, end minute or null, lunch minutes]. The sixth is the
+ *  span's lunch (0 when none; see ActualSpan.lunchMin), written always since cn-v1151 and read as `?? 0`
+ *  (unpackActuals), so a five-element tuple from before it still reads. */
 export type ActualsPayload = {
   people: { id: string; name: string }[];
   jobs: { id: string; name: string; job_number: string | null; customer: string | null }[];
-  spans: [number, number, string, number, number | null][];
+  spans: [number, number, string, number, number | null, number?][];
 };
 
 export type ActualJob = { name: string; job_number: string | null; customer: string | null };
@@ -151,7 +169,7 @@ export function packActuals(spans: readonly ActualSpan[], jobs: ReadonlyMap<stri
       j = jobList.push({ id: s.jobId, name: w?.name ?? aJob, job_number: w?.job_number ?? null, customer: w?.customer ?? null }) - 1;
       jIdx.set(s.jobId, j);
     }
-    tuples.push([j, p, s.dayStr, s.startMin, s.endMin]);
+    tuples.push([j, p, s.dayStr, s.startMin, s.endMin, s.lunchMin ?? 0]);
   }
   return { people, jobs: jobList, spans: tuples };
 }
@@ -200,12 +218,16 @@ export async function readPagesCapped<T>(
   return { rows: out, capped: true, error: null };
 }
 
-/** A time entry as the calendar's read returns it: no pay column, ever (no rate, paid, miles or notes). */
+/** A time entry as the calendar's read returns it: no pay column, ever (no rate, paid, miles or notes).
+ *  `lunch_minutes` is the ONE hours rule's third column (lib/utils hoursBetween), not pay: without it the
+ *  block's day figure was clock time while /timecards and the whole-job figure took the lunch off (skeptic
+ *  #55: "8.5 h clocked · 22 h on the job", two bases on one line). */
 export type ActualEntryRow = {
   profile_id: string;
   job_id: string | null;
   clock_in: string;
   clock_out: string | null;
+  lunch_minutes?: number | null;
   profiles?: { full_name: string | null } | null;
   job?: { id: string; job_number: string | null; name: string | null; customers?: { name: string | null } | null } | null;
 };
@@ -236,6 +258,7 @@ export function actualsFrom(
     jobId: r.job_id ? String(r.job_id) : null,
     clockIn: r.clock_in,
     clockOut: r.clock_out ?? null,
+    lunchMinutes: r.lunch_minutes ?? null,
   }));
   const jobsById = new Map<string, ActualJob>();
   for (const r of rows) {
@@ -256,7 +279,11 @@ export function unpackActuals(p: ActualsPayload | null | undefined): ActualSpan[
     const job = p.jobs?.[t[0]];
     const person = p.people?.[t[1]];
     if (!job || !person || !isYmd(t[2])) continue;
-    out.push({ jobId: job.id, profileId: person.id, name: person.name, dayStr: t[2], startMin: t[3], endMin: t[4] });
+    const span: ActualSpan = { jobId: job.id, profileId: person.id, name: person.name, dayStr: t[2], startMin: t[3], endMin: t[4] };
+    // The sixth element since cn-v1151; a five-element tuple reads as no lunch.
+    const lunch = Number(t[5] ?? 0) || 0;
+    if (lunch > 0) span.lunchMin = lunch;
+    out.push(span);
   }
   return out;
 }
@@ -281,6 +308,12 @@ export type WorkedPerson = {
   /** The first in; the last out (null: the last stretch was never clocked out). */
   startMin: number;
   endMin: number | null;
+  /** THE MINUTES THE ONE HOURS RULE PAYS this person that day (skeptic #55, cn-v1151): each CLOSED
+   *  stretch's clock time less the lunch riding on it (lib/utils hoursBetween: in to out, lunch off), never
+   *  below zero, summed per entry BEFORE the stretches are merged for the bars. The bars are where the
+   *  person was; this is what /timecards pays, and the block's "8 h worked" reads it (block-extras
+   *  dayClocked). An open stretch adds nothing: not hours yet. */
+  workedMin?: number;
 };
 
 export type BlockActual = {
@@ -348,12 +381,18 @@ function firstOf(name: string): string {
  * People sort by their first clock-in.
  */
 export function mergePeople(spans: readonly ActualSpan[], openEnd: (startMin: number) => number, running = false): WorkedPerson[] {
-  const byPerson = new Map<string, { name: string; iv: WorkedSpan[] }>();
+  const byPerson = new Map<string, { name: string; iv: WorkedSpan[]; workedMin: number }>();
   for (const s of spans) {
-    const p = byPerson.get(s.profileId) ?? { name: s.name, iv: [] };
+    const p = byPerson.get(s.profileId) ?? { name: s.name, iv: [], workedMin: 0 };
     const open = s.endMin == null;
     const end = open ? Math.max(s.startMin + 1, openEnd(s.startMin)) : Math.max(s.startMin + 1, s.endMin as number);
     p.iv.push(open && running ? { startMin: s.startMin, endMin: end, open, running: true } : { startMin: s.startMin, endMin: end, open });
+    /* THE FIGURE, BEFORE THE MERGE: what the ONE hours rule pays for this stretch — its clock time less the
+       lunch riding on it, never below zero — summed per ENTRY. A leftover duplicate pair counts twice here,
+       as /timecards pays it twice (a duplicate punch is a data defect fixed at its root, 0360, never
+       guessed away by the schedule), while the bars below union it and draw it once: a bar is where the
+       person was; the number is what the hours rule pays. An open stretch adds nothing: not hours yet. */
+    if (!open) p.workedMin += Math.max(0, (s.endMin as number) - s.startMin - (s.lunchMin ?? 0));
     byPerson.set(s.profileId, p);
   }
   const out: WorkedPerson[] = [];
@@ -386,6 +425,7 @@ export function mergePeople(spans: readonly ActualSpan[], openEnd: (startMin: nu
       spans: merged,
       startMin: merged[0].startMin,
       endMin: lastSpan.open ? null : lastSpan.endMin,
+      workedMin: p.workedMin,
     });
   }
   return out.sort((a, b) => a.startMin - b.startMin || a.name.localeCompare(b.name));

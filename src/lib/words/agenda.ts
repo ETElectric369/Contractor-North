@@ -3,8 +3,8 @@ import { MODAL_WORDS } from "@/components/ui/modal-words";
 
 /**
  * THE AGENDA'S FOUNDATION WORDS (ag_, the agenda-in-Spanish wave): what the schedule's pure libraries
- * say (lib/schedule/job-block, block-info, placement-plan, plan-vs-actual, work-shape, place-by-town,
- * lib/come-back-days, lib/schedule-options, lib/action-items/words), the words every sheet says
+ * say (lib/schedule/job-block, block-info, block-extras, placement-plan, plan-vs-actual, work-shape,
+ * place-by-town, lib/come-back-days, lib/schedule-options, lib/action-items/words), the words every sheet says
  * (components/ui/modal-words), and the handful of doors every agenda surface shares (Day, Week,
  * Month, Today…). A library never imports this file: it keeps its English inline and takes the
  * caller's `lang` + translator (lib/lang-words say), the way lib/job-status jobStatusLabel does.
@@ -55,6 +55,7 @@ export const words: WordCatalog = {
     ag_btn_cancel: MODAL_WORDS.en.cancel,
     ag_btn_saving: MODAL_WORDS.en.saving,
     ag_modalTapAgain: MODAL_WORDS.en.tapAgain,
+    ag_modalDragHint: MODAL_WORDS.en.dragHint,
 
     // ── Lengths (job-block lengthWords; paired plurals) ──
     ag_minute: "{n} minute",
@@ -133,6 +134,22 @@ export const words: WordCatalog = {
     ag_offHold: "{who} was on hold. It's off hold now.",
     ag_offHoldWhy: "{who} was on hold ({why}). It's off hold now.",
 
+    // ── What else the box says (block-extras, cn-v1151): the state words Title Case, a state not a door;
+    //    the hours fragments lowercase. "Worked", not "clocked" (skeptic #55): the day's figure is hours
+    //    PAID by the one hours rule (lunch off), the same basis as "on the job" beside it; the bars are the
+    //    clock time. ──
+    ag_stateOnHold: "On Hold",
+    ag_stateDone: "Done",
+    ag_stateDoneVisit: "Done",
+    ag_statePaid: "Paid",
+    ag_stateBillOpen: "Bill Open",
+    ag_stateInProgress: "In Progress",
+    ag_stateCancelled: "Cancelled",
+    ag_statePendingPick: "Pending Pick",
+    ag_hWorked: "{h} h worked",
+    ag_hOnTheJob: "{h} h on the job",
+    ag_onTheClock: "on the clock",
+
     // ── A job's name when it has none (schedule-options) ──
     ag_job: "Job",
     ag_newJobOn: "New Job · {day}",
@@ -163,6 +180,7 @@ export const words: WordCatalog = {
     ag_btn_cancel: MODAL_WORDS.es.cancel,
     ag_btn_saving: MODAL_WORDS.es.saving,
     ag_modalTapAgain: MODAL_WORDS.es.tapAgain,
+    ag_modalDragHint: MODAL_WORDS.es.dragHint,
 
     ag_minute: "{n} minuto",
     ag_minutes: "{n} minutos",
@@ -234,6 +252,20 @@ export const words: WordCatalog = {
     ag_thatJob: "Ese trabajo",
     ag_offHold: "{who} estaba en pausa. Ya no está en pausa.",
     ag_offHoldWhy: "{who} estaba en pausa ({why}). Ya no está en pausa.",
+
+    // En Pausa is the house word for a job on hold (jb_statusOnHold, ag_offHold); a visit is done = Hecha
+    // (ag_cal_doneLower's family), a job done = Terminado (jb_statusComplete).
+    ag_stateOnHold: "En Pausa",
+    ag_stateDone: "Terminado",
+    ag_stateDoneVisit: "Hecha",
+    ag_statePaid: "Pagado",
+    ag_stateBillOpen: "Factura Abierta",
+    ag_stateInProgress: "En Curso",
+    ag_stateCancelled: "Cancelado",
+    ag_statePendingPick: "Esperando Elección",
+    ag_hWorked: "{h} h trabajadas",
+    ag_hOnTheJob: "{h} h en el trabajo",
+    ag_onTheClock: "en el reloj",
 
     ag_job: "Trabajo",
     ag_newJobOn: "Trabajo Nuevo · {day}",

@@ -262,11 +262,102 @@ describe("My Day's rows and the schedule read the same words, with no money", ()
   it("no price, amount, total, cost or rate on any of them", () => {
     for (const f of [
       "src/lib/schedule/block-info.ts",
+      "src/lib/schedule/block-extras.ts",
       "src/components/crew-initials.tsx",
       "src/components/time-grid.tsx",
       "src/app/(app)/schedule/job-schedule-card.tsx",
     ]) {
       expect(code(f), f).not.toMatch(/\b(prices?|amounts?|totals?|costs?|rates?|bill_rate|pay_rate)\b|formatCurrency|\$\d/i);
     }
+  });
+});
+
+/**
+ * THE BOX SAYS MORE (cn-v1151): what the panel reads for it, who gets the whole-job hours, and where the
+ * day header locks — pinned at the source, the way the reads above are. The words themselves are tabled in
+ * lib/schedule/block-extras.test.ts and rendered in calendar-view-render.test.ts / agenda-calendar-es.test.ts.
+ */
+describe("the box says more (cn-v1151): the panel's read, the office's hours, the locked header", () => {
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const code = (f: string) =>
+    read(f)
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|\s)\/\/[^\n]*/g, "$1");
+
+  it("JOB_COLS carries every column a line turns on: the two notes boxes, the hold's reason and day, the invoices' status alone", () => {
+    const panel = read("src/app/(app)/schedule/calendar-panel.tsx");
+    expect(panel).toContain(
+      '"id, job_number, name, status, scheduled_start, scheduled_end, planned_minutes, assigned_to, address, city, customers(name), notes, description, hold_reason, hold_until, invoices(status)"',
+    );
+    // The status alone: no figure from a bill rides to the schedule.
+    expect(panel).not.toMatch(/invoices\((?=[^)]*\b(total|amount|balance|paid_amount)\b)/);
+  });
+
+  it("the hours read is the office's alone, paged to a stated bound with a unique tiebreak, and a cut or failed read drops every figure", () => {
+    const panel = code("src/app/(app)/schedule/calendar-panel.tsx");
+    expect(panel).toContain("if (canEdit) for (let i = 0; i < listedIds.length; i += 200) hoursChunks.push(listedIds.slice(i, i + 200));");
+    const q = panel.slice(panel.indexOf("readPagesCapped<ClosedEntryRow>("), panel.indexOf("}, JOB_HOURS_PAGES)"));
+    expect(q).toContain('.from("time_entries")');
+    expect(q).toContain('.select("job_id, clock_in, clock_out, lunch_minutes")');
+    expect(q).toContain('.in("job_id", ids)');
+    expect(q).toContain('.not("clock_out", "is", null)');
+    expect(q).toContain('.order("clock_in", { ascending: false })');
+    expect(q).toContain('.order("id", { ascending: false })');
+    expect(q).toContain(".range(from, to)");
+    expect(q).not.toContain(".limit(");
+    // No pay column: the three columns of the hours rule and the job, nothing else.
+    expect(q).not.toMatch(/rate|paid_at|miles|notes/);
+    expect(panel).toContain("hoursReads.every((r) => !r.error && !r.capped) ? foldHoursByJob(hoursReads.flatMap((r) => r.rows)) : {}");
+    expect(panel).toContain("hoursByJob={hoursByJob}");
+  });
+
+  it("the clocked-time read carries lunch_minutes — the hours rule's third column, not pay — so the day's figure is hours WORKED, one basis with the job's (skeptic #55)", () => {
+    const panel = read("src/app/(app)/schedule/calendar-panel.tsx");
+    expect(panel).toContain(
+      '"id, profile_id, job_id, clock_in, clock_out, lunch_minutes, source, profiles:profile_id(full_name), job:job_id(id, job_number, name, customers(name))"',
+    );
+    // The read's row type and the view's grid type carry it through to the box: lunch on the row, the hours
+    // rule's minutes on the person (never the bars' length when the figure is there).
+    expect(read("src/lib/schedule/plan-vs-actual.ts")).toContain("lunch_minutes?: number | null;");
+    expect(read("src/lib/schedule/plan-vs-actual.ts")).toContain("lunchMinutes: r.lunch_minutes ?? null,");
+    const view = code("src/app/(app)/calendar/calendar-view.tsx");
+    expect(view).toContain("workedMin: p.workedMin,");
+    expect(code("src/lib/schedule/block-extras.ts")).toContain('minutes += typeof p.workedMin === "number" ? Math.max(0, p.workedMin) : clock;');
+  });
+
+  it("the whole-job figure dropped is SAID: the panel tells the view, the view says it on each week line (skeptic #55)", () => {
+    const panel = code("src/app/(app)/schedule/calendar-panel.tsx");
+    expect(panel).toContain("const jobHoursDropped = hoursReads.some((r) => !!r.error || r.capped);");
+    expect(panel).toContain("jobHoursDropped={jobHoursDropped}");
+    const view = code("src/app/(app)/calendar/calendar-view.tsx");
+    expect(view).toContain("jobHoursDropped = false,");
+    // Inside the week line, the way the clocked-time cap is said (the same small grey line).
+    const line = view.slice(view.indexOf("{jobHoursDropped && ("), view.indexOf('{t("ag_cal_jobHoursDropped")}'));
+    expect(line).toContain('className="block text-[11px] font-normal text-slate-500"');
+    const week = view.slice(view.indexOf("<WeekCard"), view.indexOf("</WeekCard>"));
+    expect(week).toContain('{t("ag_cal_jobHoursDropped")}');
+  });
+
+  it("the view hands each block its three lines through the one rule, with the reader's language", () => {
+    const view = code("src/app/(app)/calendar/calendar-view.tsx");
+    expect(view).toContain("const extras = jobBlockExtras(job, { actual, jobHours: hoursByJob[job.id] ?? null, canEdit, todayStr: todayK }, lang, t);");
+    expect(view).toContain("...visitBlockExtras(a, { actual }, lang, t),");
+    // The office's figure is a prop with a stable empty default (the memos key on it), and it is in the week cache's key.
+    expect(view).toContain("hoursByJob = EMPTY_HOURS,");
+    expect(view).toMatch(/const key = \[[\s\S]*?hoursByJob,\s*\];/);
+  });
+
+  it("the week grid locks its day header under the measured week line; the day grid does not", () => {
+    const view = code("src/app/(app)/calendar/calendar-view.tsx");
+    expect(view.match(/\bstickyHeader\b/g)).toHaveLength(1);
+    expect(view).toContain("useStickyOffset(lineRef, hostRef);");
+    expect(view).toMatch(/<Card className="overflow-clip">\s*<div ref=\{hostRef\}>\s*<div\s+ref=\{lineRef\}\s+className=\{`sticky top-0 z-20 border-b/);
+    // The sticky grid is WeekCard's child; the day view's grid, the one under the top bar, carries no stickyHeader.
+    const week = view.slice(view.indexOf("<WeekCard"), view.indexOf("</WeekCard>"));
+    expect(week).toContain("stickyHeader");
+    // The LAST `view === "day"` is the day view itself (the header's own day door comes first).
+    const day = view.slice(view.lastIndexOf('{view === "day" && ('), view.indexOf("<DayDetail"));
+    expect(day).toContain("<TimeGrid");
+    expect(day).not.toContain("stickyHeader");
   });
 });

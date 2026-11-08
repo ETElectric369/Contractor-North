@@ -11,11 +11,18 @@
  *                already says who, "Marla Finch · Panel Upgrade");
  *   the time     start to end on the company's clock;
  *   the crew     initials chips, a dashed "Nobody" when no one is on it. A visit carries one person.
+ *   the hours    what was worked, when the block knows ("2.00 h", "8 h worked · 22 h on the job");
+ *   the state    where the job stands when that matters here (on hold, done), in a tone;
  *   (the town small, only where there is room: the week's day header already names the day's towns.)
+ *   the note     the person's own words, as many whole lines as are left (cn-v1151, "each box on the grid
+ *                must be able to say more inside it").
  *
  * A grid block is as tall as its time, so a small one says less, in this order: the name, then the
- * place, then the crew, then the time, then the town (blockRows). Never a line cut in half, never
- * overflowing at 375px. No money here or anywhere near it: the crew reads the same blocks.
+ * place, then the crew, then the time, then the hours, then the state, then the town, then the note
+ * (blockRows). The hours and the state come BEFORE the town because the week's day header already names
+ * the day's towns, and what was worked and whether the job is on hold or done is what the person is
+ * looking for in the box. Never a line cut in half, never overflowing at 375px. No money here or anywhere
+ * near it: the crew reads the same blocks.
  */
 import { pillColorForPerson } from "@/lib/employee-color";
 import type { Lang } from "@/lib/locale";
@@ -268,21 +275,33 @@ export function spanShort(startMin: number, endMin: number): string {
   return `${hmShort(startMin)}–${hmShort(endMin)}`;
 }
 
-/** What a grid block has to say beyond its name. */
-export type BlockHas = { place: boolean; crew: boolean; time: boolean; town: boolean };
+/** What a grid block has to say beyond its name. The three newer lines (the hours, the state, the note)
+ *  are optional, so a caller that only says where and who compiles unchanged. */
+export type BlockHas = { place: boolean; crew: boolean; time: boolean; hours?: boolean; state?: boolean; town: boolean; note?: boolean };
+
+/** Which of a block's lines fit its height (blockRows): each whole or absent, and how many whole lines
+ *  of the note (0 when there is no note, or no room left for one). */
+export type BlockRowsFit = { place: boolean; crew: boolean; time: boolean; hours: boolean; state: boolean; town: boolean; noteLines: number };
 
 // The block's text is 10px at leading-tight (12.5px a line); a chip row is 14px and a 2px gap; the
 // block's own padding and border take 6px.
 const CHROME_PX = 6;
 const LINE_PX = 12.5;
 const CHIPS_PX = 16;
+/** The most lines a note draws, however tall the block: past six the box is a page, not a block. */
+const NOTE_LINES_MAX = 6;
 
 /**
  * WHAT A BLOCK OF THIS HEIGHT SHOWS: the name always, then — each only when the whole line fits under
- * the ones before it — the place, the crew, the time, the town. A half-hour block is its name; an hour
- * is the name, the place and the crew; two hours is everything.
+ * the ones before it — the place, the crew, the time, the hours, the state, the town, and then as many
+ * whole lines of the note as still fit (at most NOTE_LINES_MAX; none when it has no note). A half-hour
+ * block is its name; an hour is the name, the place and the crew; two hours is the name, the place, the
+ * crew, the time, the hours and the state; two and a half adds the town and a line of the note.
+ *
+ * The hours and the state sit BEFORE the town: the week's day header already names the day's towns,
+ * and what was worked and whether the job is on hold or done is what the person is looking for.
  */
-export function blockRows(heightPx: number, has: BlockHas): BlockHas {
+export function blockRows(heightPx: number, has: BlockHas): BlockRowsFit {
   let used = CHROME_PX + LINE_PX;
   const room = (px: number) => {
     if (used + px > heightPx + 0.5) return false;
@@ -292,6 +311,10 @@ export function blockRows(heightPx: number, has: BlockHas): BlockHas {
   const place = has.place && room(LINE_PX);
   const crew = has.crew && room(CHIPS_PX);
   const time = has.time && room(LINE_PX);
+  const hours = !!has.hours && room(LINE_PX);
+  const state = !!has.state && room(LINE_PX);
   const town = has.town && room(LINE_PX);
-  return { place, crew, time, town };
+  let noteLines = 0;
+  if (has.note) while (noteLines < NOTE_LINES_MAX && room(LINE_PX)) noteLines += 1;
+  return { place, crew, time, hours, state, town, noteLines };
 }

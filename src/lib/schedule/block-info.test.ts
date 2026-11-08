@@ -81,20 +81,58 @@ describe("the crew and the time, short", () => {
   });
 });
 
-describe("a small block says less, in order: the name, the place, the crew, the time, the town", () => {
+describe("a small block says less, in order: the name, the place, the crew, the time, the hours, the state, the town, the note", () => {
   const all = { place: true, crew: true, time: true, town: true };
+  // Re-pinned cn-v1151: the return grew three fields (hours, state, noteLines) for the fuller box; a
+  // block that has none of the three reads them false / 0 and everything else exactly as before.
+  const fit = (over: Partial<ReturnType<typeof blockRows>>) => ({ place: false, crew: false, time: false, hours: false, state: false, town: false, noteLines: 0, ...over });
   it("a half hour (24px) is its name; three quarters (36px) the name and the place", () => {
-    expect(blockRows(24, all)).toEqual({ place: false, crew: false, time: false, town: false });
-    expect(blockRows(36, all)).toEqual({ place: true, crew: false, time: false, town: false });
+    expect(blockRows(24, all)).toEqual(fit({}));
+    expect(blockRows(36, all)).toEqual(fit({ place: true }));
   });
 
   it("an hour (48px) is the name, the place and the crew; two hours (96px) everything", () => {
-    expect(blockRows(48, all)).toEqual({ place: true, crew: true, time: false, town: false });
-    expect(blockRows(96, all)).toEqual(all);
+    expect(blockRows(48, all)).toEqual(fit({ place: true, crew: true }));
+    expect(blockRows(96, all)).toEqual(fit(all));
   });
 
   it("a line it doesn't have gives its room to the next", () => {
-    expect(blockRows(36, { place: false, crew: true, time: true, town: false })).toEqual({ place: false, crew: true, time: false, town: false });
-    expect(blockRows(48, { place: false, crew: false, time: true, town: true })).toEqual({ place: false, crew: false, time: true, town: true });
+    expect(blockRows(36, { place: false, crew: true, time: true, town: false })).toEqual(fit({ crew: true }));
+    expect(blockRows(48, { place: false, crew: false, time: true, town: true })).toEqual(fit({ time: true, town: true }));
+  });
+
+  describe("the fuller box (cn-v1151): the hours and the state before the town, then the note in whole lines", () => {
+    // A schedule block that knows everything: where, who, when, what was worked, where the job stands,
+    // the town, and the person's own words.
+    const schedule = { place: true, crew: true, time: true, hours: true, state: true, town: true, note: true };
+    it.each([
+      [24, fit({})],
+      [48, fit({ place: true, crew: true })],
+      [96, fit({ place: true, crew: true, time: true, hours: true, state: true })],
+      [120, fit({ place: true, crew: true, time: true, hours: true, state: true, town: true, noteLines: 1 })],
+    ])("a schedule-shaped block at %ipx", (px, rows) => {
+      expect(blockRows(px, schedule)).toEqual(rows);
+    });
+
+    // A timecards shift: no place, no crew, no town — the time, the hours, the state and the note.
+    const shift = { place: false, crew: false, time: true, hours: true, state: true, town: false, note: true };
+    it.each([
+      [48, fit({ time: true, hours: true })],
+      [96, fit({ time: true, hours: true, state: true, noteLines: 3 })],
+    ])("a timecards-shaped block at %ipx", (px, rows) => {
+      expect(blockRows(px, shift)).toEqual(rows);
+    });
+
+    it("the note stops at six lines however tall the block; no note is no lines however tall", () => {
+      expect(blockRows(480, shift).noteLines).toBe(6);
+      expect(blockRows(2000, schedule).noteLines).toBe(6);
+      expect(blockRows(480, { ...shift, note: false }).noteLines).toBe(0);
+      expect(blockRows(2000, all).noteLines).toBe(0);
+    });
+
+    it("a line the block has no room for is dropped whole, and the note never comes before the town", () => {
+      // 108px: everything to the town fits (97px used) and the first note line (109.5) does not.
+      expect(blockRows(108, schedule)).toEqual(fit({ place: true, crew: true, time: true, hours: true, state: true, town: true }));
+    });
   });
 });

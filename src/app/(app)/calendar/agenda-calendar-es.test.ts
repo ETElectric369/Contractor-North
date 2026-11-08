@@ -46,7 +46,8 @@ import { MoveToDay } from "@/components/move-to-day";
 import { JobsMap } from "@/components/jobs-map";
 import { CrewInitials } from "@/components/crew-initials";
 import { RowMoreSheet } from "@/components/row-more-sheet";
-import { mergePeople } from "@/lib/schedule/plan-vs-actual";
+import { actualsFrom, mergePeople } from "@/lib/schedule/plan-vs-actual";
+import { translator } from "@/lib/i18n";
 import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
 
 const LA = "America/Los_Angeles";
@@ -254,5 +255,127 @@ describe("the calendar in Spanish", () => {
     expect(t).toContain("esta semana");
     expect(t).toMatch(/\d+–\d+ de [a-z]+ de \d{4}|\d+ de [a-z]+ – \d+ de [a-z]+ de \d{4}/);
     expect(t).not.toContain("this week");
+  });
+});
+
+/**
+ * THE BOX SAYS MORE, IN SPANISH (cn-v1151): the hours, the state and the note of a block (lib/schedule/block-extras)
+ * come through the ag_ catalog when the reader's language is Spanish — the house words for a job's standing
+ * (En Pausa, Terminado, En Curso), Hecha for a visit, the hold's day in es-US, the hours fragments lowercase.
+ */
+describe("the box says more, in Spanish (cn-v1151)", () => {
+  const PAST = "2026-11-03"; // a Tuesday of the anchor's week, before "today" (DAY)
+  const job = (over: Partial<CalJob>): CalJob => ({
+    id: "j-bayberry",
+    job_number: "J-030",
+    name: "14 Bayberry Ln",
+    status: "scheduled",
+    scheduled_start: at(DAY, "10:00"),
+    scheduled_end: at(DAY, "12:00"),
+    planned_minutes: 120,
+    assigned_to: ["p-larkspur"],
+    customers: { name: "Thistlewood" },
+    address: "14 Bayberry Ln",
+    city: "Truckee",
+    ...over,
+  });
+  const jobs: CalJob[] = [
+    job({ id: "j-worked", name: "14 Bayberry Ln", scheduled_start: at(PAST, "10:00"), scheduled_end: at(PAST, "18:00"), planned_minutes: 480 }),
+    // Three hours, so the hold's reason has a note line to draw in under the state (lib/schedule/block-info blockRows).
+    job({ id: "j-hold", name: "7 Larkspur Ct", job_number: "J-031", status: "on_hold", hold_reason: "Esperando el permiso", hold_until: "2026-11-12", address: "7 Larkspur Ct", scheduled_start: at("2026-11-06", "09:00"), scheduled_end: at("2026-11-06", "12:00"), planned_minutes: 180 }),
+    job({ id: "j-paid", name: "3 Snowbell Rd", job_number: "J-032", status: "complete", invoices: [{ status: "paid" }], address: "3 Snowbell Rd", scheduled_start: at("2026-11-06", "12:00"), scheduled_end: at("2026-11-06", "14:00") }),
+    job({ id: "j-open", name: "5 Snowbell Rd", job_number: "J-033", status: "complete", invoices: [{ status: "sent" }], address: "5 Snowbell Rd", scheduled_start: at("2026-11-07", "09:00"), scheduled_end: at("2026-11-07", "11:00") }),
+    job({ id: "j-going", name: "9 Larkspur Ct", job_number: "J-034", status: "in_progress", notes: "Código 2580.", address: "9 Larkspur Ct", scheduled_start: at("2026-11-07", "12:00"), scheduled_end: at("2026-11-07", "16:00"), planned_minutes: 240 }),
+    // Today, 8 to 4: Sam clocked 8–9 and is back on the clock since 9:30 (now is 10:00 on the company's clock).
+    job({ id: "j-today", name: "11 Larkspur Ct", job_number: "J-035", status: "in_progress", assigned_to: ["p-snowbell"], address: "11 Larkspur Ct", scheduled_start: at(DAY, "08:00"), scheduled_end: at(DAY, "16:00"), planned_minutes: 480 }),
+  ];
+  const visits = [
+    { id: "v-done", type: "inspection", title: "Inspección: Thistlewood", starts_at: at(PAST, "08:00"), ends_at: at(PAST, "10:00"), status: "completed", job_id: null, customer_id: null, location: "7 Larkspur Ct, Truckee, CA 96161", notes: "Lleva la escalera.", assigned_to: "p-larkspur" },
+    { id: "v-pick", type: "quote", title: "Cotización: Thistlewood", starts_at: at("2026-11-06", "14:00"), ends_at: at("2026-11-06", "16:00"), status: "proposed", job_id: null, customer_id: null, location: "3 Snowbell Rd, Truckee, CA 96161", notes: null, assigned_to: null },
+  ];
+  const entry = (job_id: string, clock_in: string, clock_out: string | null, profile_id = "p-larkspur", lunch_minutes: number | null = null) => ({
+    profile_id,
+    job_id,
+    clock_in,
+    clock_out,
+    lunch_minutes,
+    profiles: { full_name: profile_id === "p-larkspur" ? "Lara Larkspur" : "Sam Snowbell" },
+    job: { id: job_id, job_number: "J-030", name: "14 Bayberry Ln", customers: { name: "Thistlewood" } },
+  });
+  // Lara 10 to 6:30 with a 30 min lunch: 8.5 h of clock on the bar, 8 h worked as the figure (the hours rule).
+  const { actuals } = actualsFrom(
+    [entry("j-worked", at(PAST, "10:00"), at(PAST, "18:30"), "p-larkspur", 30), entry("j-today", at(DAY, "08:00"), at(DAY, "09:00"), "p-snowbell"), entry("j-today", at(DAY, "09:30"), null, "p-snowbell")],
+    LA,
+    DAY,
+    false,
+    "es",
+    translator("es"),
+  );
+  const render = (canEdit = true, extra: Record<string, unknown> = {}) => {
+    nav.params = new URLSearchParams(`view=week&date=${DAY}`);
+    return es(
+      createElement(CalendarView, {
+        jobs,
+        appointments: visits as never,
+        members: team,
+        picker: { jobs: [], customers: [], staff: [] },
+        now: `${DAY}T18:00:00.000Z`,
+        tz: LA,
+        workDayStart: "09:00",
+        workDayEnd: "17:00",
+        canEdit,
+        actuals,
+        hoursByJob: canEdit ? { "j-worked": 22 } : {},
+        ...extra,
+      }),
+    );
+  };
+
+  it("the state line: En Pausa · Vuelve 12 nov, short, with the hold's reason leading the note; Terminado · Pagado / Factura Abierta for the office; En Curso", () => {
+    const html = render();
+    expect(html).toContain('<div class="truncate font-semibold text-amber-700">En Pausa · Vuelve 12 nov</div>');
+    expect(html).not.toContain("En Pausa · Esperando el permiso");
+    // The reason (the person's own words) draws as the note under the state, and the title carries it after the state.
+    expect(html).toMatch(/style="-webkit-line-clamp:\d+">Esperando el permiso<\/div>/);
+    expect(html).toContain('· En Pausa · Vuelve 12 nov · Esperando el permiso"');
+    expect(html).toContain('<div class="truncate font-semibold text-emerald-700">Terminado · Pagado</div>');
+    expect(html).toContain('<div class="truncate font-semibold text-emerald-700">Terminado · Factura Abierta</div>');
+    expect(html).toContain('<div class="truncate font-semibold opacity-80">En Curso</div>');
+    expect(text(html)).toContain("Código 2580.");
+    expect(text(html)).not.toMatch(/On Hold|Bill Open|In Progress|\bPaid\b|\bDone\b/);
+  });
+
+  it("a tech's done job says Terminado alone", () => {
+    const html = render(false);
+    expect(html).toContain('<div class="truncate font-semibold text-emerald-700">Terminado</div>');
+    expect(html).not.toContain("Pagado");
+    expect(html).not.toContain("Factura Abierta");
+  });
+
+  it("the hours line: trabajadas (the hours rule, lunch off), en el trabajo, en el reloj", () => {
+    const html = render();
+    expect(html).toContain('<div class="truncate tabular-nums">8 h trabajadas · 22 h en el trabajo</div>');
+    expect(html).not.toContain("8.5 h");
+    expect(html).toContain("1 h trabajadas · en el reloj");
+    expect(html).not.toContain("h clocked");
+    expect(html).not.toContain("h worked");
+    expect(html).not.toContain("registradas");
+  });
+
+  it("the office's whole-job figure dropped is said in Spanish on the week line (skeptic #55)", () => {
+    const html = render(true, { hoursByJob: {}, jobHoursDropped: true });
+    expect(html).toContain(
+      '<span class="block text-[11px] font-normal text-slate-500">Las horas en el trabajo no se muestran esta vez: más turnos de los que esta página cuenta.</span>',
+    );
+    expect(html).not.toContain("Hours on the job");
+    expect(render()).not.toContain("Las horas en el trabajo no se muestran");
+  });
+
+  it("a visit: Hecha when completed, Esperando Elección while the customer picks", () => {
+    const html = render();
+    expect(html).toContain('<div class="truncate font-semibold text-emerald-700">Hecha</div>');
+    expect(html).toContain('<div class="truncate font-semibold text-amber-700">Esperando Elección</div>');
+    // A two-hour visit has no room for a note line after its where, who, time, state and town: its title says it.
+    expect(html).toContain("· Hecha · Lleva la escalera.");
   });
 });

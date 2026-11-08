@@ -22,6 +22,8 @@ import {
   SENTENCE_MAX,
   unpackActuals,
   type ActualEntry,
+  type ActualSpan,
+  type ActualsPayload,
   type PlanBlock,
 } from "./plan-vs-actual";
 import { bookedKeys } from "./booked-days";
@@ -119,11 +121,129 @@ describe("the entries, as past-day spans on the company's clock", () => {
       { id: "j46", name: "12 Elm St", job_number: "J-046", customer: "Rita Moss" },
       { id: "j11", name: "A Job", job_number: null, customer: null },
     ]);
-    expect(packed.spans[2]).toEqual([1, 0, "2026-09-23", 540, null]);
+    // Six elements since cn-v1151: the sixth is the span's lunch, 0 when none.
+    expect(packed.spans[2]).toEqual([1, 0, "2026-09-23", 540, null, 0]);
     expect(unpackActuals(packed)).toEqual(spans);
     expect(unpackActuals(null)).toEqual([]);
     // Nothing about pay rides along: no rate, no amount, no pay column.
     expect(JSON.stringify(packed)).not.toMatch(/rate|amount|paid|miles/);
+  });
+});
+
+/**
+ * THE LUNCH RIDES ONCE (skeptic #55, cn-v1151). The block's day figure is the ONE hours rule — in to out,
+ * lunch off (lib/utils hoursBetween), the figure /timecards and the whole-job line beside it already read —
+ * so the lunch comes through the pipeline: on the entry, on the clock-in day's span of a closed shift, in
+ * the tuple's sixth element, and into each person's `workedMin`. The bars stay clock time.
+ */
+describe("the lunch rides once, on the clock-in day's span of a closed shift", () => {
+  const withLunch = (e: ActualEntry, lunchMinutes: number | null): ActualEntry => ({ ...e, lunchMinutes });
+
+  it("a closed shift's clock-in day carries it; a continuation day, an open punch, a null or zero lunch carry none", () => {
+    const spans = actualSpans(
+      [
+        withLunch(entry(ERIK, "j9", "2026-09-22", "08:00", "16:30"), 30),
+        // Over midnight: the deduction counts once, on the day /timecards files the shift under.
+        withLunch(entry(ERIK, "j9", "2026-09-23", "22:00", "06:30", "2026-09-24"), 30),
+        // Open: not hours yet, no lunch to take off.
+        withLunch(entry(JIMMY, "j9", "2026-09-24", "09:00", null), 30),
+        withLunch(entry(JIMMY, "j9", "2026-09-22", "09:00", "12:00"), null),
+        withLunch(entry(JIMMY, "j9", "2026-09-23", "09:00", "12:00"), 0),
+        // A negative lunch would ADD paid time (hoursBetween's own clamp): none.
+        withLunch(entry(BRIAN, "j9", "2026-09-22", "09:00", "12:00"), -15),
+      ],
+      LA,
+      TODAY,
+    );
+    expect(spans.map((s) => [s.dayStr, s.startMin, s.endMin, s.lunchMin])).toEqual([
+      ["2026-09-22", 480, 990, 30],
+      ["2026-09-23", 1320, 1440, 30],
+      ["2026-09-24", 0, 390, undefined],
+      ["2026-09-24", 540, null, undefined],
+      ["2026-09-22", 540, 720, undefined],
+      ["2026-09-23", 540, 720, undefined],
+      ["2026-09-22", 540, 720, undefined],
+    ]);
+    expect(spans.filter((s) => "lunchMin" in s)).toHaveLength(2);
+  });
+
+  it("packs as the sixth element (0 when none), unpacks the same spans, and a five-element tuple from before still reads as no lunch", () => {
+    const spans = actualSpans([withLunch(entry(ERIK, "j9", "2026-09-22", "08:00", "16:30"), 30), entry(JIMMY, "j9", "2026-09-22", "09:00", "12:00")], LA, TODAY);
+    const packed = packActuals(spans, new Map());
+    expect(packed.spans).toEqual([
+      [0, 0, "2026-09-22", 480, 990, 30],
+      [0, 1, "2026-09-22", 540, 720, 0],
+    ]);
+    expect(unpackActuals(packed)).toEqual(spans);
+    const older: ActualsPayload = { people: packed.people, jobs: packed.jobs, spans: [[0, 0, "2026-09-22", 480, 990]] };
+    expect(unpackActuals(older)).toEqual([{ profileId: "p-erik", name: "Erik Taylor", jobId: "j9", dayStr: "2026-09-22", startMin: 480, endMin: 990 }]);
+    expect("lunchMin" in unpackActuals(older)[0]).toBe(false);
+  });
+
+  it("the read carries lunch_minutes (the hours rule's third column, not pay) into the tuple", () => {
+    const { actuals } = actualsFrom(
+      [
+        {
+          profile_id: ERIK.profileId,
+          job_id: "j46",
+          clock_in: at("2026-09-22", "08:00"),
+          clock_out: at("2026-09-22", "16:30"),
+          lunch_minutes: 30,
+          profiles: { full_name: ERIK.name },
+          job: { id: "j46", job_number: "J-046", name: "12 Elm St", customers: { name: "Rita Moss" } },
+        },
+      ],
+      LA,
+      TODAY,
+    );
+    expect(actuals!.spans).toEqual([[0, 0, "2026-09-22", 480, 990, 30]]);
+  });
+
+  describe("workedMin: what the hours rule pays, summed before the bars are merged", () => {
+    const span = (who: { profileId: string; name: string }, startMin: number, endMin: number | null, lunchMin?: number): ActualSpan => ({
+      ...who,
+      jobId: "j",
+      dayStr: "2026-09-22",
+      startMin,
+      endMin,
+      ...(lunchMin ? { lunchMin } : {}),
+    });
+    const one = (...s: ActualSpan[]) => mergePeople(s, (m) => m + 60)[0];
+
+    it("an 8:00–4:30 shift with a 30 min lunch: the bar is 8.5 h long, the figure 480 — the 8 h /timecards says", () => {
+      const erik = one(span(ERIK, 480, 990, 30));
+      expect(erik.spans).toEqual([{ startMin: 480, endMin: 990, open: false }]);
+      expect(erik.workedMin).toBe(480);
+    });
+
+    it("a shift over midnight deducts once: its clock-in day's span less the lunch, the next day's whole", () => {
+      expect(one(span(ERIK, 1320, 1440, 30)).workedMin).toBe(90);
+      expect(one({ ...span(ERIK, 0, 390), dayStr: "2026-09-23" }).workedMin).toBe(390);
+    });
+
+    it("an open punch adds nothing (not hours yet); a lunch longer than the stretch never goes below zero", () => {
+      expect(one(span(ERIK, 540, null)).workedMin).toBe(0);
+      expect(one(span(ERIK, 480, 540), span(ERIK, 600, null)).workedMin).toBe(60);
+      expect(one(span(ERIK, 540, 550, 30)).workedMin).toBe(0);
+    });
+
+    it("a leftover duplicate pair draws once (the bars union) and counts twice (as /timecards pays it): the number follows the hours rule, the bars the clock", () => {
+      const erik = one(span(ERIK, 540, 1020), span(ERIK, 540, 1020));
+      expect(erik.spans).toHaveLength(1);
+      expect(erik.workedMin).toBe(960);
+    });
+
+    it("rides on the block's people through planVsActual and the ghosts", () => {
+      const entries = [withLunch(entry(ERIK, "j9", "2026-09-23", "08:00", "16:30"), 30), withLunch(entry(JIMMY, "j9", "2026-09-25", "08:00", "12:00"), 0)];
+      const spans = actualSpans(entries, LA, TODAY);
+      const res = planVsActual({ blocks: [block("k", "j9", "2026-09-23", 480, 990)], spans, todayStr: TODAY });
+      expect(res.byKey.get("k")!.people.map((p) => [p.first, p.workedMin])).toEqual([["Erik", 480]]);
+      expect(res.unplanned[0].people.map((p) => [p.first, p.workedMin])).toEqual([["Jimmy", 240]]);
+      expect(ghostsFor(spans, new Set(), TODAY)[0].people[0].workedMin).toBe(480);
+      // Through the payload too: pack, unpack, judge — the same 480.
+      const again = planVsActual({ blocks: [block("k", "j9", "2026-09-23", 480, 990)], spans: unpackActuals(packActuals(spans, new Map())), todayStr: TODAY });
+      expect(again.byKey.get("k")!.people[0].workedMin).toBe(480);
+    });
   });
 });
 
@@ -207,8 +327,10 @@ describe("the calendar reads it and draws it (source)", () => {
 
   it("one past-only read of entries on a job, newest first, PAGED to a bound, and NO pay column", () => {
     const panel = read("src/app/(app)/schedule/calendar-panel.tsx");
+    // `lunch_minutes` since cn-v1151 (skeptic #55): the hours rule's third column, so the block's day figure
+    // is hours WORKED (lunch off), the basis /timecards and the whole-job figure already read. Not pay.
     expect(panel).toContain(
-      '"id, profile_id, job_id, clock_in, clock_out, source, profiles:profile_id(full_name), job:job_id(id, job_number, name, customers(name))"',
+      '"id, profile_id, job_id, clock_in, clock_out, lunch_minutes, source, profiles:profile_id(full_name), job:job_id(id, job_number, name, customers(name))"',
     );
     const q = panel.slice(panel.indexOf('.from("time_entries")'), panel.indexOf("}, ACTUALS_PAGES)"));
     expect(q).toContain('.not("job_id", "is", null)');
@@ -234,7 +356,8 @@ describe("the calendar reads it and draws it (source)", () => {
     expect(crew).not.toContain(".limit(");
     expect(panel).toContain("actuals, actualsCappedBefore } = actualsFrom(entriesRead.error ? null : entriesRead.rows, tz, todayStr, entriesRead.capped, lang, translator(lang))");
     const cols = panel.slice(panel.indexOf("const ENTRY_COLS"), panel.indexOf("const [historyReads"));
-    expect(cols).not.toMatch(/rate_override|paid_at|miles|notes|lunch|pay/);
+    // No pay column (lunch_minutes is the hours rule's, not pay: see above).
+    expect(cols).not.toMatch(/rate_override|paid_at|miles|notes|pay/);
     // Jobs with in-window days but no listed day are read by id, 200 at a time, in the same round.
     expect(panel).toContain("for (let i = 0; i < missing.length; i += 200) missingChunks.push(missing.slice(i, i + 200));");
   });
@@ -297,7 +420,9 @@ describe("the calendar reads it and draws it (source)", () => {
        or a picked job has no weekend to land on, and on the place, or the column it just landed on folds
        away while the refresh is still in flight. Everything else still only invalidates on data, never
        on a scroll growth; both of these are client state that changes nothing else about a week. */
-    expect(view).toMatch(/const key = \[\s*jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs,\s*personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed, justPlaced,\s*\];/);
+    // `hoursByJob` joined it in cn-v1151: the office's whole-job hours are data the blocks are drawn from
+    // (the box's hours line), so a fresh record after router.refresh rebuilds the weeks like any other read.
+    expect(view).toMatch(/const key = \[\s*jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs,\s*personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed, justPlaced, hoursByJob,\s*\];/);
     expect(view).toContain("onDayClick={drillInto}");
     expect(view).toContain("placement={armedProp}");
     expect(view).not.toContain("placement={target.prop}");

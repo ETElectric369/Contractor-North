@@ -352,7 +352,9 @@ describe("the weekend rule changes which columns are drawn, and nothing else", (
     expect(CAL).toContain("label: spanLabel(wk[0], wk[6], { month: \"long\", lang })");
     expect(CAL).toContain("hasToday: all.some((d) => d.isToday)");
     expect(CAL).toContain("loadsBack: !!actualsCappedBefore && clockInUse && first < actualsCappedBefore && first < todayK");
-    expect(CAL).toContain("<Card key={weekKey}");
+    // cn-v1151: the week's Card is drawn by WeekCard (it measures its own week line so the grid's day
+    // header can stick under it); the key is still the whole week's.
+    expect(CAL).toMatch(/<WeekCard\s+key=\{weekKey\}/);
     // And the endless stack still measures its reach from the full week's first day.
     expect(CAL).toContain("const weekStartK = dayKey(weekDays[0] ?? anchor);");
   });

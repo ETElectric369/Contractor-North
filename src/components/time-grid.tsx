@@ -58,9 +58,10 @@ export interface TimeGridEvent {
   /** With the grid's onEventTap, a tap opens the caller's sheet for this pill instead of following
    *  href (the schedule's tile sheet). Absent, the pill is the link it always was. */
   tapId?: string;
-  /** WHERE AND WHO, inside the block (the schedule's job and visit blocks; lib/schedule/block-info).
-   *  Drawn as tall as the block has room for: the name, then the place, the crew, the time, the town.
-   *  With it, `sub` is not drawn. */
+  /** WHERE AND WHO, inside the block (the schedule's job and visit blocks; lib/schedule/block-info), and
+   *  since cn-v1151 what was worked, where the job stands and the person's own words. Drawn as tall as
+   *  the block has room for: the name, then the place, the crew, the time, the hours, the state, the
+   *  town, the note. With it, `sub` is not drawn. */
   info?: TimeGridInfo;
   /** WHAT HAPPENED, on a past day (the schedule; lib/schedule/plan-vs-actual): who clocked in, as bars
    *  in each person's color beside the block, and the block hollow when nobody did. Optional and
@@ -74,8 +75,10 @@ export interface TimeGridEvent {
 /** A past or today's block's worked time (see TimeGridEvent.actual); a `running` stretch is today's punch still on the clock. */
 export interface TimeGridActual {
   /** Each person who clocked in, in their own color, with their stretches (minutes past midnight;
-   *  `open` = never clocked out, drawn fading out). */
-  people: { key: string; initials: string; dot: string; spans: { startMin: number; endMin: number; open: boolean; running?: true }[] }[];
+   *  `open` = never clocked out, drawn fading out), and `workedMin`: the minutes the ONE hours rule pays
+   *  them that day (clock time less lunch; lib/schedule/plan-vs-actual mergePeople), which the box's hours
+   *  line reads — the bars are clock time, the number is what is paid, and the two can differ by a lunch. */
+  people: { key: string; initials: string; dot: string; workedMin?: number; spans: { startMin: number; endMin: number; open: boolean; running?: true }[] }[];
   /** Booked, and no time clocked to it: the block keeps its border and type color, filled faint. */
   hollow?: boolean;
   /** The block's sentence ("Booked 9–5 · Erik 10–6 · 1h late"): its title and label. */
@@ -103,6 +106,15 @@ export interface TimeGridInfo {
   time?: string | null;
   /** The crew as initials chips; [] draws a dashed Nobody; absent draws no crew line. */
   crew?: CrewChip[] | null;
+  /** What was worked, one line, tabular-nums ("2.00 h", "8 h worked · 22 h on the job"). */
+  hours?: string | null;
+  /** Where the job stands, one line, semibold, in a tone: good (done, paid) in emerald, warn (on hold,
+   *  late) in amber, plain in the pill's own color a shade lighter. */
+  state?: { text: string; tone: "good" | "warn" | "plain" } | null;
+  /** The person's own words, multi-line: drawn in as many whole lines as the block has room for after
+   *  everything above it (blockRows' noteLines), clamped so a line is never cut in half, and not at all
+   *  when there is no room for one — the title still carries it. */
+  note?: string | null;
 }
 
 export interface TimeGridAllDay {
@@ -260,6 +272,7 @@ function TimeGridInner({
   onEventTap,
   onSlotTap,
   addLabel: addLabelProp,
+  stickyHeader = false,
 }: {
   days: TimeGridDay[];
   events: TimeGridEvent[];
@@ -298,6 +311,15 @@ function TimeGridInner({
   onSlotTap?: (dayStr: string, minute: number | null) => void;
   /** The words the open spots and the "+" say ("Add to Schedule"). */
   addLabel?: string;
+  /**
+   * THE DAY HEADER LOCKS ON SCREEN (Erik, cn-v1151: the Mon–Sun line must stay put while he scrolls down
+   * the week). On, the day-header strip is `position: sticky` against the nearest scroll container
+   * OUTSIDE the grid — the week stack on /timecards and the schedule — at `top: var(--grid-stick-top)`,
+   * the height of the caller's own week line above it (components/use-sticky-offset sets the variable).
+   * Opt-in, off by default: the schedule's day view scrolls with the page under the app's top bar, where
+   * a stuck strip would ride up under the bar instead of under a week line.
+   */
+  stickyHeader?: boolean;
 }) {
   const lang = useLang();
   const t = translator(lang);
@@ -310,14 +332,18 @@ function TimeGridInner({
     return () => clearInterval(timer);
   }, [tz]);
 
-  // Scroll today into view once (week view on a phone shows ~4 columns).
+  // Scroll today into view once (week view on a phone shows ~4 columns). The day-header strip is its
+  // own box now (see the render), so it is carried along too — the scroll event would do it a frame
+  // later; this does it in the same one.
   const scrollRef = useRef<HTMLDivElement>(null);
+  const headRef = useRef<HTMLDivElement>(null);
   const todayColRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const box = scrollRef.current;
     const col = todayColRef.current;
     if (!box || !col || box.scrollWidth <= box.clientWidth) return;
     box.scrollLeft = Math.max(0, col.offsetLeft - 48 /* gutter */);
+    if (headRef.current) headRef.current.scrollLeft = box.scrollLeft;
   }, []);
 
   // Visible range: work window ±2h, stretched to cover outliers (an early
@@ -369,10 +395,19 @@ function TimeGridInner({
   const colBorder = (d: TimeGridDay) =>
     d.heavyStart ? "border-l-2 border-l-slate-400" : "border-l border-l-slate-100";
 
+  /** The state line's color by its tone: good in emerald, warn in amber, plain the pill's own text a
+   *  shade lighter. Static strings, so the JIT keeps them. */
+  const stateTone = (tone: "good" | "warn" | "plain") =>
+    tone === "good" ? "text-emerald-700" : tone === "warn" ? "text-amber-700" : "opacity-80";
+
   /** A block's lines, as many as its height has room for (lib/schedule/block-info blockRows): the
-   *  name, then the place, the crew, the time, the town. Every line is whole or absent. The crew line
-   *  is marks, never a door (pointer-events-none): the block's tap is the block's. A pill squeezed
-   *  beside another in a week (under ~48px) shows two chips and "+N". */
+   *  name, then the place, the crew, the time, the hours, the state, the town, and the note in as many
+   *  whole lines as are left. Every line is whole or absent: the note is clamped to blockRows' count
+   *  (`-webkit-line-clamp`, inline because the count is a number by height, not one of six classes),
+   *  so a line is never cut in half, and a block with no room for one draws none. The crew line is
+   *  marks, never a door (pointer-events-none): the block's tap is the block's. A pill squeezed beside
+   *  another in a week (under ~48px) shows two chips and "+N". Without `info` (/timecards today) the
+   *  block is its label and its sub, exactly as it always was. */
   const pillBody = (e: TimeGridEvent, heightPx: number, narrow = false) => {
     const info = e.info;
     if (!info) {
@@ -383,11 +418,15 @@ function TimeGridInner({
         </>
       );
     }
+    const note = info.note?.trim() || null;
     const rows = blockRows(heightPx, {
       place: !!info.place,
       crew: Array.isArray(info.crew),
       time: !!info.time,
+      hours: !!info.hours,
+      state: !!info.state?.text,
       town: !!info.town,
+      note: !!note,
     });
     return (
       <>
@@ -399,21 +438,34 @@ function TimeGridInner({
           </div>
         )}
         {rows.time && <div className="truncate tabular-nums opacity-70">{info.time}</div>}
+        {rows.hours && <div className="truncate tabular-nums">{info.hours}</div>}
+        {rows.state && info.state && <div className={`truncate font-semibold ${stateTone(info.state.tone)}`}>{info.state.text}</div>}
         {rows.town && <div className="truncate text-[9px] opacity-60">{info.town}</div>}
+        {rows.noteLines > 0 && (
+          <div
+            className="overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical] whitespace-pre-wrap break-words opacity-80"
+            style={{ WebkitLineClamp: rows.noteLines }}
+          >
+            {note}
+          </div>
+        )}
       </>
     );
   };
   /** Everything the block says, for its title and its label (a small block still says it all to a
    *  screen reader and on hover). */
   const pillTitle = (e: TimeGridEvent) => {
-    // A past block's sentence closes its title and label: what was booked, and what happened.
+    // A past block's sentence closes what was booked and what happened; the hours, the state and the
+    // note (last) follow it, so a block too short to draw them still says them.
     const said = e.actual?.sentence ?? null;
     if (e.ghost) return [fillText(t("ag_cal_ghostTitle"), { label: e.label }), said].filter(Boolean).join(" · ");
     if (!e.info) return [e.label, e.sub, said].filter(Boolean).join(" · ");
     const crew = e.info.crew;
     // "Crew: Brian Cole, Erik Taylor" or "Nobody on it": a block too short for its chips still says it.
     const who = Array.isArray(crew) ? crewWords(crew, lang, t) : null;
-    return [e.label, e.info.place, e.info.town, e.info.time, who, said].filter(Boolean).join(" · ");
+    return [e.label, e.info.place, e.info.town, e.info.time, who, said, e.info.hours, e.info.state?.text, e.info.note?.trim()]
+      .filter(Boolean)
+      .join(" · ");
   };
 
   /**
@@ -479,294 +531,336 @@ function TimeGridInner({
     );
   };
 
+  /* `time-grid-columns` + the two widths: the minimum is applied by globals.css, which is what lets a
+     turned phone cap it at the room there really is instead of scrolling the week sideways again — and
+     `--grid-legal-w` is the floor under that cap, the narrowest the columns may share before the day's
+     own button goes under 44px. The two targets the floor is about are the two buttons drawn in the
+     header, so the condition that renders the `+` is the condition that asks for its 44px. Upright the
+     rule resolves to the natural number alone, so nothing changes.
+
+     ONE OBJECT FOR TWO WRAPPERS. The header strip and the body below it are separate boxes now (see the
+     render), and each carries the class and both variables, so the stylesheet lays them out at exactly
+     the same width — same clamp, same `100%` of the same room — and the day lines never drift off their
+     columns. */
+  const colVars = {
+    "--grid-natural-w": `${naturalGridWidth(days.length)}px`,
+    "--grid-legal-w": `${legalGridWidth(days.length, !placement && Boolean(onSlotTap))}px`,
+  } as React.CSSProperties;
+
   return (
-    <div ref={scrollRef} className="overflow-x-auto">
-      {/* `time-grid-columns` + the two widths: the minimum is applied by globals.css, which is what lets
-          a turned phone cap it at the room there really is instead of scrolling the week sideways again —
-          and `--grid-legal-w` is the floor under that cap, the narrowest the columns may share before the
-          day's own button goes under 44px. The two targets the floor is about are the two buttons drawn
-          below, so the condition that renders the `+` is the condition that asks for its 44px.
-          Upright the rule resolves to the natural number alone, so nothing changes. */}
+    <div>
+      {/* THE DAY-HEADER STRIP, A SIBLING OF THE SCROLLER AND NOT ITS FIRST CHILD (cn-v1151: "the Mon–Sun
+          line must lock on screen while he scrolls down the week"). A sticky element sticks to its NEAREST
+          scroll container, and `overflow-x: auto` makes one — so inside the horizontal scroller the header
+          could never reach the week stack outside, which is the box the person is actually scrolling, and
+          it rode away under the week line. Out here it has only the stack above it to stick to.
+          Two boxes, one scroll: the strip clips (`overflow-x-hidden`, never a second scrollbar) and the
+          body's onScroll copies its scrollLeft across, so sideways on a phone the day lines stay over their
+          columns. `bg-white`, so the hour lines never show through a stuck strip.
+          `top` IS A VARIABLE because the caller's own week line sits above this strip, stuck at 0, at a
+          height only the caller knows (it wraps on a narrow phone): components/use-sticky-offset measures
+          that line and sets --grid-stick-top on an ancestor; absent, 0px. z-[15]: above the pills (no z),
+          the worked bars (z-[5]) and the now line (z-10), under the week line (z-20).
+          AND IT IS OPT-IN (`stickyHeader`): the schedule's day view scrolls with the page under the app's
+          top bar, where a stuck strip would ride up under the bar instead of under a week line.
+          TWO-WAY (skeptic #55): `overflow-x-hidden` hides the scrollbar, not the scrolling — keyboard focus
+          on a `+` or a day button inside the strip scrolls the STRIP alone, and it sat misaligned from the
+          columns until the next body scroll. So the strip's own onScroll copies its scrollLeft to the body
+          when they differ; an equal write fires no scroll event, so the pair never loops. */}
       <div
-        className="time-grid-columns"
-        style={
-          {
-            "--grid-natural-w": `${naturalGridWidth(days.length)}px`,
-            "--grid-legal-w": `${legalGridWidth(days.length, !placement && Boolean(onSlotTap))}px`,
-          } as React.CSSProperties
-        }
+        ref={headRef}
+        className={`overflow-x-hidden bg-white${stickyHeader ? " sticky z-[15]" : ""}`}
+        style={stickyHeader ? { top: "var(--grid-stick-top, 0px)" } : undefined}
+        onScroll={(e) => {
+          const b = scrollRef.current;
+          if (b && b.scrollLeft !== e.currentTarget.scrollLeft) b.scrollLeft = e.currentTarget.scrollLeft;
+        }}
       >
-        {/* Day headers */}
-        <div className="flex border-b border-slate-100">
-          <div className="w-12 shrink-0" />
-          {days.map((d) => {
-            const head = (
-              <span className={d.isToday ? "font-bold text-brand" : ""}>
-                {d.label}
-                {d.isToday && (
-                  <span className="ml-1 text-[9px] font-semibold uppercase tracking-wide">{t("ag_todayLower")}</span>
-                )}
-                {d.sublabel && (
-                  <span className="block truncate text-[10px] font-medium text-slate-400" title={d.sublabel}>
-                    {d.sublabel}
-                  </span>
-                )}
-              </span>
-            );
-            /* ARMED — the header is the drop zone and says so. Not a hover-only affordance:
-               on a phone there is no hover, and this is a phone-in-a-truck screen. */
-            if (placement) {
-              return (
+        <div className="time-grid-columns" style={colVars}>
+          {/* Day headers */}
+          <div className="flex border-b border-slate-100">
+            <div className="w-12 shrink-0" />
+            {days.map((d) => {
+              const head = (
+                <span className={d.isToday ? "font-bold text-brand" : ""}>
+                  {d.label}
+                  {d.isToday && (
+                    <span className="ml-1 text-[9px] font-semibold uppercase tracking-wide">{t("ag_todayLower")}</span>
+                  )}
+                  {d.sublabel && (
+                    <span className="block truncate text-[10px] font-medium text-slate-400" title={d.sublabel}>
+                      {d.sublabel}
+                    </span>
+                  )}
+                </span>
+              );
+              /* ARMED — the header is the drop zone and says so. Not a hover-only affordance:
+                 on a phone there is no hover, and this is a phone-in-a-truck screen. */
+              if (placement) {
+                return (
+                  <button
+                    key={d.dayStr}
+                    onClick={() => placement.onPlace(d.dayStr)}
+                    title={`${placement.label} — ${d.label}`}
+                    className={`group min-w-0 flex-1 truncate border-t-2 border-t-brand/60 bg-brand-light/30 px-1 py-1.5 text-center text-xs font-medium text-slate-600 hover:bg-brand-light ${colBorder(d)}`}
+                  >
+                    {head}
+                    <span className="mt-0.5 block truncate text-[10px] font-semibold text-brand">
+                      {placement.label}
+                    </span>
+                  </button>
+                );
+              }
+              /* THE DAY'S "+": Add to Schedule on this day, beside the day's own tap (which drills in).
+                 Two sibling buttons, never one inside the other. 44 by 44: a 92px week column still leaves
+                 the day's label about 48px.
+
+                 AND THESE ARE THE TWO TARGETS THE FLOOR IS FOR. The `+` is `w-11 shrink-0` — it does not
+                 give way — so whatever a narrow column takes, it takes from the `flex-1` button beside it.
+                 That is why legalGridWidth() exists and why it is told whether this branch ran. */
+              if (onSlotTap) {
+                return (
+                  <div key={d.dayStr} className={`flex min-w-0 flex-1 items-stretch ${colBorder(d)}`}>
+                    {onDayClick ? (
+                      <button
+                        type="button"
+                        onClick={() => onDayClick(d.dayStr)}
+                        className="min-h-11 min-w-0 flex-1 truncate px-1 py-1.5 text-center text-xs font-medium text-slate-600 hover:bg-slate-50"
+                      >
+                        {head}
+                      </button>
+                    ) : (
+                      <div className="min-h-11 min-w-0 flex-1 truncate px-1 py-1.5 text-center text-xs font-medium text-slate-600">{head}</div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => onSlotTap(d.dayStr, null)}
+                      aria-label={`${addLabel}, ${d.label}`}
+                      title={`${addLabel}, ${d.label}`}
+                      className="flex min-h-11 w-11 shrink-0 items-center justify-center text-brand hover:bg-brand-light/60"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
+                );
+              }
+              return onDayClick ? (
                 <button
                   key={d.dayStr}
-                  onClick={() => placement.onPlace(d.dayStr)}
-                  title={`${placement.label} — ${d.label}`}
-                  className={`group min-w-0 flex-1 truncate border-t-2 border-t-brand/60 bg-brand-light/30 px-1 py-1.5 text-center text-xs font-medium text-slate-600 hover:bg-brand-light ${colBorder(d)}`}
+                  onClick={() => onDayClick(d.dayStr)}
+                  className={`min-w-0 flex-1 truncate px-1 py-1.5 text-center text-xs font-medium text-slate-600 hover:bg-slate-50 ${colBorder(d)}`}
                 >
                   {head}
-                  <span className="mt-0.5 block truncate text-[10px] font-semibold text-brand">
-                    {placement.label}
-                  </span>
                 </button>
-              );
-            }
-            /* THE DAY'S "+": Add to Schedule on this day, beside the day's own tap (which drills in).
-               Two sibling buttons, never one inside the other. 44 by 44: a 92px week column still leaves
-               the day's label about 48px.
-
-               AND THESE ARE THE TWO TARGETS THE FLOOR IS FOR. The `+` is `w-11 shrink-0` — it does not
-               give way — so whatever a narrow column takes, it takes from the `flex-1` button beside it.
-               That is why legalGridWidth() exists and why it is told whether this branch ran. */
-            if (onSlotTap) {
-              return (
-                <div key={d.dayStr} className={`flex min-w-0 flex-1 items-stretch ${colBorder(d)}`}>
-                  {onDayClick ? (
-                    <button
-                      type="button"
-                      onClick={() => onDayClick(d.dayStr)}
-                      className="min-h-11 min-w-0 flex-1 truncate px-1 py-1.5 text-center text-xs font-medium text-slate-600 hover:bg-slate-50"
-                    >
-                      {head}
-                    </button>
-                  ) : (
-                    <div className="min-h-11 min-w-0 flex-1 truncate px-1 py-1.5 text-center text-xs font-medium text-slate-600">{head}</div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => onSlotTap(d.dayStr, null)}
-                    aria-label={`${addLabel}, ${d.label}`}
-                    title={`${addLabel}, ${d.label}`}
-                    className="flex min-h-11 w-11 shrink-0 items-center justify-center text-brand hover:bg-brand-light/60"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
+              ) : (
+                <div
+                  key={d.dayStr}
+                  className={`min-w-0 flex-1 truncate px-1 py-1.5 text-center text-xs font-medium text-slate-600 ${colBorder(d)}`}
+                >
+                  {head}
                 </div>
               );
-            }
-            return onDayClick ? (
-              <button
-                key={d.dayStr}
-                onClick={() => onDayClick(d.dayStr)}
-                className={`min-w-0 flex-1 truncate px-1 py-1.5 text-center text-xs font-medium text-slate-600 hover:bg-slate-50 ${colBorder(d)}`}
-              >
-                {head}
-              </button>
-            ) : (
-              <div
-                key={d.dayStr}
-                className={`min-w-0 flex-1 truncate px-1 py-1.5 text-center text-xs font-medium text-slate-600 ${colBorder(d)}`}
-              >
-                {head}
-              </div>
-            );
-          })}
+            })}
+          </div>
         </div>
+      </div>
 
-        {/* All-day tray — timeless items stay timeless (never faked into a slot). */}
-        {hasAllDay && (
-          <div className="flex border-b border-slate-100 bg-slate-50/50">
-            <div className="flex w-12 shrink-0 items-start justify-end pr-1 pt-1 text-[9px] font-medium uppercase tracking-wide text-slate-400">
-              {t("ag_cal_allDayLower")}
+      {/* THE BODY: the tray and the hour rows, scrolling sideways on a phone; the strip above follows it. */}
+      <div
+        ref={scrollRef}
+        className="overflow-x-auto"
+        onScroll={(e) => {
+          const h = headRef.current;
+          if (h) h.scrollLeft = e.currentTarget.scrollLeft;
+        }}
+      >
+        <div className="time-grid-columns" style={colVars}>
+          {/* All-day tray — timeless items stay timeless (never faked into a slot). */}
+          {hasAllDay && (
+            <div className="flex border-b border-slate-100 bg-slate-50/50">
+              <div className="flex w-12 shrink-0 items-start justify-end pr-1 pt-1 text-[9px] font-medium uppercase tracking-wide text-slate-400">
+                {t("ag_cal_allDayLower")}
+              </div>
+              {days.map((d) => (
+                <div key={d.dayStr} className={`min-w-0 flex-1 space-y-0.5 p-0.5 ${colBorder(d)}`}>
+                  {(allDayByDay.get(d.dayStr) ?? []).map((a) =>
+                    placement ? (
+                      /* ARMED: every tap means "put it HERE." A chip that kept its link would
+                         navigate away mid-placement and drop the picks — on a busy day the tray
+                         covers most of the tappable column, so the trap was the common case. */
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => placement.onPlace(d.dayStr)}
+                        title={`${placement.label} — ${d.label}`}
+                        className={`block w-full truncate rounded border px-1 py-px text-left text-[10px] font-medium leading-snug hover:opacity-80 ${a.color}`}
+                      >
+                        {a.label}
+                      </button>
+                    ) : a.href ? (
+                      <Link
+                        key={a.id}
+                        href={a.href}
+                        title={a.label}
+                        className={`block truncate rounded border px-1 py-px text-[10px] font-medium leading-snug hover:opacity-80 ${a.color}`}
+                      >
+                        {a.label}
+                      </Link>
+                    ) : (
+                      <div
+                        key={a.id}
+                        title={a.label}
+                        className={`truncate rounded border px-1 py-px text-[10px] font-medium leading-snug ${a.color}`}
+                      >
+                        {a.label}
+                      </div>
+                    ),
+                  )}
+                </div>
+              ))}
             </div>
-            {days.map((d) => (
-              <div key={d.dayStr} className={`min-w-0 flex-1 space-y-0.5 p-0.5 ${colBorder(d)}`}>
-                {(allDayByDay.get(d.dayStr) ?? []).map((a) =>
-                  placement ? (
-                    /* ARMED: every tap means "put it HERE." A chip that kept its link would
-                       navigate away mid-placement and drop the picks — on a busy day the tray
-                       covers most of the tappable column, so the trap was the common case. */
+          )}
+
+          {/* The grid: hour gutter + one positioned column per day */}
+          <div className="flex">
+            <div className="relative w-12 shrink-0" style={{ height: gridH }}>
+              {hours.slice(0, -1).map((h) => (
+                <div
+                  key={h}
+                  className="absolute right-1 text-right text-[10px] leading-none text-slate-400"
+                  style={{ top: (h * 60 - rangeStart) * PX_PER_MIN + (h === startHour ? 2 : -4) }}
+                >
+                  {hourLabel(h, lang)}
+                </div>
+              ))}
+            </div>
+            {days.map((d) => {
+              const laid = layoutColumns(byDay.get(d.dayStr) ?? []);
+              const showNow = now && now.dayStr === d.dayStr && now.min >= rangeStart && now.min <= rangeEnd;
+              return (
+                <div
+                  key={d.dayStr}
+                  ref={d.isToday ? todayColRef : undefined}
+                  className={`relative min-w-0 flex-1 ${colBorder(d)} ${d.isToday ? "bg-brand-light/15" : ""}`}
+                  style={{ height: gridH }}
+                >
+                  {/* THE WHOLE COLUMN IS THE TARGET while armed — a 12px header strip is a hard
+                      thing to hit with a thumb, and the column is the shape he is aiming at anyway.
+                      The pills above it place too (see below): while armed, every tap on the day
+                      means the day. */}
+                  {placement && (
                     <button
-                      key={a.id}
                       type="button"
                       onClick={() => placement.onPlace(d.dayStr)}
-                      title={`${placement.label} — ${d.label}`}
-                      className={`block w-full truncate rounded border px-1 py-px text-left text-[10px] font-medium leading-snug hover:opacity-80 ${a.color}`}
-                    >
-                      {a.label}
-                    </button>
-                  ) : a.href ? (
-                    <Link
-                      key={a.id}
-                      href={a.href}
-                      title={a.label}
-                      className={`block truncate rounded border px-1 py-px text-[10px] font-medium leading-snug hover:opacity-80 ${a.color}`}
-                    >
-                      {a.label}
-                    </Link>
-                  ) : (
+                      aria-label={fillText(t("ag_cal_placeOn"), { label: placement.label, day: d.label })}
+                      className="absolute inset-0 bg-brand-light/20 transition-colors hover:bg-brand-light/60"
+                    />
+                  )}
+
+                  {/* THE OPEN SPOTS: the column behind the blocks. A tap here is Add to Schedule at the
+                      half hour tapped; the blocks sit above it, so a tap on one is still that block. */}
+                  {!placement && onSlotTap && (
+                    <button
+                      type="button"
+                      onClick={(ev) => {
+                        // A keyboard press has no spot (detail 0): the caller starts the work day.
+                        if (ev.detail === 0) return onSlotTap(d.dayStr, null);
+                        const box = ev.currentTarget.getBoundingClientRect();
+                        onSlotTap(d.dayStr, slotMinute(ev.clientY - box.top, rangeStart));
+                      }}
+                      aria-label={`${addLabel}, ${d.label}`}
+                      title={fillText(t("ag_cal_tapAnOpenTime"), { label: addLabel })}
+                      className="absolute inset-0 cursor-copy transition-colors hover:bg-brand-light/10"
+                    />
+                  )}
+
+                  {/* hour rules */}
+                  {hours.slice(1, -1).map((h) => (
                     <div
-                      key={a.id}
-                      title={a.label}
-                      className={`truncate rounded border px-1 py-px text-[10px] font-medium leading-snug ${a.color}`}
+                      key={h}
+                      className="pointer-events-none absolute inset-x-0 border-t border-slate-100"
+                      style={{ top: (h * 60 - rangeStart) * PX_PER_MIN }}
+                    />
+                  ))}
+
+                  {/* event pills */}
+                  {laid.map((e) => {
+                    const top = (Math.max(e.startMin, rangeStart) - rangeStart) * PX_PER_MIN;
+                    const height = Math.max(16, (e.endMin - Math.max(e.startMin, rangeStart)) * PX_PER_MIN);
+                    const lanes = e.actual?.people.length ?? 0;
+                    const style: React.CSSProperties = {
+                      top,
+                      height,
+                      left: `calc(${(e.col / e.cols) * 100}% + 2px)`,
+                      width: `calc(${100 / e.cols}% - 4px)`,
+                      // Room for the worked bars at the right edge, so they never sit on the words.
+                      ...(lanes ? { paddingRight: laneRight(lanes) + 1 } : {}),
+                    };
+                    const tone = e.actual?.hollow ? hollowTone(e.color) : e.color;
+                    const cls = `absolute overflow-hidden rounded-md border px-1 py-0.5 text-[10px] leading-tight shadow-sm ${tone}`;
+                    const title = pillTitle(e);
+                    // Two pills side by side in a week column are ~42px each at 375px: two chips and "+N".
+                    const narrow = days.length > 1 && e.cols > 1;
+                    /* ARMED, A PILL PLACES TOO. On a busy day the pills cover most of the column,
+                       so the natural tap landed on a Link, navigated to that job, unmounted the
+                       provider and silently threw away every pick and the AM/PM choice — the worst
+                       possible answer to the exact tap the mode invites. While armed, the whole
+                       column means one thing. */
+                    return placement ? (
+                      <button
+                        key={e.id}
+                        type="button"
+                        onClick={() => placement.onPlace(d.dayStr)}
+                        style={style}
+                        title={`${placement.label} — ${d.label}`}
+                        className={`${cls} text-left opacity-60`}
+                      >
+                        {pillBody(e, height, narrow)}
+                      </button>
+                    ) : onEventTap && e.tapId ? (
+                      /* THE TILE OPENS ITS SHEET: the day, the time and who's on it, where the block
+                         is (Erik: "on the schedule itself there should be a time adjustment inside the
+                         job itself with the crew picker"). The record is one more tap, inside. */
+                      <button
+                        key={e.id}
+                        type="button"
+                        onClick={() => onEventTap(e.tapId!, d.dayStr)}
+                        style={style}
+                        title={title}
+                        aria-label={e.ghost ? title : fillText(t("ag_cal_dayTimeCrew"), { name: title })}
+                        className={`${cls} text-left hover:opacity-80`}
+                      >
+                        {pillBody(e, height, narrow)}
+                      </button>
+                    ) : e.href ? (
+                      <Link key={e.id} href={e.href} style={style} title={title} className={`${cls} hover:opacity-80`}>
+                        {pillBody(e, height, narrow)}
+                      </Link>
+                    ) : (
+                      <div key={e.id} style={style} title={title} className={cls}>
+                        {pillBody(e, height, narrow)}
+                      </div>
+                    );
+                  })}
+
+                  {/* what happened: the worked bars, over the blocks, never catching a tap */}
+                  {laid.map((e) => barLayer(e, days.length === 1 || e.cols === 1))}
+
+                  {/* the now line */}
+                  {showNow && (
+                    <div
+                      className="pointer-events-none absolute inset-x-0 z-10"
+                      style={{ top: (now!.min - rangeStart) * PX_PER_MIN }}
                     >
-                      {a.label}
+                      <div className="relative border-t-2 border-rose-500">
+                        <span className="absolute -left-0.5 -top-[5px] h-2 w-2 rounded-full bg-rose-500" />
+                      </div>
                     </div>
-                  ),
-                )}
-              </div>
-            ))}
+                  )}
+                </div>
+              );
+            })}
           </div>
-        )}
-
-        {/* The grid: hour gutter + one positioned column per day */}
-        <div className="flex">
-          <div className="relative w-12 shrink-0" style={{ height: gridH }}>
-            {hours.slice(0, -1).map((h) => (
-              <div
-                key={h}
-                className="absolute right-1 text-right text-[10px] leading-none text-slate-400"
-                style={{ top: (h * 60 - rangeStart) * PX_PER_MIN + (h === startHour ? 2 : -4) }}
-              >
-                {hourLabel(h, lang)}
-              </div>
-            ))}
-          </div>
-          {days.map((d) => {
-            const laid = layoutColumns(byDay.get(d.dayStr) ?? []);
-            const showNow = now && now.dayStr === d.dayStr && now.min >= rangeStart && now.min <= rangeEnd;
-            return (
-              <div
-                key={d.dayStr}
-                ref={d.isToday ? todayColRef : undefined}
-                className={`relative min-w-0 flex-1 ${colBorder(d)} ${d.isToday ? "bg-brand-light/15" : ""}`}
-                style={{ height: gridH }}
-              >
-                {/* THE WHOLE COLUMN IS THE TARGET while armed — a 12px header strip is a hard
-                    thing to hit with a thumb, and the column is the shape he is aiming at anyway.
-                    The pills above it place too (see below): while armed, every tap on the day
-                    means the day. */}
-                {placement && (
-                  <button
-                    type="button"
-                    onClick={() => placement.onPlace(d.dayStr)}
-                    aria-label={fillText(t("ag_cal_placeOn"), { label: placement.label, day: d.label })}
-                    className="absolute inset-0 bg-brand-light/20 transition-colors hover:bg-brand-light/60"
-                  />
-                )}
-
-                {/* THE OPEN SPOTS: the column behind the blocks. A tap here is Add to Schedule at the
-                    half hour tapped; the blocks sit above it, so a tap on one is still that block. */}
-                {!placement && onSlotTap && (
-                  <button
-                    type="button"
-                    onClick={(ev) => {
-                      // A keyboard press has no spot (detail 0): the caller starts the work day.
-                      if (ev.detail === 0) return onSlotTap(d.dayStr, null);
-                      const box = ev.currentTarget.getBoundingClientRect();
-                      onSlotTap(d.dayStr, slotMinute(ev.clientY - box.top, rangeStart));
-                    }}
-                    aria-label={`${addLabel}, ${d.label}`}
-                    title={fillText(t("ag_cal_tapAnOpenTime"), { label: addLabel })}
-                    className="absolute inset-0 cursor-copy transition-colors hover:bg-brand-light/10"
-                  />
-                )}
-
-                {/* hour rules */}
-                {hours.slice(1, -1).map((h) => (
-                  <div
-                    key={h}
-                    className="pointer-events-none absolute inset-x-0 border-t border-slate-100"
-                    style={{ top: (h * 60 - rangeStart) * PX_PER_MIN }}
-                  />
-                ))}
-
-                {/* event pills */}
-                {laid.map((e) => {
-                  const top = (Math.max(e.startMin, rangeStart) - rangeStart) * PX_PER_MIN;
-                  const height = Math.max(16, (e.endMin - Math.max(e.startMin, rangeStart)) * PX_PER_MIN);
-                  const lanes = e.actual?.people.length ?? 0;
-                  const style: React.CSSProperties = {
-                    top,
-                    height,
-                    left: `calc(${(e.col / e.cols) * 100}% + 2px)`,
-                    width: `calc(${100 / e.cols}% - 4px)`,
-                    // Room for the worked bars at the right edge, so they never sit on the words.
-                    ...(lanes ? { paddingRight: laneRight(lanes) + 1 } : {}),
-                  };
-                  const tone = e.actual?.hollow ? hollowTone(e.color) : e.color;
-                  const cls = `absolute overflow-hidden rounded-md border px-1 py-0.5 text-[10px] leading-tight shadow-sm ${tone}`;
-                  const title = pillTitle(e);
-                  // Two pills side by side in a week column are ~42px each at 375px: two chips and "+N".
-                  const narrow = days.length > 1 && e.cols > 1;
-                  /* ARMED, A PILL PLACES TOO. On a busy day the pills cover most of the column,
-                     so the natural tap landed on a Link, navigated to that job, unmounted the
-                     provider and silently threw away every pick and the AM/PM choice — the worst
-                     possible answer to the exact tap the mode invites. While armed, the whole
-                     column means one thing. */
-                  return placement ? (
-                    <button
-                      key={e.id}
-                      type="button"
-                      onClick={() => placement.onPlace(d.dayStr)}
-                      style={style}
-                      title={`${placement.label} — ${d.label}`}
-                      className={`${cls} text-left opacity-60`}
-                    >
-                      {pillBody(e, height, narrow)}
-                    </button>
-                  ) : onEventTap && e.tapId ? (
-                    /* THE TILE OPENS ITS SHEET: the day, the time and who's on it, where the block
-                       is (Erik: "on the schedule itself there should be a time adjustment inside the
-                       job itself with the crew picker"). The record is one more tap, inside. */
-                    <button
-                      key={e.id}
-                      type="button"
-                      onClick={() => onEventTap(e.tapId!, d.dayStr)}
-                      style={style}
-                      title={title}
-                      aria-label={e.ghost ? title : fillText(t("ag_cal_dayTimeCrew"), { name: title })}
-                      className={`${cls} text-left hover:opacity-80`}
-                    >
-                      {pillBody(e, height, narrow)}
-                    </button>
-                  ) : e.href ? (
-                    <Link key={e.id} href={e.href} style={style} title={title} className={`${cls} hover:opacity-80`}>
-                      {pillBody(e, height, narrow)}
-                    </Link>
-                  ) : (
-                    <div key={e.id} style={style} title={title} className={cls}>
-                      {pillBody(e, height, narrow)}
-                    </div>
-                  );
-                })}
-
-                {/* what happened: the worked bars, over the blocks, never catching a tap */}
-                {laid.map((e) => barLayer(e, days.length === 1 || e.cols === 1))}
-
-                {/* the now line */}
-                {showNow && (
-                  <div
-                    className="pointer-events-none absolute inset-x-0 z-10"
-                    style={{ top: (now!.min - rangeStart) * PX_PER_MIN }}
-                  >
-                    <div className="relative border-t-2 border-rose-500">
-                      <span className="absolute -left-0.5 -top-[5px] h-2 w-2 rounded-full bg-rose-500" />
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
         </div>
       </div>
     </div>

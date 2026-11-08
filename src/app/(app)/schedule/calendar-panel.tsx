@@ -7,6 +7,7 @@ import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import { dayRowsByDay, type CrewDayRow } from "@/lib/schedule/block-info";
+import { JOB_HOURS_PAGES, foldHoursByJob, type ClosedEntryRow } from "@/lib/schedule/block-extras";
 import { ACTUALS_PAGES, CREW_ROW_PAGES, actualsFrom, readPagesCapped, type ActualEntryRow } from "@/lib/schedule/plan-vs-actual";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 import { RefreshOnVisible } from "@/components/refresh-on-visible";
@@ -38,8 +39,14 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
   const jobFrom = new Date(now - CAL_WINDOW_BACK_DAYS * 86400_000).toISOString();
   const jobTo = new Date(now + CAL_WINDOW_FWD_DAYS * 86400_000).toISOString();
 
-  // `address` (the street) rides along: every block says where (lib/schedule/block-info).
-  const JOB_COLS = "id, job_number, name, status, scheduled_start, scheduled_end, planned_minutes, assigned_to, address, city, customers(name)";
+  // `address` (the street) rides along: every block says where (lib/schedule/block-info). Since cn-v1151 the
+  // box says more (lib/schedule/block-extras), and PROJECTION LAW: every column a line turns on is here —
+  // `notes` and `description` (the note: the job's Notes, else its scope), `hold_reason` and `hold_until`
+  // (On Hold · Back Oct 3, the reason leading the note), and the job's invoices' STATUS alone (Done · Paid / Bill Open, the office's
+  // line; invoices.job_id is the one path from a job to its bills, so the embed needs no hint). No figure
+  // from a bill, ever: the crew reads the same rows.
+  const JOB_COLS =
+    "id, job_number, name, status, scheduled_start, scheduled_end, planned_minutes, assigned_to, address, city, customers(name), notes, description, hold_reason, hold_until, invoices(status)";
   // EVERYONE'S DAY'S ROWS from today on (a day early, so the company's today is in it in any timezone):
   // the day row wins for that day on every upcoming chip (lib/schedule/block-info crewChips).
   const dayRowsFrom = new Date(now - 86400_000).toISOString().slice(0, 10);
@@ -153,6 +160,24 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
   const missingChunks: string[][] = [];
   for (let i = 0; i < missing.length; i += 200) missingChunks.push(missing.slice(i, i + 200));
 
+  /* THE JOB'S HOURS, FOR THE OFFICE'S BOX (cn-v1151; Erik: "totals of hours worked ... displayed in the
+     space inside the box"). Every CLOSED entry on the listed jobs — clock_in, clock_out, lunch_minutes, the
+     three columns of the ONE hours rule (lib/utils hoursBetween), folded per job by lib/schedule/block-extras
+     foldHoursByJob — read FOR THE OFFICE ONLY (canEdit): time_entries RLS hands a member their own rows
+     alone, so a member's "whole job" would be a short number wearing the job's name; nobody but the office
+     gets one, and the view says so by construction (block-extras). In reads of 200 ids (a long list is a
+     long URL, as the history read beside it), each A PAGE AT A TIME to a stated bound (readPagesCapped,
+     JOB_HOURS_PAGES: a bare .limit() is cut at PostgREST's own ceiling with no error, so a count can never
+     see the cut). NOTHING SILENT, NOTHING SHORT: a read that hits its bound, or fails, drops the figure for
+     EVERY job rather than show one that is short — a short figure under a job's name is a lie the office
+     would act on; no line is what the box says when it doesn't know. The jobs the history read brings (a
+     worked day on a job whose date was cleared) are read in this same round, so their ids are not known
+     here: their blocks say the day's clocked hours and no whole-job figure. A per-job sum in SQL (an RPC)
+     would lift the bound; it needs a migration. Not a pay column in sight: no rate, no paid, no miles. */
+  const listedIds = ((listedJobs ?? []) as { id: string }[]).map((j) => j.id);
+  const hoursChunks: string[][] = [];
+  if (canEdit) for (let i = 0; i < listedIds.length; i += 200) hoursChunks.push(listedIds.slice(i, i + 200));
+
   /* WHAT HAPPENED ON PAST DAYS (Wave 2, SV-actual: the July rule "the calendar never shows clocked
      time" is retired). The schedule is the one time map: future days show what's booked; past days
      show what was booked AND what happened, inside the same block (lib/schedule/plan-vs-actual). The
@@ -160,12 +185,15 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
      company day through the end of TODAY on the company's clock (today's punches too, the running one
      included, since 2026-10-26: "schedule isn't showing today's timecard entries"), only entries on a job (a no-job punch
      is never guessed onto a block), newest first, A PAGE AT A TIME to a stated bound. NO PAY
-     COLUMN: no rate, no paid, no miles, no notes. Names come from the entry's own person, so someone
-     who has left still has initials on the days they worked. The job rides along so a ghost (part D)
-     can name a job the window's jobs read didn't bring. RLS scopes it to the company (0249's
-     (org_id, clock_in desc) index serves it). Fail-soft: a failed read draws no bars, and says so. */
+     COLUMN: no rate, no paid, no miles, no notes. `lunch_minutes` IS NOT PAY: it is the ONE hours rule's
+     third column (lib/utils hoursBetween — in to out, lunch off), and without it the block's day figure
+     was clock time while /timecards and the whole-job figure beside it took the lunch off (skeptic #55,
+     cn-v1151: "8.5 h clocked · 22 h on the job", two bases on one line). Names come from the entry's own
+     person, so someone who has left still has initials on the days they worked. The job rides along so a
+     ghost (part D) can name a job the window's jobs read didn't bring. RLS scopes it to the company
+     (0249's (org_id, clock_in desc) index serves it). Fail-soft: a failed read draws no bars, and says so. */
   const ENTRY_COLS =
-    "id, profile_id, job_id, clock_in, clock_out, source, profiles:profile_id(full_name), job:job_id(id, job_number, name, customers(name))";
+    "id, profile_id, job_id, clock_in, clock_out, lunch_minutes, source, profiles:profile_id(full_name), job:job_id(id, job_number, name, customers(name))";
   /* THE WHOLE OLDEST DAY, NOT FROM THIS HOUR BACKWARDS. jobFrom is an INSTANT (now minus the window),
      so at a 3pm load it begins mid-afternoon on the oldest day and an 8am shift on that day was never
      read, while the view counts that day as loaded whole and draws its block hollow. The clocked-time
@@ -179,7 +207,7 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
   const actualsFromIso = tzDayStartUtc(new Date(Date.parse(`${winFromStr}T12:00:00Z`) - 86400_000).toISOString().slice(0, 10), tz).toISOString();
   // Through today: the read stops at the start of TOMORROW on the company's clock.
   const tomorrowStr = new Date(Date.parse(`${todayStr}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10);
-  const [historyReads, entriesRead] = await Promise.all([
+  const [historyReads, entriesRead, hoursReads] = await Promise.all([
     Promise.all(missingChunks.map((missingChunk) => supabase.from("jobs").select(JOB_COLS).in("id", missingChunk))),
     /* PAGED, NEWEST FIRST (readPagesCapped). A `.limit(4000)` is silently cut at PostgREST's own
        db-max-rows (1000 by default), so the row count can never see the cut and every older day would
@@ -197,9 +225,34 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
         .range(from, to);
       return { data: (r.data ?? null) as unknown as ActualEntryRow[] | null, error: r.error };
     }, ACTUALS_PAGES),
+    /* The office's hours read (see THE JOB'S HOURS above): closed entries on the listed jobs, 200 ids a read,
+       paged with a unique tiebreak (clock_in desc, id desc — 0249's index), JOB_HOURS_PAGES pages at most. */
+    Promise.all(
+      hoursChunks.map((ids) =>
+        readPagesCapped<ClosedEntryRow>(async (from, to) => {
+          const r = await supabase
+            .from("time_entries")
+            .select("job_id, clock_in, clock_out, lunch_minutes")
+            .in("job_id", ids)
+            .not("clock_out", "is", null)
+            .order("clock_in", { ascending: false })
+            .order("id", { ascending: false })
+            .range(from, to);
+          return { data: (r.data ?? null) as unknown as ClosedEntryRow[] | null, error: r.error };
+        }, JOB_HOURS_PAGES),
+      ),
+    ),
   ]);
   const historyJobs = historyReads.flatMap((r) => (r.data ?? []) as unknown[]);
   const jobs: unknown[] = [...(listedJobs ?? []), ...(historyJobs ?? [])];
+  /* Every chunk whole, or no figure at all (a tech's read is no reads: {}). A chunk that failed or hit its
+     bound drops the figure for every job — never a short number under a job's name. */
+  const hoursByJob = hoursReads.length && hoursReads.every((r) => !r.error && !r.capped) ? foldHoursByJob(hoursReads.flatMap((r) => r.rows)) : {};
+  /* NOTHING SILENT (skeptic #55): the figure dropped is SAID. A blank where "22 h on the job" stood reads
+     as "no hours" to the office, so when a chunk was cut or failed the view draws one small line on each
+     week line (ag_cal_jobHoursDropped) beside the blocks that now say the day's hours alone. A tech's read
+     is no reads, so this is never true for someone who gets no figure in the first place. */
+  const jobHoursDropped = hoursReads.some((r) => !!r.error || r.capped);
   const lang = await langRead;
   const { actuals, actualsCappedBefore } = actualsFrom(entriesRead.error ? null : entriesRead.rows, tz, todayStr, entriesRead.capped, lang, translator(lang));
 
@@ -242,6 +295,11 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
         // cap, the first day it covers whole (older days are never drawn hollow: blank is not zero).
         actuals={actuals}
         actualsCappedBefore={actualsCappedBefore}
+        // The office's whole-job hours by job id (cn-v1151), for the box's hours line; {} for anyone else,
+        // and {} when the read was cut or failed (nothing short, nothing silent: see THE JOB'S HOURS above).
+        hoursByJob={hoursByJob}
+        // And when it WAS cut or failed, the week lines say so (never a blank the office reads as zero).
+        jobHoursDropped={jobHoursDropped}
       />
     </div>
   );

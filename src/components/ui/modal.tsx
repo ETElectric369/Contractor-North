@@ -1,12 +1,21 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Button } from "./button";
 import { lockBodyForModal, unlockBodyForModal } from "./modal-lock";
 import { backStack, createBackStepper, escapeStack, shouldGuardBack } from "./overlay-history";
 import { keyboardClosed, nextKeyboardBaseline, revealScroll, type KeyboardBaseline } from "./modal-keyboard";
+import { clampOffset, isDragTarget, pastThreshold, type Offset, type PanelRect } from "./modal-drag";
 import { safeAreaTop } from "@/lib/native-shell";
 import { useLang } from "@/components/lang-provider";
 import { modalWords } from "./modal-words";
@@ -16,6 +25,9 @@ const stepBack = createBackStepper(
   (n) => window.history.go(-n),
   (fn) => queueMicrotask(fn),
 );
+
+/** The sheet where it opens: centered, not dragged. One object, so putting it back is a state React can bail out of. */
+const AT_REST: Offset = { x: 0, y: 0 };
 
 export function Modal({
   open,
@@ -113,9 +125,90 @@ export function Modal({
   // the old bare onClick closed the window mid-use and ate the half-filled form
   // (the desktop "shuts the window" report). Track where the pointer went down and
   // only treat a click as a backdrop tap when it both started AND landed there.
+  // A DRAG OF THE SHEET (below) is the same shape and is kept out the same way: its pointer
+  // goes down on the header — a target that is not this wrapper, so downOnBackdrop reads
+  // false — the header holds pointer capture for the rest of it, and the click at the end,
+  // wherever the finger is by then, is never one that started on the backdrop.
   const downOnBackdrop = useRef(false);
   // The scrolling middle of the panel — where a focused field is scrolled into view (below).
   const bodyRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * THE SHEET MOVES; WHAT IS BEHIND IT SHOWS. Erik, 2026-11-07: "could we make it so all pop-up boxes can
+   * be moved around on screen by dragging them so i can see relevant information in the background? that
+   * would be amazing everywhere actually". Every pop-up in the app is this one component, so it is done
+   * once, here; the rules are modal-drag.ts, with no DOM in them.
+   *
+   *  · THE TITLE BAR MOVES IT. A pointer down on the header — the bar itself or the title's text — starts
+   *    a drag; the header takes pointer capture, so the moves keep arriving when the finger leaves the
+   *    panel. The X, and anything else that is a control inside the bar, keeps its own job (isDragTarget).
+   *    A tap is not a drag: nothing moves until the pointer has travelled 3px (pastThreshold).
+   *  · IT STAYS ON SCREEN. Each move is clamped so the panel keeps 8px to every edge of the viewport —
+   *    the visual viewport while iOS is tracking it (vvRect), the window otherwise (clampOffset).
+   *  · IT OPENS CENTERED EVERY TIME. The offset goes back to rest whenever the sheet opens or closes (the
+   *    [open] effect below), so a sheet dragged into a corner last time is in the middle this time.
+   *  · DOUBLE-CLICK THE BAR PUTS IT BACK (the bar's title says so: w.dragHint).
+   *  · WHILE MOVED, THE SCRIM LIGHTENS (bg-slate-900/40 → /15): the point is to read what is behind it.
+   *    Nothing else changes while moved — a tap on the scrim still closes (two when dirty), Escape and
+   *    Back still work, holdOpen still holds.
+   *  · THE OFFSET IS left/top ON THE PANEL, which is already position: relative — NEVER transform,
+   *    translate or will-change: transform. Any of those makes the panel the containing block of every
+   *    position: fixed descendant (a sheet opened above this one, a glass menu) and traps it inside the
+   *    panel: the exact trap the `portal` prop exists to escape. At rest no left/top is written at all,
+   *    so the markup a server renders is byte for byte what it was.
+   */
+  const [offset, setOffset] = useState<Offset>(AT_REST);
+  // A drag in flight: which pointer, where it went down, the offset the sheet had then, and the panel's
+  // RESTING place (where it sits at offset 0,0), measured once at the start.
+  const dragRef = useRef<{ pointerId: number; start: Offset; base: Offset; rest: PanelRect } | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const moved = offset.x !== 0 || offset.y !== 0;
+  // The room: the visual viewport while iOS is tracking it (its top/left are the keyboard's pan, so a
+  // panel rect is read against that origin), the window otherwise.
+  const viewportNow = () =>
+    vvRect && typeof vvRect.width === "number" && typeof vvRect.height === "number"
+      ? { left: Number(vvRect.left) || 0, top: Number(vvRect.top) || 0, width: vvRect.width, height: vvRect.height }
+      : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+  const onHandlePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    // The primary button or a finger; one drag at a time; never from a control inside the bar.
+    const panel = panelRef.current;
+    if (e.button !== 0 || dragRef.current || !panel || !isDragTarget(e.target, e.currentTarget)) return;
+    // The resting place is measured ONCE, here: the panel's rect less the offset it is drawn at. A
+    // pointermove is a continuous event React may render behind, so a rect read mid-drag against the
+    // closure's `offset` could pair a fresh rect with a stale offset and clamp against a place the panel
+    // never was. The rest does not move during a drag; only the offset does.
+    const vp = viewportNow();
+    const rect = panel.getBoundingClientRect();
+    dragRef.current = {
+      pointerId: e.pointerId,
+      start: { x: e.clientX, y: e.clientY },
+      base: offset,
+      rest: { left: rect.left - vp.left - offset.x, top: rect.top - vp.top - offset.y, width: rect.width, height: rect.height },
+    };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // An inactive pointer throws (InvalidStateError); a drag that never captured must not keep the ref,
+      // or `dragRef.current ||` above would refuse every later drag until the sheet reopens (skeptic #55).
+      dragRef.current = null;
+    }
+  };
+  const onHandlePointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const now = { x: e.clientX, y: e.clientY };
+    if (!pastThreshold(drag.start, now)) return;
+    const want = { x: drag.base.x + (now.x - drag.start.x), y: drag.base.y + (now.y - drag.start.y) };
+    // Clamped against the resting place and the room as it is now (the keyboard may have moved it).
+    const next = clampOffset(want, drag.rest, AT_REST, viewportNow());
+    setOffset((prev) => (prev.x === next.x && prev.y === next.y ? prev : next));
+  };
+  const endDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId === e.pointerId) dragRef.current = null;
+  };
+  const onHandleDoubleClick = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (isDragTarget(e.target, e.currentTarget)) setOffset(AT_REST);
+  };
 
   /**
    * A HISTORY ENTRY, SO THE SYSTEM BACK GESTURE CLOSES THIS AND NOT THE PAGE.
@@ -183,9 +276,12 @@ export function Modal({
     };
   }, [open, historyClose, overlayId]);
 
-  // Disarm whenever the modal opens or closes — a fresh open starts clean.
+  // Disarm whenever the modal opens or closes — a fresh open starts clean: the discard guard off, the
+  // sheet back in the middle (its drag offset at rest) with no drag in flight.
   useEffect(() => {
     setConfirmDiscard(false);
+    setOffset(AT_REST);
+    dragRef.current = null;
     return () => {
       if (disarmTimer.current) clearTimeout(disarmTimer.current);
     };
@@ -294,6 +390,13 @@ export function Modal({
   const maxW =
     size === "sm" ? "max-w-sm" : size === "md" ? "max-w-md" : size === "xl" ? "max-w-2xl" : "max-w-lg";
 
+  // The panel's inline style: the keyboard cap, and the drag offset as left/top (never transform — the
+  // drag note above) only while the sheet has been moved, so at rest the panel carries no style at all.
+  const panelStyle: CSSProperties | undefined =
+    kbMaxH || moved
+      ? { ...(kbMaxH ? { maxHeight: kbMaxH } : {}), ...(moved ? { left: offset.x, top: offset.y } : {}) }
+      : undefined;
+
   const overlay = (
     // Scroll the WHOLE overlay so a panel taller than the *visible* viewport can never strand its
     // top off-screen: on iOS the keyboard shrinks the visual viewport and scrolls it, and some
@@ -305,7 +408,8 @@ export function Modal({
       style={vvRect}
       className={`z-[120] overflow-y-auto overscroll-contain ${vvRect ? "" : "fixed inset-0"}`}
     >
-      <div className="fixed inset-0 bg-slate-900/40" />
+      {/* The scrim: lighter once the sheet has been moved — he moved it to read what is behind it. */}
+      <div className={`fixed inset-0 ${moved ? "bg-slate-900/15" : "bg-slate-900/40"}`} />
       <div
         onPointerDown={(e) => {
           downOnBackdrop.current = e.target === e.currentTarget;
@@ -322,11 +426,23 @@ export function Modal({
             on a short phone (esp. with the keyboard up). stopPropagation so a tap inside
             the panel never bubbles to the backdrop-close on the wrapper. */}
         <div
+          ref={panelRef}
           onClick={(e) => e.stopPropagation()}
-          style={kbMaxH ? { maxHeight: kbMaxH } : undefined}
+          style={panelStyle}
           className={`relative z-10 flex max-h-[calc(100dvh-max(0.75rem,var(--sat,0px))-0.75rem)] w-full ${maxW} flex-col rounded-2xl bg-white shadow-xl`}
         >
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-6 py-4">
+        {/* The title bar is the handle (the drag note above): grab cursor, no text selection mid-drag,
+            touch-none so a finger on the title moves the sheet instead of scrolling the page. */}
+        <div
+          onPointerDown={onHandlePointerDown}
+          onPointerMove={onHandlePointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          onLostPointerCapture={endDrag}
+          onDoubleClick={onHandleDoubleClick}
+          className="flex shrink-0 items-center justify-between border-b border-slate-100 px-6 py-4 cursor-grab active:cursor-grabbing select-none touch-none"
+          title={w.dragHint}
+        >
           <h2 className="text-base font-semibold text-slate-900">{title}</h2>
           <button
             onClick={requestClose}

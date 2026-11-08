@@ -5,8 +5,9 @@ import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { TimeGrid, type TimeGridEvent } from "@/components/time-grid";
+import { TimeGrid, type TimeGridEvent, type TimeGridInfo } from "@/components/time-grid";
 import { useEndlessStack } from "@/components/use-endless-stack";
+import { useStickyOffset } from "@/components/use-sticky-offset";
 import { spanLabel } from "@/lib/schedule/span-label";
 import { summarizeMileage } from "@/lib/mileage-math";
 import { initials } from "@/lib/utils";
@@ -112,6 +113,13 @@ export type StackEntry = {
   miles: number;
   label: string;
   sub: string;
+  /** WHAT THE BOX ON THE GRID SAYS (cn-v1151; Erik: "more information on the timecard entry box …
+   *  perhaps even just the total hours"): the span, the hours with the lunch that came off them,
+   *  where the shift stands (On the Clock / Paid / No Job, an offline punch said too) and the
+   *  person's own words, drawn as tall as the block has room for. Built by the page from the SAME
+   *  fields the row reads (./entry-info), so the grid and the list under it say one thing about a
+   *  shift. With it the grid draws no `sub`; `sub` stays here for the rows. */
+  info?: TimeGridInfo;
   color: string;
   /** The person's legend swatch (a real bg- class). The row used to paint its dot with
    *  color.split(" ")[0], which is the pill's BORDER class — a transparent circle. */
@@ -462,8 +470,6 @@ export function TimecardStack({
     >
       {weeks.map((days) => {
         const wd = weekData.get(days[0])!;
-        const { mark, events, weekHours, weekOpen, periodOpen, people } = wd;
-        const hasToday = days.includes(todayStr);
 
         /* ── A WEEK NOBODY HAS REACHED YET SAYS NOTHING ────────────────────────────────────
            Erik, 2026-09-18, iPhone: his screenshot has two "No hours this week. Clock-ins show
@@ -479,151 +485,22 @@ export function TimecardStack({
            shift that runs past midnight into it — so nothing is ever hidden, only unsaid. And a
            week that HAS started keeps its empty line below: "nobody worked this week" is a real
            answer to a real question about a week that happened. */
-        if (!hasStarted(days[0], todayStr) && events.length === 0) return null;
+        if (!hasStarted(days[0], todayStr) && wd.events.length === 0) return null;
 
         return (
-          <div key={days[0]}>
-            {/* ── THE BREAK LINE ─────────────────────────────────────────────────────────────
-                Drawn only where a pay period actually opens, which for biweekly is every other
-                week — so it stays a signal instead of becoming a rule that repeats until nobody
-                reads it. It carries the period's hours, because at a boundary that is the number
-                somebody is about to be paid on, and the dates INCLUSIVE of the last day worked
-                (payPeriodBounds is half-open, and naming the wrong last day is how payroll
-                arguments start). */}
-            {mark && (
-              <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t-2 border-brand/50 pt-2">
-                <span className="text-xs font-bold uppercase tracking-wide text-brand">
-                  Pay period
-                </span>
-                <span className="text-sm font-semibold text-slate-800">{periodLabel(mark)}</span>
-                <span className="font-mono text-xs tabular-nums text-slate-500">
-                  {hoursLine(hoursInPeriod(hourRows, mark), periodOpen)}
-                </span>
-                {mark.midWeek && (
-                  // Semimonthly starts on the 16th, mid-week. Say so rather than letting the line
-                  // above a Monday imply the period began there.
-                  <span className="text-xs text-slate-400">starts mid-week</span>
-                )}
-              </div>
-            )}
-
-            <Card className="overflow-clip">
-              <div
-                /* flex-wrap, because the hours line can now carry "· 1 still on the clock" and a
-                   375px header has no room to squash a date instead. It wraps; it never truncates
-                   the week it names. */
-                className={`sticky top-0 z-20 flex flex-wrap items-baseline gap-x-2 border-b px-3 py-1.5 text-xs font-semibold backdrop-blur ${
-                  hasToday
-                    ? "border-brand/30 bg-brand-light/70 text-brand"
-                    : "border-slate-100 bg-white/90 text-slate-500"
-                }`}
-              >
-                <span>{weekSpan(days)}</span>
-                {hasToday && (
-                  <span className="text-[10px] font-bold uppercase tracking-wide">this week</span>
-                )}
-                {/* ONE WEEK, ONE NUMBER — and when it is short a running shift, it says so here
-                    instead of quietly counting hours nobody has earned yet. */}
-                <span className="ml-auto font-mono tabular-nums text-slate-500">
-                  {hoursLine(weekHours, weekOpen)}
-                </span>
-              </div>
-
-              {/* ── THE SHAPE ON TOP, THE LEDGER UNDER IT ──────────────────────────────────
-                  THE GRID IS A DESKTOP INSTRUMENT. Erik: "timecard scroll on my phone froze up
-                  and doesnt show me the calendar so we may need a better layout for small
-                  devices." On a 375px screen each week is seven columns scrolling SIDEWAYS inside
-                  a stack scrolling DOWN — nested opposing scrollers that iOS handles badly, for a
-                  grid where each column is 50px of unreadable slivers anyway. So the grid is
-                  sm: and up, and only in By Day: a person's week is not a shape you read in time
-                  blocks, it is a run of shifts and one subtotal.
-
-                  IT IS AN ADDITION, NEVER A REPLACEMENT. The grid was briefly the ONLY thing a
-                  desktop got in By Day, the list hidden under it at sm:. But a pill is id, day,
-                  start, end, label, sub, color, href (TimeGridEvent) and nothing else — so the
-                  offline disclosure, the notes, lunch, the code badge, a running clock's Clock
-                  Out and the empty state all vanished at 640px, on the DEFAULT grouping. That is
-                  0168 broken (a punch that cannot say where its time came from) and a dead end
-                  (a week with no hours saying nothing at all). The list stays under the grid;
-                  its rows open the editor, which holds Copy to Someone Else… (Wave 2).
-
-                  They are not two lists either — the Erik complaint this wave exists to answer.
-                  The grid answers "what shape was the week", the list answers "what happened and
-                  is it right", and both are rendered from the SAME `events`, so they cannot
-                  disagree the way the two ledgers did. */}
-              {group === "day" && (
-                <div className="hidden border-b border-slate-100 sm:block">
-                  <TimeGrid
-                    days={wd.days}
-                    events={events}
-                    workStartMin={workStartMin}
-                    workEndMin={workEndMin}
-                    tz={tz}
-                    initialNow={{ dayStr: todayStr, min: nowMin }}
-                  />
-                </div>
-              )}
-
-              <div>
-                {group === "day"
-                  ? days
-                      .filter((ds) => (byDay.get(ds) ?? []).length > 0)
-                      .map((ds) => (
-                        <div key={ds} className="border-b border-slate-100 last:border-b-0">
-                          <div className={`flex flex-wrap items-baseline justify-between gap-x-2 px-3 pt-2 text-xs font-semibold ${ds === todayStr ? "text-brand" : "text-slate-500"}`}>
-                            <span>
-                              {labelFor(ds)}
-                              {!!mark && mark.start === ds && (
-                                <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-brand">new pay period</span>
-                              )}
-                            </span>
-                            <span className="font-mono tabular-nums text-slate-400">
-                              {hoursLine(
-                                Math.round((byDay.get(ds) ?? []).reduce((t, e) => t + e.hours, 0) * 100) / 100,
-                                (byDay.get(ds) ?? []).filter((e) => e.open).length,
-                              )}
-                            </span>
-                          </div>
-                          {/* The person leads the row when the days are the spine. */}
-                          <ShiftList rows={byDay.get(ds) ?? []} lead={(e) => e.person} />
-                        </div>
-                      ))
-                  : people.map((p) => (
-                      <div key={p.id} className="border-b border-slate-100 last:border-b-0">
-                        {/* The person header the per-person Card used to carry: initials, the
-                            name, their hours for THIS week, and their miles with the commute
-                            split still visible. */}
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3 pt-2">
-                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600">
-                            {initials(p.name)}
-                          </span>
-                          <span className="min-w-0 truncate text-sm font-semibold text-slate-900">{p.name}</span>
-                          <span className="ml-auto flex flex-wrap items-baseline justify-end gap-x-2">
-                            <span className="font-mono text-xs tabular-nums text-slate-500">
-                              {hoursLine(p.hours, p.open)}
-                            </span>
-                            {p.mileage.recorded > 0 && (
-                              <span className="text-xs text-slate-400">{mileageLine(p)}</span>
-                            )}
-                          </span>
-                        </div>
-                        {/* The day leads the row when the people are the spine. */}
-                        <ShiftList rows={p.entries} lead={(e) => labelFor(e.dayStr)} />
-                      </div>
-                    ))}
-                {/* THE one empty state for a week with no hours — the page's second one (an
-                    EmptyState under the per-person cards, saying the same thing in other words)
-                    went with the cards. Only weeks that have already STARTED ever get this far
-                    (see the guard above), so it is always about a week that actually happened. */}
-                {events.length === 0 && (
-                  <p className="px-3 py-4 text-center text-xs text-slate-400">
-                    No hours this week. Clock-ins show up here.
-                  </p>
-                )}
-              </div>
-
-            </Card>
-          </div>
+          <WeekCard
+            key={days[0]}
+            days={days}
+            wd={wd}
+            todayStr={todayStr}
+            hourRows={hourRows}
+            byDay={byDay}
+            group={group}
+            workStartMin={workStartMin}
+            workEndMin={workEndMin}
+            tz={tz}
+            nowMin={nowMin}
+          />
         );
       })}
       {/* NOTHING SILENT: say where the scroll stops rather than just refusing to grow. */}
@@ -632,6 +509,206 @@ export function TimecardStack({
           Six months back. Use the arrows above to jump further.
         </p>
       )}
+    </div>
+  );
+}
+
+/** One shift's day, hours and whether it is still running — what the pay-period line sums. */
+type HourRow = { dayStr: string; hours: number; open: boolean };
+
+/**
+ * ONE WEEK'S CARD: the break line, the week line, the grid and the rows under it.
+ *
+ * A COMPONENT, NOT A BLOCK INSIDE weeks.map, for one reason (cn-v1151; Erik: "inside the scroll
+ * calendar box it would be super helpful to have the Monday through Friday header lock on screen
+ * as I scroll down the week"). The grid's day-header strip sticks now (TimeGrid's `stickyHeader`),
+ * and it has to stick UNDER this card's own week line, at the line's height — which wraps on a
+ * narrow phone, so it is measured, not guessed. components/use-sticky-offset measures the line
+ * (lineRef) and writes `--grid-stick-top` onto an ancestor of the grid (hostRef: this card's outer
+ * div; Card forwards no ref, and the variable inherits), and a hook can only be called from a
+ * component, one per week. Nothing else moved: every line below is the block weeks.map held.
+ */
+function WeekCard({
+  days,
+  wd,
+  todayStr,
+  hourRows,
+  byDay,
+  group,
+  workStartMin,
+  workEndMin,
+  tz,
+  nowMin,
+}: {
+  days: string[];
+  wd: WeekData;
+  todayStr: string;
+  hourRows: HourRow[];
+  byDay: Map<string, StackEntry[]>;
+  group: Grouping;
+  workStartMin: number;
+  workEndMin: number;
+  tz: string;
+  nowMin: number;
+}) {
+  const { mark, events, weekHours, weekOpen, periodOpen, people } = wd;
+  const hasToday = days.includes(todayStr);
+  /* THE WEEK LINE'S HEIGHT, HANDED TO THE GRID: the line is measured, the number lands on this
+     card's outer div as --grid-stick-top, and the grid's day strip sticks there, right under the
+     line (no state, no render: style.setProperty through a ResizeObserver). */
+  const hostRef = useRef<HTMLDivElement>(null);
+  const lineRef = useRef<HTMLDivElement>(null);
+  useStickyOffset(lineRef, hostRef);
+
+  return (
+    <div ref={hostRef}>
+      {/* ── THE BREAK LINE ─────────────────────────────────────────────────────────────
+          Drawn only where a pay period actually opens, which for biweekly is every other
+          week — so it stays a signal instead of becoming a rule that repeats until nobody
+          reads it. It carries the period's hours, because at a boundary that is the number
+          somebody is about to be paid on, and the dates INCLUSIVE of the last day worked
+          (payPeriodBounds is half-open, and naming the wrong last day is how payroll
+          arguments start). */}
+      {mark && (
+        <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t-2 border-brand/50 pt-2">
+          <span className="text-xs font-bold uppercase tracking-wide text-brand">
+            Pay period
+          </span>
+          <span className="text-sm font-semibold text-slate-800">{periodLabel(mark)}</span>
+          <span className="font-mono text-xs tabular-nums text-slate-500">
+            {hoursLine(hoursInPeriod(hourRows, mark), periodOpen)}
+          </span>
+          {mark.midWeek && (
+            // Semimonthly starts on the 16th, mid-week. Say so rather than letting the line
+            // above a Monday imply the period began there.
+            <span className="text-xs text-slate-400">starts mid-week</span>
+          )}
+        </div>
+      )}
+
+      <Card className="overflow-clip">
+        <div
+          ref={lineRef}
+          /* flex-wrap, because the hours line can now carry "· 1 still on the clock" and a
+             375px header has no room to squash a date instead. It wraps; it never truncates
+             the week it names. (And it is the line use-sticky-offset measures, above.) */
+          className={`sticky top-0 z-20 flex flex-wrap items-baseline gap-x-2 border-b px-3 py-1.5 text-xs font-semibold backdrop-blur ${
+            hasToday
+              ? "border-brand/30 bg-brand-light/70 text-brand"
+              : "border-slate-100 bg-white/90 text-slate-500"
+          }`}
+        >
+          <span>{weekSpan(days)}</span>
+          {hasToday && (
+            <span className="text-[10px] font-bold uppercase tracking-wide">this week</span>
+          )}
+          {/* ONE WEEK, ONE NUMBER — and when it is short a running shift, it says so here
+              instead of quietly counting hours nobody has earned yet. */}
+          <span className="ml-auto font-mono tabular-nums text-slate-500">
+            {hoursLine(weekHours, weekOpen)}
+          </span>
+        </div>
+
+        {/* ── THE SHAPE ON TOP, THE LEDGER UNDER IT ──────────────────────────────────
+            THE GRID IS A DESKTOP INSTRUMENT. Erik: "timecard scroll on my phone froze up
+            and doesnt show me the calendar so we may need a better layout for small
+            devices." On a 375px screen each week is seven columns scrolling SIDEWAYS inside
+            a stack scrolling DOWN — nested opposing scrollers that iOS handles badly, for a
+            grid where each column is 50px of unreadable slivers anyway. So the grid is
+            sm: and up, and only in By Day: a person's week is not a shape you read in time
+            blocks, it is a run of shifts and one subtotal.
+
+            IT IS AN ADDITION, NEVER A REPLACEMENT. The grid was briefly the ONLY thing a
+            desktop got in By Day, the list hidden under it at sm:. But a pill is id, day,
+            start, end, label, sub, color, href (TimeGridEvent) and nothing else — so the
+            offline disclosure, the notes, lunch, the code badge, a running clock's Clock
+            Out and the empty state all vanished at 640px, on the DEFAULT grouping. That is
+            0168 broken (a punch that cannot say where its time came from) and a dead end
+            (a week with no hours saying nothing at all). The list stays under the grid;
+            its rows open the editor, which holds Copy to Someone Else… (Wave 2).
+
+            They are not two lists either — the Erik complaint this wave exists to answer.
+            The grid answers "what shape was the week", the list answers "what happened and
+            is it right", and both are rendered from the SAME `events`, so they cannot
+            disagree the way the two ledgers did.
+
+            SINCE cn-v1151 THE PILL SAYS MORE (StackEntry.info: the span, the hours, the state,
+            the note), so a desktop reads an entry without opening it; the list under it is
+            still the ledger, and still the door. And the grid's Mon–Sun strip LOCKS under the
+            week line while the week scrolls (`stickyHeader`, at the height measured above). */}
+        {group === "day" && (
+          <div className="hidden border-b border-slate-100 sm:block">
+            <TimeGrid
+              days={wd.days}
+              events={events}
+              workStartMin={workStartMin}
+              workEndMin={workEndMin}
+              tz={tz}
+              initialNow={{ dayStr: todayStr, min: nowMin }}
+              stickyHeader
+            />
+          </div>
+        )}
+
+        <div>
+          {group === "day"
+            ? days
+                .filter((ds) => (byDay.get(ds) ?? []).length > 0)
+                .map((ds) => (
+                  <div key={ds} className="border-b border-slate-100 last:border-b-0">
+                    <div className={`flex flex-wrap items-baseline justify-between gap-x-2 px-3 pt-2 text-xs font-semibold ${ds === todayStr ? "text-brand" : "text-slate-500"}`}>
+                      <span>
+                        {labelFor(ds)}
+                        {!!mark && mark.start === ds && (
+                          <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-brand">new pay period</span>
+                        )}
+                      </span>
+                      <span className="font-mono tabular-nums text-slate-400">
+                        {hoursLine(
+                          Math.round((byDay.get(ds) ?? []).reduce((t, e) => t + e.hours, 0) * 100) / 100,
+                          (byDay.get(ds) ?? []).filter((e) => e.open).length,
+                        )}
+                      </span>
+                    </div>
+                    {/* The person leads the row when the days are the spine. */}
+                    <ShiftList rows={byDay.get(ds) ?? []} lead={(e) => e.person} />
+                  </div>
+                ))
+            : people.map((p) => (
+                <div key={p.id} className="border-b border-slate-100 last:border-b-0">
+                  {/* The person header the per-person Card used to carry: initials, the
+                      name, their hours for THIS week, and their miles with the commute
+                      split still visible. */}
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3 pt-2">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600">
+                      {initials(p.name)}
+                    </span>
+                    <span className="min-w-0 truncate text-sm font-semibold text-slate-900">{p.name}</span>
+                    <span className="ml-auto flex flex-wrap items-baseline justify-end gap-x-2">
+                      <span className="font-mono text-xs tabular-nums text-slate-500">
+                        {hoursLine(p.hours, p.open)}
+                      </span>
+                      {p.mileage.recorded > 0 && (
+                        <span className="text-xs text-slate-400">{mileageLine(p)}</span>
+                      )}
+                    </span>
+                  </div>
+                  {/* The day leads the row when the people are the spine. */}
+                  <ShiftList rows={p.entries} lead={(e) => labelFor(e.dayStr)} />
+                </div>
+              ))}
+          {/* THE one empty state for a week with no hours — the page's second one (an
+              EmptyState under the per-person cards, saying the same thing in other words)
+              went with the cards. Only weeks that have already STARTED ever get this far
+              (see the guard in TimecardStack), so it is always about a week that actually happened. */}
+          {events.length === 0 && (
+            <p className="px-3 py-4 text-center text-xs text-slate-400">
+              No hours this week. Clock-ins show up here.
+            </p>
+          )}
+        </div>
+
+      </Card>
     </div>
   );
 }

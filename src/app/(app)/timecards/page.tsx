@@ -25,6 +25,7 @@ import { formatDateTimeTz, timeEntryGridSpan, tzDayStartUtc, tzMinutesOfDay, tod
 import { balanceForPerson, drawIdsFrom, toPayPaymentRow, wagesOnly, type PayPaymentRow, type PersonBalance } from "@/lib/payroll-math";
 import { firstNameOf, pillColorForPerson } from "@/lib/employee-color";
 import { TimecardStack, type Grouping, type StackEntry } from "./timecard-stack";
+import { entryInfo } from "./entry-info";
 import { hmToMin } from "@/lib/tz";
 import { AddTimeEntry, type AddJob } from "./add-time-entry";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
@@ -290,8 +291,11 @@ export default async function TimecardsPage({
       /* job_code / source / notes / miles ride along now that this list is THE list: they are
          four flat columns, not the editor's projection, and two of them are disclosures (0168's
          manual/offline provenance) that must not go quiet just because a row is three weeks old.
-         split_from / split_how (0288) are what brackets the pieces of one split shift. */
-      "id, profile_id, clock_in, clock_out, lunch_minutes, job_id, job_code, source, notes, miles, split_from, split_how, profiles:profile_id(full_name), job:job_id(job_number, name)",
+         split_from / split_how (0288) are what brackets the pieces of one split shift.
+         paid_at (cn-v1151) is what lets the box on the grid say "Paid": the anchored week's rows
+         come from THIS read too, so without it here the word would never show (THE PROJECTION LAW:
+         the failure is always a select list). */
+      "id, profile_id, clock_in, clock_out, lunch_minutes, job_id, job_code, source, notes, miles, paid_at, split_from, split_how, profiles:profile_id(full_name), job:job_id(job_number, name)",
     )
     .gte("clock_in", stackFrom)
     .lt("clock_in", stackTo)
@@ -411,6 +415,29 @@ export default async function TimecardsPage({
     const open = !e.clock_out;
     const detail = detailById.get(String(e.id));
     const color = pillColorForPerson(e.profile_id);
+    const hours = open ? 0 : hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
+    /* THE DAY IT ENDED, WHEN THAT IS NOT THE DAY IT STARTED.
+     *
+     * A row is filed under its clock-IN day — the By Day group header, or the day that leads
+     * the row in By Person — and the span beside it is times only. So a shift punched 10:00 PM
+     * Monday and closed 6:30 AM Tuesday read "10:00 PM–6:30 AM" under Monday, with nothing on
+     * screen saying the clock-out was the next morning. timeEntryGridSpan clamps exactly this
+     * case at 1440, so the app knows these shifts happen; the per-person card this row replaced
+     * printed the DATE on both ends and never had the ambiguity.
+     *
+     * The hours were always right (hoursBetween is a duration), but this row is now the only
+     * rendering of the shift and Erik pays people off it. So the out-day is named whenever it
+     * differs, and stays out of the way on the ordinary shifts that end when they started. */
+    const sub = (() => {
+      const from = formatTime(e.clock_in, tz);
+      if (!e.clock_out) return `${from}–now`;
+      const crossed = todayStrInTz(tz, new Date(e.clock_out)) !== dayStr;
+      return `${from}–${formatTime(e.clock_out, tz)}${crossed ? ` ${formatDateShort(e.clock_out, tz)}` : ""}`;
+    })();
+    const noJob = !open && !e.job_id && !e.job_code;
+    const source: StackEntry["source"] = e.source === "manual" ? "manual" : e.source === "offline" ? "offline" : null;
+    const lunchMin = Number(e.lunch_minutes ?? 0);
+    const notes: string | null = e.notes ?? null;
     return {
       id: String(e.id),
       personId: String(e.profile_id ?? ""),
@@ -420,38 +447,28 @@ export default async function TimecardsPage({
       clockIn: String(e.clock_in),
       startMin,
       endMin,
-      hours: open ? 0 : hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes),
+      hours,
       open,
       miles: Number(e.miles ?? 0),
       label: `${firstNameOf(e.profiles?.full_name)}${e.job ? ` · ${jobLabel(e.job)}` : ""}`,
-      /* THE DAY IT ENDED, WHEN THAT IS NOT THE DAY IT STARTED.
-       *
-       * A row is filed under its clock-IN day — the By Day group header, or the day that leads
-       * the row in By Person — and the span beside it is times only. So a shift punched 10:00 PM
-       * Monday and closed 6:30 AM Tuesday read "10:00 PM–6:30 AM" under Monday, with nothing on
-       * screen saying the clock-out was the next morning. timeEntryGridSpan clamps exactly this
-       * case at 1440, so the app knows these shifts happen; the per-person card this row replaced
-       * printed the DATE on both ends and never had the ambiguity.
-       *
-       * The hours were always right (hoursBetween is a duration), but this row is now the only
-       * rendering of the shift and Erik pays people off it. So the out-day is named whenever it
-       * differs, and stays out of the way on the ordinary shifts that end when they started. */
-      sub: (() => {
-        const from = formatTime(e.clock_in, tz);
-        if (!e.clock_out) return `${from}–now`;
-        const crossed = todayStrInTz(tz, new Date(e.clock_out)) !== dayStr;
-        return `${from}–${formatTime(e.clock_out, tz)}${crossed ? ` ${formatDateShort(e.clock_out, tz)}` : ""}`;
-      })(),
+      sub,
       color: color.pill,
       dot: color.dot,
       href: hrefFor(weekOf(dayStr), `entry=${e.id}`),
       // THE NAME, NOT THE NUMBER, and still a way into the job itself (jobLabel is the SSOT).
       job: e.job_id && e.job ? { href: `/jobs/${e.job_id}`, label: jobLabel(e.job) } : null,
       jobCode: e.job_code ?? null,
-      noJob: !open && !e.job_id && !e.job_code,
-      source: e.source === "manual" ? "manual" : e.source === "offline" ? "offline" : null,
-      lunchMin: Number(e.lunch_minutes ?? 0),
-      notes: e.notes ?? null,
+      noJob,
+      source,
+      lunchMin,
+      notes,
+      /* THE BOX ON THE GRID SAYS WHAT THE ROW SAYS (cn-v1151; Erik: "more information on the timecard
+         entry box … perhaps even just the total hours"). Built from the SAME values the row above
+         reads — the span, the hours, the lunch, the lock, No Job, the offline disclosure, the notes
+         less the clock's take-back line — by one pure rule (./entry-info), so the grid can never say
+         one thing about a shift and the list under it another. With `info`, the grid draws the span
+         as the box's time line in place of `sub`; `sub` stays for the rows and the tests that read it. */
+      info: entryInfo({ sub, open, hours, lunchMin, paidAt: e.paid_at ?? null, noJob, source, notes }),
       family: familyById.get(String(e.id)) ?? null,
       familyConverted: (() => {
         const f = familyById.get(String(e.id));
