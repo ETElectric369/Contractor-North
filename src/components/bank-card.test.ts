@@ -19,6 +19,7 @@ vi.mock("@/app/(app)/organize/paperwork-actions", () => ({ keepPaperwork: vi.fn(
 
 import { BankCard, changeChoicesFor, livePicks, othersFor, rowsAnswered, toneOf } from "./bank-card";
 import { FuelTrendCard } from "@/app/(app)/analytics/fuel-trend-card";
+import { enTitleCase } from "../../tests/title-case-words";
 
 const textOf = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
 const buttons = (html: string) => [...html.matchAll(/<button[^>]*>[\s\S]*?<\/button>/g)].map((m) => ({ markup: m[0], text: textOf(m[0]) }));
@@ -204,6 +205,18 @@ describe("the bank card", () => {
     const html = render({ ...VIEW, rows: [{ ...VIEW.rows[0], guess: null, buttons: [{ id: "draw", label: "Owner's Draw" }, { id: "cost:Fuel", label: "Fuel" }] }] });
     expect(textOf(html)).toContain("No guess");
     expect(html).not.toMatch(/>Guess</);
+  });
+
+  /** A refund whose charge is still a question (cn-v1154): the row has a reason but no guess, and says both. */
+  it("a row with a hint and no guess says both: the reason under the title, No guess beside it", () => {
+    const hint = "Answer the $219.15 charge on Sep 12 first. This return follows it.";
+    const row = { ...VIEW.rows[1], guess: null, hint, buttons: [{ id: "not_income", label: "Already Counted or Not Income" }, { id: "other_income", label: "Other Income" }] };
+    const html = render({ ...VIEW, rows: [row] });
+    const text = textOf(html);
+    expect(text).toContain("No guess");
+    expect(text).toContain(hint);
+    expect(html).not.toMatch(/>Guess</);
+    expect(buttons(html).map((b) => b.text)).toEqual(expect.arrayContaining(["Already Counted or Not Income", "Other Income"]));
   });
 
   /**
@@ -454,5 +467,50 @@ describe("where the money went: one colour per segment", () => {
   it("no two segments share a colour", () => {
     const keys = ["fuel", "business", "materials", "suppliers", "crew", "draw", "cash_out", "not_cost", "books", "need", "other"];
     expect(new Set(keys.map(toneOf)).size).toBe(keys.length);
+  });
+});
+
+/**
+ * A RECEIPT OF THE SAME MONEY, OFFERED AS A TAP (cn-v1154): the row's guess is the receipt, so the Guess
+ * badge sits on its button; the reason reads under the row in full; the button's words stay short enough
+ * for a phone and Title Case; and the row's own Other… list carries the receipt said in full. Made up.
+ */
+describe("a receipt offered as a tap", () => {
+  const RECEIPT_ROW: BankView["rows"][number] = {
+    id: "line:twh",
+    title: "TWH STORE 21 ANYTOWN",
+    money: "$27.43",
+    dates: "Sep 24",
+    direction: "out",
+    single: true,
+    guess: "bill:b-thistle",
+    hint: "Same as the $27.43 receipt on Sep 23 at Thistlewood Hardware on 41 Larkspur · J-054 — Marla Finch.",
+    buttons: [
+      { id: "bill:b-thistle", label: "Same as the $27.43 Receipt on Sep 23" },
+      { id: "draw", label: "Owner's Draw" },
+      { id: "cost:Fuel", label: "Fuel" },
+    ],
+    others: [
+      { id: "bill:b-thistle", label: "Same as the $27.43 Receipt on Sep 23 · Thistlewood Hardware · 41 Larkspur · J-054 — Marla Finch" },
+      { id: "draw", label: "Owner's Draw" },
+    ],
+  };
+
+  it("the Guess badge sits on the receipt's button, the reason reads under the row, and the words fit a phone", () => {
+    const html = render({ ...VIEW, rows: [RECEIPT_ROW] });
+    const text = textOf(html);
+    const labels = buttons(html).map((b) => b.text);
+    expect(labels.slice(0, 4)).toEqual(["Same as the $27.43 Receipt on Sep 23 Guess", "Owner's Draw", "Fuel", "Other…"]);
+    expect(labels.filter((l) => l.endsWith(" Guess"))).toHaveLength(1);
+    // The job in full in the reason (the law: name jobs, not numbers); the button stays short.
+    expect(text).toContain("Same as the $27.43 receipt on Sep 23 at Thistlewood Hardware on 41 Larkspur · J-054 — Marla Finch.");
+    expect(text).not.toContain("No guess");
+    // Nothing is pressed until a person taps.
+    expect(html).not.toContain('aria-pressed="true"');
+    const label = RECEIPT_ROW.buttons[0].label;
+    expect(label.length).toBeLessThanOrEqual(40);
+    expect(enTitleCase(label)).toBe(true);
+    // The row brings its own Other… list: the receipt, said in full, is reachable there too.
+    expect(othersFor(RECEIPT_ROW, VIEW).map((o) => o.id)).toEqual(["bill:b-thistle", "draw"]);
   });
 });

@@ -29,6 +29,7 @@ import {
   learnableAnswer,
   lineIdOf,
   namesOf,
+  onAccountForMatch,
   PAY_WINDOW,
   ruleChoice,
   sayBand,
@@ -43,6 +44,7 @@ import {
   storedChoiceName,
   teachesNoRule,
   validPicks,
+  WORKED_DAYS_BACK,
   type BankAppliedPass,
   type BankNames,
   type BankSortedRead,
@@ -58,6 +60,7 @@ import {
   type MatchTable,
   type StoredBank,
 } from "@/lib/bank-download";
+import { isStillOwed } from "@/lib/supplier-owed";
 // THE JOBS A PAPER MAY BE FILED TO, from the one list every other paper picker reads (PR1): every
 // open job AND every finished one, never a cancelled one. A bank line is a paper like any other.
 import { insertPaperRow, PAPER_JOB_STATUSES } from "@/app/(app)/organize/paperwork-core";
@@ -89,6 +92,12 @@ import { bandHolding, bandHolds, bandWithout, REANSWER_UNKNOWN, reanswerRefusal,
 type Db = any;
 
 export const BANK_NEEDS_UPDATE = "Sorting a bank download needs one database update first. It is waiting here and nothing was changed.";
+
+/** The most minutes one punch counts toward "the job the crew was on that day" (cn-v1154): sixteen
+ *  hours, a long day and then some. A clock somebody forgot to punch out runs for days, and counted to
+ *  `now` it would outweigh every honest punch on the day it began and make its job that day's guess
+ *  on every store line. The punch stays on the day it started; only its weight is held to a day's worth. */
+const WORKED_PUNCH_CAP_MINUTES = 16 * 60;
 
 /** bank_lines / bank_rules / a bank_line_id column not on this database yet. */
 export function isMissingBank(err: unknown): boolean {
@@ -166,9 +175,10 @@ const chunks = <T,>(xs: readonly T[], n: number): T[][] => {
 /**
  * Everything the plan compares a download with, for this company, around the download's own dates.
  * A failed read is a problem said on the card, never an empty table (a missing payment would read
- * as a deposit nobody recorded).
+ * as a deposit nobody recorded). `now` is the instant an open clock is counted to (a test hands in
+ * its own); it feeds a guess only, never the plan's fingerprint.
  */
-export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownload, tz: string): Promise<{ books: BankBooks | null; problem: string | null }> {
+export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownload, tz: string, now: Date = new Date()): Promise<{ books: BankBooks | null; problem: string | null }> {
   if (!dl.from || !dl.to) return { books: null, problem: "This download has no dated lines to sort." };
   const from = shiftDay(dl.from, -14);
   const to = shiftDay(dl.to, 10);
@@ -188,7 +198,40 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
   // to avoid dragging a year of payments across the wire.
   const periodStartIso = tzDayStartUtc(dl.from, tz).toISOString();
   const periodEndIso = tzDayStartUtc(shiftDay(dl.to, 1), tz).toISOString();
-  const [alreadyR, payR, periodPayR, crewR, supR, billR, pettyR, acctR, aliasR, invR, peopleR, ruleR, paidR, docR, storedR, jobR, namesJobs] = await Promise.all([
+  // THE CREW'S CLOCKED TIME around the download (cn-v1154): from the start of two days before its first
+  // line (a card charge posts one to three days after the counter, WORKED_DAYS_BACK) to the end of its
+  // last day, which is the channel view's own end.
+  const workedFromIso = tzDayStartUtc(shiftDay(dl.from, -WORKED_DAYS_BACK), tz).toISOString();
+  // Whether bank_lines can hold a job yet (0375) decides which columns the stored-lines read may ask
+  // for, so that one read waits on this answer and nothing else does.
+  const namesJobsP = bankLinesNameJobs(supabase, orgId);
+  const billsP = paged<any>((f, t) =>
+    supabase
+      .from("bills")
+      // status and amount_paid (0383) say whether a bill on an on-account store is still owed there
+      // (onAccountForMatch): an owed bill is paid by the account's lump payment, never by its own line.
+      .select("id, amount, bill_date, supplier, job_id, category, supplier_account_id, status, amount_paid")
+      .eq("org_id", orgId)
+      .is("superseded_by_bill_id", null)
+      .is("bank_line_id", null)
+      .gte("bill_date", from)
+      .lte("bill_date", to)
+      .order("id")
+      .range(f, t),
+  );
+  // WHICH OF THOSE BILLS A SUPPLIER PAYMENT PAID (supplier_payment_allocations, 0383): a bill paid that
+  // way never posts its own money, so it must stay out of the counter match. Read for the bills just
+  // read and no more (their ids, 150 a call, the company's own rows): the company's whole history of
+  // payments is not the question, and a window with no bills asks nothing. A bills read that failed
+  // says so itself. A voided payment's rows are left in: 0383 reopens the bills it paid, which keeps
+  // them out as owed anyway, and a stale row can only turn a match into a question.
+  const allocP: Promise<{ data: { bill_id: string }[]; error: unknown }> = billsP.then(async (b) => {
+    const ids = b.error ? [] : (b.rows as any[]).map((x) => String(x.id));
+    const parts = await Promise.all(chunks(ids, 150).map((part) => supabase.from("supplier_payment_allocations").select("bill_id").eq("org_id", orgId).in("bill_id", part)));
+    const error = parts.map((p: { error: unknown }) => p.error).find(Boolean) ?? null;
+    return { data: error ? [] : parts.flatMap((p: { data: { bill_id: string }[] | null }) => p.data ?? []), error };
+  });
+  const [alreadyR, payR, periodPayR, crewR, supR, billR, pettyR, acctR, aliasR, invR, peopleR, ruleR, paidR, docR, storedR, jobR, namesJobs, allocR, owedR, workedR] = await Promise.all([
     already,
     paged<any>((f, t) =>
       supabase
@@ -239,18 +282,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
         .order("id")
         .range(f, t),
     ),
-    paged<any>((f, t) =>
-      supabase
-        .from("bills")
-        .select("id, amount, bill_date, supplier, job_id, category, supplier_account_id")
-        .eq("org_id", orgId)
-        .is("superseded_by_bill_id", null)
-        .is("bank_line_id", null)
-        .gte("bill_date", from)
-        .lte("bill_date", to)
-        .order("id")
-        .range(f, t),
-    ),
+    billsP,
     paged<any>((f, t) =>
       supabase.from("petty_cash").select("id, amount, tx_date, kind").eq("org_id", orgId).is("bank_line_id", null).gte("tx_date", from).lte("tx_date", to).order("id").range(f, t),
     ),
@@ -275,16 +307,20 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
       .order("invoice_date", { ascending: false })
       .limit(2000),
     // EVERY LINE ALREADY COUNTED 3 days either side, under any key: the same transaction in a
-    // download of another format carries another key, and must still count once.
-    paged<any>((f, t) =>
-      supabase
-        .from("bank_lines")
-        .select("line_key, posted_on, amount, account_last4, description, check_number")
-        .eq("org_id", orgId)
-        .gte("posted_on", shiftDay(dl.from!, -3))
-        .lte("posted_on", shiftDay(dl.to!, 3))
-        .order("id")
-        .range(f, t),
+    // download of another format carries another key, and must still count once. With the answer each
+    // holds (cn-v1154: choice, bucket, and the job once bank_lines can hold one, 0375), so a refund can
+    // find the charge it undoes and say where that charge's money went.
+    namesJobsP.then((hasJob) =>
+      paged<any>((f, t) =>
+        supabase
+          .from("bank_lines")
+          .select(`line_key, posted_on, amount, account_last4, description, check_number, choice, bucket${hasJob ? ", job_id" : ""}`)
+          .eq("org_id", orgId)
+          .gte("posted_on", shiftDay(dl.from!, -3))
+          .lte("posted_on", shiftDay(dl.to!, 3))
+          .order("id")
+          .range(f, t),
+      ),
     ),
     // THE JOBS A LINE MAY BE PUT ON (0375), newest first: every open job and every finished one, never
     // a cancelled one — a line from June can belong to a job that is complete now, and only a job that
@@ -297,12 +333,46 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
       .in("status", PAPER_JOB_STATUSES)
       .order("created_at", { ascending: false })
       .limit(BANK_JOBS),
-    bankLinesNameJobs(supabase, orgId),
+    namesJobsP,
+    allocP,
+    // THE ON-ACCOUNT STORES WITH A BILL STILL OWED, any date (cn-v1154): only then is "Pay <account>"
+    // the guess for a line that names the account. The balance such a line pays is usually older than
+    // this download's own weeks, so the bills window above is no help here. Every bill filed on an
+    // account is read with the fields the one still-owed test reads (lib/supplier-owed isStillOwed),
+    // and that test decides below — the rule is never asked of the database by status, because the
+    // tree keeps it in one place (supplier-owed-one-place.test.ts). A failed read guesses nothing.
+    paged<any>((f, t) =>
+      supabase
+        .from("bills")
+        .select("supplier_account_id, status, amount, amount_paid, superseded_by_bill_id")
+        .eq("org_id", orgId)
+        .is("superseded_by_bill_id", null)
+        .not("supplier_account_id", "is", null)
+        .order("id")
+        .range(f, t),
+    ),
+    // THE CREW'S TIME ON JOBS around the download (cn-v1154), for "the job the crew was on that day"
+    // guesses. Only punches on a job (index 0249: org_id, clock_in). A failed read is no such guess,
+    // never the whole card.
+    paged<any>((f, t) =>
+      supabase
+        .from("time_entries")
+        .select("job_id, clock_in, clock_out, lunch_minutes")
+        .eq("org_id", orgId)
+        .not("job_id", "is", null)
+        .gte("clock_in", workedFromIso)
+        .lt("clock_in", periodEndIso)
+        .order("id")
+        .range(f, t),
+    ),
   ]);
 
   const errors = [
     ...(alreadyR as { error: unknown }[]).map((r) => r.error),
     payR.error, periodPayR.error, crewR.error, supR.error, billR.error, pettyR.error, acctR.error, aliasR.error, invR.error, peopleR.error, ruleR.error, paidR.error, storedR.error,
+    // The allocations decide a MATCH (which bill stays out of it), so a failed read is the card's
+    // problem like any book above, never a quiet empty set that would match a lump-paid bill.
+    allocR.error,
   ].filter(Boolean);
   if (errors.length) {
     if (errors.some(isMissingBank)) return { books: null, problem: BANK_NEEDS_UPDATE };
@@ -329,6 +399,20 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
     list.push(String(d.invoice_number ?? ""));
     papersOf.set(String(d.supplier_account_id), list);
   }
+  // The accounts with a bill still owed (a failed read: none, and no Pay guess anywhere).
+  if (owedR.error) reportError("bills:bank.loadBooks.owed", owedR.error, { orgId });
+  const owedAccounts = new Set(
+    ((owedR.error ? [] : owedR.rows) as any[])
+      .filter((b) =>
+        isStillOwed({
+          status: b.status ?? null,
+          amount: b.amount,
+          amountPaid: b.amount_paid === null || b.amount_paid === undefined ? null : Number(b.amount_paid),
+          supersededByBillId: b.superseded_by_bill_id ?? null,
+        }),
+      )
+      .map((b) => String(b.supplier_account_id)),
+  );
   const accounts = ((acctR.data ?? []) as any[]).map((a) => ({
     id: String(a.id),
     name: String(a.name ?? ""),
@@ -336,8 +420,10 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
     branch: a.branch_code ?? branchFromNumbers(papersOf.get(String(a.id)) ?? []),
     onAccount: a.on_account !== false,
     aliases: aliases.get(String(a.id)) ?? [],
+    owed: owedAccounts.has(String(a.id)),
   }));
   const onAccount = new Set(accounts.filter((a) => a.onAccount).map((a) => a.id));
+  const allocatedBillIds = new Set(allocR.data.map((a) => String(a.bill_id)));
   const dayOf = (iso: string) => todayStrInTz(tz, new Date(iso));
   // NO JOB IS OFFERED until bank_lines can hold one (0375), and none if the jobs couldn't be read.
   // Each one said in full by the repo's one job-label helper, so no screen invents a second format.
@@ -392,7 +478,19 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
       supplier: String(b.supplier ?? ""),
       jobId: b.job_id ?? null,
       category: b.category ?? null,
-      onAccount: !!b.supplier_account_id && onAccount.has(String(b.supplier_account_id)),
+      // Out of the counter match only while the account still carries it: owed there, or paid by the
+      // account's lump payment. A receipt paid at that store's register matches like any other.
+      onAccount: onAccountForMatch(
+        {
+          id: String(b.id),
+          supplierAccountId: b.supplier_account_id ? String(b.supplier_account_id) : null,
+          status: b.status ?? null,
+          amountPaid: b.amount_paid === null || b.amount_paid === undefined ? null : Number(b.amount_paid),
+          amount: Number(b.amount) || 0,
+        },
+        onAccount,
+        allocatedBillIds,
+      ),
       supplierAccountId: b.supplier_account_id ? String(b.supplier_account_id) : null,
     })),
     pettyCash: (pettyR.rows as any[]).map((p) => ({ id: String(p.id), cents: centsOf(p.amount), day: String(p.tx_date), kind: String(p.kind ?? "") })),
@@ -428,8 +526,23 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
       last4: l.account_last4 ?? null,
       description: String(l.description ?? ""),
       check: l.check_number ?? null,
+      // The answer the line holds, under the same normalized word the `already` map carries; the job
+      // only once the column is there (0375), so a reader can tell "no job" from "not asked".
+      choice: l.choice === null || l.choice === undefined ? null : storedChoiceName(String(l.choice)),
+      bucket: l.bucket ?? null,
+      ...(namesJobs ? { jobId: l.job_id ?? null } : {}),
     })),
+    // ONE ROW PER PUNCH ON A JOB: the company day it started, its minutes less lunch, an open clock
+    // counted to `now`, and no punch heavier than WORKED_PUNCH_CAP_MINUTES (a clock left open for days).
+    // jobsWorkedOn adds a day's punches up. A failed read: no punches, said once.
+    worked: (workedR.error ? [] : (workedR.rows as any[])).map((e) => {
+      const start = new Date(String(e.clock_in)).getTime();
+      const end = e.clock_out ? new Date(String(e.clock_out)).getTime() : now.getTime();
+      const span = Math.min(WORKED_PUNCH_CAP_MINUTES, Math.round((end - start) / 60_000));
+      return { jobId: String(e.job_id), day: dayOf(String(e.clock_in)), minutes: Math.max(0, span - (Number(e.lunch_minutes) || 0)) };
+    }),
   };
+  if (workedR.error) reportError("bills:bank.loadBooks.worked", workedR.error, { orgId });
   return { books, problem: null };
 }
 
@@ -709,6 +822,19 @@ export async function applyBankCore(
     w.choice = null;
     paymentsMarked++;
   }
+  // A RECEIPT ALREADY ON THE BOOKS, TAPPED (cn-v1154): a person's "Same as the $27.43 Receipt" MARKS that
+  // bill, exactly as a crew payment or an invoice's payment already recorded is marked above. The receipt
+  // keeps the bucket or job it was filed in and the line is stored 'matched' (storedAnswer); writing a
+  // second bill would count the money twice. validPicks already held the pick to a receipt this row was
+  // offered, one of this company's, and one no other row of this Apply names.
+  let receiptsMarked = 0;
+  for (const w of work) {
+    if (w.sortedBy !== "person" || w.choice?.choice !== "bill") continue;
+    taken.add(w.choice.billId);
+    w.match = { table: "bills", ids: [w.choice.billId] };
+    w.choice = null;
+    receiptsMarked++;
+  }
 
   // CLAIM THE ROW before anything is written.
   const claimed = await supabase
@@ -776,7 +902,13 @@ export async function applyBankCore(
       const got = ((data ?? []) as { id: string }[]).map((r) => String(r.id));
       if (error || got.length !== w.match!.ids.length) {
         if (got.length) await supabase.from(table).update({ bank_line_id: null }).eq("org_id", who.orgId).in("id", got).eq("bank_line_id", id).select("id");
-        await unwrite([w.line.key], `${w.line.description} (${w.line.postedOn}) wasn't matched: what it matched changed a moment ago.${error ? ` ${dbError(error)}` : ""}`);
+        // A RECEIPT A PERSON TAPPED (cn-v1154) that another screen matched first is said with the next
+        // step: the line comes off and is asked again, and the card asks it without that receipt.
+        const why =
+          w.sortedBy === "person" && table === "bills"
+            ? `${w.line.description} (${w.line.postedOn}) wasn't matched: that receipt was matched a moment ago. Look again and answer it once more.`
+            : `${w.line.description} (${w.line.postedOn}) wasn't matched: what it matched changed a moment ago.`;
+        await unwrite([w.line.key], `${why}${error ? ` ${dbError(error)}` : ""}`);
       }
     }
   }
@@ -1035,10 +1167,15 @@ export async function applyBankCore(
   //     account that spelling - an alias, removable on the supplier's card like any other. Apply is
   //     the whole prompt: the match proved it. A spelling another account already owns is said, not
   //     taken. Undo leaves it: it is identity the match proved, not an answer.
+  //     A RECEIPT A PERSON TAPPED (cn-v1154) proves the identity the other way round: the line's words
+  //     named nobody the books knew, and the person said which receipt it is, so the bank's words become
+  //     the receipt's account's spelling (proof "tap": the typed-name test is skipped, every other guard
+  //     holds). A receipt on no account teaches nothing.
   const identities = new Map<string, { accountId: string; accountName: string; alias: string }>();
   for (const w of work) {
-    if (w.sortedBy !== "match" || !w.match || !written(w)) continue;
-    const learnt = identityToLearn(w.line, { how: "match", table: w.match.table, ids: w.match.ids, said: "" }, books);
+    if (!w.match || !written(w)) continue;
+    const proof = w.sortedBy === "person" ? "tap" : "name";
+    const learnt = identityToLearn(w.line, { how: "match", table: w.match.table, ids: w.match.ids, said: "" }, books, proof);
     if (learnt) identities.set(`${learnt.accountId}|${learnt.alias.toLowerCase()}`, learnt);
   }
   const rememberedWho: string[] = [];
@@ -1121,6 +1258,7 @@ export async function applyBankCore(
     "." +
     (crewMarked ? ` ${crewMarked === 1 ? "1 crew payment was" : `${crewMarked} crew payments were`} already recorded, so ${crewMarked === 1 ? "it was" : "they were"} marked, never written twice.` : "") +
     (paymentsMarked ? ` ${paymentsMarked === 1 ? "1 deposit was" : `${paymentsMarked} deposits were`} already a payment on ${paymentsMarked === 1 ? "its" : "their"} invoice, so ${paymentsMarked === 1 ? "that payment was" : "those payments were"} marked, never written twice.` : "") +
+    (receiptsMarked ? ` ${receiptsMarked === 1 ? "1 receipt was" : `${receiptsMarked} receipts were`} already on the books, so ${receiptsMarked === 1 ? "it was" : "they were"} marked, never written twice.` : "") +
     (leftLines ? ` ${leftLines} left for later ${leftLines === 1 ? "is" : "are"} not counted yet and wait${leftLines === 1 ? "s" : ""} on the card.` : "") +
     (remembered.length ? ` Remembered for next time: ${remembered.join("; ")}. Forget one under See How It Sorted.` : "") +
     (rememberedWho.length ? ` Remembered ${rememberedWho.join(", ")} (a spelling on the supplier's card).` : "");
@@ -1486,7 +1624,7 @@ export async function reanswerBankLineCore(
     learnable: false,
     merchantKey: String(line.merchant_key ?? ""),
   };
-  const fits = validPicks({ line: choiceId(c) }, { groups: [asRow] }, { accounts: [], crew: [], invoices: [], jobs });
+  const fits = validPicks({ line: choiceId(c) }, { groups: [asRow] }, { accounts: [], crew: [], invoices: [], jobs, bills: [] });
   if (fits.refused.length) return { ok: false, error: `Nothing was changed. ${fits.refused[0].replace(/\.$/, "")}.` };
   // THE ROW THE NEW ANSWER WRITES, by Apply's one shape, and the cost guard asked at the write as well.
   const newRow =

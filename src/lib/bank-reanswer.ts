@@ -26,8 +26,9 @@ export const REANSWER_TO = ["cost", "job", "draw", "cash_out", "not_cost", "not_
 export type ReanswerTo = (typeof REANSWER_TO)[number];
 
 /** The payment answers: each ties the line to a row somebody else's money is in (a payment on an
- *  invoice, a supplier's, a crew member's) or to a row already there (matched). */
-export const REANSWER_PAYMENT_ANSWERS = ["matched", "supplier", "crew", "invoice"] as const;
+ *  invoice, a supplier's, a crew member's) or to a row already there (matched; a receipt tapped on the
+ *  card, cn-v1154, is stored as one). */
+export const REANSWER_PAYMENT_ANSWERS = ["matched", "supplier", "crew", "invoice", "bill"] as const;
 
 /** Why a payment answer is not offered, and the one road that does it today. */
 export const REANSWER_TO_PAYMENT = "Changing a line to a payment answer isn't a one-line change yet: Undo the download and apply it again.";

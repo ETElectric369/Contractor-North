@@ -34,7 +34,8 @@ describe("the answers a line may be changed to", () => {
   });
 
   it("refuses every payment answer in the one sentence, with the one road that does it today", () => {
-    for (const id of ["matched", "supplier:acct-1", "crew:pat", "invoice:inv-1"]) {
+    // A receipt tapped on the card (cn-v1154) is stored 'matched', and a bill id is refused the same way.
+    for (const id of ["matched", "supplier:acct-1", "crew:pat", "invoice:inv-1", "bill:b-1"]) {
       expect(reanswerRefusal(id), id).toBe(REANSWER_TO_PAYMENT);
       expect(reanswerOffers(id), id).toBe(false);
     }

@@ -6,6 +6,7 @@ import { findHeaderRow, fingerprintOf, headerKey, looksLikePaperNumber, readDate
 // bills row with NO LINES under it, so which way the money goes decides whether a job is an answer at
 // all. jobRefusalFor below asks this guard; nothing in this module decides that for itself.
 import { jobCostRefusal } from "@/lib/job-cost-guard";
+import { isStillOwed } from "@/lib/supplier-owed";
 // EVERY LINE PROVES THE ONE BEFORE IT (2026-10-02). The reader already FOUND the balance column — it is
 // in BANK_FIELDS, bankTableProof treats it as proof a table is a bank's, and chargesPrintedPositive
 // leans on it — and then threw the value away: there was no balance on BankLine at all. It is carried
@@ -884,7 +885,17 @@ export type BankChoice =
    * from his personal account were customers paying his Venmo, already recorded against their
    * invoices, so the right answer was Already Counted. A person picks this one on purpose.
    */
-  | { choice: "owner_in" };
+  | { choice: "owner_in" }
+  /**
+   * THE RECEIPT THIS LINE IS (cn-v1154): a bill already on the books for the same money within three
+   * days, offered as a tap even when the bank's words and the bill's typed name share nothing — the
+   * sure match needs a name, and a counter receipt typed "HD" under a line reading "1111-HARDWAR #221"
+   * was asked about every month. Taking it MARKS that bill (bills.bank_line_id) and the line is stored
+   * 'matched', exactly as the plan's own bill match stores one: the receipt keeps the bucket or job it
+   * was filed in, and no second bill is written. It is never a rule (a receipt is one paper), and never
+   * written as a word of its own.
+   */
+  | { choice: "bill"; billId: string };
 
 export type ChoiceName = BankChoice["choice"];
 
@@ -896,6 +907,10 @@ export type ChoiceName = BankChoice["choice"];
  */
 export const CASH_OUT_STORED = "petty_cash";
 export function storedChoice(c: BankChoice): string {
+  // A receipt tapped as the answer (cn-v1154) stores no answer of its own: the line is 'matched' and the
+  // receipt carries the mark, the same row the plan's own bill match writes. 'bill' is no word 0363's
+  // CHECK allows, and must never reach a row.
+  if (c.choice === "bill") return "matched";
   return c.choice === "cash_out" ? CASH_OUT_STORED : c.choice;
 }
 /** A stored word as the app's choice name (the legacy word for Cash Taken Out comes back as cash_out). */
@@ -916,6 +931,8 @@ export function choiceId(c: BankChoice): string {
       return `invoice:${c.invoiceId}`;
     case "job":
       return `job:${c.jobId}`;
+    case "bill":
+      return `bill:${c.billId}`;
     default:
       return c.choice;
   }
@@ -941,6 +958,10 @@ export function parseChoiceId(id: unknown): BankChoice | null {
     // A job, exactly like an invoice: the id is checked against this company's own jobs in validPicks.
     case "job":
       return UUIDISH.test(a ?? "") ? { choice: "job", jobId: a } : null;
+    // A receipt (cn-v1154), the same way: validPicks checks it is one of this company's bills AND one the
+    // row was offered.
+    case "bill":
+      return UUIDISH.test(a ?? "") ? { choice: "bill", billId: a } : null;
     // Cash Taken Out, and the word it had before W1-34 (a card's pick saved under the old name).
     case "cash_out":
     case CASH_OUT_STORED:
@@ -1007,6 +1028,10 @@ export function jobRefusalFor(direction: "in" | "out"): string | null {
  *  money out takes the rest. A job is money out only (jobRefusalFor). */
 export function choiceFits(c: BankChoice, direction: "in" | "out"): boolean {
   if (c.choice === "job") return !jobRefusalFor(direction);
+  // A RECEIPT FITS THE DIRECTION ITS OWN SIGN SAYS (cn-v1154): a receipt is money out, a return money in,
+  // and the choice carries only the id. The plan offers one only where the signs already agree
+  // (sameMoneyBill), and validPicks reads the sign off the bill itself; here there is nothing to refuse.
+  if (c.choice === "bill") return true;
   return direction === "in" ? IN_CHOICES.has(c.choice) || COSTING_CHOICES.has(c.choice) : !IN_CHOICES.has(c.choice);
 }
 
@@ -1017,6 +1042,10 @@ export type BankNames = {
   /** Each job said the way Erik reads one: the place, the number and who ("i cant tell by job
    *  numbers alone"). Built by namesOf from the books, never a bare number. */
   jobs: Map<string, string>;
+  /** The button words of each receipt a row may be offered (receiptWords, cn-v1154), by bill id. Only
+   *  where the books are at hand (namesOf with bills); a sentence about a stored line never needs them,
+   *  because a line that took a receipt is stored 'matched' and said so. */
+  bills?: Map<string, string>;
 };
 
 /** The button's words, Title Case. */
@@ -1053,6 +1082,10 @@ export function choiceLabel(c: BankChoice, names: BankNames): string {
     // are the same words on the bank card, in the Other… list and on the profit and loss.
     case "owner_in":
       return "Owner's Money In";
+    // "Same as the $27.43 Receipt on Sep 23" (receiptWords, cn-v1154): the money and the day, so two
+    // receipts offered on one line can be told apart. The row's hint carries the store and the job.
+    case "bill":
+      return names.bills?.get(c.billId) ?? "Same as the Receipt";
   }
 }
 
@@ -1148,6 +1181,10 @@ export type BooksBill = {
   supplier: string;
   jobId: string | null;
   category: string | null;
+  /** MUST STAY OUT of the counter match (onAccountForMatch, cn-v1154): a bill still owed on an
+   *  on-account store, or one the account's lump payment paid (supplier_payment_allocations), never
+   *  posts its own money as a line. Before cn-v1154 this was every bill on an on-account store, which
+   *  kept a receipt paid at that store's register from matching its own charge. */
   onAccount: boolean;
   /** The supplier account the bill was filed on, if any (2026-10-07): the sure bill match reads the
    *  account's spellings too, and a match on the bill's typed name alone teaches the account the
@@ -1155,7 +1192,19 @@ export type BooksBill = {
   supplierAccountId?: string | null;
 };
 export type BooksPetty = { id: string; cents: number; day: string; kind: string };
-export type BooksAccount = { id: string; name: string; number: string | null; branch: string | null; onAccount: boolean; aliases: string[] };
+export type BooksAccount = {
+  id: string;
+  name: string;
+  number: string | null;
+  branch: string | null;
+  onAccount: boolean;
+  aliases: string[];
+  /** Does the account have a bill still owed (lib/supplier-owed isStillOwed, any date; cn-v1154)? Only then
+   *  is "Pay <account>" the GUESS for a line that names it: with nothing owed, such a line is most
+   *  likely a purchase at that store's register. Absent when nothing read it, which guesses nothing;
+   *  the Pay button itself stays for every on-account account (buttonsFor). */
+  owed?: boolean;
+};
 export type BooksInvoice = { id: string; number: string; balanceCents: number; customer?: string | null };
 export type BooksCrew = { id: string; name: string };
 /** A job a line may be put on, with its label already made by the repo's one job-label helper
@@ -1174,8 +1223,24 @@ export type BooksRule = {
   maxCents?: number | null;
 };
 export type AlreadyLine = { choice: string; bucket: string | null; amountCents: number };
-/** A line already in bank_lines around this download's days, whatever download counted it. */
-export type StoredLine = { key: string; postedOn: string; cents: number; last4: string | null; description: string; check: string | null };
+/**
+ * A line already in bank_lines around this download's days, whatever download counted it. Its answer
+ * rides along when the read carries it (cn-v1154: bank_lines.choice, bucket, job_id), so a refund can
+ * find the charge it undoes and say where that charge's money went; absent on a read made before then.
+ */
+export type StoredLine = {
+  key: string;
+  postedOn: string;
+  cents: number;
+  last4: string | null;
+  description: string;
+  check: string | null;
+  choice?: string | null;
+  bucket?: string | null;
+  jobId?: string | null;
+};
+/** One job's clocked time on one company day (yyyy-mm-dd), for "the job worked that day" guesses. */
+export type WorkedDay = { jobId: string; day: string; minutes: number };
 
 export type BankBooks = {
   /** line_key → what it was, for every line of this download already in bank_lines. */
@@ -1205,6 +1270,9 @@ export type BankBooks = {
   crewPaid: { profileId: string; cents: number }[];
   /** The company's bank lines 3 days either side of this download, under any key (the twin check). */
   stored?: StoredLine[];
+  /** The crew's clocked time by job and day around this download (cn-v1154): a counter receipt's
+   *  job is most often the job the crew was on that day. Empty until the read supplies it. */
+  worked?: readonly WorkedDay[];
 };
 
 // ── THE PLAN ───────────────────────────────────────────────────────────────────────────────────
@@ -1241,6 +1309,13 @@ export type NeedGroup = {
   /** A sentence for the row when the books hold something that looks like it ("Maybe the payment on
    *  INV-1001 of Sep 1, already in North"), or null. */
   hint?: string | null;
+  /**
+   * THE RECEIPTS THIS ROW MAY BE (cn-v1154), as choice ids ("bill:<id>"), the guess first: a bill of the
+   * same money within three days (sameMoneyBill), and its runner-up when two could be it. Only on a row
+   * that is one line, and the only receipts validPicks takes for it — the Other… list never lists every
+   * bill, only these. Absent where none was offered.
+   */
+  receipts?: string[];
   merchantKey: string;
   /**
    * EACH LINE THE ROW HOLDS (2026-10-07), so a merchant's row can OPEN and take an answer PER LINE:
@@ -1283,6 +1358,14 @@ export function dayDiff(a: string, b: string): number {
   return Math.round((Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) / 86_400_000);
 }
 
+/** The day `days` after `ymd` ("YYYY-MM-DD"; negative walks back). Calendar days at noon UTC, so a
+ *  clock change never lands on the wrong day. */
+export function shiftDay(ymd: string, days: number): string {
+  const t = new Date(`${ymd}T12:00:00Z`);
+  t.setUTCDate(t.getUTCDate() + days);
+  return t.toISOString().slice(0, 10);
+}
+
 /** How far a payment the company wrote (crew pay, a supplier's) may be from the bank's day: up to
  *  60 days before it posts (a check cashed late), up to 5 after (recorded after the bank posted). */
 export const PAY_WINDOW = { before: 60, after: 5 } as const;
@@ -1294,11 +1377,62 @@ export function inPayWindow(postedOn: string, recordedOn: string): boolean {
 const compact = (s: string) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
 /**
+ * WORDS THAT NAME NOBODY: the bank's noise around every merchant (NOISE), the words a bank puts in
+ * front of the payee to say how the money went (DROP_LEAD), and the words that open a name but name
+ * nobody alone (STOP_FIRST). A prefix match reads a cut-short word as a name, so none of these may be
+ * one: "ONLINE" opens "Online Metals" and "TRANSFER" opens "Transfer Flow", and neither is the payee.
+ */
+const NAMES_NOBODY = new Set([...NOISE, ...DROP_LEAD, ...STOP_FIRST]);
+
+/** A line word of this many letters may name a supplier by opening one of its words ("HARDWAR" for
+ *  "Hardware", "SUP" for "Supply"): a bill match is gated by the same cents on the same days too. */
+export const SUPPLIER_PREFIX_FLOOR = 3;
+/** An account needs five letters ("BAYBE" for "Bayberry", never "SUP" or "BAYB"), and most of the
+ *  name's word with them (ACCOUNT_PREFIX_COVERAGE): an account the line names drives a
+ *  supplier-payment match and a guess, with no money gate on the guess, so a stranger's line must
+ *  not name it on a few shared letters. */
+export const ACCOUNT_PREFIX_FLOOR = 5;
+/** How much of the name's word an account's bank word must cover, in whole percent of its letters:
+ *  7 of 8 ("HARDWAR" for "Hardware", 87%) and 5 of 8 ("BAYBE" for "Bayberry", 62%) pass; 5 of 9
+ *  ("HOMES" for "Homestead", 55%) fails, because "homes" opening "Homestead" would guess Pay Homestead
+ *  on a line from any store whose name starts the same way, with no money to gate it. */
+export const ACCOUNT_PREFIX_COVERAGE = 60;
+
+/**
+ * DOES A BANK'S CUT-SHORT WORD OPEN THE NAME'S WORD (cn-v1154)? A bank prints a merchant in a field
+ * too short for it ("THISTLEWOOD HARDWAR", "BAYBERRY SUP"), so the word on the line is the start of
+ * the real one. Both sides are read as lowercase letters and digits only; the bank word must have at
+ * least `floor` of them, must not be one of the words that name nobody, and with `coveragePct` above
+ * zero must be at least that much of the name's word (the account rule; the supplier match, gated by
+ * the same cents on the same days, passes nothing there and keeps the floor alone).
+ */
+export function prefixNames(bankWord: string, targetWord: string, floor: number, coveragePct = 0): boolean {
+  const w = compact(bankWord);
+  if (!w || w.length < floor || NAMES_NOBODY.has(w)) return false;
+  const t = compact(targetWord);
+  if (!t.length || !t.startsWith(w)) return false;
+  // Whole numbers on both sides, so no fraction rounds the edge: 5 of 8 is 500 against 480, 5 of 9
+  // is 500 against 540.
+  return w.length * 100 >= t.length * coveragePct;
+}
+
+/** Does any of the line's merchant words open any merchant word of the spelling, `floor` letters up
+ *  (and `coveragePct` of the word, where the caller asks for it)? Merchant words on both sides: no
+ *  numbers, no dates, none of the bank's noise. */
+function wordOpensWord(lineWords: readonly string[], spelling: string, floor: number, coveragePct = 0): boolean {
+  const theirs = merchantWords(spelling);
+  return lineWords.some((w) => theirs.some((t) => prefixNames(w, t, floor, coveragePct)));
+}
+
+/**
  * Does the line name this supplier account: its number, its branch, its name or a spelling of it?
  *   · a branch code of digits is a number on its own ("(PC) 4410 T"), never digits inside another
  *     number (a store's 44101); an account number with letters in it is found squeezed together;
  *   · a name or spelling of 5+ letters by its first 12 (a bank cuts names short); a short one
- *     ("CED", "OSH") as a word of its own, never letters inside another word.
+ *     ("CED", "OSH") as a word of its own, never letters inside another word;
+ *   · a word of the line, 5 letters up and most of the word it opens, that opens a word of the name or
+ *     of a spelling ("BAYBE" for "Bayberry Supply", cn-v1154: ACCOUNT_PREFIX_FLOOR and
+ *     ACCOUNT_PREFIX_COVERAGE): a bank cuts the merchant's field short as often as the name.
  */
 export function lineNamesAccount(description: string, a: BooksAccount): boolean {
   const d = compact(description);
@@ -1310,6 +1444,8 @@ export function lineNamesAccount(description: string, a: BooksAccount): boolean 
   }
   const spellings = [a.name, ...a.aliases];
   if (spellings.map(compact).filter((x) => x.length >= 5).some((x) => d.includes(x.slice(0, 12)))) return true;
+  const lineWords = merchantWords(description);
+  if (spellings.some((x) => wordOpensWord(lineWords, x, ACCOUNT_PREFIX_FLOOR, ACCOUNT_PREFIX_COVERAGE))) return true;
   const words = ` ${String(description).toLowerCase().replace(/[^a-z0-9]+/g, " ")} `;
   return spellings
     .map((x) => String(x ?? "").trim().toLowerCase())
@@ -1345,13 +1481,189 @@ function sameLineWords(a: { description: string; check: string | null }, b: { de
   return wa.some((w) => wb.has(w));
 }
 
-/** Does the line name the bill's supplier: a word of 3+ letters they share ("HOME HARDWARE #55" and
- *  "Home Hardware"), or the first 5 letters of the supplier's name ("LOWES #1234" and "Lowe's")? */
+/** A line's merchant words from the store's own first word on: the bank's lead words ("ONLINE",
+ *  "ZELLE"), "the" and a lone letter dropped off the front, as the merchant key drops them. The first
+ *  word left is the one a bank leads a description with: the brand. */
+function leadWordsOf(description: string): string[] {
+  const words = merchantWords(description);
+  while (words.length > 1 && (DROP_LEAD.has(words[0]) || STOP_FIRST.has(words[0]) || words[0].length === 1)) words.shift();
+  return words;
+}
+
+/** A store as a sentence names it, from a bank line's words: the first two of its lead words
+ *  (leadWordsOf), Title Case ("Thistlewood Hardware", never "The Home"). The same words
+ *  identityToLearn remembers as an account's alias. "" when the line has none. */
+function storeWordsOf(description: string): string {
+  return leadWordsOf(description).slice(0, 2).join(" ").replace(/\b[a-z]/g, (c) => c.toUpperCase());
+}
+
+/** Does a refund's line name the charge's merchant: the refund's FIRST merchant word (leadWordsOf),
+ *  3 letters up, is one of the charge's words ("THISTLEWOOD HARDWARE #221 REFUND" and "1111-THISTLEWOOD
+ *  HARDWARE #221"). A brand leads a bank's description; a word every store shares ("hardware",
+ *  "supply") never does, so a refund from one store never finds another store's charge through it.
+ *  Numbers, dates and the bank's noise never count, and a line that names nobody names no charge. */
+function namesSameMerchant(refund: string, charge: string): boolean {
+  const [first] = leadWordsOf(refund);
+  return !!first && first.length >= 3 && merchantWords(charge).includes(first);
+}
+
+/**
+ * Does the line name the bill's supplier: a word of 3+ letters they share ("HOME HARDWARE #55" and
+ * "Home Hardware"), the first 5 letters of the supplier's name ("LOWES #1234" and "Lowe's"), or a word
+ * of the line, 3 letters up, that opens one of the supplier's words ("THISTLEWOOD HARDWAR" and
+ * "Thistlewood Hardware", cn-v1154)?
+ */
 export function lineNamesSupplier(description: string, supplier: string): boolean {
-  const words = new Set(merchantWords(description).filter((w) => w.length >= 3));
+  const lineWords = merchantWords(description);
+  const words = new Set(lineWords.filter((w) => w.length >= 3));
   if (merchantWords(supplier).some((w) => w.length >= 3 && words.has(w))) return true;
   const start = compact(supplier).slice(0, 5);
-  return start.length >= 4 && compact(description).includes(start);
+  if (start.length >= 4 && compact(description).includes(start)) return true;
+  return wordOpensWord(lineWords, supplier, SUPPLIER_PREFIX_FLOOR);
+}
+
+// ── THE COUNTER MATCH'S HELPERS (cn-v1154) ───────────────────────────────────────────────────────
+// Pure, every input an argument: the plan and the card's buttons read them, bank-core supplies what
+// they compare with, and the same inputs always give the same answer.
+
+/**
+ * THE RECEIPT A BANK LINE COULD BE: among `bills` not yet taken (`used` holds bill ids), the ones of
+ * the same money on the same days. SIGNS: a line's cents are signed the bank's way (money in positive,
+ * money out negative) and a bill's the books' way (a bill or receipt positive, a return or credit
+ * negative), so a line is a bill when bill.cents === -line.cents: money out is a receipt, money in is
+ * a return. Within `days` of the bill's date either way, and never a bill an account pays (`onAccount`,
+ * the flag the plan's own bill match reads; bank-core decides what sets it).
+ *
+ * Nearest day first; at the same distance the bill whose supplier the line names (lineNamesSupplier),
+ * then the earlier bill, then the id. `next` is the runner-up, so a caller can draw a second button
+ * when two receipts could be it. The caller decides which lines to ask for: the plan keeps its own rule
+ * that a transfer between the company's accounts is never a receipt.
+ */
+export function sameMoneyBill(
+  line: Pick<BankLine, "postedOn" | "cents" | "description">,
+  bills: readonly BooksBill[],
+  used: ReadonlySet<string>,
+  days = 3,
+): { best: BooksBill | null; next: BooksBill | null } {
+  if (!line.cents) return { best: null, next: null };
+  const distance = new Map<string, number>();
+  const named = new Map<string, boolean>();
+  const hits = bills.filter((b) => {
+    if (used.has(b.id) || b.onAccount || b.cents !== -line.cents || !b.day) return false;
+    const d = Math.abs(dayDiff(line.postedOn, b.day));
+    if (d > days) return false;
+    distance.set(b.id, d);
+    named.set(b.id, lineNamesSupplier(line.description, b.supplier));
+    return true;
+  });
+  hits.sort(
+    (a, b) =>
+      (distance.get(a.id) ?? 0) - (distance.get(b.id) ?? 0) ||
+      Number(named.get(b.id)) - Number(named.get(a.id)) ||
+      (a.day ?? "").localeCompare(b.day ?? "") ||
+      a.id.localeCompare(b.id),
+  );
+  return { best: hits[0] ?? null, next: hits[1] ?? null };
+}
+
+/** What onAccountForMatch reads of a bill: the row's own columns, as bank-core reads them. */
+export type BillForMatch = {
+  id: string;
+  supplierAccountId: string | null;
+  /** bills.status as stored ("unpaid" | "paid"; 0383 derives it per purchase). */
+  status: string | null;
+  /** bills.amount_paid (0383) when the read carries it; null or absent says nothing about the money. */
+  amountPaid?: number | null;
+  /** bills.amount in the row's own dollars (a credit is negative both ways). */
+  amount: number;
+};
+
+/**
+ * MUST THIS BILL STAY OUT OF THE COUNTER MATCH (cn-v1154)? Before this, every bill on an on-account
+ * store was kept out, so a receipt paid at the register of a store the company also has an account
+ * with never matched its own bank line: four hardware stores flagged on account, one of them actually
+ * billed monthly. A bill stays out when its account is on account AND either it is still owed (the
+ * money comes as the account's lump payment, never as a line of the bill's own money) OR a supplier
+ * payment already paid it (its id in `allocatedBillIds`, read from supplier_payment_allocations: that
+ * payment is the bank line, and the bill's own money never posts). A paid counter receipt with no
+ * allocation on it matches like any receipt. "Still owed" is THE ONE still-owed test (lib/supplier-owed
+ * isStillOwed, by the number when amount_paid was read, else by the status word) — never written
+ * here again; either sign of owing keeps a bill out, because a wrong match is worse than a question.
+ */
+export function onAccountForMatch(bill: BillForMatch, onAccountIds: ReadonlySet<string>, allocatedBillIds: ReadonlySet<string>): boolean {
+  if (!bill.supplierAccountId || !onAccountIds.has(bill.supplierAccountId)) return false;
+  if (allocatedBillIds.has(bill.id)) return true;
+  return isStillOwed({ status: bill.status, amount: bill.amount, amountPaid: bill.amountPaid });
+}
+
+/**
+ * THE JOBS THE CREW CLOCKED ON A DAY (yyyy-mm-dd), most minutes first, a tie by job id. A job punched
+ * twice that day is one job with both punches' minutes. Empty when nobody clocked in.
+ */
+export function jobsWorkedOn(day: string, worked: readonly WorkedDay[]): string[] {
+  const minutes = new Map<string, number>();
+  for (const w of worked) if (w.day === day) minutes.set(w.jobId, (minutes.get(w.jobId) ?? 0) + w.minutes);
+  return [...minutes.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([id]) => id);
+}
+
+/** How many days before the bank's day the register day may be: a card charge posts one to three
+ *  days after the counter, so the day itself and the two before it are looked at, nearest first. */
+export const WORKED_DAYS_BACK = 2;
+
+/**
+ * THE JOB WORKED ON A DAY OR JUST BEFORE IT: the day's top job, else the nearest of the two days
+ * before it, with the day it was found on (so a card can say which day), else null. Never a day
+ * after: a receipt is paid before the bank posts it, not after.
+ */
+export function jobWorkedNear(day: string, worked: readonly WorkedDay[]): { jobId: string; day: string } | null {
+  for (let back = 0; back <= WORKED_DAYS_BACK; back++) {
+    const d = shiftDay(day, -back);
+    const [top] = jobsWorkedOn(d, worked);
+    if (top) return { jobId: top, day: d };
+  }
+  return null;
+}
+
+/** What a charge was answered: the stored choice word, its cost bucket and its job (bank_lines.choice,
+ *  bucket, job_id), or the live pick on a row of this download. null = no answer yet. */
+export type ChargeAnswer = { choice: string | null; bucket: string | null; jobId: string | null };
+/** A money-out line a refund may undo: one of this download's, or one stored earlier (a StoredLine
+ *  with its answer), as much of it as the question needs. */
+export type ChargeLine = { lineKey: string; postedOn: string; cents: number; description: string; answer: ChargeAnswer | null };
+/** Where the charge's money went: on a job, on a cost bucket, or nowhere yet. */
+export type ReturnState = "bucket" | "job" | "unanswered";
+/** How long a store takes to refund a card: a week covers a return made the next weekend. */
+export const RETURN_WINDOW_DAYS = 7;
+
+/**
+ * THE CHARGE A REFUND UNDOES (cn-v1154): for a money-in line, the money-out line of the same merchant
+ * (namesSameMerchant: the refund's first merchant word is one of the charge's, numbers and noise never counting)
+ * posted on the refund's day or up to `days` before it, for at least the refund's money (a store
+ * refunds part of a charge, never more than it). Nearest day first, then the charge closest to the
+ * refund's money (a whole refund before a part one), then the key. With it, where that money went:
+ * "job" when its answer carries a job, "bucket" when a cost bucket, "unanswered" when it has no answer
+ * yet. A charge answered as neither (a draw, a matched bill, cash taken out) is passed over: there is
+ * no cost to put the money back on. The caller says what to do about each state.
+ */
+export function returnOfCharge(
+  line: Pick<BankLine, "postedOn" | "cents" | "description">,
+  charges: readonly ChargeLine[],
+  days = RETURN_WINDOW_DAYS,
+): { charge: ChargeLine; state: ReturnState } | null {
+  if (line.cents <= 0) return null;
+  const stateOf = (c: ChargeLine): ReturnState | null => (c.answer === null ? "unanswered" : c.answer.jobId ? "job" : c.answer.bucket ? "bucket" : null);
+  const gap = new Map<string, number>();
+  const hits = charges.filter((c) => {
+    if (c.cents >= 0 || -c.cents < line.cents || stateOf(c) === null) return false;
+    const d = dayDiff(line.postedOn, c.postedOn);
+    if (d < 0 || d > days || !namesSameMerchant(line.description, c.description)) return false;
+    gap.set(c.lineKey, d);
+    return true;
+  });
+  hits.sort((a, b) => (gap.get(a.lineKey) ?? 0) - (gap.get(b.lineKey) ?? 0) || Math.abs(a.cents) - Math.abs(b.cents) || a.lineKey.localeCompare(b.lineKey));
+  const charge = hits[0];
+  const state = charge ? stateOf(charge) : null;
+  return charge && state ? { charge, state } : null;
 }
 
 const FUEL_RE =
@@ -1407,6 +1719,60 @@ export function invoiceByBalance(line: BankLine, books: Pick<BankBooks, "invoice
   return hits.length === 1 ? hits[0] : null;
 }
 
+/**
+ * THE JOB A STORE LINE IS MOST LIKELY FOR (cn-v1154): money out at a store (TOOLS_RE's words, or the
+ * line names one of the company's supplier accounts) that no filed receipt of the same money explains
+ * (sameMoneyBill: a receipt names its own job, and the receipt is the plan's guess before this one), on
+ * a day the crew clocked a job the books still carry, or the nearest of the two days before it
+ * (jobWorkedNear: a card posts after the counter). Null otherwise. The plan reads it twice, once for the
+ * guess and once for the hint that says which day the clock spoke of, and both read the same answer. A
+ * job the card could not offer (not in books.jobs) is no guess, so no row guesses what Apply would refuse.
+ */
+function crewJobFor(line: BankLine, books: BankBooks, used?: ReadonlySet<string>): { jobId: string; day: string } | null {
+  if (line.cents >= 0) return null;
+  const d = line.description.replace(/[*_]/g, " ");
+  if (!TOOLS_RE.test(d) && !books.accounts.some((a) => lineNamesAccount(line.description, a))) return null;
+  if (sameMoneyBill(line, books.bills, used ?? new Set<string>()).best) return null;
+  const near = jobWorkedNear(line.postedOn, books.worked ?? []);
+  return near && books.jobs.some((j) => j.id === near.jobId) ? near : null;
+}
+
+/** "The crew was on 41 Larkspur · J-054 — Marla Finch that day.": the hint beside a job the clock
+ *  guessed (crewJobFor), naming the day the clock spoke of when it is not the line's own. A card posts
+ *  one to three days after the counter, and the person should see which day the guess leans on. */
+function crewOnJobHint(line: Pick<BankLine, "postedOn">, near: { jobId: string; day: string }, books: Pick<BankBooks, "jobs">): string {
+  const job = jobSaidIn(books, near.jobId);
+  const back = dayDiff(line.postedOn, near.day);
+  if (back === 0) return `The crew was on ${job} that day.`;
+  return `The crew was on ${job} on ${sayRange(near.day, near.day)}, ${back === 1 ? "the day" : back === 2 ? "two days" : `${back} days`} before this posted.`;
+}
+
+/** A job in a sentence, said as the card says a job everywhere else: the label the books carry (the
+ *  place, the number and who, made by jobSaidLabel in bank-core's read), never the bare number, which
+ *  tells a person nothing away from the job (the house law: name jobs, not numbers). "a job" for one
+ *  the books no longer carry (finished, cancelled). */
+function jobSaidIn(books: Pick<BankBooks, "jobs">, jobId: string | null | undefined): string {
+  return (jobId ? books.jobs.find((j) => j.id === jobId)?.label : undefined) || "a job";
+}
+
+/**
+ * WHAT A STORE'S REFUND SAYS, from the charge it undoes (returnOfCharge). The charge's money went on a
+ * cost bucket: the refund's guess is that bucket (the negative bill in it that the cost answer on money
+ * in already writes), and the row says which charge. On a job: NO guess, because a credit on a job with
+ * no lines under it is what jobRefusalFor refuses, and the road is the store's credit slip filed on the
+ * job, which this very line then matches. Not answered yet: no guess, and the charge is asked first,
+ * because the refund follows whatever that answer turns out to be.
+ */
+function refundSaid(found: { charge: ChargeLine; state: ReturnState }, books: Pick<BankBooks, "jobs">): { guess: BankChoice | null; hint: string } {
+  const { charge, state } = found;
+  const money = sayDollars(-charge.cents / 100);
+  const day = sayRange(charge.postedOn, charge.postedOn);
+  if (state === "job") return { guess: null, hint: `That ${money} charge on ${day} is on ${jobSaidIn(books, charge.answer?.jobId)}. File the store's credit slip on the job to count it there.` };
+  if (state === "unanswered") return { guess: null, hint: `Answer the ${money} charge on ${day} first. This return follows it.` };
+  const bucket = charge.answer?.bucket;
+  return { guess: isBusinessCostBucket(bucket) ? { choice: "cost", bucket } : null, hint: `Return of the ${money} charge on ${day} at ${storeWordsOf(charge.description) || "the store"}.` };
+}
+
 /** THE GUESS for a line nothing matched and no rule placed. Never picked; marked Guess. */
 export function guessFor(line: BankLine, books: BankBooks, used?: ReadonlySet<string>): BankChoice | null {
   if (line.cents > 0) {
@@ -1432,7 +1798,10 @@ export function guessFor(line: BankLine, books: BankBooks, used?: ReadonlySet<st
     if (byAmount.length === 1) return { choice: "crew", profileId: byAmount[0] };
     if (books.crew.length === 1) return { choice: "crew", profileId: books.crew[0].id };
   }
-  const account = books.accounts.find((a) => a.onAccount && lineNamesAccount(line.description, a));
+  // PAY <ACCOUNT> ONLY WHEN SOMETHING IS OWED THERE (cn-v1154): a line naming an on-account store the
+  // company owes nothing to is a counter purchase, not a payment on the account, and the guess would
+  // have put the money against a balance that isn't there.
+  const account = books.accounts.find((a) => a.onAccount && a.owed && lineNamesAccount(line.description, a));
   if (account) return { choice: "supplier", supplierAccountId: account.id };
   const named = PAY_WORDS_RE.test(line.description) ? crewNamed(line.description, books.crew) : null;
   if (named) return { choice: "crew", profileId: named.id };
@@ -1446,6 +1815,12 @@ export function guessFor(line: BankLine, books: BankBooks, used?: ReadonlySet<st
   if (AUTO_RE.test(d)) return AUTO;
   if (FUEL_RE.test(d)) return FUEL;
   if (PHONE_RE.test(d)) return { choice: "cost", bucket: "Phone & Office" };
+  // A STORE LINE WITH NO RECEIPT (cn-v1154) is most often the job the crew was on that day: the counter
+  // receipt is in the truck and the bank line is here. Asked after every word above, so a line those
+  // words name (a fill-up, a fee) keeps its guess; Tools & Supplies stays the guess when nobody clocked
+  // in, and is the second button when somebody did (buttonsFor).
+  const onJob = crewJobFor(line, books, used);
+  if (onJob) return { choice: "job", jobId: onJob.jobId };
   if (TOOLS_RE.test(d)) return { choice: "cost", bucket: "Tools & Supplies" };
   return null;
 }
@@ -1614,9 +1989,11 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
   type Pass = "sure" | "loose";
   const match = (line: BankLine, pass: Pass): Disposition | null => {
     const amount = -line.cents;
-    // A BILL FOR THE SAME MONEY within 3 days, not one a supplier account pays. Sure: the line names
-    // the bill's supplier. Loose: the line names nobody, so the amount is all there is to go on. A
-    // transfer between the company's own accounts is never a bill. Money IN is a return or a
+    // A BILL FOR THE SAME MONEY within 3 days, never one that must stay out (`onAccount`: still owed on
+    // an on-account store, or paid by the account's lump payment — its own money never posts as a
+    // line; a receipt paid at that store's register matches like any other, cn-v1154). Sure: the line
+    // names the bill's supplier. Loose: the line names nobody, so the amount is all there is to go on.
+    // A transfer between the company's own accounts is never a bill. Money IN is a return or a
     // supplier's credit already on the books as a negative bill of the same money.
     const billMatch = (): Disposition | null => {
       if (TRANSFER_RE.test(line.description) && !PROCESSOR_RE.test(line.description)) return null;
@@ -1743,7 +2120,9 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
   }
 
   // RULES, then the questions that are left.
-  const asking: { line: BankLine; direction: "in" | "out"; guess: BankChoice | null; single: boolean }[] = [];
+  const asking: { line: BankLine; direction: "in" | "out"; guess: BankChoice | null; single: boolean; receipts?: string[]; hint?: string | null }[] = [];
+  /** The receipts already offered as a line's guess (bill ids), in line order (cn-v1154). */
+  const offered = new Set<string>();
   for (const line of lines) {
     if (dispositions.has(line.key)) continue;
     const direction = line.cents > 0 ? "in" : "out";
@@ -1752,7 +2131,19 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
     // Money in that is exactly an open invoice's balance is asked, whatever a rule says (even when
     // the guess is Already Counted: a payment of that money is already in North).
     const onInvoice = !!invoiceByBalance(line, books);
-    if (rule && rc && !onInvoice && choiceFits(rc, direction)) {
+    // WHAT MAY BE A RECEIPT AT ALL (cn-v1154): never a transfer between the company's own accounts (the
+    // match's own rule), never money in that is exactly an open invoice's balance (a customer's payment,
+    // not a store's credit that happens to be the same money), and never a customer's deposit or a
+    // processor's payout (isCustomerMoneyIn, which reads the sign itself: money in only). A receipt
+    // offered on any of these would put a vendor's credit slip in front of the customer's own invoice.
+    const ownTransfer = TRANSFER_RE.test(line.description) && !PROCESSOR_RE.test(line.description);
+    const mayBeReceipt = !ownTransfer && !onInvoice && !isCustomerMoneyIn(line);
+    // A LEARNED RULE YIELDS TO A RECEIPT OF THE SAME MONEY (cn-v1154): a bill of exactly this money
+    // within 3 days that no line took is more likely what this line is than the merchant's usual
+    // answer — the match passes left it only because the bank's words and the bill's supplier never
+    // met. The line is asked instead of placed, and the rule's answer stays a tap away.
+    const receiptNear = mayBeReceipt && !!sameMoneyBill(line, books.bills, used).best;
+    if (rule && rc && !onInvoice && !receiptNear && choiceFits(rc, direction)) {
       dispositions.set(line.key, { how: "rule", ruleId: rule.id, choice: rc });
       counts.ruled++;
       continue;
@@ -1761,8 +2152,68 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
     const hint = rule ? null : ruleHintFor(line, books.rules);
     const hinted = hint ? ruleChoice(hint, books) : null;
     const guess = onInvoice ? guessFor(line, books, used) : hinted && choiceFits(hinted, direction) ? hinted : guessFor(line, books, used);
-    const single = teachesNoRule(line) || onInvoice || guess?.choice === "invoice";
-    asking.push({ line, direction, guess, single });
+    // A job is per LINE (0375): a line the clock put on one is a row of its own, and teaches no rule.
+    const single = teachesNoRule(line) || onInvoice || guess?.choice === "invoice" || guess?.choice === "job";
+    // THE RECEIPT THIS LINE IS (cn-v1154), offered as a tap: the same money within three days, no word in
+    // common needed. The receipt is the guess, the line is a row of its own (one receipt, one line), and
+    // a runner-up is a second button. THE PLAN RUNS IN LINE ORDER (the lines were sorted above), and a
+    // receipt offered as one line's guess goes into `offered`, so a later line of the same money never
+    // proposes the same receipt: it takes the next one, or asks plainly. A runner-up stays free for the
+    // line it more likely belongs to; two rows naming one receipt are refused at validPicks, before
+    // anything is written. Only on a line that may be a receipt at all (mayBeReceipt, above).
+    const receipt = mayBeReceipt ? sameMoneyBill(line, books.bills, new Set([...used, ...offered])) : null;
+    if (receipt?.best) {
+      offered.add(receipt.best.id);
+      const receipts = [receipt.best, ...(receipt.next ? [receipt.next] : [])].map((b) => choiceId({ choice: "bill", billId: b.id }));
+      asking.push({ line, direction, guess: { choice: "bill", billId: receipt.best.id }, single: true, receipts, hint: receiptHint(receipt.best, books) });
+      continue;
+    }
+    // A JOB THE CLOCK GUESSED (cn-v1154, crewJobFor) says which day the crew was on it: the line's own
+    // day, or the one or two before it that the card charge trailed.
+    const onJob = guess?.choice === "job" ? crewJobFor(line, books, used) : null;
+    asking.push({ line, direction, guess, single, hint: onJob ? crewOnJobHint(line, onJob, books) : null });
+  }
+  // A STORE'S REFUND (cn-v1154): money in that is nobody's payment, with no guess of its own, is asked
+  // against the charge it undoes (returnOfCharge, refundSaid). Worked out AFTER the loop above, so every
+  // charge's answer so far is known (the rule that places a charge posted the refund's own day but later
+  // in the file is decided by then) and nothing is mirrored from the loop. The charges: this download's
+  // money out, each with its stored answer where Apply already counted it (the stored line under the same
+  // key carries the job the `already` read does not), the word a match keeps ('matched', which
+  // returnOfCharge passes over as it does a stored match: a filed receipt's refund is the credit paper the
+  // sure pass matches), the rule that places it, or nothing (asked, a receipt offered or not); a line
+  // counted under another key (a twin) is left to its stored line. Then every stored line around the
+  // download that is not one of this download's own, with the answer the read carried; one it did not
+  // carry is left out, because "answer it first" would be false of a line already answered. The refund's
+  // row is the line's own: the sentence is about this one refund.
+  const storedByKey = new Map((books.stored ?? []).map((s) => [s.key, s]));
+  const chargeOf = (line: BankLine): ChargeLine | null => {
+    const d = dispositions.get(line.key);
+    const a = books.already.get(line.key);
+    let answer: ChargeAnswer | null = null;
+    if (a) {
+      const s = storedByKey.get(line.key);
+      answer = s?.choice != null ? { choice: s.choice, bucket: s.bucket ?? null, jobId: s.jobId ?? null } : { choice: a.choice, bucket: a.bucket, jobId: null };
+    } else if (d?.how === "already") return null;
+    else if (d?.how === "match") answer = { choice: "matched", bucket: null, jobId: null };
+    else if (d?.how === "rule") {
+      const rc = d.choice;
+      answer = { choice: rc.choice, bucket: rc.choice === "cost" ? rc.bucket : null, jobId: null };
+    }
+    return { lineKey: line.key, postedOn: line.postedOn, cents: line.cents, description: line.description, answer };
+  };
+  const charges = lines.filter((l) => l.cents < 0).map(chargeOf).filter((c): c is ChargeLine => c !== null);
+  for (const s of books.stored ?? []) {
+    if (mine.has(s.key) || s.cents >= 0 || s.choice == null) continue;
+    charges.push({ lineKey: s.key, postedOn: s.postedOn, cents: s.cents, description: s.description, answer: { choice: s.choice, bucket: s.bucket ?? null, jobId: s.jobId ?? null } });
+  }
+  for (const a of asking) {
+    if (a.direction !== "in" || a.guess || isCustomerMoneyIn(a.line)) continue;
+    const back = returnOfCharge(a.line, charges);
+    if (!back) continue;
+    const said = refundSaid(back, books);
+    a.guess = said.guess;
+    a.single = true;
+    a.hint = said.hint;
   }
   // ONE ROW PER MERCHANT, SPLIT BY AMOUNT: a merchant's lines far apart in size (a fill-up and a
   // coffee at one store) are separate rows, so one tap never answers both.
@@ -1788,7 +2239,7 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
     bandsPer.set(k, band + 1);
   }
   const groups = new Map<string, NeedGroup>();
-  for (const { line, direction, guess, single } of asking) {
+  for (const { line, direction, guess, single, receipts, hint: said } of asking) {
     // A QUESTION: one row per merchant (and amount band); a check, a deposit an invoice may be, or a
     // line with no merchant words is a row of its own.
     const k = `${direction}:${line.merchantKey}`;
@@ -1811,6 +2262,7 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
         learnable: !single && !!line.merchantKey && !isGenericKey(line.merchantKey),
         merchantKey: line.merchantKey,
         lines: [],
+        ...(receipts ? { receipts } : {}),
         /**
          * WHY, IN ONE SHORT LINE, OR NOTHING AT ALL. Erik, on a $7,714.09 deposit offered a bare "Already
          * Counted Or Not Income": the guess asked him to take its word. Two reasons can actually be
@@ -1824,6 +2276,8 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
          * is worse than none.
          */
         hint: (() => {
+          // A receipt offered on the row says what it is first (receiptHint): the row's one reason.
+          if (said) return said;
           const p = lookalikePayment(line, books, used);
           if (p) return `Maybe the payment on ${p.invoiceNumber} of ${sayRange(p.day, p.day)}, already in North.`;
           return line.cents > 0 ? channelWhyFor(line.description, channels) : null;
@@ -1881,24 +2335,40 @@ function namesBillsAccount(description: string, b: Pick<BooksBill, "supplierAcco
  * teaches no rule (a bare check, a transfer, a generic key), from a match the account's own spellings
  * already made (nothing new), or from a loose match (amount alone proves no name). An answer is
  * remembered as a rule; this is identity, and Undo of the download leaves it.
+ *
+ * THE PROOF (cn-v1154) is either the NAME — the plan's own match, where the line named the bill's typed
+ * supplier — or a TAP: a person took the receipt the row offered on the same money and days, and the
+ * line's words name nobody the books know. That is the whole point of the tap, so the typed-name test
+ * is skipped for it; every other guard holds, and the account learns the bank's words as its spelling.
+ * A tapped line that DOES name someone else the books know (another account, another bill's typed
+ * supplier) teaches nothing: the person may still take the receipt, but the words are not this store's.
  */
 export function identityToLearn(
   line: Pick<BankLine, "cents" | "description" | "merchantKey" | "check">,
   d: Disposition | null | undefined,
   books: Pick<BankBooks, "bills" | "accounts">,
+  proof: "name" | "tap" = "name",
 ): { accountId: string; accountName: string; alias: string } | null {
   if (!d || d.how !== "match" || d.table !== "bills" || d.ids.length !== 1) return null;
   if (teachesNoRule(line)) return null;
   const b = books.bills.find((x) => x.id === d.ids[0]);
   const a = b ? accountOfBill(b, books.accounts) : null;
+  // A receipt on no account learns nothing: there is no identity to attach the bank's words to.
   if (!b || !a) return null;
-  if (!lineNamesSupplier(line.description, b.supplier)) return null;
+  if (proof === "name" && !lineNamesSupplier(line.description, b.supplier)) return null;
   if (lineNamesAccount(line.description, a)) return null;
-  // The store's own words: the bank's lead words off the front (as the key does), then "the" and a
-  // lone letter dropped as well, then two words, Title Case ("Home Depot", never "The Home").
-  const words = merchantWords(line.description);
-  while (words.length > 1 && (DROP_LEAD.has(words[0]) || STOP_FIRST.has(words[0]) || words[0].length === 1)) words.shift();
-  const alias = words.slice(0, 2).join(" ").replace(/\b[a-z]/g, (c) => c.toUpperCase());
+  // A TAP TEACHES NOTHING FROM A LINE THAT ALREADY NAMES SOMEONE ELSE: another of the company's
+  // accounts, or a supplier typed on another bill ("CATBIRD TOOLS 44" taken as a Thistlewood Hardware
+  // receipt). The receipt is still the person's to take — they may know better than the words — but the
+  // bank's words would become the wrong store's spelling, and every reader of the aliases would follow.
+  if (proof === "tap") {
+    if (books.accounts.some((x) => x.id !== a.id && lineNamesAccount(line.description, x))) return null;
+    const own = compact(b.supplier);
+    if (books.bills.some((x) => x.id !== b.id && compact(x.supplier) !== own && lineNamesSupplier(line.description, x.supplier))) return null;
+  }
+  // The store's own words (storeWordsOf): the bank's lead words off the front, then two words, Title
+  // Case ("Home Depot", never "The Home").
+  const alias = storeWordsOf(line.description);
   if (alias.replace(/[^a-z0-9]/gi, "").length < 3) return null;
   return { accountId: a.id, accountName: a.name, alias };
 }
@@ -1910,6 +2380,12 @@ function buttonsFor(g: NeedGroup, books: BankBooks): string[] {
     if (id && !out.includes(id)) out.push(id);
   };
   add(g.guess);
+  // THE RECEIPTS THE ROW MAY BE (cn-v1154): the guess is the first of them; a runner-up is the second
+  // button, so two receipts of the same money are both a tap away. The cap below still holds.
+  for (const id of g.receipts ?? []) add(id);
+  // A JOB THE CLOCK GUESSED (cn-v1154) keeps the store's own bucket a tap away: the crew's day says which
+  // job most often, not always, and Tools & Supplies was the line's guess before the clock spoke.
+  if (g.guess?.startsWith("job:")) add(choiceId({ choice: "cost", bucket: "Tools & Supplies" }));
   if (g.direction === "in") {
     // With no guess, Already Counted comes before Other Income: a deposit already in North counted
     // again as income is money that never came in twice.
@@ -1960,7 +2436,8 @@ export function learnableAnswer(c: BankChoice, direction: "in" | "out"): boolean
   // An answer that does not even fit the direction can never be a rule for it: bank_rules_income_is_in
   // refuses the row, and one refused rule loses the whole Apply's rule write.
   if (!choiceFits(c, direction)) return false;
-  if (c.choice === "job" || c.choice === "invoice" || c.choice === "other_income") return false;
+  // A receipt (cn-v1154) names ONE paper, as an invoice names one deposit: never a rule either.
+  if (c.choice === "job" || c.choice === "invoice" || c.choice === "other_income" || c.choice === "bill") return false;
   return direction === "out" || c.choice === "not_income" || c.choice === "owner_in";
 }
 
@@ -2011,6 +2488,44 @@ export function sayRange(from: string | null, to: string | null, today?: string 
   const year = (d: string) => (today && today.slice(0, 4) !== d.slice(0, 4) ? { year: "numeric" as const } : {});
   const f = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", ...year(d) });
   return from === to ? f(from) : `${f(from)}–${f(to)}`;
+}
+
+/** "Same as the $27.43 Receipt on Sep 23": a receipt's button (cn-v1154). The money and the day, so two
+ *  receipts offered on one line can be told apart; short enough for a phone; "Return" for a credit (a
+ *  negative bill, money in). The row's hint carries the store and the job. */
+export function receiptWords(b: Pick<BooksBill, "cents" | "day">): string {
+  return `Same as the ${sayDollars(Math.abs(b.cents) / 100)} ${b.cents < 0 ? "Return" : "Receipt"}${b.day ? ` on ${sayRange(b.day, b.day)}` : ""}`;
+}
+
+/** The store a receipt names: its typed supplier, else its account's name, else nothing. */
+function receiptStore(b: BooksBill, books: Pick<BankBooks, "accounts">): string {
+  return b.supplier.trim() || accountOfBill(b, books.accounts)?.name.trim() || "";
+}
+
+/** The job a receipt sits on, said as the card says a job (jobSaidIn: the label; "a job" when the bill's
+ *  job is not among the books', finished or cancelled); null for a receipt on no job. */
+function receiptJob(b: BooksBill, books: Pick<BankBooks, "jobs">): string | null {
+  return b.jobId ? jobSaidIn(books, b.jobId) : null;
+}
+
+/** "Same as the $27.43 receipt on Sep 23 at Thistlewood Hardware on 41 Larkspur · J-054 — Marla Finch.":
+ *  the row's hint (cn-v1154), what the books hold that looks like this line, said in full. A receipt on
+ *  no job says nothing of one. */
+export function receiptHint(b: BooksBill, books: Pick<BankBooks, "jobs" | "accounts">): string {
+  const where = receiptStore(b, books);
+  const job = receiptJob(b, books);
+  return (
+    `Same as the ${sayDollars(Math.abs(b.cents) / 100)} ${b.cents < 0 ? "return" : "receipt"}` +
+    (b.day ? ` on ${sayRange(b.day, b.day)}` : "") +
+    (where ? ` at ${where}` : "") +
+    (job ? ` on ${job}` : "") +
+    "."
+  );
+}
+
+/** A receipt in a row's Other… list, said in full: the button's words, then the store and the job. */
+export function receiptListWords(b: BooksBill, books: Pick<BankBooks, "jobs" | "accounts">): string {
+  return [receiptWords(b), receiptStore(b, books) || null, receiptJob(b, books)].filter(Boolean).join(" · ");
 }
 
 /** THE ONE LINE: "Bank ••1234 · Aug 26–Sep 25 · 96 sorted · 17 already in North · 5 need you, in 3
@@ -2168,7 +2683,7 @@ export { plural as sayCount };
 export function validPicks(
   picks: Record<string, unknown> | null | undefined,
   plan: Pick<BankPlan, "groups">,
-  books: Pick<BankBooks, "accounts" | "crew" | "invoices" | "jobs">,
+  books: Pick<BankBooks, "accounts" | "crew" | "invoices" | "jobs" | "bills">,
 ): { ok: Map<string, BankChoice>; refused: string[] } {
   const ok = new Map<string, BankChoice>();
   const refused: string[] = [];
@@ -2220,7 +2735,34 @@ export function validPicks(
       refused.push(`${groupTitle(g)}: that person isn't on your crew`);
       continue;
     }
+    // A RECEIPT (cn-v1154): one of this company's bills, of the sign the row's direction says, and one the
+    // row was OFFERED (g.receipts). The plan proposes a receipt to one line only and never a bill a line
+    // already took, so a pick naming any other was hand-made, or the card is stale.
+    if (c.choice === "bill") {
+      const b = books.bills.find((x) => x.id === c.billId);
+      if (!b) {
+        refused.push(`${groupTitle(g)}: that receipt isn't one of yours`);
+        continue;
+      }
+      if ((b.cents < 0 ? "in" : "out") !== g.direction) {
+        refused.push(`${groupTitle(g)}: that answer doesn't fit ${g.direction === "in" ? "money in" : "money out"}`);
+        continue;
+      }
+      if (!g.single || !(g.receipts ?? []).includes(choiceId(c))) {
+        refused.push(`${groupTitle(g)}: that receipt isn't offered on this line`);
+        continue;
+      }
+    }
     ok.set(gid, c);
+  }
+  // TWO LINES ON ONE RECEIPT (cn-v1154): a receipt is one paper. The match write would take it for the
+  // first line and refuse the second after the fact; both are refused here, before anything is written.
+  const onReceipt = new Map<string, string[]>();
+  for (const [gid, c] of ok) if (c.choice === "bill") onReceipt.set(c.billId, [...(onReceipt.get(c.billId) ?? []), gid]);
+  for (const gids of onReceipt.values()) {
+    if (gids.length < 2) continue;
+    for (const gid of gids) ok.delete(gid);
+    refused.push(`${gids.length} lines name the same receipt; it can only be one of them`);
   }
   // TWO DEPOSITS ON ONE INVOICE are held to its balance TOGETHER: each alone may fit, both may not.
   const onInvoice = new Map<string, string[]>();
@@ -2308,7 +2850,8 @@ export type BankRowView = {
   /** "Maybe the payment on INV-1001 of Sep 1, already in North." or null. */
   hint?: string | null;
   /** A single deposit's own Other… list: only the invoices open for at least its money, each said
-   *  in full ("On INV-1001 · Pat Customer · $1,275.00 open"). Absent: the card's shared list. */
+   *  in full ("On INV-1001 · Pat Customer · $1,275.00 open"); or a row offered a receipt (cn-v1154): the
+   *  receipts it was offered, said in full, then the shared list. Absent: the card's shared list. */
   others?: BankButton[];
   direction: "in" | "out";
   single: boolean;
@@ -2464,12 +3007,14 @@ function rulesUsed(plan: BankPlan, books: BankBooks, names: BankNames): BankView
     .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
 }
 
-export function namesOf(books: Pick<BankBooks, "accounts" | "crew" | "invoices" | "jobs">): BankNames {
+export function namesOf(books: Pick<BankBooks, "accounts" | "crew" | "invoices" | "jobs"> & Partial<Pick<BankBooks, "bills">>): BankNames {
   return {
     accounts: new Map(books.accounts.map((a) => [a.id, a.name])),
     crew: new Map(books.crew.map((c) => [c.id, c.name])),
     invoices: new Map(books.invoices.map((i) => [i.id, i.number])),
     jobs: new Map(books.jobs.map((j) => [j.id, j.label])),
+    // The receipts' button words (cn-v1154), where the books carry bills: the card's labels read them.
+    ...(books.bills ? { bills: new Map(books.bills.map((b) => [b.id, receiptWords(b)])) } : {}),
   };
 }
 
@@ -2487,9 +3032,11 @@ export function bankViewOf(
   } = {},
 ): BankView {
   const names = namesOf(books);
-  const label = (id: string) => {
+  /** A quick button's words. On money in a bucket reads "Refund: …" here as it does in the Other… list
+   *  (inButton), so one id never wears two labels on one card. */
+  const label = (id: string, direction: "in" | "out" = "out") => {
     const c = parseChoiceId(id);
-    return c ? choiceLabel(c, names) : id;
+    return c ? (direction === "in" ? inButton(c) : button(c)).label : id;
   };
   const button = (c: BankChoice): BankButton => ({ id: choiceId(c), label: choiceLabel(c, names) });
   /** On money in, a bucket is a refund of that cost ("Refund: Fuel": money back from the store comes
@@ -2509,6 +3056,26 @@ export function bankViewOf(
   /** A single deposit's Other… list: what is different about THIS row (the invoices open for at least
    *  its money, said in full), then the shared answers above. */
   const othersForDeposit = (cents: number): BankButton[] => [...books.invoices.filter((i) => i.balanceCents >= cents).map(invoiceButton), ...sharedForDeposit];
+  /** The money-out answers a row of one line may take, made once for the card (every row shares them). */
+  const sharedOutSingle = everyChoice("out", books, true).map(button);
+  const billOf = new Map(books.bills.map((b) => [b.id, b]));
+  /** A receipt in a row's Other… list (cn-v1154), said in full; a bill the books no longer carry is left out. */
+  const receiptButton = (id: string): BankButton | null => {
+    const c = parseChoiceId(id);
+    const b = c?.choice === "bill" ? billOf.get(c.billId) : null;
+    return b ? { id, label: receiptListWords(b, books) } : null;
+  };
+  /**
+   * A ROW'S OWN Other… LIST, or none (the card's shared list). A row offered a receipt lists ITS receipts
+   * first, then the shared answers for its direction — never every bill of the month, which no person
+   * could pick from; a single deposit lists the invoices open for its money. The receipts are reachable
+   * there too, so a tap that missed the quick buttons still has them.
+   */
+  const othersFor = (g: NeedGroup): BankButton[] | null => {
+    const receipts = (g.receipts ?? []).map(receiptButton).filter((b): b is BankButton => !!b);
+    if (receipts.length) return [...receipts, ...(g.direction === "in" ? othersForDeposit(g.cents) : sharedOutSingle)];
+    return g.direction === "in" && g.single ? othersForDeposit(g.cents) : null;
+  };
   const byKey = new Map(dl.lines.map((l) => [l.key, l]));
   const sorted = new Map<string, { label: string; n: number; cents: number }>();
   for (const [key, d] of plan.dispositions) {
@@ -2559,8 +3126,11 @@ export function bankViewOf(
         single: g.single,
         guess: g.guess,
         hint: g.hint ?? null,
-        buttons: g.buttons.map((id) => ({ id, label: label(id) })),
-        ...(g.direction === "in" && g.single ? { others: othersForDeposit(g.cents) } : {}),
+        buttons: g.buttons.map((id) => ({ id, label: label(id, g.direction) })),
+        ...(() => {
+          const others = othersFor(g);
+          return others ? { others } : {};
+        })(),
         ...(g.keys.length > 1 && g.lines?.length
           ? {
               lines: [...g.lines]
@@ -2576,7 +3146,7 @@ export function bankViewOf(
       };
     }),
     otherOut: everyChoice("out", books, false).map(button),
-    otherOutSingle: everyChoice("out", books, true).map(button),
+    otherOutSingle: sharedOutSingle,
     otherIn: everyChoice("in", books, false).map(inButton),
     otherInSingle: everyChoice("in", books, true).map(inButton),
     flow: flow.out,

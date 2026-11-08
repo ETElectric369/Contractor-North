@@ -27,8 +27,8 @@ import { RETURN_ON_JOB_WHY } from "@/lib/job-cost-guard";
 import { addOpenList } from "./open-list-actions";
 import { applyBankDownload, forgetBankRule, reanswerBankLine, setBankAccount, swapBankDownload, undoBankDownload } from "./bank-actions";
 import { REANSWER_TO_PAYMENT } from "@/lib/bank-reanswer";
-import { applyBankCore, bankLinesStayHere, bankViews, BANK_NEEDS_UPDATE } from "./bank-core";
-import { describePaper, readinessOf } from "@/lib/paperwork";
+import { applyBankCore, bankLinesStayHere, bankViews, BANK_NEEDS_UPDATE, loadBankBooks } from "./bank-core";
+import { describePaper, proposalOf, readinessOf } from "@/lib/paperwork";
 import { fileItem, undoPaperwork } from "@/app/(app)/organize/actions";
 
 type Row = Record<string, any>;
@@ -245,6 +245,11 @@ function seed() {
     ],
     pay_payments: [],
     supplier_payments: [],
+    // Which supplier payment paid which bill (0383): a bill with a row here was paid on the account.
+    supplier_payment_allocations: [],
+    // The crew's punches, for "the job the crew was on that day" (cn-v1154). Bills carry amount_paid
+    // and status the way 0383 keeps them: a receipt born paid at the counter is paid in full.
+    time_entries: [],
     bills: [],
     petty_cash: [],
     bank_lines: [],
@@ -351,6 +356,10 @@ describe("the door", () => {
       { id: "si-1", org_id: "org-1", supplier_account_id: "acct-cs", invoice_number: "4410-1100001", invoice_date: "2026-09-01" },
       { id: "si-2", org_id: "org-1", supplier_account_id: "acct-cs", invoice_number: "4410-1100002", invoice_date: "2026-09-03" },
     );
+    // A bill still owed on the account, from before this download's own weeks (cn-v1154): Pay <store>
+    // is the guess only while something is owed there; with nothing owed, a line naming the store is a
+    // purchase at its register.
+    db.bills.push({ id: "b-owed", org_id: "org-1", job_id: null, supplier: "Contractor Supply", supplier_account_id: "acct-cs", amount: 318.2, amount_paid: 0, status: "unpaid", bill_date: "2026-08-20", category: "Receipt", bank_line_id: null, superseded_by_bill_id: null });
     const id = await drop(`Date,Description,Amount\n09/10/2026,1111-(PC) 4410 T  ANYTOWN CA,-500.00\n`, "Card1234.csv");
     const v = await view(id);
     expect(v.rows[0].buttons[0]).toEqual({ id: "supplier:acct-cs", label: "Pay Contractor Supply" });
@@ -1048,6 +1057,117 @@ describe("the merchant's identity", () => {
   });
 });
 
+describe("a store the company also has an account with (cn-v1154)", () => {
+  // Contractor Supply is on account (acct-cs). One card line of a receipt's money, against: a receipt
+  // paid at the register, a bill still owed on the account, and a bill the account's lump payment paid.
+  const COUNTER = `Date,Description,Amount\n09/10/2026,1111-CONTRACTOR SUPPLY CO ANYTOWN,-212.40\n`;
+  const PMT = `Date,Description,Amount\n09/22/2026,CONTRACTOR SUPPLY CO PMT CS-12345,-1000.00\n`;
+  const billOnAccount = (over: Partial<Row> = {}) =>
+    db.bills.push({
+      id: "b-cs",
+      org_id: "org-1",
+      job_id: null,
+      supplier: "Contractor Supply",
+      supplier_account_id: "acct-cs",
+      amount: 212.4,
+      amount_paid: 212.4,
+      status: "paid",
+      bill_date: "2026-09-09",
+      category: "Tools & Supplies",
+      bank_line_id: null,
+      superseded_by_bill_id: null,
+      ...over,
+    });
+
+  it("a receipt paid at the register (paid, no payment on it) matches its own line within 3 days, like any receipt", async () => {
+    billOnAccount();
+    const id = await drop(COUNTER, "Card1234.csv");
+    const v = await view(id);
+    expect(v.rows).toHaveLength(0);
+    expect(v.headline).toContain("1 sorted");
+    const res = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: {} });
+    expect(res.ok).toBe(true);
+    expect(db.bills).toHaveLength(1);
+    expect(db.bills[0].bank_line_id).not.toBeNull();
+  });
+
+  it("a bill still owed on the account never matches (the account's lump payment pays it), and Pay <store> is the guess", async () => {
+    billOnAccount({ status: "unpaid", amount_paid: 0 });
+    const id = await drop(COUNTER, "Card1234.csv");
+    const v = await view(id);
+    expect(v.rows).toHaveLength(1);
+    expect(v.rows[0].buttons[0]).toEqual({ id: "supplier:acct-cs", label: "Pay Contractor Supply" });
+    expect(db.bills[0].bank_line_id).toBeNull();
+  });
+
+  it("a bill the account's lump payment paid (an allocation on it) never matches; with nothing owed, Pay <store> is a button and not the guess", async () => {
+    billOnAccount();
+    db.supplier_payment_allocations.push({ id: "al-1", org_id: "org-1", supplier_payment_id: "sp-lump", bill_id: "b-cs", amount: 212.4, discount: 0 });
+    const id = await drop(COUNTER, "Card1234.csv");
+    const v = await view(id);
+    expect(v.rows).toHaveLength(1);
+    expect(v.rows[0].guess).not.toBe("supplier:acct-cs");
+    expect(v.otherOut.map((b) => b.label)).toContain("Pay Contractor Supply");
+    expect(db.bills[0].bank_line_id).toBeNull();
+  });
+
+  it("a line naming the account guesses Pay <store> while a bill is owed there, however old that bill is", async () => {
+    db.bills.push({ id: "b-owed", org_id: "org-1", job_id: null, supplier: "Contractor Supply", supplier_account_id: "acct-cs", amount: 318.2, amount_paid: 0, status: "unpaid", bill_date: "2026-06-15", category: "Receipt", bank_line_id: null, superseded_by_bill_id: null });
+    const id = await drop(PMT, "Card1234.csv");
+    const v = await view(id);
+    expect(v.rows[0].guess).toBe("supplier:acct-cs");
+  });
+
+  it("and not when nothing is owed there: another company's owed bill on its own account counts for nothing here", async () => {
+    db.bills.push({ id: "b-theirs", org_id: "org-2", job_id: null, supplier: "Someone Else's Supplier", supplier_account_id: "acct-x", amount: 318.2, amount_paid: 0, status: "unpaid", bill_date: "2026-09-01", category: "Receipt", bank_line_id: null, superseded_by_bill_id: null });
+    const id = await drop(PMT, "Card1234.csv");
+    const v = await view(id);
+    expect(v.rows[0].guess).not.toBe("supplier:acct-cs");
+    expect(JSON.stringify(v)).not.toMatch(/Someone Else/);
+  });
+
+  it("reads the crew's time on jobs around the download: the company day, minutes less lunch, an open clock to now and never past 16 hours; never a punch with no job or another company's", async () => {
+    db.time_entries = [
+      // 8:00 to 4:30 Pacific with half an hour of lunch: 480 minutes on the kitchen job, Sep 10.
+      { id: "te-1", org_id: "org-1", profile_id: "pat", job_id: "job-kitchen", clock_in: "2026-09-10T15:00:00Z", clock_out: "2026-09-10T23:30:00Z", lunch_minutes: 30, status: "closed" },
+      // Still on the clock: counted to `now`, four hours in.
+      { id: "te-2", org_id: "org-1", profile_id: "pat", job_id: "job-done", clock_in: "2026-09-16T15:00:00Z", clock_out: null, lunch_minutes: 0, status: "open" },
+      // Two days before the first line (Sep 2) is read; three days before is not.
+      { id: "te-3", org_id: "org-1", profile_id: "pat", job_id: "job-kitchen", clock_in: "2026-08-31T15:00:00Z", clock_out: "2026-08-31T16:00:00Z", lunch_minutes: 0, status: "closed" },
+      { id: "te-4", org_id: "org-1", profile_id: "pat", job_id: "job-kitchen", clock_in: "2026-08-30T15:00:00Z", clock_out: "2026-08-30T16:00:00Z", lunch_minutes: 0, status: "closed" },
+      { id: "te-5", org_id: "org-1", profile_id: "pat", job_id: null, clock_in: "2026-09-12T15:00:00Z", clock_out: "2026-09-12T16:00:00Z", lunch_minutes: 0, status: "closed" },
+      { id: "te-6", org_id: "org-2", profile_id: "other-crew", job_id: "job-theirs", clock_in: "2026-09-10T15:00:00Z", clock_out: "2026-09-10T17:00:00Z", lunch_minutes: 0, status: "closed" },
+      // A clock nobody punched out, open for three days: it counts 16 hours (960 minutes) on the day it
+      // began, never the three days, or it would be that day's top job over every honest punch.
+      { id: "te-7", org_id: "org-1", profile_id: "pat", job_id: "job-done", clock_in: "2026-09-13T15:00:00Z", clock_out: null, lunch_minutes: 0, status: "open" },
+    ];
+    await drop();
+    const dl = proposalOf(db.organized_items[0]).bankImport!.download!;
+    const { books, problem } = await loadBankBooks(state.client, "org-1", dl, "America/Los_Angeles", new Date("2026-09-16T19:00:00Z"));
+    expect(problem).toBeNull();
+    expect(books!.worked).toEqual([
+      { jobId: "job-kitchen", day: "2026-09-10", minutes: 480 },
+      { jobId: "job-done", day: "2026-09-16", minutes: 240 },
+      { jobId: "job-kitchen", day: "2026-08-31", minutes: 60 },
+      { jobId: "job-done", day: "2026-09-13", minutes: 960 },
+    ]);
+  });
+
+  it("the lines already counted around the download carry the answer each holds, and the job only once bank_lines can hold one", async () => {
+    db.bank_lines.push({ id: "bl-old", org_id: "org-1", line_key: "another-format-key", posted_on: "2026-09-03", amount: -40, account_last4: "1234", description: "OLD FILL", check_number: null, choice: "cost", bucket: "Fuel", job_id: null });
+    await drop();
+    const dl = proposalOf(db.organized_items[0]).bankImport!.download!;
+    const { books } = await loadBankBooks(state.client, "org-1", dl, "America/Los_Angeles");
+    expect(books!.stored).toEqual([expect.objectContaining({ key: "another-format-key", cents: -4000, choice: "cost", bucket: "Fuel", jobId: null })]);
+    // Before 0375 the column isn't there: the read asks for everything but the job, and says nothing of it.
+    noJobColumn = true;
+    const before = await loadBankBooks(state.client, "org-1", dl, "America/Los_Angeles");
+    expect(before.problem).toBeNull();
+    expect(before.books!.stored![0]).toMatchObject({ choice: "cost", bucket: "Fuel" });
+    expect(before.books!.stored![0]).not.toHaveProperty("jobId");
+  });
+});
+
 describe("Undo", () => {
   it("takes back only what the download wrote, and the card waits again with every line", async () => {
     const id = await drop();
@@ -1608,6 +1728,99 @@ describe("the read report on a scanned statement's card", () => {
     expect(said).toContain("Read off the page itself.");
     // The pages it DID say are still facts about the paper, so the read report still has them.
     expect(res.line).toContain("3 pages");
+  });
+});
+
+/**
+ * A RECEIPT OF THE SAME MONEY, TAPPED (cn-v1154): the bill already on the books is MARKED (bills.bank_line_id),
+ * the line is stored 'matched' by the person, no second bill is written, the receipt's account learns the
+ * bank's words as its spelling, and Undo takes the mark off and leaves the receipt and the spelling. A
+ * receipt another screen matched a moment ago is said with the next step. Made-up store, job and figures.
+ */
+describe("a receipt of the same money, tapped", () => {
+  const TWH = `Date,Description,Amount\n09/24/2026,1111-TWH STORE 21 ANYTOWN,-27.43\n`;
+  const receipt = (over: Record<string, unknown> = {}) => {
+    db.supplier_accounts.push({ id: "acct-thistle", org_id: "org-1", name: "Thistlewood Hardware", account_number: null, branch_code: null, on_account: false });
+    db.bills.push({
+      id: "b-thistle",
+      org_id: "org-1",
+      job_id: "job-kitchen",
+      supplier: "Thistlewood Hardware",
+      supplier_account_id: "acct-thistle",
+      amount: 27.43,
+      bill_date: "2026-09-23",
+      category: "Materials",
+      status: "paid",
+      amount_paid: 27.43,
+      bank_line_id: null,
+      superseded_by_bill_id: null,
+      ...over,
+    });
+  };
+
+  it("marks the receipt, stores the line as matched, learns the bank's words, and Undo takes only the mark off", async () => {
+    receipt();
+    const id = await drop(TWH, "Card1234.csv");
+    const v = await view(id);
+    const row = v.rows[0];
+    expect(row).toMatchObject({ guess: "bill:b-thistle", hint: "Same as the $27.43 receipt on Sep 23 at Thistlewood Hardware on 41 Larkspur · J-054 — Marla Finch." });
+    expect(row.buttons[0]).toEqual({ id: "bill:b-thistle", label: "Same as the $27.43 Receipt on Sep 23" });
+    const res = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [row.id]: "bill:b-thistle" } });
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain("1 receipt was already on the books, so it was marked, never written twice.");
+    expect(res.message).toContain('Remembered "Twh Store" as Thistlewood Hardware (a spelling on the supplier\'s card).');
+    // No second bill; the receipt carries the mark; the line holds no answer of its own.
+    expect(db.bills).toHaveLength(1);
+    const line = db.bank_lines.find((l) => l.description.includes("TWH"))!;
+    expect(line).toMatchObject({ choice: "matched", sorted_by: "person", bucket: null, supplier_account_id: null, profile_id: null, invoice_id: null });
+    expect(db.bills[0]).toMatchObject({ id: "b-thistle", bank_line_id: line.id, job_id: "job-kitchen", category: "Materials", amount: 27.43 });
+    expect(db.supplier_aliases).toEqual([expect.objectContaining({ org_id: "org-1", supplier_account_id: "acct-thistle", alias: "Twh Store", branch_label: null })]);
+    expect(db.bank_rules).toHaveLength(0);
+    expect(db.organized_items[0].status).toBe("filed");
+    // Undo: the mark comes off, the receipt stays as it was, and the spelling the tap proved stays.
+    expect((await undoBankDownload(id)).ok).toBe(true);
+    expect(db.bills[0]).toMatchObject({ id: "b-thistle", bank_line_id: null, job_id: "job-kitchen", amount: 27.43 });
+    expect(db.bank_lines).toHaveLength(0);
+    expect(db.supplier_aliases).toHaveLength(1);
+    // The next statement: the store's words now name the account, so its receipt matches, sure, unasked.
+    db.bills.push({ id: "b-thistle2", org_id: "org-1", job_id: null, supplier: "Thistlewood Hardware", supplier_account_id: "acct-thistle", amount: 40, bill_date: "2026-10-02", category: "Materials", status: "paid", amount_paid: 40, bank_line_id: null, superseded_by_bill_id: null });
+    const next = await drop(`Date,Description,Amount\n10/03/2026,1111-TWH STORE 21 ANYTOWN,-40.00\n`, "Card1234-next.csv");
+    const nv = await view(next);
+    expect(nv.rows).toHaveLength(0);
+    expect(nv.counts.matched).toBe(1);
+  });
+
+  it("a receipt on no account learns nothing, and the tap still marks it", async () => {
+    receipt({ supplier_account_id: null });
+    const id = await drop(TWH, "Card1234.csv");
+    const v = await view(id);
+    const res = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [v.rows[0].id]: "bill:b-thistle" } });
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain("1 receipt was already on the books, so it was marked, never written twice.");
+    expect(res.message).not.toContain("Remembered");
+    expect(db.supplier_aliases).toHaveLength(0);
+    expect(db.bills).toHaveLength(1);
+    expect(db.bills[0].bank_line_id).toBe(db.bank_lines[0].id);
+  });
+
+  it("a receipt another screen matched a moment ago is said with the next step, and the line is asked again", async () => {
+    receipt();
+    const id = await drop(TWH, "Card1234.csv");
+    const v = await view(id);
+    // Between the card and the write, another screen marks the receipt: the guarded update finds nothing.
+    refuseWrite = (table, verb) => {
+      if (table === "bills" && verb === "update") db.bills[0].bank_line_id = "line-elsewhere";
+      return false;
+    };
+    const res = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [v.rows[0].id]: "bill:b-thistle" } });
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain("But: 1111-TWH STORE 21 ANYTOWN (2026-09-24) wasn't matched: that receipt was matched a moment ago. Look again and answer it once more.");
+    // Nothing of this line stands: no bank line, the other screen's mark untouched, no spelling learned,
+    // and the card still waits with the line.
+    expect(db.bank_lines).toHaveLength(0);
+    expect(db.bills[0].bank_line_id).toBe("line-elsewhere");
+    expect(db.supplier_aliases).toHaveLength(0);
+    expect(db.organized_items[0].status).toBe("needs_review");
   });
 });
 

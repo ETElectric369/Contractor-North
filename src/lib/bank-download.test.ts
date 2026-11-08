@@ -48,6 +48,8 @@ import {
   validPicks,
   lineIdOf,
   identityToLearn,
+  receiptHint,
+  receiptWords,
   type BankBooks,
   type BankDownload,
   type BooksPayment,
@@ -975,6 +977,45 @@ describe("the company's own rules", () => {
     const plan = planBankDownload(dl, ORG_BOOKS({ rules: [rule({ id: "r-gone", key: "dental", choice: "crew", bucket: null, profileId: "someone-gone" })] }));
     expect(plan.dispositions.get(lineBy(dl, "DENTAL").key)).toMatchObject({ how: "need" });
   });
+
+  it("a learned rule yields to a receipt of the same money within 3 days: that line is asked, the rest are placed (cn-v1154)", () => {
+    const dl = readBankTable(
+      parseCSV(`Date,Description,Amount
+09/12/2026,1111-GLIMMER PLAZA 77 ANYTOWN,-62.15
+09/14/2026,1111-GLIMMER PLAZA 77 ANYTOWN,-40.00
+09/10/2026,ONLINE TRANSFER TO CHK XXXXXX9876 REF #IB0123456789,-2000.00
+`),
+      "x.csv",
+      hash,
+    )!;
+    const books = ORG_BOOKS({
+      rules: [rule({ id: "r-glimmer", key: "glimmer" }), rule({ id: "r-draw", key: "transfer 9876", choice: "draw", bucket: null })],
+      bills: [
+        // The fill's money two days earlier, typed under a name the bank's words never meet: the match
+        // passes leave it, and the rule must not take the line over it.
+        { id: "b-hw", cents: 6215, day: "2026-09-10", supplier: "Thistlewood Hardware", jobId: "job-kitchen", category: null, onAccount: false },
+        // The transfer's money as a bill: a transfer between the company's own accounts is no receipt.
+        { id: "b-lumber", cents: 200000, day: "2026-09-10", supplier: "Catbird Lumber", jobId: "job-shop", category: null, onAccount: false },
+      ],
+    });
+    const plan = planBankDownload(dl, books);
+    expect(plan.dispositions.get(lineBy(dl, "GLIMMER", "2026-09-12").key)).toMatchObject({ how: "need" });
+    expect(plan.dispositions.get(lineBy(dl, "GLIMMER", "2026-09-14").key)).toMatchObject({ how: "rule", ruleId: "r-glimmer" });
+    expect(plan.dispositions.get(lineBy(dl, "ONLINE TRANSFER").key)).toMatchObject({ how: "rule", ruleId: "r-draw" });
+    expect(plan.counts).toMatchObject({ ruled: 2, needLines: 1 });
+  });
+
+  it("the same rule with no receipt of that money near places every line, as before", () => {
+    const dl = readBankTable(parseCSV(`Date,Description,Amount\n09/12/2026,1111-GLIMMER PLAZA 77 ANYTOWN,-62.15\n09/14/2026,1111-GLIMMER PLAZA 77 ANYTOWN,-40.00\n`), "x.csv", hash)!;
+    const books = ORG_BOOKS({
+      rules: [rule({ id: "r-glimmer", key: "glimmer" })],
+      // The same money a week off is not this line's receipt.
+      bills: [{ id: "b-far", cents: 6215, day: "2026-09-05", supplier: "Thistlewood Hardware", jobId: "job-kitchen", category: null, onAccount: false }],
+    });
+    const plan = planBankDownload(dl, books);
+    for (const l of dl.lines) expect(plan.dispositions.get(l.key)).toMatchObject({ how: "rule", ruleId: "r-glimmer" });
+    expect(plan.counts).toMatchObject({ ruled: 2, needLines: 0 });
+  });
 });
 
 describe("what needs a person: one row per merchant, the guess first and never picked", () => {
@@ -1257,7 +1298,8 @@ describe("a bank line on a job", () => {
     expect(view.rows[0].single).toBe(false);
     expect(view.otherOut.some((b) => b.id.startsWith("job:"))).toBe(false);
     expect(view.otherOutSingle.some((b) => b.id.startsWith("job:"))).toBe(true);
-    // No row's guess or button is ever a job: there is no way to guess WHICH job.
+    // No row's guess or button is a job while nothing says WHICH job: these books carry no clocked time.
+    // The clock can say (cn-v1154): "a store line with no receipt guesses the day's job", below.
     const guessed = [...view.rows.flatMap((r) => r.buttons.map((b) => b.id)), ...sortOf(BOUGHT).view.rows.flatMap((r) => [...r.buttons.map((b) => b.id), r.guess ?? ""])];
     expect(guessed.some((id) => id.startsWith("job:"))).toBe(false);
   });
@@ -1581,5 +1623,346 @@ describe("the owner's own money going in", () => {
     const res = validPicks({ [out.id]: "owner_in" }, plan, ORG_BOOKS());
     expect(res.ok.size).toBe(0);
     expect(res.refused[0]).toContain("that answer doesn't fit money out");
+  });
+});
+
+/**
+ * THE COUNTER MATCH'S LAST TWO CASES (cn-v1154). A store line no receipt explains is guessed as the job
+ * the crew clocked that day (or the day or two before: a card trails the counter), and a store's refund
+ * is asked against the charge it undoes. Every store, job and figure here is made up: Thistlewood
+ * Hardware, Bayberry Supply, the Larkspur kitchen.
+ */
+describe("a store line with no receipt guesses the day's job", () => {
+  const HARDWARE = `Date,Description,Amount\n09/12/2026,1111-THISTLEWOOD HARDWARE #221 ANYTOWN,-219.15\n`;
+  const worked = (day: string, jobId = "job-kitchen") => [{ jobId, day, minutes: 240 }];
+  const sortOf = (csv: string, books: BankBooks) => {
+    const dl = readBankTable(parseCSV(csv), "Card1234.csv", hash)!;
+    const plan = planBankDownload(dl, books);
+    return { dl, plan, group: plan.groups[0], view: bankViewOf(dl, plan, books) };
+  };
+
+  it("the crew clocked a job that day: the job is the guess, its own row, Tools & Supplies second, and the hint says so", () => {
+    const books = ORG_BOOKS({ worked: worked("2026-09-12") });
+    const { plan, group, view } = sortOf(HARDWARE, books);
+    expect(plan.groups).toHaveLength(1);
+    expect(group.guess).toBe("job:job-kitchen");
+    expect(group.single).toBe(true);
+    expect(group.learnable).toBe(false);
+    expect(group.id).toMatch(/^line:/);
+    expect(group.buttons).toEqual(["job:job-kitchen", "cost:Tools & Supplies", "draw"]);
+    // The hint and the button both say the job in full (the law: name jobs, not numbers), and the pick is taken.
+    expect(group.hint).toBe("The crew was on 41 Larkspur · J-054 — Marla Finch that day.");
+    expect(view.rows[0].buttons[0].label).toBe("On 41 Larkspur · J-054 — Marla Finch");
+    expect(validPicks({ [group.id]: "job:job-kitchen" }, plan, books).ok.size).toBe(1);
+  });
+
+  it("names the day the clock spoke of when it is the day before, or two days before", () => {
+    expect(sortOf(HARDWARE, ORG_BOOKS({ worked: worked("2026-09-11") })).group.hint).toBe("The crew was on 41 Larkspur · J-054 — Marla Finch on Sep 11, the day before this posted.");
+    expect(sortOf(HARDWARE, ORG_BOOKS({ worked: worked("2026-09-10") })).group.hint).toBe("The crew was on 41 Larkspur · J-054 — Marla Finch on Sep 10, two days before this posted.");
+    // The day's own job wins over an earlier day's.
+    const both = [...worked("2026-09-12", "job-shop"), ...worked("2026-09-11", "job-kitchen")];
+    expect(sortOf(HARDWARE, ORG_BOOKS({ worked: both })).group.guess).toBe("job:job-shop");
+  });
+
+  it("a line naming a supplier account is a store line too; a quiet day keeps Tools & Supplies; a job the books don't carry is no guess", () => {
+    const bayberry = { id: "acct-bayberry", name: "Bayberry Supply", number: null, branch: null, onAccount: false, aliases: [] };
+    const account = sortOf(`Date,Description,Amount\n09/12/2026,1111-BAYBE 4410 ANYTOWN,-88.00\n`, ORG_BOOKS({ accounts: [bayberry], worked: worked("2026-09-12") }));
+    expect(account.group.guess).toBe("job:job-kitchen");
+    expect(account.group.hint).toBe("The crew was on 41 Larkspur · J-054 — Marla Finch that day.");
+    // Nobody on the clock that day or the two before: today's guess, a merchant's row, no hint.
+    const quiet = sortOf(HARDWARE, ORG_BOOKS({ worked: worked("2026-09-09") }));
+    expect(quiet.group.guess).toBe("cost:Tools & Supplies");
+    // The merchant's row (one line here, so `single` still reads true), learnable as before.
+    expect(quiet.group.id).toBe("out:thistlewood");
+    expect(quiet.group.learnable).toBe(true);
+    expect(quiet.group.hint ?? null).toBeNull();
+    // The job clocked is one the card cannot offer (finished since, cancelled): no guess of it.
+    const gone = sortOf(HARDWARE, ORG_BOOKS({ worked: worked("2026-09-12", "job-gone") }));
+    expect(gone.group.guess).toBe("cost:Tools & Supplies");
+    expect(gone.group.hint ?? null).toBeNull();
+    // A line no store word and no account names, on a worked day, is not a store line.
+    expect(sortOf(`Date,Description,Amount\n09/12/2026,DENTAL CARE LLC,-150.00\n`, ORG_BOOKS({ worked: worked("2026-09-12") })).group.guess).toBeNull();
+  });
+
+  it("stands aside for a receipt of the same money (the receipt is the guess), and for the merchant's own rule", () => {
+    // A receipt of this money within three days that no match took (its typed supplier is none of the
+    // line's words): the receipt outranks the clock, in the plan and in guessFor alone.
+    const receipt = { id: "b-receipt", cents: 21915, day: "2026-09-12", supplier: "Receipt", jobId: null, category: "Receipt", onAccount: false };
+    const withReceipt = ORG_BOOKS({ worked: worked("2026-09-12"), bills: [receipt] });
+    const { dl, group } = sortOf(HARDWARE, withReceipt);
+    expect(group.guess?.startsWith("job:")).toBe(false);
+    expect(guessFor(dl.lines[0], withReceipt)?.choice).not.toBe("job");
+    // A rule whose band holds the line places it: no question, no guess.
+    const rule: BooksRule = { id: "r-hw", direction: "out", key: "thistlewood", choice: "cost", bucket: "Tools & Supplies", supplierAccountId: null, profileId: null, minCents: 20000, maxCents: 25000 };
+    const ruled = sortOf(HARDWARE, ORG_BOOKS({ worked: worked("2026-09-12"), rules: [rule] }));
+    expect(ruled.plan.groups).toHaveLength(0);
+    expect(ruled.plan.dispositions.get(ruled.dl.lines[0].key)).toMatchObject({ how: "rule", ruleId: "r-hw" });
+    // Outside the band, the merchant's nearest answer is the guess, as before.
+    expect(sortOf(HARDWARE, ORG_BOOKS({ worked: worked("2026-09-12"), rules: [{ ...rule, minCents: 1000, maxCents: 2000 }] })).group.guess).toBe("cost:Tools & Supplies");
+  });
+});
+
+describe("a Money In from the same store is a return", () => {
+  const CHARGE = { key: "s-charge", postedOn: "2026-09-12", cents: -21915, last4: null, description: "1111-THISTLEWOOD HARDWARE #221 ANYTOWN", check: null };
+  const REFUND = `Date,Description,Amount\n09/15/2026,THISTLEWOOD HARDWARE #221 REFUND,219.15\n`;
+  const sortOf = (csv: string, books: BankBooks) => {
+    const dl = readBankTable(parseCSV(csv), "Card1234.csv", hash)!;
+    const plan = planBankDownload(dl, books);
+    return { dl, plan, group: plan.groups[0], view: bankViewOf(dl, plan, books) };
+  };
+
+  it("a refund three days after a charge already on a bucket: that bucket is the guess, and the row says which charge", () => {
+    const books = ORG_BOOKS({ stored: [{ ...CHARGE, choice: "cost", bucket: "Tools & Supplies", jobId: null }] });
+    const { plan, group, view } = sortOf(REFUND, books);
+    expect(plan.groups).toHaveLength(1);
+    expect(group.direction).toBe("in");
+    expect(group.guess).toBe("cost:Tools & Supplies");
+    expect(group.single).toBe(true);
+    expect(group.id).toMatch(/^line:/);
+    expect(group.learnable).toBe(false);
+    expect(group.hint).toBe("Return of the $219.15 charge on Sep 12 at Thistlewood Hardware.");
+    expect(group.buttons).toEqual(["cost:Tools & Supplies", "other_income", "not_income"]);
+    // On money in a bucket is a refund of that cost, in the Other… list's own words, and the pick is taken.
+    expect(view.rows[0].buttons[0].label).toBe("Refund: Tools & Supplies");
+    expect(validPicks({ [group.id]: "cost:Tools & Supplies" }, plan, books).ok.size).toBe(1);
+  });
+
+  it("the charge is on a job: no guess, the road is the store's credit slip on the job, and the two usual buttons stay", () => {
+    const { group } = sortOf(REFUND, ORG_BOOKS({ stored: [{ ...CHARGE, choice: "job", bucket: null, jobId: "job-kitchen" }] }));
+    expect(group.guess).toBeNull();
+    expect(group.hint).toBe("That $219.15 charge on Sep 12 is on 41 Larkspur · J-054 — Marla Finch. File the store's credit slip on the job to count it there.");
+    expect(group.buttons).toEqual(["not_income", "other_income"]);
+    expect(group.id).toMatch(/^line:/);
+    // A job the books no longer carry is still said to be one.
+    expect(sortOf(REFUND, ORG_BOOKS({ stored: [{ ...CHARGE, choice: "job", bucket: null, jobId: "job-gone" }] })).group.hint).toContain("is on a job.");
+  });
+
+  it("the charge is in this download and not answered yet: the charge is asked first, and the refund follows it", () => {
+    const BOTH = `Date,Description,Amount\n09/15/2026,THISTLEWOOD HARDWARE #221 REFUND,219.15\n09/12/2026,1111-THISTLEWOOD HARDWARE #221 ANYTOWN,-219.15\n`;
+    const { dl, plan } = sortOf(BOTH, ORG_BOOKS());
+    const refund = plan.groups.find((g) => g.direction === "in")!;
+    const charge = plan.groups.find((g) => g.direction === "out")!;
+    expect(charge.guess).toBe("cost:Tools & Supplies");
+    expect(refund.guess).toBeNull();
+    expect(refund.hint).toBe("Answer the $219.15 charge on Sep 12 first. This return follows it.");
+    expect(refund.buttons).toEqual(["not_income", "other_income"]);
+    // The charge counted in an earlier pass of this download (bank_lines holds it): the refund takes its bucket.
+    const chargeKey = lineBy(dl, "ANYTOWN").key;
+    const counted = planBankDownload(dl, ORG_BOOKS({ already: new Map([[chargeKey, { choice: "cost", bucket: "Fuel", amountCents: 21915 }]]) }));
+    expect(counted.groups).toHaveLength(1);
+    expect(counted.groups[0].guess).toBe("cost:Fuel");
+    expect(counted.groups[0].hint).toBe("Return of the $219.15 charge on Sep 12 at Thistlewood Hardware.");
+    // Its job rides on the stored line under the same key, which the already read does not carry.
+    const onJob = ORG_BOOKS({ already: new Map([[chargeKey, { choice: "job", bucket: null, amountCents: 21915 }]]), stored: [{ ...CHARGE, key: chargeKey, choice: "job", bucket: null, jobId: "job-kitchen" }] });
+    expect(planBankDownload(dl, onJob).groups[0].hint).toContain("is on 41 Larkspur · J-054 — Marla Finch.");
+  });
+
+  it("a same-day charge later in the file that a rule places: the refund reads the rule's answer, not 'answer it first'", () => {
+    const SAME_DAY = `Date,Description,Amount\n09/12/2026,THISTLEWOOD HARDWARE #221 REFUND,100.00\n09/12/2026,1111-THISTLEWOOD HARDWARE #221 ANYTOWN,-219.15\n`;
+    const rule: BooksRule = { id: "r-hw", direction: "out", key: "thistlewood", choice: "cost", bucket: "Tools & Supplies", supplierAccountId: null, profileId: null, minCents: 20000, maxCents: 25000 };
+    const { plan } = sortOf(SAME_DAY, ORG_BOOKS({ rules: [rule] }));
+    expect(plan.groups).toHaveLength(1);
+    expect(plan.groups[0].guess).toBe("cost:Tools & Supplies");
+    // A part refund names the whole charge it comes off.
+    expect(plan.groups[0].hint).toBe("Return of the $219.15 charge on Sep 12 at Thistlewood Hardware.");
+  });
+
+  it("today's behaviour where nothing is found: no charge, an answer the read lacks, a matched charge, a filed credit, customer money", () => {
+    // No charge within seven days: no guess, no hint, the merchant's row as before.
+    const none = sortOf(REFUND, ORG_BOOKS({ stored: [{ ...CHARGE, postedOn: "2026-09-07", choice: "cost", bucket: "Tools & Supplies", jobId: null }] }));
+    expect(none.group.guess).toBeNull();
+    expect(none.group.hint ?? null).toBeNull();
+    expect(none.group.buttons).toEqual(["not_income", "other_income"]);
+    expect(none.group.id).toBe("in:thistlewood");
+    // A charge whose stored answer the read did not carry says nothing: it is answered, just not here.
+    expect(sortOf(REFUND, ORG_BOOKS({ stored: [CHARGE] })).group.hint ?? null).toBeNull();
+    // A charge that is a matched bill is passed over: its refund is the credit paper, below.
+    expect(sortOf(REFUND, ORG_BOOKS({ stored: [{ ...CHARGE, choice: "matched", bucket: null, jobId: null }] })).group.hint ?? null).toBeNull();
+    // A filed credit of the same money still wins first, as a match: nothing to ask.
+    const credit = { id: "b-credit", cents: -21915, day: "2026-09-14", supplier: "Thistlewood Hardware", jobId: null, category: "Receipt", onAccount: false };
+    const filed = sortOf(REFUND, ORG_BOOKS({ bills: [credit], stored: [{ ...CHARGE, choice: "cost", bucket: "Tools & Supplies", jobId: null }] }));
+    expect(filed.plan.groups).toHaveLength(0);
+    expect(filed.plan.dispositions.get(filed.dl.lines[0].key)).toMatchObject({ how: "match", table: "bills", ids: ["b-credit"], said: "Return from Thistlewood Hardware already on the books" });
+    // Customer money never enters: a payout that happens to share the store's words is asked as itself.
+    const payout = sortOf(`Date,Description,Amount\n09/15/2026,VENMO CASHOUT THISTLEWOOD HARDWARE,219.15\n`, ORG_BOOKS({ stored: [{ ...CHARGE, choice: "cost", bucket: "Tools & Supplies", jobId: null }] }));
+    expect(payout.group.guess).toBeNull();
+    expect(payout.group.hint ?? "").not.toMatch(/Return of/);
+  });
+});
+
+/**
+ * A RECEIPT OF THE SAME MONEY, OFFERED AS A TAP (cn-v1154). The sure match needs a name the bank's words
+ * and the bill share, so a counter receipt typed under a store the bank spells unrecognisably was asked
+ * about every month. Now a bill of exactly this money within three days is the row's GUESS, with its
+ * reason under it, even when no word matches; taking it marks the bill, and Apply learns the bank's words
+ * as the store's spelling. Every store, job and figure here is made up.
+ */
+describe("a receipt of the same money, offered as a tap", () => {
+  const TWH = `Date,Description,Amount\n09/24/2026,1111-TWH STORE 21 ANYTOWN,-27.43\n`;
+  const thistle = (over: Partial<BankBooks["bills"][number]> = {}) => ({
+    id: "b-thistle",
+    cents: 2743,
+    day: "2026-09-23",
+    supplier: "Thistlewood Hardware",
+    jobId: "job-kitchen",
+    category: "Materials",
+    onAccount: false,
+    supplierAccountId: "acct-thistle",
+    ...over,
+  });
+  const catbird = () => thistle({ id: "b-catbird", day: "2026-09-26", supplier: "Catbird Lumber", jobId: null, supplierAccountId: null });
+  const account = { id: "acct-thistle", name: "Thistlewood Hardware", number: null, branch: null, onAccount: false, aliases: [] as string[] };
+  const far = { id: "b-far", cents: 51000, day: "2026-09-24", supplier: "Catbird Lumber", jobId: null, category: "Materials", onAccount: false, supplierAccountId: null };
+  // The job in full (the law: name jobs, not numbers), as the job buttons say it.
+  const HINT = "Same as the $27.43 receipt on Sep 23 at Thistlewood Hardware on 41 Larkspur · J-054 — Marla Finch.";
+
+  it("is the guess, with its reason under the row, even when no word matches; the Other… list carries only this row's receipt", () => {
+    const dl = download(TWH, "Card1234.csv");
+    const books = ORG_BOOKS({ accounts: [account], bills: [thistle(), far] });
+    const plan = planBankDownload(dl, books);
+    expect(plan.dispositions.get(dl.lines[0].key)).toEqual({ how: "need", group: lineIdOf(dl.lines[0].key) });
+    const g = plan.groups[0];
+    expect(g).toMatchObject({ single: true, learnable: false, guess: "bill:b-thistle", receipts: ["bill:b-thistle"], hint: HINT });
+    expect(g.buttons).toEqual(["bill:b-thistle", "draw", "cost:Fuel"]);
+    const view = bankViewOf(dl, plan, books);
+    const row = view.rows[0];
+    expect(row.guess).toBe("bill:b-thistle");
+    expect(row.buttons[0]).toEqual({ id: "bill:b-thistle", label: "Same as the $27.43 Receipt on Sep 23" });
+    expect(row.buttons[0].label.length).toBeLessThanOrEqual(40);
+    expect(row.hint).toBe(HINT);
+    // The row's own Other… list: ITS receipt said in full, then the usual answers; never every bill.
+    expect(row.others![0]).toEqual({ id: "bill:b-thistle", label: "Same as the $27.43 Receipt on Sep 23 · Thistlewood Hardware · 41 Larkspur · J-054 — Marla Finch" });
+    expect(row.others!.map((o) => o.id)).toContain("draw");
+    expect(row.others!.some((o) => o.id === "bill:b-far")).toBe(false);
+    expect(view.otherOutSingle.some((o) => o.id.startsWith("bill:"))).toBe(false);
+    expect(view.otherOut.some((o) => o.id.startsWith("bill:"))).toBe(false);
+  });
+
+  it("a second receipt of the same money is the second button, and the cap of three holds", () => {
+    const dl = download(TWH, "Card1234.csv");
+    const plan = planBankDownload(dl, ORG_BOOKS({ accounts: [account], bills: [catbird(), thistle()] }));
+    const g = plan.groups[0];
+    // The nearer day is the guess; the runner-up is the second button; the hint speaks of the guess.
+    expect(g.guess).toBe("bill:b-thistle");
+    expect(g.receipts).toEqual(["bill:b-thistle", "bill:b-catbird"]);
+    expect(g.buttons).toEqual(["bill:b-thistle", "bill:b-catbird", "draw"]);
+    expect(g.hint).toBe(HINT);
+  });
+
+  it("two lines, one receipt: only the first offers it; a transfer never does", () => {
+    const two = `Date,Description,Amount\n09/25/2026,1111-TWH STORE 21 ANYTOWN,-27.43\n09/24/2026,1111-TWH STORE 21 ANYTOWN,-27.43\n`;
+    const plan = planBankDownload(download(two, "Card1234.csv"), ORG_BOOKS({ accounts: [account], bills: [thistle()] }));
+    const first = plan.groups.find((g) => g.first === "2026-09-24")!;
+    const second = plan.groups.find((g) => g.first === "2026-09-25")!;
+    expect(first.guess).toBe("bill:b-thistle");
+    expect(second.receipts).toBeUndefined();
+    expect(second.buttons.some((b) => b.startsWith("bill:"))).toBe(false);
+    // A transfer between the company's own accounts is never a receipt, whatever the money.
+    const xfer = download(`Date,Description,Amount\n09/24/2026,ONLINE TRANSFER TO SAVINGS,-27.43\n`, "Card1234.csv");
+    const g = planBankDownload(xfer, ORG_BOOKS({ bills: [thistle()] })).groups[0];
+    expect(g.guess).toBe("draw");
+    expect(g.receipts).toBeUndefined();
+    expect(g.buttons.some((b) => b.startsWith("bill:"))).toBe(false);
+  });
+
+  it("is never a rule, reads back as itself, fits the direction its sign says, and is stored as matched", () => {
+    const c = { choice: "bill" as const, billId: "b-thistle" };
+    expect(learnableAnswer(c, "out")).toBe(false);
+    expect(learnableAnswer(c, "in")).toBe(false);
+    expect(parseChoiceId("bill:abcdef12")).toEqual({ choice: "bill", billId: "abcdef12" });
+    expect(choiceId(parseChoiceId("bill:abcdef12")!)).toBe("bill:abcdef12");
+    expect(parseChoiceId("bill")).toBeNull();
+    expect(parseChoiceId("bill:")).toBeNull();
+    expect(parseChoiceId("bill:not a uuid")).toBeNull();
+    expect(choiceFits(c, "out")).toBe(true);
+    expect(choiceFits(c, "in")).toBe(true);
+    // The line holds no answer of its own: 'matched', the row the plan's own bill match writes.
+    expect(storedChoice(c)).toBe("matched");
+    expect(storedAnswer(c)).toEqual({ choice: "matched", bucket: null, supplier_account_id: null, profile_id: null, invoice_id: null });
+    // The words: the button short, Title Case; a credit is a Return; the hint says the store and the job.
+    expect(choiceLabel(c, namesOf(ORG_BOOKS({ bills: [thistle()] })))).toBe("Same as the $27.43 Receipt on Sep 23");
+    expect(choiceLabel(c, namesOf(ORG_BOOKS()))).toBe("Same as the Receipt");
+    expect(receiptWords({ cents: -2743, day: "2026-09-23" })).toBe("Same as the $27.43 Return on Sep 23");
+    expect(receiptHint(thistle({ jobId: "job-gone" }), ORG_BOOKS())).toBe("Same as the $27.43 receipt on Sep 23 at Thistlewood Hardware on a job.");
+    expect(receiptHint(thistle({ jobId: null }), ORG_BOOKS())).toBe("Same as the $27.43 receipt on Sep 23 at Thistlewood Hardware.");
+    expect(receiptHint(thistle({ cents: -2743, supplier: "" }), ORG_BOOKS({ accounts: [account] }))).toBe("Same as the $27.43 return on Sep 23 at Thistlewood Hardware on 41 Larkspur · J-054 — Marla Finch.");
+  });
+
+  it("validPicks takes the receipt the row was offered; refuses one not yours, one a match took, and one receipt on two lines", () => {
+    const dl = download(TWH, "Card1234.csv");
+    const books = ORG_BOOKS({ accounts: [account], bills: [thistle()] });
+    const plan = planBankDownload(dl, books);
+    const g = plan.groups[0];
+    expect(validPicks({ [g.id]: "bill:b-thistle" }, plan, books).ok.get(g.id)).toEqual({ choice: "bill", billId: "b-thistle" });
+    expect(validPicks({ [g.id]: "bill:b-nope" }, plan, books).refused).toEqual(["TWH STORE 21 ANYTOWN: that receipt isn't one of yours"]);
+    // A receipt the sure match took (another line named the store) is offered nowhere, so taken nowhere.
+    const named = download(`Date,Description,Amount\n09/24/2026,1111-TWH STORE 21 ANYTOWN,-27.43\n09/23/2026,THISTLEWOOD HARDWARE #221,-27.43\n`, "Card1234.csv");
+    const plan2 = planBankDownload(named, books);
+    expect(plan2.counts.matched).toBe(1);
+    const asked = plan2.groups[0];
+    expect(asked.receipts).toBeUndefined();
+    const used = validPicks({ [asked.id]: "bill:b-thistle" }, plan2, books);
+    expect(used.ok.size).toBe(0);
+    expect(used.refused).toEqual(["TWH STORE 21 ANYTOWN: that receipt isn't offered on this line"]);
+    // Two lines naming one receipt: both refused before anything is written; each on its own is fine.
+    const two = download(`Date,Description,Amount\n09/25/2026,1111-TWH STORE 21 ANYTOWN,-27.43\n09/24/2026,1111-TWH STORE 21 ANYTOWN,-27.43\n`, "Card1234.csv");
+    const books2 = ORG_BOOKS({ accounts: [account], bills: [catbird(), thistle()] });
+    const plan3 = planBankDownload(two, books2);
+    const a = plan3.groups.find((x) => x.first === "2026-09-24")!;
+    const b = plan3.groups.find((x) => x.first === "2026-09-25")!;
+    expect(a.receipts).toEqual(["bill:b-thistle", "bill:b-catbird"]);
+    expect(b.receipts).toEqual(["bill:b-catbird"]);
+    const both = validPicks({ [a.id]: "bill:b-catbird", [b.id]: "bill:b-catbird" }, plan3, books2);
+    expect(both.ok.size).toBe(0);
+    expect(both.refused).toEqual(["2 lines name the same receipt; it can only be one of them"]);
+    expect(validPicks({ [a.id]: "bill:b-thistle", [b.id]: "bill:b-catbird" }, plan3, books2).ok.size).toBe(2);
+  });
+
+  it("hands Apply the bank's words for the receipt's account when the proof is a tap, and nothing for a receipt on no account", () => {
+    const dl = download(TWH, "Card1234.csv");
+    const line = dl.lines[0];
+    const matched = { how: "match" as const, table: "bills" as const, ids: ["b-thistle"], said: "" };
+    const books = ORG_BOOKS({ accounts: [account], bills: [thistle()] });
+    // The line names nobody the books know: by name nothing is proved; by a tap, the words are the store's.
+    expect(identityToLearn(line, matched, books, "name")).toBeNull();
+    expect(identityToLearn(line, matched, books)).toBeNull();
+    expect(identityToLearn(line, matched, books, "tap")).toEqual({ accountId: "acct-thistle", accountName: "Thistlewood Hardware", alias: "Twh Store" });
+    // Every other guard holds: a receipt on no account, a line the account already names, a bare check.
+    expect(identityToLearn(line, matched, ORG_BOOKS({ accounts: [account], bills: [thistle({ supplierAccountId: null })] }), "tap")).toBeNull();
+    expect(identityToLearn(line, matched, ORG_BOOKS({ accounts: [{ ...account, aliases: ["TWH"] }], bills: [thistle()] }), "tap")).toBeNull();
+    expect(identityToLearn({ ...line, check: "1050", description: "CHECK 1050" }, matched, books, "tap")).toBeNull();
+    // A LINE THAT NAMES SOMEONE ELSE teaches nothing by a tap (skeptic #58): another account the books
+    // carry, or a supplier typed on another bill. The receipt may still be taken; the words are not its.
+    const catbird = download(`Date,Description,Amount\n09/24/2026,1111-CATBIRD TOOLS 44 ANYTOWN,-27.43\n`, "Card1234.csv").lines[0];
+    const catbirdAccount = { id: "acct-catbird", name: "Catbird Tools", number: null, branch: null, onAccount: false, aliases: [] as string[] };
+    expect(identityToLearn(catbird, matched, ORG_BOOKS({ accounts: [account, catbirdAccount], bills: [thistle()] }), "tap")).toBeNull();
+    expect(identityToLearn(catbird, matched, ORG_BOOKS({ accounts: [account], bills: [thistle(), thistle({ id: "b-tools", day: "2026-09-01", supplier: "Catbird Tools", supplierAccountId: null })] }), "tap")).toBeNull();
+    // With neither in the books, the same line teaches the tapped receipt's account its words: the plain case.
+    expect(identityToLearn(catbird, matched, books, "tap")).toEqual({ accountId: "acct-thistle", accountName: "Thistlewood Hardware", alias: "Catbird Tools" });
+  });
+
+  it("is never offered on money that is not a receipt: a customer's deposit on an invoice's balance, a payout", () => {
+    // A vendor's credit of exactly the deposit's money within three days (skeptic #58): the invoice stays
+    // the guess and no receipt is offered, because a customer's payment is no store's credit slip.
+    const credit = thistle({ id: "b-credit", cents: -127500, day: "2026-09-05", jobId: null });
+    const dl = download();
+    const books = ORG_BOOKS({ accounts: [account], bills: [credit], invoices: [{ id: "inv-1", number: "INV-1001", balanceCents: 127500 }] });
+    const plan = planBankDownload(dl, books);
+    const deposit = plan.groups.find((g) => g.keys.includes(lineBy(dl, "DEPOSIT").key))!;
+    expect(deposit.guess).toBe("invoice:inv-1");
+    expect(deposit.receipts).toBeUndefined();
+    expect(deposit.buttons.some((b) => b.startsWith("bill:"))).toBe(false);
+    expect(deposit.hint ?? null).toBeNull();
+    // A processor's payout with no invoice to go on: still no receipt, asked as itself.
+    const payout = thistle({ id: "b-payout", cents: -48540, day: "2026-09-18", jobId: null });
+    const plan2 = planBankDownload(dl, ORG_BOOKS({ accounts: [account], bills: [payout] }));
+    const stripe = plan2.groups.find((g) => g.keys.includes(lineBy(dl, "STRIPE").key))!;
+    expect(stripe.receipts).toBeUndefined();
+    expect(stripe.buttons.some((b) => b.startsWith("bill:"))).toBe(false);
+    // A store's refund of that money, under words the books don't know, is still offered its credit.
+    const refund = download(`Date,Description,Amount\n09/06/2026,TWH STORE 21 REFUND,1275.00\n`, "Card1234.csv");
+    const plan3 = planBankDownload(refund, ORG_BOOKS({ accounts: [account], bills: [credit] }));
+    expect(plan3.groups[0].guess).toBe("bill:b-credit");
+    expect(plan3.groups[0].receipts).toEqual(["bill:b-credit"]);
   });
 });
