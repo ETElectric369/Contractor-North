@@ -4,13 +4,15 @@ import { useState, useTransition } from "react";
 import { Copy, ExternalLink, LogOut, Mail, Power, PowerOff, RefreshCw, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
+import { SentMessagesList } from "@/components/sent-messages-list";
+import { SendButton } from "@/components/send-sheet";
 import { formatDateTime } from "@/lib/utils";
 import { orgPublicBase } from "@/app/(app)/share-actions";
 import { openOfficeLook } from "@/components/portal/open-office-look";
 import { portalOfficeLookUrl } from "../../portal-look-actions";
 import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
-import { emailPortalLink, rotatePortalLink, setPortalEnabled, signOutPortalDevices, type PortalLinkState } from "../actions";
+import { rotatePortalLink, setPortalEnabled, signOutPortalDevices, type PortalLinkState } from "../actions";
 
 /**
  * THE CUSTOMER'S OWN PAGE — a different page, at a different URL, meant for them.
@@ -92,14 +94,6 @@ export function PortalLinkButton({
     start(async () => {
       const problem = await openOfficeLook(() => portalOfficeLookUrl(customerId));
       if (problem) say(null, problem);
-    });
-  }
-  function emailIt() {
-    say(null);
-    start(async () => {
-      const res = await emailPortalLink(customerId);
-      if (res.ok) say(fillText(t("cu_emailedTo"), { name: customerName }));
-      else say(null, res.error ?? t("cu_couldntSend"));
     });
   }
   function copyIt() {
@@ -202,14 +196,24 @@ export function PortalLinkButton({
         >
           <Copy className="h-4 w-4" /> {t("cu_btn_copyTheLink")}
         </Button>
-        <Button
-          variant="outline"
-          onClick={emailIt}
-          disabled={pending || !hasEmail || !on}
-          title={!hasEmail ? t("cu_addEmailFirst") : on ? t("cu_emailTitle") : t("cu_turnOnFirst")}
-        >
-          <Mail className="h-4 w-4" /> {t("cu_btn_emailItToThem")}
-        </Button>
+        {/* Email It to Them opens the review sheet (cn-v1155): the address, the subject and the message
+            are his to read and change before the link leaves. No email on file is no dead end there:
+            the sheet asks for one for this send. Off, the link would open to "turned off", so it waits. */}
+        {on ? (
+          <SendButton
+            kind="portal"
+            id={customerId}
+            customerName={customerName}
+            textReady={false}
+            label={t("cu_btn_emailItToThem")}
+            variant="outline"
+            onSent={() => say(fillText(t("cu_emailedTo"), { name: customerName }))}
+          />
+        ) : (
+          <Button variant="outline" disabled title={t("cu_turnOnFirst")}>
+            <Mail className="h-4 w-4" /> {t("cu_btn_emailItToThem")}
+          </Button>
+        )}
         <Button
           variant="outline"
           onClick={() => {
@@ -241,6 +245,8 @@ export function PortalLinkButton({
       {pending && <p className="text-xs text-slate-500">{t("cu_working")}</p>}
       {msg && <p className="text-xs text-slate-600">{msg}</p>}
       {error && !confirmNew && <p className="text-xs text-red-700">{error}</p>}
+      {/* What went out to them, word for word; hides until a link has been sent. */}
+      <SentMessagesList kind="portal" id={customerId} refreshKey={msg ?? ""} />
 
       <Modal
         open={confirmNew}

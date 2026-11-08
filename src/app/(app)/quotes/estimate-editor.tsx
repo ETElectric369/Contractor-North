@@ -18,7 +18,7 @@ import { DayField } from "@/components/day-field";
 import { NumberInput } from "@/components/ui/number-input";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { LineItemText } from "@/components/line-item-text";
-import { EmailButton } from "@/components/email-button";
+import { SendButton } from "@/components/send-sheet";
 import { ShareIconButton } from "@/components/share-icon-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import type { NavTree } from "@/lib/nav-tree";
@@ -67,6 +67,7 @@ import { CircuitScheduleCard } from "./[id]/circuit-schedule-card";
 import { IntakeFiles } from "../leads/intake-files";
 import { LineDescInput, TaskBreakdown, type PersonOption, type PriceItemLite } from "./task-breakdown";
 import { joinLineNote, splitLineNote } from "@/lib/estimate/line-note";
+import { SentMessagesList } from "@/components/sent-messages-list";
 import { createQuoteSession, isQuiet, useQuoteSession, type EditorLine, type EstimateHeader, type HeaderField, type Mode, type SessionState } from "./use-quote-writes";
 import { browserStash, stashHandoff, takeHandoff, type HandoffProposal } from "./handoff";
 
@@ -166,7 +167,7 @@ export interface EditorCatalog {
   leadPlans?: { leadId: string; files: { path: string; name: string }[] };
   /** The visit's scope word, for Remember as a Kit's "under" box (null = no visit, or no scope). */
   scopeWord?: string | null;
-  /** Texting is set up (EmailButton's Text door). */
+  /** Texting is set up (the Send sheet's Text door). */
   textReady: boolean;
   /** The Estimates switch (Duplicate / Revise are its doors; a lock keeps them). */
   estimatesOn: boolean;
@@ -975,12 +976,19 @@ export function EstimateEditor(props: EstimateEditorProps) {
           </div>
           {/* Impulse verbs first (Send / advance status / Duplicate); the ⋯ Actions menu rides LAST. */}
           <div className="flex flex-wrap items-center gap-2">
-            <EmailButton id={savedId} kind="quote" textReady={catalog.textReady} />
+            <SendButton kind="quote" id={savedId} number={mode.kind === "saved" ? mode.number : null} textReady={catalog.textReady} label={t("qt_btn_send")} />
             <StatusControl id={savedId} status={status} />
             {(catalog.estimatesOn || lock) && <DuplicateQuoteButton id={savedId} />}
             {(catalog.estimatesOn || lock) && (status === "sent" || status === "accepted") && <DuplicateQuoteButton id={savedId} revision />}
             {tree && <SectionActionsMenu tree={tree} />}
           </div>
+        </div>
+      )}
+
+      {/* What went out for this estimate, word for word; the block hides until something has. */}
+      {savedId && mode.kind === "saved" && (
+        <div className="mb-6">
+          <SentMessagesList kind="quote" id={savedId} />
         </div>
       )}
 

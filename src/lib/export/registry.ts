@@ -460,6 +460,7 @@ export const EXPORT_TABLES: readonly ExportTable[] = [
   // ── The trail ───────────────────────────────────────────────────────────────
   { table: "agent_audit_log", order: "id", maxPages: TRAIL_MAX_PAGES, columns: ["id", "user_id", "action", "risk", "effect", "ok", "error", "input_summary", "source", "created_at"] },
   { table: "reminder_log", order: "id", maxPages: TRAIL_MAX_PAGES, columns: ["id", "kind", "entity_id", "channel", "sent_at"] },
+  { table: "sent_messages", order: "id", columns: ["id", "doc_kind", "doc_id", "customer_id", "channel", "to_addr", "subject", "body", "copy_to", "sent_by", "sent_at", "auto"] },
   {
     table: "bug_reports",
     order: "id",

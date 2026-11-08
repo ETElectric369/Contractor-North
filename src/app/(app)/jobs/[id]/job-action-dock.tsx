@@ -52,6 +52,7 @@ export function JobActionDock({
   customerPhone,
   hasQuote,
   defaultSendInvoice,
+  sendWithoutReview = false,
   isDrawBilled,
   customers,
   templates,
@@ -70,6 +71,8 @@ export function JobActionDock({
   customerPhone: string | null;
   hasQuote: boolean;
   defaultSendInvoice: boolean;
+  /** Send Without Review is on: Finish & Send Invoice emails at once instead of opening the review sheet. */
+  sendWithoutReview?: boolean;
   isDrawBilled: boolean;
   customers: { id: string; name: string }[];
   templates: { id: string; name: string }[];
@@ -124,6 +127,7 @@ export function JobActionDock({
                   jobId={job.id}
                   hasQuote={hasQuote}
                   defaultSendInvoice={defaultSendInvoice}
+                  sendWithoutReview={sendWithoutReview}
                   isDrawBilled={isDrawBilled}
                   isTm={job.billing_type === "tm"}
                 />

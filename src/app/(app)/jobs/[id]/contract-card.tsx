@@ -9,8 +9,10 @@ import { Input, Label } from "@/components/ui/input";
 import { DayField } from "@/components/day-field";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
+import { SentMessagesList } from "@/components/sent-messages-list";
+import { SendButton } from "@/components/send-sheet";
 import { formatDate } from "@/lib/utils";
-import { generateContractFromJob, updateContract, recordPaperSignature, sendContract, voidContract } from "../../contracts/actions";
+import { generateContractFromJob, updateContract, recordPaperSignature, voidContract } from "../../contracts/actions";
 
 type ContractRow = {
   id: string;
@@ -142,9 +144,7 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
               <a href={link} target="_blank" rel="noopener" className="text-sm font-medium text-brand underline">
                 Open Signing Page
               </a>
-              <Button variant="outline" size="sm" onClick={() => run(() => sendContract(c.id))} disabled={pending}>
-                Resend
-              </Button>
+              <SendButton kind="contract" id={c.id} number={c.contract_number} textReady={false} label="Resend" variant="outline" className="h-8 px-3 text-sm" />
               {/* SIGNED ON PAPER — the normal case in this trade, and until now the only way to
                   record it was Void, which says the agreement doesn't exist (audit R3). */}
               <Button variant="outline" size="sm" onClick={() => setPaperFor(c.id)} disabled={pending}>
@@ -160,9 +160,7 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
             <p className="text-sm text-slate-600">Draft ready. Review the terms, then send it to the customer to sign.</p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <Button size="sm" onClick={() => setEditing(true)}>Review &amp; Edit</Button>
-              <Button variant="outline" size="sm" onClick={() => run(() => sendContract(c.id))} disabled={pending}>
-                Send to Customer
-              </Button>
+              <SendButton kind="contract" id={c.id} number={c.contract_number} textReady={false} label="Send to Customer" variant="outline" className="h-8 px-3 text-sm" />
               <Button variant="ghost" size="sm" onClick={() => run(() => generateContractFromJob(jobId))} disabled={pending}>
                 Regenerate
               </Button>
@@ -170,6 +168,12 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
                 Void
               </Button>
             </div>
+          </div>
+        )}
+        {/* What went out for this contract, word for word; hides until something has. */}
+        {c && (
+          <div className="mt-3">
+            <SentMessagesList kind="contract" id={c.id} />
           </div>
         )}
       </CardContent>

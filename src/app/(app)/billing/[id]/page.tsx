@@ -16,6 +16,7 @@ import { CreditButton } from "./credit-button";
 import { RecordRefundButton } from "./record-refund-button";
 import { ShareIconButton } from "@/components/share-icon-button";
 import { SendButton } from "@/components/send-sheet";
+import { SentMessagesList } from "@/components/sent-messages-list";
 import { ACTIONS_ROW_CLS, SectionActionsMenu } from "@/components/section-actions-menu";
 import { invoiceSectionTree } from "@/lib/nav-tree";
 import { deleteInvoice, invoiceShareText } from "../actions";
@@ -560,6 +561,11 @@ export default async function InvoicePage({
             />
           </SectionActionsMenu>
         </div>
+      </div>
+
+      {/* What went out for this bill (and its receipts), word for word; says so when nothing has. */}
+      <div className="mb-6">
+        <SentMessagesList kind="invoice" id={inv.id} showEmpty refreshKey={(inv as { sent_at?: string | null }).sent_at ?? ""} />
       </div>
 
       {progressFailed && (

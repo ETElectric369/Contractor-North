@@ -24,10 +24,9 @@ describe("migration 0406: one list of the ways money moves", () => {
   /** The statements alone, without the header's words. */
   const code = sql.replace(/--.*$/gm, "");
 
-  it("is the one 0406 and nothing sits past it", () => {
+  it("is the one 0406 (what sits past it is the newest migration's own test: migration-0407.test.ts)", () => {
     const names = readdirSync(migrations);
     expect(names.filter((n) => n.startsWith("0406_"))).toEqual(["0406_one_list_of_ways_money_moves.sql"]);
-    expect(names.some((n) => /^040[7-9]_|^04[1-9]\d_|^0[5-9]\d\d_/.test(n))).toBe(false);
   });
 
   it("exists, names itself, and runs under the house timeouts", () => {

@@ -49,7 +49,6 @@ export const words: WordCatalog = {
     "src/app/(app)/quotes/paper-format-switch.tsx",
     "src/components/add-line-items.tsx",
     "src/components/share-icon-button.tsx",
-    "src/components/email-button.tsx",
     "src/app/(app)/appointments/new-inspection-button.tsx",
   ],
   sameInBoth: ["qt_colTotal", "qt_breakerExample"],
@@ -226,7 +225,7 @@ export const words: WordCatalog = {
     qt_btn_notYet: "Not Yet",
     qt_sharingIsSending: "Sharing the link is sending it, so this marks it sent and opens your share sheet in the same motion. You can still change it afterwards.",
 
-    // ── The Email and Text chips (components/email-button; also drawn on billing). The texting-not-set-up refusal is lib/sms-readiness's own constant and stays English with it ──
+    // ── The Email and Text chips (the old components/email-button, gone in cn-v1155: Send now opens components/send-sheet). The texting-not-set-up refusal is lib/sms-readiness's own constant and stays English with it ──
     qt_couldntSendTryAgain: "Couldn't send — try again.",
     qt_theCustomer: "the customer",
     qt_confirmEmailInvoiceAmount: "Send this {money} invoice to {who} by email? This marks it Sent.",
@@ -236,6 +235,7 @@ export const words: WordCatalog = {
     qt_confirmEmail: "Email?",
     qt_confirmText: "Text?",
     qt_btn_sendInvoice: "Send Invoice",
+    qt_btn_send: "Send",
     qt_btn_email: "Email",
     qt_btn_text: "Text",
     qt_invoiceEmailed: "Invoice emailed",
@@ -417,7 +417,7 @@ export const words: WordCatalog = {
     qt_btn_notYet: "Aún No",
     qt_sharingIsSending: "Compartir el enlace es enviarlo, así que esto marca el envío y abre la hoja para compartir en el mismo paso. Aún puedes cambiarlo después.",
 
-    // ── The Email and Text chips (components/email-button; also drawn on billing). The texting-not-set-up refusal is lib/sms-readiness's own constant and stays English with it ──
+    // ── The Email and Text chips (the old components/email-button, gone in cn-v1155: Send now opens components/send-sheet). The texting-not-set-up refusal is lib/sms-readiness's own constant and stays English with it ──
     qt_couldntSendTryAgain: "No se pudo enviar — inténtalo de nuevo.",
     qt_theCustomer: "el cliente",
     qt_confirmEmailInvoiceAmount: "¿Enviar esta factura de {money} a {who} por correo? Esto la marca como Enviada.",
@@ -427,6 +427,7 @@ export const words: WordCatalog = {
     qt_confirmEmail: "¿Enviar por correo?",
     qt_confirmText: "¿Enviar por mensaje?",
     qt_btn_sendInvoice: "Enviar Factura",
+    qt_btn_send: "Enviar",
     qt_btn_email: "Correo",
     qt_btn_text: "Mensaje",
     qt_invoiceEmailed: "Factura enviada por correo",

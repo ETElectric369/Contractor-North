@@ -117,6 +117,7 @@ export const TABLE_WORDS: Record<string, string> = {
   payroll_runs: "each pay period's hours and pay per person",
   pay_payments: "money paid to people against what they earned",
   documents: "every uploaded file's name, kind and where it is filed",
+  sent_messages: "every email or text that went out for a bill, quote, contract, portal link or receipt: the address, the subject, the words as sent, who sent it and when",
   organized_items: "paperwork the office sorted: what it read and where it was filed",
   resources: "the company's contact book: inspectors, building departments, utilities",
   site_pages: "the pages of the company's website",

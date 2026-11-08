@@ -177,6 +177,10 @@ export interface OrgSettings {
   // BCC the owner (org email) on every customer-facing email — invoices, quotes,
   // contracts, portal links — so you always have a copy and can confirm it sent.
   copy_owner_on_emails: boolean;
+  // Review before anything goes out (cn-v1155). false (the default) = Email It and Text It open the
+  // review sheet: the address, the subject and the message, editable for that one send. true = they
+  // send at once with today's words.
+  send_without_review: boolean;
 
   // Billing automation
   // When a job is finished, auto-email the draft invoice to the customer.
@@ -404,6 +408,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   remind_invoice_due: false,
   remind_appointments: false,
   copy_owner_on_emails: false,
+  send_without_review: false,
   auto_send_invoice_on_complete: false,
   splash_headline: "",
   splash_tagline: "",

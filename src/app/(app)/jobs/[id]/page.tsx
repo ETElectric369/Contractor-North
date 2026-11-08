@@ -2345,6 +2345,7 @@ export default async function JobDetailPage({
            prop it always had (any quote row), so its Finish toggles start where they did. */
         hasQuote={(j as any).billing_type === "tm" ? false : (quotes ?? []).length > 0}
         defaultSendInvoice={getOrgSettings((org as any)?.settings).auto_send_invoice_on_complete}
+        sendWithoutReview={getOrgSettings((org as any)?.settings).send_without_review}
         isDrawBilled={isDrawBilled}
         /* The book feeds the Edit Job modal, a staff door — a tech's dock never carries it. */
         customers={viewerIsStaff ? allCustomers ?? [] : []}

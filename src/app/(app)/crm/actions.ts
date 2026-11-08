@@ -7,7 +7,10 @@ import { emptyToNull } from "@/lib/forms";
 import { createClient } from "@/lib/supabase/server";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 import { requireStaff } from "@/lib/staff-guard";
-import { sendEmail, renderReminderEmail, ownerBcc } from "@/lib/email";
+import { sendEmail, renderReminderEmail } from "@/lib/email";
+import { checkSendMessage, copyMeAddress, type PreviewResult, type SendMessage } from "@/lib/send-review";
+import { logSend, senderEmail } from "@/lib/sent-messages";
+import { PORTAL_EMAIL_BODY, portalSubject, portalEmailTail, sendWhyKey } from "@/lib/send-words";
 import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
 import { findDuplicateGroups, normPhone, type DupCustomer, type DupGroup } from "@/lib/crm/duplicates";
 import { visibleCustomerIdOrNull } from "@/lib/job-visibility";
@@ -109,48 +112,129 @@ export async function signOutPortalDevices(
   return { ok: true, ended: Number(data ?? 0), link };
 }
 
+/**
+ * THE WORDS THE REVIEW SHEET OPENS WITH for the portal link (cn-v1155): the subject, and the
+ * 6-digit-code sentences as the message, with the button's line fixed beneath. Email only. The same
+ * refusals the send gives (no email on file is NOT one: the sheet lets him type an address). Reads
+ * only; nothing is sent.
+ */
+export async function previewPortalSend(customerId: string): Promise<PreviewResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: String(ctx.error) };
+  const { supabase, userId, orgId } = ctx;
+  const ws = wordsOf(supabase, userId);
+  const r = await readPortalSend(supabase, orgId, customerId, null);
+  if (!r.ok) return { ok: false, error: await ws.say(r.error) };
+  const { c, org, settings, link } = r;
+  return {
+    ok: true,
+    preview: {
+      kind: "portal",
+      id: customerId,
+      customerName: c.name ?? null,
+      to: c.email ?? null,
+      phone: null,
+      subject: portalSubject(org?.name),
+      body: PORTAL_EMAIL_BODY,
+      smsBody: "",
+      tail: { email: portalEmailTail(link), sms: "" },
+      copyMe: settings.copy_owner_on_emails === true,
+      copyTo: copyMeAddress(await senderEmail(supabase, userId), org?.email),
+      textReady: false,
+      viewerLang: await ws.lang(),
+      reviewOff: settings.send_without_review === true,
+    },
+  };
+}
+
+/** One read for the portal link's preview and its send, so the sheet shows what goes. An error is the
+ *  catalog key of the refusal. Not exported: a "use server" file exports only async functions. */
+async function readPortalSend(
+  supabase: any,
+  orgId: string | null,
+  customerId: string,
+  /** A send passes the address it will use (the sheet's, else none): with neither that one nor the
+   *  customer's own, it is refused before the link checks, as it always was. The preview passes null. */
+  sendTo: { override: string | undefined } | null,
+): Promise<
+  | { ok: false; error: string }
+  | { ok: true; c: { name?: string | null; email?: string | null }; org: any; settings: ReturnType<typeof getOrgSettings>; link: string }
+> {
+  let q = supabase.from("customers").select("name, email").eq("id", customerId);
+  if (orgId) q = q.eq("org_id", orgId);
+  const { data: c } = await q.maybeSingle();
+  if (!c) return { ok: false, error: "cu_srv_customerNotFound" };
+  if (sendTo && !sendTo.override && !(c as { email?: string | null }).email) return { ok: false, error: "cu_srv_noEmail" };
+  const access = await readPortalLink(supabase, customerId);
+  if (!access) return { ok: false, error: "cu_srv_noLinkYet" };
+  // Never email a link that opens to "this link was turned off".
+  if (!access.enabled) return { ok: false, error: "cu_srv_linkOff" };
+  const { data: org } = await supabase.from("organizations").select("id, name, phone, email, settings").maybeSingle();
+  const settings = getOrgSettings((org as any)?.settings);
+  // The customer's portal, on the contractor's own domain — see orgDocUrl in lib/org-settings.
+  const link = orgDocUrl(settings, "portal", access.token);
+  return { ok: true, c: c as { name?: string | null; email?: string | null }, org: org as any, settings, link };
+}
+
 /** Email the customer their passwordless portal link (invoices, contracts, quotes,
- *  project status). The link is their unguessable token — bookmark, no login. */
-export async function emailPortalLink(customerId: string): Promise<ActionResult> {
+ *  project status). The link is their unguessable token — bookmark, no login. `message` is what the
+ *  review sheet let go: an absent field keeps today's words. */
+export async function emailPortalLink(customerId: string, message?: SendMessage): Promise<ActionResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  const supabase = ctx.supabase;
-  const ws = wordsOf(supabase, ctx.userId);
-  const { data: c } = await supabase
-    .from("customers")
-    .select("name, email")
-    .eq("id", customerId)
-    .maybeSingle();
-  if (!c) return { ok: false, error: await ws.say("cu_srv_customerNotFound") };
-  if (!c.email) return { ok: false, error: await ws.say("cu_srv_noEmail") };
-  const access = await readPortalLink(supabase, customerId);
-  if (!access) return { ok: false, error: await ws.say("cu_srv_noLinkYet") };
-  // Never email a link that opens to "this link was turned off".
-  if (!access.enabled) return { ok: false, error: await ws.say("cu_srv_linkOff") };
+  const { supabase, userId, orgId } = ctx;
+  const ws = wordsOf(supabase, userId);
+  // An email has no fixed-tail limit to count against, so the check can run before the link is read.
+  const checked = checkSendMessage(message, "email", 0);
+  if (!checked.ok) return { ok: false, error: await ws.say(sendWhyKey(checked.why, "email")) };
+  const m = checked.message;
+  const r = await readPortalSend(supabase, orgId, customerId, { override: m.to });
+  if (!r.ok) return { ok: false, error: await ws.say(r.error) };
+  const { c, org, settings, link } = r;
+  const to = m.to ?? c.email;
+  if (!to) return { ok: false, error: await ws.say("cu_srv_noEmail") };
 
   // FROM HERE ON, THE CUSTOMER READS IT: the heading, the message, the button and the subject stay
   // English whatever the caller reads (pinned by crm/customers-server-es.test.ts).
-
-  const { data: org } = await supabase.from("organizations").select("name, phone, email, settings").maybeSingle();
-  // The customer's portal, on the contractor's own domain — see orgDocUrl in lib/org-settings.
-  const link = orgDocUrl(getOrgSettings((org as any)?.settings), "portal", access.token);
   const html = renderReminderEmail({
-    company: { name: org?.name ?? "Contractor North", brand: accentHex(getOrgSettings((org as any)?.settings).glass_tint), phone: org?.phone, email: org?.email },
-    customerName: c.name,
+    company: { name: org?.name ?? "Contractor North", brand: accentHex(settings.glass_tint), phone: org?.phone, email: org?.email },
+    customerName: c.name ?? "there",
     heading: "Your customer portal",
     // 0331: the link asks each new phone or computer for a code. Say so before they meet it.
-    message: "Here's your private link to your jobs: the work and payments day by day, your picks and photos, and your invoices, contracts and quotes. It's up to date every time you open it. The first time you open it on a phone or computer, we'll email you a 6-digit code to sign in; no password to remember. Bookmark it for easy access.",
+    message: PORTAL_EMAIL_BODY,
     cta: { label: "Open my portal", link },
+    body: m.body,
   });
+  // COPY ME: the sheet's tick wins; with none, the company's standing switch. The copy goes to the
+  // sender's own address, else the company's.
+  const copyTo = (m.copyMe ?? settings.copy_owner_on_emails) ? copyMeAddress(await senderEmail(supabase, userId), org?.email) : null;
+  const subject = m.subject ?? portalSubject(org?.name);
   const res = await sendEmail({
-    to: c.email,
-    subject: `Your ${org?.name ?? "customer"} portal`.trim(),
+    to,
+    subject,
     fromName: org?.name ?? undefined,
     html,
     replyTo: org?.email ?? undefined,
-    bcc: ownerBcc(getOrgSettings((org as any)?.settings).copy_owner_on_emails, org?.email),
+    bcc: copyTo ?? undefined,
   });
-  return res.ok ? { ok: true } : res;
+  if (!res.ok) return res;
+  const logOrg = orgId ?? org?.id ?? null;
+  if (logOrg) {
+    await logSend(supabase, {
+      orgId: logOrg,
+      docKind: "portal",
+      docId: null,
+      customerId,
+      channel: "email",
+      to,
+      subject,
+      body: m.body ?? PORTAL_EMAIL_BODY,
+      copyTo,
+      sentBy: userId,
+      auto: false,
+    });
+  }
+  return { ok: true };
 }
 
 /** New Link: the link the customer holds stops at once (it opens to "This link was turned off"),

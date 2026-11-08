@@ -62,7 +62,10 @@ import { revisionOf, supersedeRevised, supersededWords } from "@/lib/estimate/re
 import { taskBookFromRows, taskModeDraft, taskModePrompt, type TaskModeParsed } from "@/lib/estimate/task-mode";
 import { laborRateFor } from "@/lib/pricing/labor-rate";
 import { priceMaterial } from "@/lib/pricing/price-material";
-import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
+import { sendEmail, renderQuoteNoticeEmail } from "@/lib/email";
+import { checkSendMessage, copyMeAddress, type PreviewResult, type SendMessage } from "@/lib/send-review";
+import { logSend, senderEmail } from "@/lib/sent-messages";
+import { quoteSubject, quoteEmailBody, quoteEmailTail, quoteSmsBody, quoteSmsTail, sendWhyKey } from "@/lib/send-words";
 import { sendSms, smsReadiness } from "@/lib/sms";
 import { textNotReadyRefusal, textRefused } from "@/lib/sms-readiness";
 import { orgAccess } from "@/lib/org-access";
@@ -140,49 +143,59 @@ export async function setQuoteType(id: string, docType: "estimate" | "quote") {
   return { ok: true };
 }
 
-export async function textQuote(
-  id: string,
-): Promise<{ ok: boolean; error?: string; notReady?: boolean }> {
-  const supabase = await createClient();
-  const ws = wordsOf(supabase);
-  const { data: quote } = await supabase
+/**
+ * ONE READ FOR EVERY WAY AN ESTIMATE GOES OUT (cn-v1155): the preview, the email and the text all
+ * read the estimate, the company and the link the same way, so what the sheet shows is what is sent.
+ * THE LEAD RIDES ALONG (PROJECTION LAW): an estimate can be made out to a lead (the printed document
+ * and the public /q link coalesce onto the inquiry since 0119), so the phone and email are asked of
+ * both, and the customer wins when there is one. Not exported: a "use server" file exports only
+ * async functions.
+ */
+async function readQuoteSend(supabase: Awaited<ReturnType<typeof createClient>>, orgId: string | null, id: string) {
+  let q = supabase
     .from("quotes")
-    // THE LEAD RIDES ALONG (PROJECTION LAW). An estimate can be made out to a lead — the printed
-    // document and the public /q link have coalesced onto the inquiry since 0119 — but Send only
-    // ever asked for the customer, so texting a perfectly reachable prospect answered "this
-    // customer has no phone number" about a customer that was never supposed to exist yet.
-    .select("quote_number, total, public_token, doc_type, status, address, customers(name, phone, address), inquiry:inquiry_id(name, phone, address), jobs(address)")
-    .eq("id", id)
-    .maybeSingle();
-  if (!quote) return { ok: false, error: await ws.say("qs_quoteNotFound") };
-  const { data: org } = await supabase.from("organizations").select("id, name, settings").maybeSingle();
-  // TEXTING NOT SET UP (lib/sms-readiness): said here, where he tapped, before anything is promised
-  // or stamped. Nothing is sent and the estimate stays a draft.
-  if (!smsReadiness(org).ready) return { ok: false, notReady: true, error: textNotReadyRefusal(await ws.lang(), translator(await ws.lang())) };
-  // THE PLAN HAS ENDED (cn-v1137, decision 3): a lapsed company sends no texts. Said where he
-  // tapped, in his role (the owner is told the door, everyone else the owner); nothing is sent.
-  const quoteOrgId = (org as { id?: string } | null)?.id;
-  const access = await orgAccess(quoteOrgId);
-  if (!access.state.active) return { ok: false, error: await textingPausedWordsFor(quoteOrgId, undefined, await ws.lang(), translator(await ws.lang())) };
-  // Same order the document itself resolves in: the customer when there is one, else the lead.
-  const customer = (quote as any).customers ?? (quote as any).inquiry;
-  if (!customer?.phone)
-    return { ok: false, error: await ws.say("qs_noPhone") };
-
+    .select("id, customer_id, quote_number, title, total, public_token, doc_type, status, address, customers(name, email, phone, address), inquiry:inquiry_id(name, email, phone, address), jobs(address)")
+    .eq("id", id);
+  if (orgId) q = q.eq("org_id", orgId);
+  const { data: quote } = await q.maybeSingle();
+  if (!quote) return null;
+  const { data: org } = await supabase.from("organizations").select("id, name, phone, email, settings").maybeSingle();
+  const settings = getOrgSettings((org as any)?.settings);
+  const customer = ((quote as any).customers ?? (quote as any).inquiry) as { name?: string | null; email?: string | null; phone?: string | null } | null;
   const label = docLabel(quote as { doc_type?: string | null });
-  const link = orgDocUrl(getOrgSettings((org as any)?.settings), "q", (quote as any).public_token, rowPlace(quote as any));
-  const body = `${org?.name ?? "Your contractor"}: ${label} ${quote.quote_number} ($${Number(quote.total).toFixed(2)}). View: ${link}`;
+  // The link is built from the org's own domain, so it is made after the org read.
+  const link = orgDocUrl(settings, "q", (quote as any).public_token, rowPlace(quote as any));
+  return { quote: quote as any, customer, org: org as any, settings, label, link };
+}
 
-  const sent = await sendSms(customer.phone, body, (org as any)?.settings?.sms_from_number);
-  // Texting is set up (asked above), so a false here is the service refusing it; sendSms has
-  // already logged why. It is never "add your Twilio account" on an account that has one.
-  if (!sent) return { ok: false, error: textRefused(await ws.lang(), translator(await ws.lang())) };
-  // Mark as sent once texted (unless already accepted/declined) — mirrors emailQuote.
-  if (["draft"].includes((quote as any).status ?? "")) {
+/** Keep the words that went out (never throws). A lead's estimate has no customer id to file under. */
+async function logQuoteSend(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  p: { orgId: string | null; quote: { id: string; customer_id?: string | null }; channel: "email" | "sms"; to: string; subject: string | null; body: string; copyTo: string | null; userId: string },
+): Promise<void> {
+  if (!p.orgId) return;
+  await logSend(supabase, {
+    orgId: p.orgId,
+    docKind: "quote",
+    docId: p.quote.id,
+    customerId: p.quote.customer_id ?? null,
+    channel: p.channel,
+    to: p.to,
+    subject: p.subject,
+    body: p.body,
+    copyTo: p.copyTo,
+    sentBy: p.userId,
+    auto: false,
+  });
+}
+
+/** A draft becomes sent once it has gone out (accepted and declined stay as they are), and the stored
+ *  PDF (0198) is warmed after the response so the customer's Download button works from the first
+ *  minute: after() never slows the send, and the render carries this sender's cookies. */
+async function markQuoteSent(supabase: Awaited<ReturnType<typeof createClient>>, id: string, status: string | null | undefined): Promise<void> {
+  if (status === "draft") {
     await supabase.from("quotes").update({ status: "sent" }).eq("id", id);
   }
-  // Warm the stored PDF (0198) post-response so the customer's Download button works from the
-  // first minute — after() never slows the send, and the render carries this sender's cookies.
   const h = await headers();
   const warmHost = h.get("x-forwarded-host") ?? h.get("host");
   const warmProto = h.get("x-forwarded-proto") ?? "https";
@@ -191,6 +204,49 @@ export async function textQuote(
   after(async () => {
     if (warmHost) await warmDocPdf("quote", id, `${warmProto}://${warmHost}`, warmCookie);
   });
+}
+
+
+export async function textQuote(
+  id: string,
+  message?: SendMessage,
+): Promise<{ ok: boolean; error?: string; notReady?: boolean }> {
+  // THE HOUSE GUARD (cn-v1155), as emailQuote: staff only; a lead's estimate stays sendable.
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, userId, orgId } = ctx;
+  const ws = wordsOf(supabase, userId);
+  const r = await readQuoteSend(supabase, orgId, id);
+  if (!r) return { ok: false, error: await ws.say("qs_quoteNotFound") };
+  const { quote, customer, org, label, link } = r;
+  // TEXTING NOT SET UP (lib/sms-readiness): said here, where he tapped, before anything is promised
+  // or stamped. Nothing is sent and the estimate stays a draft.
+  if (!smsReadiness(org).ready) return { ok: false, notReady: true, error: textNotReadyRefusal(await ws.lang(), translator(await ws.lang())) };
+  // THE PLAN HAS ENDED (cn-v1137, decision 3): a lapsed company sends no texts. Said where he
+  // tapped, in his role (the owner is told the door, everyone else the owner); nothing is sent.
+  const quoteOrgId = (org as { id?: string } | null)?.id;
+  const access = await orgAccess(quoteOrgId);
+  if (!access.state.active) return { ok: false, error: await textingPausedWordsFor(quoteOrgId, undefined, await ws.lang(), translator(await ws.lang())) };
+
+  const tail = quoteSmsTail(link);
+  const checked = checkSendMessage(message, "sms", tail.length);
+  if (!checked.ok) return { ok: false, error: await ws.say(sendWhyKey(checked.why, "sms")) };
+  const m = checked.message;
+  // Same order the document itself resolves in: the customer when there is one, else the lead.
+  const phone = m.to ?? customer?.phone;
+  if (!phone) return { ok: false, error: await ws.say("qs_noPhone") };
+
+  const head = m.body ?? quoteSmsBody({ orgName: org?.name, docType: label, number: quote.quote_number, total: quote.total });
+  const body = `${head} ${tail}`;
+
+  const sent = await sendSms(phone, body, (org as any)?.settings?.sms_from_number);
+  // Texting is set up (asked above), so a false here is the service refusing it; sendSms has
+  // already logged why. It is never "add your Twilio account" on an account that has one.
+  if (!sent) return { ok: false, error: textRefused(await ws.lang(), translator(await ws.lang())) };
+  // The log keeps the words without the link tail (what the person saw and typed), like the email path.
+  await logQuoteSend(supabase, { orgId: orgId ?? quoteOrgId ?? null, quote, channel: "sms", to: phone, subject: null, body: head, copyTo: null, userId });
+  // Mark as sent once texted (unless already accepted/declined) — mirrors emailQuote.
+  await markQuoteSent(supabase, id, quote.status);
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
   return { ok: true };
@@ -263,29 +319,24 @@ export async function quoteShareText(
 
 export async function emailQuote(
   id: string,
+  message?: SendMessage,
 ): Promise<{ ok: boolean; error?: string }> {
-  const supabase = await createClient();
-  const ws = wordsOf(supabase);
+  // THE HOUSE GUARD (cn-v1155): sending an estimate is staff work, said at the door and not left to
+  // the row policy alone. A lead's estimate stays sendable: the customer comes from customers ?? inquiry.
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, userId, orgId } = ctx;
+  const ws = wordsOf(supabase, userId);
 
-  const { data: quote } = await supabase
-    .from("quotes")
-    // The lead too — same reason as textQuote above: an estimate made out to a lead is a real,
-    // sendable document, and the /q link it carries already prints the lead's name.
-    .select("*, customers(name, email, address), inquiry:inquiry_id(name, email, address), jobs(address)")
-    .eq("id", id)
-    .maybeSingle();
-  if (!quote) return { ok: false, error: await ws.say("qs_quoteNotFound") };
-  const customer = (quote as any).customers ?? (quote as any).inquiry;
-  if (!customer?.email)
-    return { ok: false, error: await ws.say("qs_noEmail") };
-  const label = docLabel(quote as { doc_type?: string | null });
+  const r = await readQuoteSend(supabase, orgId, id);
+  if (!r) return { ok: false, error: await ws.say("qs_quoteNotFound") };
+  const { quote, customer, org, settings, label, link } = r;
 
-  const { data: org } = await supabase
-    .from("organizations")
-    .select("name, phone, email, settings")
-    .maybeSingle();
-  // After the org fetch, because the link is built from the org's own domain now.
-  const link = orgDocUrl(getOrgSettings((org as any)?.settings), "q", (quote as any).public_token, rowPlace(quote as any));
+  const checked = checkSendMessage(message, "email", quoteEmailTail(label, link).length);
+  if (!checked.ok) return { ok: false, error: await ws.say(sendWhyKey(checked.why, "email")) };
+  const m = checked.message;
+  const to = m.to ?? customer?.email;
+  if (!to) return { ok: false, error: await ws.say("qs_noEmail") };
 
   // Link-only notice (no re-rendered line-item table): the canonical document
   // lives at the /q link, so the email can never drift from the print/portal
@@ -295,44 +346,81 @@ export async function emailQuote(
     number: quote.quote_number,
     company: {
       name: org?.name ?? "Contractor North",
-      brand: accentHex(getOrgSettings((org as any)?.settings).glass_tint),
+      brand: accentHex(settings.glass_tint),
       // The company's own tagline (doc_style.tagline), the one its letterhead prints.
       tagline: companyFromOrg(org as any).tagline,
       phone: org?.phone,
       email: org?.email,
     },
-    customerName: customer.name,
+    customerName: customer?.name ?? "there",
     title: quote.title,
     total: quote.total,
     quoteLink: link,
+    // Only the words the owner changed replace the default paragraph.
+    body: m.body,
   });
 
+  // COPY ME: the sheet's tick wins; with none, the company's standing switch. The copy goes to the
+  // sender's own address, else the company's.
+  const copyTo = (m.copyMe ?? settings.copy_owner_on_emails) ? copyMeAddress(await senderEmail(supabase, userId), org?.email) : null;
+  const subject = m.subject ?? quoteSubject(label, quote.quote_number, org?.name);
   const res = await sendEmail({
-    to: customer.email,
-    subject: `${label} ${quote.quote_number} from ${org?.name ?? "us"}`,
+    to,
+    subject,
     fromName: org?.name ?? undefined,
     html,
     replyTo: org?.email ?? undefined,
-    bcc: ownerBcc(getOrgSettings((org as any)?.settings).copy_owner_on_emails, org?.email),
+    bcc: copyTo ?? undefined,
   });
   if (!res.ok) return res;
 
-  // Mark as sent once emailed (unless already accepted/declined).
-  if (["draft"].includes(quote.status)) {
-    await supabase.from("quotes").update({ status: "sent" }).eq("id", id);
-  }
-  // Warm the stored PDF (0198) post-response so the customer's Download button works from the
-  // first minute — after() never slows the send, and the render carries this sender's cookies.
-  const h = await headers();
-  const warmHost = h.get("x-forwarded-host") ?? h.get("host");
-  const warmProto = h.get("x-forwarded-proto") ?? "https";
-  const warmCookie = h.get("cookie");
-  // Headers are read BEFORE after() — request APIs inside the callback are on borrowed time.
-  after(async () => {
-    if (warmHost) await warmDocPdf("quote", id, `${warmProto}://${warmHost}`, warmCookie);
+  await logQuoteSend(supabase, {
+    orgId: orgId ?? (org as any)?.id ?? null,
+    quote,
+    channel: "email",
+    to,
+    subject,
+    body: m.body ?? quoteEmailBody({ docType: label, number: quote.quote_number, title: quote.title, total: quote.total }),
+    copyTo,
+    userId,
   });
+  await markQuoteSent(supabase, id, quote.status);
   revalidatePath(`/quotes/${id}`);
   return { ok: true };
+}
+
+/**
+ * THE WORDS THE REVIEW SHEET OPENS WITH for an estimate (cn-v1155): today's subject and paragraph as
+ * plain text, today's text minus its link, the fixed parts that carry the link, who it goes to (the
+ * customer, else the lead) and whether Copy Me starts ticked. Reads only; nothing is stamped.
+ */
+export async function previewQuoteSend(id: string): Promise<PreviewResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: String(ctx.error) };
+  const { supabase, userId, orgId } = ctx;
+  const ws = wordsOf(supabase, userId);
+  const r = await readQuoteSend(supabase, orgId, id);
+  if (!r) return { ok: false, error: await ws.say("qs_quoteNotFound") };
+  const { quote, customer, org, settings, label, link } = r;
+  return {
+    ok: true,
+    preview: {
+      kind: "quote",
+      id,
+      customerName: customer?.name ?? null,
+      to: customer?.email ?? null,
+      phone: customer?.phone ?? null,
+      subject: quoteSubject(label, quote.quote_number, org?.name),
+      body: quoteEmailBody({ docType: label, number: quote.quote_number, title: quote.title, total: quote.total }),
+      smsBody: quoteSmsBody({ orgName: org?.name, docType: label, number: quote.quote_number, total: quote.total }),
+      tail: { email: quoteEmailTail(label, link), sms: quoteSmsTail(link) },
+      copyMe: settings.copy_owner_on_emails === true,
+      copyTo: copyMeAddress(await senderEmail(supabase, userId), org?.email),
+      textReady: smsReadiness(org).ready,
+      viewerLang: await ws.lang(),
+      reviewOff: settings.send_without_review === true,
+    },
+  };
 }
 
 /** Re-exported so the existing importers (quote builder, kit picker, deck panel) don't move.

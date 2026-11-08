@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { composeFrom, renderPlatformNoticeEmail, sendEmail } from "@/lib/email";
+import { composeFrom, renderInvoiceNoticeEmail, renderPlatformNoticeEmail, renderQuoteNoticeEmail, renderReminderEmail, sendEmail } from "@/lib/email";
 import { reportError } from "@/lib/observe";
 import { reportBlocker } from "@/lib/observe-blocker";
 
@@ -172,5 +172,52 @@ describe("renderPlatformNoticeEmail — a note from North itself", () => {
     const names = [...html.matchAll(/font-weight:700">([^<]+)</g)].map((m) => m[1]);
     expect(names).toEqual(["Contractor North"]);
     expect(html).not.toContain("Larkspur");
+  });
+});
+
+describe("the owner's reviewed words (cn-v1155): body replaces the default sentence, the fixed tail stays", () => {
+  const company = { name: "Larkspur Electric", brand: "#0f766e", phone: null, email: null };
+  const invoice = { company, customerName: "Dana Rook", number: "INV-001", title: "Panel", balance: 250, invoiceLink: "https://x.example/i/t", portalLink: "https://x.example/p/t" };
+  const quote = { docType: "Quote" as const, company, customerName: "Dana Rook", number: "Q-001", title: "Panel", total: 900, quoteLink: "https://x.example/q/t", portalLink: "https://x.example/p/t" };
+  const reminder = { company, customerName: "Dana Rook", heading: "Payment due", message: "Your bill is due.", cta: { label: "Pay Now", link: "https://x.example/i/t" } };
+
+  it("without a body the invoice, quote and reminder render as they always did", () => {
+    expect(renderInvoiceNoticeEmail(invoice)).toBe(renderInvoiceNoticeEmail({ ...invoice, body: undefined }));
+    expect(renderInvoiceNoticeEmail(invoice)).toContain("is ready. Balance due: <strong");
+    expect(renderQuoteNoticeEmail(quote)).toBe(renderQuoteNoticeEmail({ ...quote, body: undefined }));
+    expect(renderQuoteNoticeEmail(quote)).toContain("is ready. Total: <strong");
+    expect(renderReminderEmail(reminder)).toBe(renderReminderEmail({ ...reminder, body: undefined }));
+    expect(renderReminderEmail(reminder)).toContain("Your bill is due.");
+  });
+
+  it("a body replaces the default words and keeps the greeting, the button and the portal block", () => {
+    const html = renderInvoiceNoticeEmail({ ...invoice, body: "Thanks for waiting.\n\nSecond line\nthird." });
+    expect(html).toContain("Hi Dana Rook,");
+    expect(html).not.toContain("is ready");
+    expect(html).toContain(">Thanks for waiting.</p>");
+    expect(html).toContain("Second line<br>third.</p>");
+    expect(html).toContain('href="https://x.example/i/t"');
+    expect(html).toContain("your customer portal");
+    const q = renderQuoteNoticeEmail({ ...quote, body: "Here you go." });
+    expect(q).not.toContain("is ready");
+    expect(q).toContain("Here you go.");
+    expect(q).toContain("View &amp; accept quote");
+    const r = renderReminderEmail({ ...reminder, body: "Custom nudge." });
+    expect(r).not.toContain("Your bill is due.");
+    expect(r).toContain("Payment due");
+    expect(r).toContain("Hi Dana Rook,");
+    expect(r).toContain("Custom nudge.");
+    expect(r).toContain("Pay Now");
+  });
+
+  it("markup in the body comes out escaped", () => {
+    for (const html of [
+      renderInvoiceNoticeEmail({ ...invoice, body: "<script>alert(1)</script>" }),
+      renderQuoteNoticeEmail({ ...quote, body: "<script>alert(1)</script>" }),
+      renderReminderEmail({ ...reminder, body: "<script>alert(1)</script>" }),
+    ]) {
+      expect(html).not.toContain("<script>");
+      expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    }
   });
 });

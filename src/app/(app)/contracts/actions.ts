@@ -6,7 +6,12 @@ import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
 import { scheduleStatus, contractTotalFromQuotes, type Milestone } from "@/lib/payment-schedule-math";
 import { buildContractBody } from "@/lib/contract-body";
-import { sendEmail, renderReminderEmail, ownerBcc } from "@/lib/email";
+import { sendEmail, renderReminderEmail } from "@/lib/email";
+import { checkSendMessage, copyMeAddress, type PreviewResult, type SendMessage } from "@/lib/send-review";
+import { logSend, senderEmail } from "@/lib/sent-messages";
+import { contractSubject, contractEmailBody, contractEmailTail, sendWhyKey } from "@/lib/send-words";
+import { callerLang } from "@/lib/lang-of";
+import { translator } from "@/lib/i18n";
 import { formatDate, formatCityStateZip } from "@/lib/utils";
 import { type SiteParts, pickSite, siteLines } from "@/lib/site-address";
 
@@ -158,40 +163,111 @@ export async function updateContract(id: string, input: { title?: string; body?:
   return { ok: true };
 }
 
+/**
+ * One read for the contract's preview and its send (cn-v1155), so what the sheet shows is what goes.
+ * Org-scoped. Not exported: a "use server" file exports only async functions.
+ */
+async function readContractSend(supabase: any, orgId: string | null, id: string) {
+  let q = supabase
+    .from("contracts")
+    .select("id, status, public_token, contract_number, job_id, customer_id, customers(name, email)")
+    .eq("id", id);
+  if (orgId) q = q.eq("org_id", orgId);
+  const { data: c } = await q.maybeSingle();
+  if (!c) return null;
+  const { data: org } = await supabase.from("organizations").select("id, name, phone, email, settings").maybeSingle();
+  const settings = getOrgSettings((org as any)?.settings);
+  const link = orgDocUrl(settings, "c", (c as any).public_token);
+  return { c: c as any, customer: (c as any).customers as { name?: string | null; email?: string | null } | null, org: org as any, settings, link };
+}
+
+/**
+ * THE WORDS THE REVIEW SHEET OPENS WITH for a contract (cn-v1155): the subject and the message as
+ * plain text, the button's line fixed beneath them. Email only: a contract has no text door. Reads
+ * only; nothing is stamped.
+ */
+export async function previewContractSend(id: string): Promise<PreviewResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: String(ctx.error) };
+  const { supabase, userId, orgId } = ctx;
+  const r = await readContractSend(supabase, orgId, id);
+  if (!r) return { ok: false, error: "Contract not found." };
+  const { c, customer, org, settings, link } = r;
+  return {
+    ok: true,
+    preview: {
+      kind: "contract",
+      id,
+      customerName: customer?.name ?? null,
+      to: customer?.email ?? null,
+      phone: null,
+      subject: contractSubject(c.contract_number, org?.name),
+      body: contractEmailBody(c.contract_number),
+      smsBody: "",
+      tail: { email: contractEmailTail(link), sms: "" },
+      copyMe: settings.copy_owner_on_emails === true,
+      copyTo: copyMeAddress(await senderEmail(supabase, userId), org?.email),
+      textReady: false,
+      viewerLang: await callerLang(supabase, userId),
+      reviewOff: settings.send_without_review === true,
+    },
+  };
+}
+
 /** Email the customer the public review-and-sign link, and mark the contract sent
- *  (which freezes its body). */
-export async function sendContract(id: string): Promise<Result> {
+ *  (which freezes its body). `message` is what the review sheet let go: an absent field keeps today's words. */
+export async function sendContract(id: string, message?: SendMessage): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  const supabase = ctx.supabase;
-  const { data: c } = await supabase
-    .from("contracts")
-    .select("status, public_token, contract_number, job_id, customers(name, email)")
-    .eq("id", id)
-    .maybeSingle();
-  if (!c) return { ok: false, error: "Contract not found." };
-  if ((c as any).status === "signed") return { ok: false, error: "This contract is already signed." };
-  const customer = (c as any).customers;
-  if (!customer?.email) return { ok: false, error: "This customer has no email address." };
+  const { supabase, userId, orgId } = ctx;
+  const r = await readContractSend(supabase, orgId, id);
+  if (!r) return { ok: false, error: "Contract not found." };
+  const { c, customer, org, settings, link } = r;
+  if (c.status === "signed") return { ok: false, error: "This contract is already signed." };
 
-  const { data: org } = await supabase.from("organizations").select("name, phone, email, settings").maybeSingle();
-  const link = orgDocUrl(getOrgSettings((org as any)?.settings), "c", (c as any).public_token);
+  const checked = checkSendMessage(message, "email", contractEmailTail(link).length);
+  if (!checked.ok) return { ok: false, error: translator("en")(sendWhyKey(checked.why, "email")) };
+  const m = checked.message;
+  const to = m.to ?? customer?.email;
+  if (!to) return { ok: false, error: "This customer has no email address." };
+
   const html = renderReminderEmail({
-    company: { name: org?.name ?? "Contractor North", brand: accentHex(getOrgSettings((org as any)?.settings).glass_tint), phone: org?.phone, email: org?.email },
-    customerName: customer.name,
+    company: { name: org?.name ?? "Contractor North", brand: accentHex(settings.glass_tint), phone: org?.phone, email: org?.email },
+    customerName: customer?.name ?? "there",
     heading: "Your contract is ready to review and sign",
-    message: `Please review contract ${(c as any).contract_number ?? ""} and sign it online. If anything looks off, just reply to this email.`,
+    message: contractEmailBody(c.contract_number),
     cta: { label: "Review & sign", link },
+    body: m.body,
   });
+  // COPY ME: the sheet's tick wins; with none, the company's standing switch. The copy goes to the
+  // sender's own address, else the company's.
+  const copyTo = (m.copyMe ?? settings.copy_owner_on_emails) ? copyMeAddress(await senderEmail(supabase, userId), org?.email) : null;
+  const subject = m.subject ?? contractSubject(c.contract_number, org?.name);
   const res = await sendEmail({
-    to: customer.email,
-    subject: `Contract ${(c as any).contract_number ?? ""} from ${org?.name ?? "us"}`,
+    to,
+    subject,
     fromName: org?.name ?? undefined,
     html,
     replyTo: org?.email ?? undefined,
-    bcc: ownerBcc(getOrgSettings((org as any)?.settings).copy_owner_on_emails, org?.email),
+    bcc: copyTo ?? undefined,
   });
   if (!res.ok) return res;
+  const logOrg = orgId ?? org?.id ?? null;
+  if (logOrg) {
+    await logSend(supabase, {
+      orgId: logOrg,
+      docKind: "contract",
+      docId: id,
+      customerId: c.customer_id ?? null,
+      channel: "email",
+      to,
+      subject,
+      body: m.body ?? contractEmailBody(c.contract_number),
+      copyTo,
+      sentBy: userId,
+      auto: false,
+    });
+  }
   // Freeze the body by flipping draft -> sent only after the email actually went out — and
   // CHECK IT (audit 8). Fire-and-forget meant a failed freeze left the contract 'draft', so
   // public_contract (which serves only sent/signed) returned null and the customer who had
@@ -199,12 +275,13 @@ export async function sendContract(id: string): Promise<Result> {
   // matches zero rows (the row is already 'sent'), so zero rows is only a failure when the row
   // we read moments ago WAS a draft.
   const wasDraft = (c as any).status === "draft";
-  const { data: frozen, error: freezeErr } = await supabase
+  let freeze = supabase
     .from("contracts")
     .update({ status: "sent", updated_at: new Date().toISOString() })
     .eq("id", id)
-    .eq("status", "draft")
-    .select("id");
+    .eq("status", "draft");
+  if (orgId) freeze = freeze.eq("org_id", orgId);
+  const { data: frozen, error: freezeErr } = await freeze.select("id");
   revalidatePath(`/jobs/${(c as any).job_id}`);
   if (freezeErr) return { ok: false, error: dbError(freezeErr) };
   if (wasDraft && !frozen?.length)

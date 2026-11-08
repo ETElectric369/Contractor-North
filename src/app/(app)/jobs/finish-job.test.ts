@@ -468,3 +468,42 @@ describe("setJobStatus — 'complete' is finishing, not a status write (M2)", ()
     expect(state.drawDoor).not.toHaveBeenCalled();
   });
 });
+
+describe("Finish & Send Invoice reads the review switch (cn-v1155)", () => {
+  const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/finish-job-button.tsx"), "utf8");
+
+  it("review on (the default): the press mails nothing, so finishJob is called with sendInvoice false", async () => {
+    const { pressSendsAtOnce } = await import("./[id]/finish-job-button");
+    expect(pressSendsAtOnce(true, false)).toBe(false);
+    expect(src).toContain("sendInvoice: pressSendsAtOnce(wantSend, sendWithoutReview)");
+  });
+
+  it("review off (Send Without Review on): today's one-shot call, sendInvoice true", async () => {
+    const { pressSendsAtOnce } = await import("./[id]/finish-job-button");
+    expect(pressSendsAtOnce(true, true)).toBe(true);
+    expect(pressSendsAtOnce(false, true)).toBe(false); // an unchecked box never sends
+  });
+
+  it("the sheet opens on the draft's id; a partial import (finishJob's warning) opens none", async () => {
+    const { opensReviewSheet } = await import("./[id]/finish-job-button");
+    expect(opensReviewSheet({ id: "inv-091" }, true)).toBe(true);
+    expect(opensReviewSheet({ id: "inv-091", warning: "review the line items before sending" }, true)).toBe(false);
+    expect(opensReviewSheet({ id: "inv-091" }, false)).toBe(false); // one-shot path: no sheet
+    expect(opensReviewSheet({}, true)).toBe(false);
+    expect(src).toContain('<SendSheet kind="invoice" id={done.id}');
+  });
+
+  it("the checkbox says the review under review, and the old words when the switch is on", () => {
+    expect(src).toContain('sendWithoutReview ? t("jb_emailInvoiceNow") : t("jb_emailInvoiceReview")');
+    expect(dict("en").jb_emailInvoiceReview).toBe("Send the invoice now (you review it first)");
+    expect(dict("es").jb_emailInvoiceReview).toBe("Enviar la factura ahora (tú la revisas primero)");
+    expect(dict("en").jb_reviewsOnFinish).not.toMatch(/as soon as you finish/);
+  });
+
+  it("the page reads the setting and hands it through the dock", () => {
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/page.tsx"), "utf8");
+    const dock = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-action-dock.tsx"), "utf8");
+    expect(page).toContain("sendWithoutReview={getOrgSettings((org as any)?.settings).send_without_review}");
+    expect(dock).toContain("sendWithoutReview={sendWithoutReview}");
+  });
+});

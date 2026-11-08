@@ -7,10 +7,11 @@ import { useRouter } from "next/navigation";
 import { BadgeDollarSign, Check, Copy, Loader2, Mail, MessageSquare, QrCode, Share } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
+import { SendButton } from "@/components/send-sheet";
 import { DayField } from "@/components/day-field";
 import { ACTIONS_ROW_CLS } from "@/components/section-actions-menu";
 import { useToast } from "@/components/toast";
-import { collectArtifacts, emailInvoice, invoiceCollectStatus, recordPayment, settleUp, textInvoice, venmoQrFor } from "@/app/(app)/billing/actions";
+import { collectArtifacts, invoiceCollectStatus, recordPayment, settleUp, venmoQrFor } from "@/app/(app)/billing/actions";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { sendFirstDetail, sendFirstQuestion } from "@/lib/pay-door-words";
 import { paymentMethodChoices, paymentMethodKey } from "@/lib/payment-method";
@@ -325,12 +326,11 @@ function busyLine(label: string, p: TapProgress | null, t: Words): { title: stri
  *                         On a declined tap that same QR would open Stripe Checkout — a pay
  *                         door, not a receipt — so it is not offered.
  *
- * DECLINED gets Text from This Phone and Share, NOT the service doors: textInvoice and
- * emailInvoice (deliverInvoiceEmail under it) take an invoice id and nothing else — no message,
- * no note — so through them the customer would get "Invoice 1042, balance $150.00. View/pay:",
- * a bill with no word that their card was refused and nothing charged. Only the two doors that
- * carry OUR sentence can carry the decline. (A `note` on those two actions is the follow-up; it
- * lives in billing/actions.ts, not here.)
+ * Text Receipt and Email Receipt open the one review sheet (components/send-sheet, kind "receipt"):
+ * the owner reads the receipt's words, may change the address, subject and message, and presses Email
+ * It or Text It; nothing goes until then. DECLINED gets Text from This Phone and Share, NOT the
+ * service doors: a decline is not a receipt, and only the doors that carry OUR sentence can carry
+ * the word that their card was refused and nothing charged.
  */
 function ReceiptRow({
   outcome,
@@ -353,72 +353,17 @@ function ReceiptRow({
 }) {
   const lang = useLang();
   const t = translator(lang);
-  const [texting, setTexting] = useState(false);
-  const [texted, setTexted] = useState(false);
-  /** The SMS service said this customer has no number: the text door becomes this phone's. */
-  const [noPhone, setNoPhone] = useState(false);
-  /** The server said texting isn't set up (the page's answer went stale since it rendered). */
-  const [notReadySeen, setNotReadySeen] = useState(false);
-  /** The business's own text door works: texting is set up, as far as anyone has said. */
-  const serviceText = textReady && !notReadySeen;
-  const [emailing, setEmailing] = useState(false);
-  const [emailed, setEmailed] = useState(false);
+  /** The business's own text door works: texting is set up, as far as the page has said. The review
+   *  sheet (components/send-sheet) says the rest in place: no number, texting not set up. */
+  const serviceText = textReady;
   const [showQr, setShowQr] = useState(false);
   // Read at render, not in an effect: this row only ever mounts on the client, after an outcome
   // (never in the server render), so there is no hydration split to protect against.
   const canShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
   /** The text door from this phone: the decline always (see above); paid only once the service
    *  has said there is no number to send to. */
-  const fromThisPhone = outcome === "declined" || noPhone || !serviceText;
-  const offerServiceText = outcome === "paid" && !noPhone && serviceText;
-
-  async function textIt() {
-    if (texting) return;
-    setTexting(true);
-    try {
-      const r = await textInvoice(invoiceId);
-      if (r.ok) {
-        setTexted(true);
-        toast(t("su_receiptTexted"), "success");
-        return;
-      }
-      // The one refusal with a door behind it. textInvoice's sentence is the key ("This customer
-      // has no phone number."); a rewording there degrades to the plain toast, never to silence.
-      if (/no phone/i.test(r.error ?? "")) {
-        setNoPhone(true);
-        return;
-      }
-      // Texting isn't set up: say so here, where he tapped, and hand him the door that works.
-      if (r.notReady) {
-        setNotReadySeen(true);
-        toast(t("su_textingNotSetUp"), "info");
-        return;
-      }
-      toast(r.error ?? t("su_textDidntSend"), "error");
-    } catch {
-      toast(t("su_textDidntReach"), "error");
-    } finally {
-      setTexting(false);
-    }
-  }
-
-  async function emailIt() {
-    if (emailing) return;
-    setEmailing(true);
-    try {
-      const r = await emailInvoice(invoiceId);
-      if (r.ok) {
-        setEmailed(true);
-        toast(t("su_receiptEmailed"), "success");
-      } else {
-        toast(r.error ?? t("su_emailDidntSend"), "error");
-      }
-    } catch {
-      toast(t("su_emailDidntReach"), "error");
-    } finally {
-      setEmailing(false);
-    }
-  }
+  const fromThisPhone = outcome === "declined" || !serviceText;
+  const offerServiceText = outcome === "paid" && serviceText;
 
   // The one sentence every door from this phone carries, and the share sheet's title: the CUSTOMER's, so
   // English whatever the tech reads (customerReceiptWords, customer_t). The link rides separately.
@@ -462,10 +407,7 @@ function ReceiptRow({
         <>
           <div className="flex flex-wrap justify-center gap-2">
             {offerServiceText && (
-              <Button size="sm" variant="outline" onClick={() => void textIt()} disabled={texting}>
-                {texted ? <Check className="h-4 w-4 text-emerald-600" /> : texting ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageSquare className="h-4 w-4" />}
-                {texted ? t("su_btn_texted") : texting ? t("su_btn_sending") : t("su_btn_textReceipt")}
-              </Button>
+              <SendButton kind="receipt" id={invoiceId} amount={amount} via="text" textReady={textReady} label={t("su_btn_textReceipt")} variant="outline" className="h-8" />
             )}
             {fromThisPhone && (
               <a
@@ -476,10 +418,7 @@ function ReceiptRow({
               </a>
             )}
             {outcome === "paid" && (
-              <Button size="sm" variant="outline" onClick={() => void emailIt()} disabled={emailing}>
-                {emailed ? <Check className="h-4 w-4 text-emerald-600" /> : emailing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
-                {emailed ? t("su_btn_emailed") : emailing ? t("su_btn_sending") : t("su_btn_emailReceipt")}
-              </Button>
+              <SendButton kind="receipt" id={invoiceId} amount={amount} textReady={textReady} label={t("su_btn_emailReceipt")} variant="outline" className="h-8" />
             )}
             {canShare && (
               <Button size="sm" variant="outline" onClick={() => void shareIt()}>
@@ -492,8 +431,7 @@ function ReceiptRow({
               </Button>
             )}
           </div>
-          {noPhone && <p className="text-xs text-slate-500">{t("su_noPhoneOnFile")}</p>}
-          {outcome === "paid" && !noPhone && !serviceText && (
+          {outcome === "paid" && !serviceText && (
             <p className="text-xs text-slate-500">{t("su_textsNotReady")} {t("su_untilThenTextFromPhone")}</p>
           )}
         </>

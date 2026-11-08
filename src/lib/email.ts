@@ -1,6 +1,7 @@
 import "server-only";
 import { reportError } from "@/lib/observe";
 import { reportBlocker } from "@/lib/observe-blocker";
+import { plainToParagraphs } from "@/lib/send-review";
 
 /**
  * Send a transactional email via Resend. Returns { ok, error }.
@@ -129,6 +130,9 @@ export function renderInvoiceNoticeEmail(input: {
   balance: number;
   invoiceLink: string;
   portalLink?: string;
+  /** The words the owner reviewed (cn-v1155), plain text. When given they REPLACE the default
+   *  "Your invoice … is ready" sentence; the greeting, the button and the portal block stay. */
+  body?: string;
 }): string {
   const c = safeColor(input.company.brand);
   const due = input.balance > 0;
@@ -146,7 +150,7 @@ export function renderInvoiceNoticeEmail(input: {
       ${contact}
     </div>
     <p style="font-size:14px;margin:0 0 8px">Hi ${escape(input.customerName)},</p>
-    <p style="font-size:14px;color:#475569;margin:0">Your invoice <strong>${escape(input.number)}</strong>${input.title ? ` — ${escape(input.title)}` : ""} is ready${due ? `. Balance due: <strong style="color:#0f172a">${money(input.balance)}</strong>.` : " — paid in full. Thank you!"}</p>
+    ${input.body !== undefined ? ownWords(input.body) : `<p style="font-size:14px;color:#475569;margin:0">Your invoice <strong>${escape(input.number)}</strong>${input.title ? ` — ${escape(input.title)}` : ""} is ready${due ? `. Balance due: <strong style="color:#0f172a">${money(input.balance)}</strong>.` : " — paid in full. Thank you!"}</p>`}
     <p style="margin:18px 0"><a href="${input.invoiceLink}" style="display:inline-block;background:${c};color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-size:14px;font-weight:600">${due ? `View &amp; pay ${money(input.balance)}` : "View invoice"}</a></p>
     ${input.portalLink ? `<p style="font-size:13px;color:#475569;margin:0">Or see all your invoices, quotes, and documents — and print a PDF — in <a href="${input.portalLink}" style="color:${c};font-weight:600">your customer portal</a>.</p>` : ""}
     <p style="font-size:13px;color:#64748b;margin-top:24px">Thank you for your business,<br/>${escape(input.company.name)}</p>
@@ -173,6 +177,9 @@ export function renderQuoteNoticeEmail(input: {
   total: number;
   quoteLink: string;
   portalLink?: string;
+  /** The words the owner reviewed (cn-v1155), plain text. When given they REPLACE the default
+   *  "Your quote … is ready" sentence; the greeting, the button and the portal block stay. */
+  body?: string;
 }): string {
   const c = safeColor(input.company.brand);
   const lh = input.letterhead;
@@ -190,7 +197,7 @@ export function renderQuoteNoticeEmail(input: {
       ${contact}
     </div>
     <p style="font-size:14px;margin:0 0 8px">Hi ${escape(input.customerName)},</p>
-    <p style="font-size:14px;color:#475569;margin:0">Your ${noun} <strong>${escape(input.number)}</strong>${input.title ? ` — ${escape(input.title)}` : ""} is ready. Total: <strong style="color:#0f172a">${money(input.total)}</strong>.</p>
+    ${input.body !== undefined ? ownWords(input.body) : `<p style="font-size:14px;color:#475569;margin:0">Your ${noun} <strong>${escape(input.number)}</strong>${input.title ? ` — ${escape(input.title)}` : ""} is ready. Total: <strong style="color:#0f172a">${money(input.total)}</strong>.</p>`}
     <p style="margin:18px 0"><a href="${input.quoteLink}" style="display:inline-block;background:${c};color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-size:14px;font-weight:600">View &amp; accept ${noun}</a></p>
     ${input.portalLink ? `<p style="font-size:13px;color:#475569;margin:0">Or see all your quotes, invoices, and documents — and print a PDF — in <a href="${input.portalLink}" style="color:${c};font-weight:600">your customer portal</a>.</p>` : ""}
     <p style="font-size:13px;color:#64748b;margin-top:24px">Thank you for the opportunity to earn your business,<br/>${escape(input.company.name)}</p>
@@ -206,6 +213,9 @@ export function renderReminderEmail(input: {
   heading: string;
   message: string;
   cta?: { label: string; link: string };
+  /** The words the owner reviewed (cn-v1155), plain text. When given they REPLACE `message`; the
+   *  heading, the greeting and the button stay. */
+  body?: string;
 }): string {
   const c = safeColor(input.company.brand);
   return `
@@ -216,7 +226,7 @@ export function renderReminderEmail(input: {
     </div>
     <p style="font-size:16px;font-weight:600;margin:0 0 12px">${escape(input.heading)}</p>
     <p style="font-size:14px;margin:0 0 8px">Hi ${escape(input.customerName)},</p>
-    <p style="font-size:14px;color:#475569;margin:0">${escape(input.message)}</p>
+    ${input.body !== undefined ? ownWords(input.body) : `<p style="font-size:14px;color:#475569;margin:0">${escape(input.message)}</p>`}
     ${input.cta ? `<p style="margin:18px 0"><a href="${input.cta.link}" style="display:inline-block;background:${c};color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:600">${escape(input.cta.label)}</a></p>` : ""}
     <p style="font-size:13px;color:#64748b;margin-top:24px">Thank you,<br/>${escape(input.company.name)}</p>
   </div>`;
@@ -283,6 +293,14 @@ function safeColor(c: string | null | undefined): string {
 /** A value inside a double-quoted attribute: the text escape, plus the quote itself. */
 function attr(s: string | null | undefined): string {
   return escape(s).replace(/"/g, "&quot;");
+}
+
+/** The owner's reviewed words as paragraphs (cn-v1155): split on blank lines, each escaped, a single
+ *  newline inside one becoming a line break. Same type as the default sentence it replaces. */
+function ownWords(text: string): string {
+  return plainToParagraphs(text)
+    .map((p) => `<p style="font-size:14px;color:#475569;margin:0 0 8px">${escape(p).replace(/\r?\n/g, "<br>")}</p>`)
+    .join("\n    ");
 }
 
 function escape(s: string | null | undefined): string {

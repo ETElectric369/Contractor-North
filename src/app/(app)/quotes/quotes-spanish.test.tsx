@@ -24,6 +24,8 @@ vi.mock("@/app/(app)/quotes/actions", () => ({
   textQuote: vi.fn(),
 }));
 vi.mock("@/app/(app)/billing/actions", () => ({ emailInvoice: vi.fn(), textInvoice: vi.fn() }));
+// The Send sheet reads its words through the one dispatcher; the markup test never opens it.
+vi.mock("@/app/(app)/send-actions", () => ({ previewSend: vi.fn(), sendReviewed: vi.fn() }));
 vi.mock("@/app/(app)/crm/actions", () => ({ createCustomer: vi.fn() }));
 vi.mock("@/app/(app)/crm/[id]/edit-customer-button", () => ({ EditCustomerButton: () => null }));
 
@@ -31,7 +33,7 @@ const { LangProvider } = await import("@/components/lang-provider");
 const { CircuitScheduleCard } = await import("./[id]/circuit-schedule-card");
 const { CustomerSelect } = await import("./[id]/customer-select");
 const { PaperFormatSwitch } = await import("./paper-format-switch");
-const { EmailButton } = await import("@/components/email-button");
+const { SendButton } = await import("@/components/send-sheet");
 
 const es = (el: ReactElement) => renderToStaticMarkup(<LangProvider lang="es">{el}</LangProvider>);
 const en = (el: ReactElement) => renderToStaticMarkup(el);
@@ -66,13 +68,9 @@ describe("the estimate's cards follow the signed-in person's language", () => {
     expect(p).not.toContain("Labor and Parts on the Paper");
   });
 
-  it("the Email / Text chips on an invoice and on a quote, in Spanish (drawn on billing too)", () => {
-    const inv = text(es(createElement(EmailButton, { id: "inv-1", kind: "invoice", customerName: "Snowbell", amount: 150, textReady: true })));
-    expect(inv).toContain("Enviar Factura");
-    expect(inv).toContain("Mensaje");
-    const q = text(es(createElement(EmailButton, { id: "q-1", kind: "quote", textReady: true })));
-    expect(q).toContain("Correo");
-    expect(q).not.toMatch(/\bEmail\b|\bText\b/);
+  it("the estimate's Send door, in Spanish (the review sheet opens from it)", () => {
+    const q = text(es(createElement(SendButton, { id: "q-1", kind: "quote", textReady: true, label: translator("es")("qt_btn_send") })));
+    expect(q).toBe("Enviar");
   });
 
   it("with no provider every piece says what it always said, byte for byte", () => {
@@ -90,8 +88,8 @@ describe("the estimate's cards follow the signed-in person's language", () => {
     expect(p).toContain("Labor and Parts on the Paper");
     expect(p).toContain("Company Default · On");
     expect(p).toContain("Prints each task's hours at the rate and its parts beneath it, on the paper and the customer's link. The company default is set in Document Studio.");
-    const q = text(en(createElement(EmailButton, { id: "q-1", kind: "quote", textReady: true })));
-    expect(q).toBe("Email Text");
+    const q = text(en(createElement(SendButton, { id: "q-1", kind: "quote", textReady: true, label: translator("en")("qt_btn_send") })));
+    expect(q).toBe("Send");
   });
 });
 

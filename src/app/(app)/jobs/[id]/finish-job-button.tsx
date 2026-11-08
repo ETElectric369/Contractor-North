@@ -8,6 +8,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
+import { SendSheet } from "@/components/send-sheet";
 import { MANAGE_ROW_CLS } from "./job-manage-menu";
 import { finishJob, finishJobPreview, type FinishJobPreview } from "../actions";
 
@@ -27,11 +28,30 @@ import { finishJob, finishJobPreview, type FinishJobPreview } from "../actions";
  * press builds the Final as a DRAFT through the Overview card's own door and lands on it, the
  * sentence saying what was built. Nothing is sent, so the modal has no toggles and no email box
  * there: it says what will be built, for how much, before the press (finishJobPreview.final).
+ *
+ * REVIEW BEFORE IT GOES OUT (cn-v1155). With Send Without Review off (the default), the checkbox no
+ * longer promises an email at the press: finishing builds the draft with sendInvoice false, and the
+ * ONE send sheet opens on it (address, subject and message to read and change; nothing goes until
+ * Email It or Text It). A draft the import raised a question about (finishJob answers with a
+ * `warning` exactly then) gets no sheet: the question comes first, as it always did. Switch on, the
+ * press emails at once, as before.
  */
+/** Review on: the press builds the draft and mails nothing; the sheet does the sending. */
+export function pressSendsAtOnce(wantSend: boolean, sendWithoutReview: boolean): boolean {
+  return wantSend && sendWithoutReview;
+}
+
+/** The sheet opens on a finished job's draft unless the import raised a question about the money
+ *  (finishJob answers with a `warning` exactly then): that question comes first. */
+export function opensReviewSheet(res: { id?: string; warning?: string }, reviewing: boolean): boolean {
+  return reviewing && !!res.id && !res.warning;
+}
+
 export function FinishJobButton({
   jobId,
   hasQuote,
   defaultSendInvoice = false,
+  sendWithoutReview = false,
   isDrawBilled = false,
   isTm = false,
   menuItem = false,
@@ -39,6 +59,8 @@ export function FinishJobButton({
   jobId: string;
   hasQuote: boolean;
   defaultSendInvoice?: boolean;
+  /** Send Without Review is on: the press emails at once instead of opening the review sheet. */
+  sendWithoutReview?: boolean;
   isDrawBilled?: boolean;
   /** A Time & Material job: the modal waits for the server's plan (the Final it would build). */
   isTm?: boolean;
@@ -52,7 +74,9 @@ export function FinishJobButton({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<FinishJobPreview | null>(null);
-  const [done, setDone] = useState<{ id?: string; speak: string; warning?: string } | null>(null);
+  const [done, setDone] = useState<{ id?: string; speak: string; warning?: string; review?: boolean } | null>(null);
+  // The review sheet over the done panel (a finished job's draft, ready to read before it goes).
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [timeIn, setTimeIn] = useState(false);
   const [costsIn, setCostsIn] = useState(false);
   const [importLabor, setImportLabor] = useState(!hasQuote);
@@ -75,10 +99,13 @@ export function FinishJobButton({
   // The "email now" option only applies to standard invoices - a draw-billed job is billed with its
   // progress payments, which are sent from their own page, and a T&M Final is a draft a person sends.
   const wantSend = sendInvoice && !drawBilled && !finalLine && !tmUnread;
+  // Review on (the default): the press builds the draft and opens the sheet; nothing is mailed by it.
+  const reviewing = wantSend && !sendWithoutReview;
 
   function openModal() {
     setError(null);
     setDone(null);
+    setReviewOpen(false);
     setPreview(null);
     setOpen(true);
     void finishJobPreview(jobId).then(setPreview, () => setPreview({ ok: false, error: t("jb_couldntReadBills") }));
@@ -89,7 +116,7 @@ export function FinishJobButton({
     start(async () => {
       const res = await finishJob(
         jobId,
-        finalBlocked ? { withoutBilling: true } : drawBilled || finalLine ? {} : { importLabor, importCosts, sendInvoice: wantSend },
+        finalBlocked ? { withoutBilling: true } : drawBilled || finalLine ? {} : { importLabor, importCosts, sendInvoice: pressSendsAtOnce(wantSend, sendWithoutReview) },
       );
       if (!res.ok) {
         setError(res.error ?? t("jb_couldNotFinish"));
@@ -109,12 +136,15 @@ export function FinishJobButton({
       // email on a partial import). `res.warning` IS that question, so when it is there the sentence
       // names it instead of sending him to check an email address that is perfectly fine.
       const notSent =
-        wantSend && !res.sent
+        wantSend && !reviewing && !res.sent
           ? res.warning
             ? t("jb_notEmailedQuestion")
             : t("jb_notEmailedNoEmail")
           : undefined;
-      setDone({ id: res.id, speak: res.speak ?? t("jb_jobFinished"), warning: [res.warning, notSent].filter(Boolean).join(" ") || undefined });
+      // A question about the money (res.warning) holds the sheet back; otherwise the draft is read first.
+      const review = opensReviewSheet(res, reviewing);
+      setDone({ id: res.id, speak: res.speak ?? t("jb_jobFinished"), warning: [res.warning, notSent].filter(Boolean).join(" ") || undefined, review });
+      setReviewOpen(review);
       router.refresh();
     });
   }
@@ -169,6 +199,7 @@ export function FinishJobButton({
           done ? (
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setOpen(false)}>{t("jb_close")}</Button>
+              {done.id && done.review && <Button variant="outline" onClick={() => setReviewOpen(true)}>{t("sn_title_invoice")}</Button>}
               {done.id && <Button onClick={() => router.push(`/billing/${done.id}`)}>{t("jb_openTheInvoice")}</Button>}
             </div>
           ) : (
@@ -257,9 +288,9 @@ export function FinishJobButton({
                     <label className="flex min-h-11 items-start gap-2 text-sm text-slate-700">
                       <input type="checkbox" checked={sendInvoice} onChange={(e) => setSendInvoice(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
                       <span>
-                        {t("jb_emailInvoiceNow")}
+                        {sendWithoutReview ? t("jb_emailInvoiceNow") : t("jb_emailInvoiceReview")}
                         <span className="block text-xs text-slate-500">
-                          {sendInvoice ? t("jb_sendsOnFinish") : t("jb_leaveUnchecked")}
+                          {sendInvoice ? (sendWithoutReview ? t("jb_sendsOnFinish") : t("jb_reviewsOnFinish")) : t("jb_leaveUnchecked")}
                         </span>
                       </span>
                     </label>
@@ -270,6 +301,10 @@ export function FinishJobButton({
           )}
         </div>
       </Modal>
+
+      {done?.id && done.review && (
+        <SendSheet kind="invoice" id={done.id} open={reviewOpen} onClose={() => setReviewOpen(false)} />
+      )}
     </>
   );
 }

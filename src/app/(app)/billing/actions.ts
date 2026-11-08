@@ -15,7 +15,11 @@ import { headers } from "next/headers";
 import { bustDocPdf, warmDocPdf } from "@/lib/pdf-cache";
 import { revalidateMoney } from "@/lib/revalidate-money";
 import { createClient } from "@/lib/supabase/server";
-import { deliverInvoiceEmail } from "@/lib/invoice-email";
+import { deliverInvoiceEmail, invoiceSendWords } from "@/lib/invoice-email";
+import { checkSendMessage, copyMeAddress, type PreviewResult, type SendCheck, type SendMessage } from "@/lib/send-review";
+import { logSend, senderEmail } from "@/lib/sent-messages";
+import { currentLangFor } from "@/lib/current-lang";
+import { money } from "@/lib/email";
 import { markInvoiceResent, markInvoiceSent, restampDueOnFirstSend } from "@/lib/invoice-sent-stamp";
 import { needsSendRefusal, sendDraftForPayment } from "@/lib/pay-door-send";
 import { jobBillForPayment, type JobBillRow } from "@/lib/job-bill-for-payment";
@@ -598,15 +602,77 @@ export async function invoiceShareText(
   };
 }
 
+/** A refused field from the review sheet, as one plain sentence the sheet can show. */
+function sendRefusalSentence(why: Extract<SendCheck, { ok: false }>["why"], channel: "email" | "sms"): string {
+  switch (why) {
+    case "to": return channel === "email" ? "That email address doesn't look right." : "That phone number doesn't look right.";
+    case "subject": return "The subject can't be empty, can't run to more than one line, and can't be longer than 200 characters.";
+    case "body": return "The message can't be empty or longer than 4,000 characters.";
+    case "length": return "That message is too long to text. Shorten it and send again.";
+  }
+}
+
+/**
+ * THE REVIEW SHEET'S PREFILL FOR AN INVOICE OR A RECEIPT (cn-v1155): exactly the words the email and
+ * the text carry today, as plain text, plus the fixed tail (the link) and where the Copy Me copy
+ * would go. Every default comes from invoiceSendWords, the same helper the send itself uses. A
+ * receipt is a paid invoice and the renderer's own paid wording ("paid in full. Thank you!")
+ * already covers it, so both kinds read the same words.
+ */
+export async function previewInvoiceSend(id: string, kind: "invoice" | "receipt"): Promise<PreviewResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: String(ctx.error) };
+  if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
+  const { supabase, orgId, userId } = ctx;
+  const { data: invoice } = await supabase
+    .from("invoices")
+    .select("invoice_number, title, total, amount_paid, status, public_token, org_id, customers(name, email, phone, address), jobs(address)")
+    .eq("id", id)
+    .eq("org_id", orgId)
+    .maybeSingle();
+  if (!invoice) return { ok: false, error: "Invoice not found." };
+  if (invoice.status === "void") return { ok: false, error: "This invoice is void, so there's nothing to send." };
+  const { data: org } = await supabase.from("organizations").select("name, email, settings").eq("id", orgId).maybeSingle();
+  const settings = getOrgSettings((org as { settings?: unknown } | null)?.settings);
+  const customer = (invoice as any).customers as { name?: string | null; email?: string | null; phone?: string | null } | null;
+  const balance = invoiceBalance(invoice.total, invoice.amount_paid);
+  const words = invoiceSendWords({ orgName: (org as any)?.name, number: invoice.invoice_number, title: (invoice as any).title, balance });
+  const link = orgDocUrl(settings, "i", (invoice as any).public_token, rowPlace(invoice as any));
+  const phone = customer?.phone ?? null;
+  const [viewerLang, own] = await Promise.all([currentLangFor(userId), senderEmail(supabase, userId)]);
+  return {
+    ok: true,
+    preview: {
+      kind,
+      id,
+      customerName: customer?.name ?? null,
+      to: customer?.email ?? null,
+      phone,
+      subject: words.subject,
+      body: words.body,
+      smsBody: words.smsBody,
+      tail: { email: balance > 0 ? `View and pay ${money(balance)}: ${link}` : `View invoice: ${link}`, sms: ` View/pay: ${link}` },
+      copyMe: settings.copy_owner_on_emails,
+      copyTo: copyMeAddress(own, (org as any)?.email),
+      // Ready is the company's texting setup only: a customer with no phone still reaches Text, where the sheet asks for a number (sn_noPhone).
+      textReady: smsReadiness(org as any).ready,
+      viewerLang,
+      reviewOff: (settings as { send_without_review?: boolean }).send_without_review === true,
+    },
+  };
+}
+
 export async function textInvoice(
   id: string,
+  message?: SendMessage,
+  kind?: "invoice" | "receipt",
 ): Promise<{ ok: boolean; error?: string; notReady?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { data: invoice } = await supabase
     .from("invoices")
-    .select("invoice_number, total, amount_paid, status, public_token, org_id, customers(name, phone, address), jobs(address)")
+    .select("invoice_number, title, total, amount_paid, status, public_token, org_id, customer_id, customers(name, phone, address), jobs(address)")
     .eq("id", id)
     .maybeSingle();
   if (!invoice) return { ok: false, error: "Invoice not found." };
@@ -620,17 +686,37 @@ export async function textInvoice(
   const access = await orgAccess(invoiceOrgId);
   if (!access.state.active) return { ok: false, error: await textingPausedWordsFor(invoiceOrgId) };
   const customer = (invoice as any).customers;
-  if (!customer?.phone)
+  if (!customer?.phone && !message?.to)
     return { ok: false, error: "This customer has no phone number." };
 
   const balance = invoiceBalance(invoice.total, invoice.amount_paid);
   const link = await publicInvoiceLink(supabase, (invoice as any).org_id, (invoice as any).public_token, rowPlace(invoice as any));
-  const body = `${org?.name ?? "Your contractor"}: Invoice ${invoice.invoice_number}, balance $${balance.toFixed(2)}. View/pay: ${link}`;
+  const tail = ` View/pay: ${link}`;
+  const checked = checkSendMessage(message, "sms", tail.length);
+  if (!checked.ok) return { ok: false, error: sendRefusalSentence(checked.why, "sms") };
+  const typed = checked.message;
+  const toPhone: string = typed.to ?? customer.phone;
+  const text = typed.body ?? invoiceSendWords({ orgName: org?.name, number: invoice.invoice_number, balance }).smsBody;
+  const body = `${text}${tail}`;
 
-  const sent = await sendSms(customer.phone, body, (org as any)?.settings?.sms_from_number);
+  const sent = await sendSms(toPhone, body, (org as any)?.settings?.sms_from_number);
   // Texting is set up (asked above), so a false here is the service refusing it; sendSms has
   // already logged why.
   if (!sent) return { ok: false, error: TEXT_REFUSED };
+  await logSend(supabase, {
+    orgId: (invoice as any).org_id,
+    docKind: kind ?? "invoice",
+    docId: id,
+    customerId: (invoice as any).customer_id ?? null,
+    channel: "sms",
+    to: toPhone,
+    subject: null,
+    // What the person saw and typed, without the link tail, the way the email path logs it.
+    body: text,
+    copyTo: null,
+    sentBy: ctx.userId,
+    auto: false,
+  });
   // The text is already in the customer's hand, so the deed happened whatever the row does next
   // — which is why this is stamped (0267) and why a failure here is reported as "it went out but
   // the status didn't stick" rather than as a failed send. Silent is the one thing it can't be:
@@ -678,10 +764,21 @@ export async function textInvoice(
 
 export async function emailInvoice(
   id: string,
+  message?: SendMessage,
+  kind?: "invoice" | "receipt",
 ): Promise<{ ok: boolean; error?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  const res = await deliverInvoiceEmail(ctx.supabase, id);
+  // An email's fixed part (the button) is HTML beside the owner's words, not text after them, so it
+  // adds nothing to the length check.
+  const checked = checkSendMessage(message, "email", 0);
+  if (!checked.ok) return { ok: false, error: sendRefusalSentence(checked.why, "email") };
+  const res = await deliverInvoiceEmail(ctx.supabase, id, {
+    message: message ? checked.message : undefined,
+    sentBy: ctx.userId,
+    senderEmail: await senderEmail(ctx.supabase, ctx.userId),
+    kind,
+  });
   if (res.ok) {
     revalidateMoney(id);
     // Warm the stored PDF (0198) post-response so the customer's Download button works from

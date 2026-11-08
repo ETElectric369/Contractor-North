@@ -33,8 +33,8 @@ import { CATALOGS } from "@/lib/i18n";
  */
 const ROOT = process.cwd();
 
-/** The screens the catalogs name at the Ventas-2 wave's foundation (181, cn-v1146: the estimates wave's 157 + twenty-four — ld_'s eight less intake-files (vp_ already names it), ld_srv_'s leads/actions, ip_'s inspections page, cu_'s twelve, cu_srv_'s three), at the estimates wave's foundation (157, cn-v1145: the visit-page wave's 138 + the estimates' nineteen — qt_'s fifteen screens, qe_'s editor and its writes, qb_'s task breakdown, qs_'s quotes/actions), at the visit-page wave's foundation (133: the agenda wave's 122 + the Settle Up button, the shell's off line and directions link, the Inspector, and the visit page's six — its page, start card, link picker, ending, header actions, Mark Complete — and its hear-actions), at the agenda wave's foundation (122: the sheet, the calendar's eleven, the rail's ten, the server's three), at cn-v1140 (96 with the plan card; 95 when the floor was set: the usage catalog's two; 93 at cn-v1139; 90 at cn-v1138); raise it as screens move over. */
-export const FILES_FLOOR = 181;
+/** 180 at cn-v1155: email-button.tsx is gone, so the catalogs name one screen fewer. The screens the catalogs name at the Ventas-2 wave's foundation (181, cn-v1146: the estimates wave's 157 + twenty-four — ld_'s eight less intake-files (vp_ already names it), ld_srv_'s leads/actions, ip_'s inspections page, cu_'s twelve, cu_srv_'s three), at the estimates wave's foundation (157, cn-v1145: the visit-page wave's 138 + the estimates' nineteen — qt_'s fifteen screens, qe_'s editor and its writes, qb_'s task breakdown, qs_'s quotes/actions), at the visit-page wave's foundation (133: the agenda wave's 122 + the Settle Up button, the shell's off line and directions link, the Inspector, and the visit page's six — its page, start card, link picker, ending, header actions, Mark Complete — and its hear-actions), at the agenda wave's foundation (122: the sheet, the calendar's eleven, the rail's ten, the server's three), at cn-v1140 (96 with the plan card; 95 when the floor was set: the usage catalog's two; 93 at cn-v1139; 90 at cn-v1138); raise it as screens move over. */
+export const FILES_FLOOR = 180;
 
 /** English that stands on a named screen on purpose: the exact words, the file, and why. */
 const ALLOW: { file: string; text: string; why: string }[] = [
@@ -58,7 +58,6 @@ const ALLOW: { file: string; text: string; why: string }[] = [
   // The Ventas-2 wave's server words (ld_srv_ / cu_srv_, cn-v1146): the portal email is what the tenant's
   // CUSTOMER reads (its heading and subject are English too, outside the scanner's eye) — pinned by
   // src/app/(app)/crm/customers-server-es.test.ts; setInquiryStatus' list is the guard's own words.
-  { file: "src/app/(app)/crm/actions.ts", text: "Here's your private link to your jobs: the work and payments day by day, your picks and photos, and your invoices, contracts and quotes. It's up to date every time you open it. The first time you open it on a phone or computer, we'll email you a 6-digit code to sign in; no password to remember. Bookmark it for easy access.", why: "the portal email's message: the customer reads it, so it stays English" },
   { file: "src/app/(app)/crm/actions.ts", text: "Open my portal", why: "the portal email's button: the customer reads it, so it stays English" },
   { file: "src/app/(app)/leads/actions.ts", text: "Status must be one of: .", why: "a programming refusal: every door sends one of the lead statuses, so no person reads it" },
 ];
@@ -319,7 +318,7 @@ describe("every named screen's words come through the catalog", () => {
   const leaks = files.flatMap((f) => collectLeaks(readFileSync(join(ROOT, f), "utf8"), f).map((l) => ({ ...l, file: f })));
 
   it("the catalogs loaded and the scan read every screen they name", () => {
-    expect(CATALOGS.length).toBe(29);
+    expect(CATALOGS.length).toBe(30);
     expect(files.length).toBeGreaterThanOrEqual(FILES_FLOOR);
   });
 

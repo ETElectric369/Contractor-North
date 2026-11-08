@@ -340,6 +340,8 @@ export const words: WordCatalog = {
     jb_whenDone: "When done",
     jb_emailInvoiceNow: "Email the invoice to the customer now",
     jb_sendsOnFinish: "Sends as soon as you finish — double-check the amounts first.",
+    jb_emailInvoiceReview: "Send the invoice now (you review it first)",
+    jb_reviewsOnFinish: "You read the address and the words first. Nothing goes until you press Email It or Text It.",
     jb_leaveUnchecked: "Leave unchecked to hold it as a draft for review.",
     // ── the Scheduled box (job-schedule-control.tsx) ───────────────────────────────────────────
     jb_daysDidntSave: "The days didn't save. Try again.",
@@ -700,6 +702,8 @@ export const words: WordCatalog = {
     jb_whenDone: "Al terminar",
     jb_emailInvoiceNow: "Enviar la factura al cliente por correo ahora",
     jb_sendsOnFinish: "Se envía en cuanto termines — revisa bien los montos primero.",
+    jb_emailInvoiceReview: "Enviar la factura ahora (tú la revisas primero)",
+    jb_reviewsOnFinish: "Lees la dirección y el mensaje primero. No sale nada hasta que toques Enviar por Correo o Enviar por Texto.",
     jb_leaveUnchecked: "Déjalo sin marcar para guardarla como borrador y revisarla.",
     // ── the Scheduled box ──────────────────────────────────────────────────────────────────────
     jb_daysDidntSave: "Los días no se guardaron. Inténtalo de nuevo.",

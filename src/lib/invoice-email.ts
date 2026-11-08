@@ -1,5 +1,7 @@
 import "server-only";
-import { sendEmail, renderInvoiceNoticeEmail, ownerBcc } from "@/lib/email";
+import { sendEmail, renderInvoiceNoticeEmail, money } from "@/lib/email";
+import { copyMeAddress, type SendMessage } from "@/lib/send-review";
+import { logSend } from "@/lib/sent-messages";
 import { getOrgSettings, accentHex, orgDocUrl, orgPublicBaseUrl } from "@/lib/org-settings";
 import { rowPlace } from "@/lib/doc-place";
 import { companyFromOrg } from "@/components/doc-letterhead";
@@ -25,6 +27,37 @@ export function invoicePortalLink(
 }
 
 /**
+ * THE WORDS AN INVOICE GOES OUT WITH, IN ONE PLACE (cn-v1155). The review sheet's prefill
+ * (previewInvoiceSend), the email (deliverInvoiceEmail), the text (textInvoice) and the sent-messages
+ * log all read this, so what the owner reviewed, what the customer got and what the log keeps can
+ * never drift. Plain text, English (it is customer-bound). `body` is what follows the fixed greeting
+ * in the email and mirrors the renderer's own default sentence; `smsBody` is today's text minus the
+ * link, which goes after it as the fixed tail.
+ */
+export function invoiceSendWords(input: {
+  orgName: string | null | undefined;
+  number: string;
+  title?: string | null;
+  balance: number;
+}): { subject: string; body: string; smsBody: string } {
+  const due = input.balance > 0;
+  return {
+    subject: `Invoice ${input.number} from ${input.orgName ?? "us"}`,
+    body: `Your invoice ${input.number}${input.title ? ` — ${input.title}` : ""} is ready${due ? `. Balance due: ${money(input.balance)}.` : " — paid in full. Thank you!"}`,
+    smsBody: `${input.orgName ?? "Your contractor"}: Invoice ${input.number}, balance $${input.balance.toFixed(2)}.`,
+  };
+}
+
+/** What the person sent from the review sheet, and who sent it. Absent (the recurring cron), every
+ *  default stands and the send is logged as automatic. */
+export type InvoiceSendOpts = {
+  message?: SendMessage;
+  sentBy?: string;
+  senderEmail?: string | null;
+  kind?: "invoice" | "receipt";
+};
+
+/**
  * Render + send an invoice email to the customer and mark a draft "sent".
  * No auth gate: the staff action `emailInvoice` runs requireStaff before calling
  * this, and the recurring/cron path (service client, no auth context) calls it
@@ -34,7 +67,9 @@ export function invoicePortalLink(
 export async function deliverInvoiceEmail(
   supabase: any,
   id: string,
+  opts?: InvoiceSendOpts,
 ): Promise<{ ok: boolean; error?: string }> {
+  const message = opts?.message;
   const { data: invoice } = await supabase
     .from("invoices")
     .select("*, customers(name, email, address), jobs(address)")
@@ -42,7 +77,8 @@ export async function deliverInvoiceEmail(
     .maybeSingle();
   if (!invoice) return { ok: false, error: "Invoice not found." };
   const customer = (invoice as any).customers;
-  if (!customer?.email) return { ok: false, error: "This customer has no email address." };
+  const to: string | undefined = message?.to ?? customer?.email ?? undefined;
+  if (!to) return { ok: false, error: "This customer has no email address." };
 
   const [{ data: items }, { data: org }, { data: portalRow, error: portalError }] = await Promise.all([
     supabase.from("invoice_items").select("*").eq("invoice_id", id).order("sort_order"),
@@ -88,6 +124,7 @@ export async function deliverInvoiceEmail(
   // (viewable, printable, payable) and the portal — never a re-rendered copy of the
   // invoice, so the email can't drift from the print/portal view.
   const co = companyFromOrg(org as any);
+  const words = invoiceSendWords({ orgName: org?.name, number: invoice.invoice_number, title: invoice.title, balance });
   const html = renderInvoiceNoticeEmail({
     company: {
       name: org?.name ?? "Contractor North",
@@ -97,23 +134,44 @@ export async function deliverInvoiceEmail(
       email: org?.email,
     },
     letterhead: companyBlock(co),
-    customerName: customer.name,
+    customerName: customer?.name ?? "there",
     number: invoice.invoice_number,
     title: invoice.title,
     balance,
     invoiceLink: link,
     portalLink,
+    // Only the owner's own words replace the default sentence; with none the HTML is what it always was.
+    body: message?.body,
   });
+  // Copy Me: the sheet's choice, else the company's standing switch. The copy goes to the sender's
+  // own address, else the company's (no sender known, the cron, is the company's as it always was).
+  const copyMe = message?.copyMe ?? getOrgSettings((org as any)?.settings).copy_owner_on_emails;
+  const bcc = copyMe ? (copyMeAddress(opts?.senderEmail, org?.email) ?? undefined) : undefined;
+  const subject = message?.subject ?? words.subject;
 
   const res = await sendEmail({
-    to: customer.email,
-    subject: `Invoice ${invoice.invoice_number} from ${org?.name ?? "us"}`,
+    to,
+    subject,
     fromName: org?.name ?? undefined,
     html,
     replyTo: org?.email ?? undefined,
-    bcc: ownerBcc(getOrgSettings((org as any)?.settings).copy_owner_on_emails, org?.email),
+    bcc,
   });
   if (!res.ok) return res;
+  // The words that went out, kept word for word (best-effort; the mail has already left).
+  await logSend(supabase, {
+    orgId: (invoice as any).org_id,
+    docKind: opts?.kind ?? "invoice",
+    docId: id,
+    customerId: (invoice as any).customer_id ?? null,
+    channel: "email",
+    to,
+    subject,
+    body: message?.body ?? words.body,
+    copyTo: bcc ?? null,
+    sentBy: opts?.sentBy ?? null,
+    auto: !opts?.sentBy,
+  });
   // THE EMAIL IS THE DEED, SO THIS IS WHERE THE STAMP BELONGS (0267, INV-069). `status = 'sent'`
   // alone could be manufactured by a pay door that never showed anyone a bill; sent_at cannot,
   // and the demotion guard in billing/actions.ts now reads delivery off exactly this write.
