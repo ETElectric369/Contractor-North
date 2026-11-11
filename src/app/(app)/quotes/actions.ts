@@ -1,5 +1,6 @@
 "use server";
 import { jobLabel, readUsualBillingKind } from "@/lib/schedule-options";
+import { isEstimateFormat, type EstimateFormat } from "@/lib/doc-style";
 import { reportError } from "@/lib/observe";
 import { customerForInquiry } from "@/lib/actions/win-customer";
 import { dbError } from "@/lib/db-error";
@@ -52,6 +53,8 @@ import { isMissingColumn } from "@/lib/job-tasks";
 import { orgTrade, tradeWordsOr, withArticle } from "@/lib/org-trade";
 import { closeVisitsBehindQuote, outcomeForQuoteStatus } from "@/lib/appointments/behind-quote";
 import { rowPlace } from "@/lib/doc-place";
+import { cleanQuoteSite, quoteSiteCandidates, siteKey, sitePartsOf, type QuoteSiteInput, type QuoteSiteRecords, type QuoteSiteWrite } from "@/lib/quote-site";
+import { SITE_COLS, type SiteParts } from "@/lib/site-address";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice, type TaskDetail } from "@/lib/estimate/line-map";
 import { coerceTaskDetail } from "@/lib/estimate/task-lines";
@@ -449,9 +452,10 @@ export interface SaveQuoteInput {
   /** The customer-facing document word (builder toggle) — omitted = 'estimate',
    *  matching the app's estimate-first default (migration 0086). */
   doc_type?: QuoteDocType;
-  /** HOW THIS ESTIMATE'S TASK LINES READ ON PAPER (cn-v1131, 0395): "tasks" | "detailed" for its own
-   *  word, null for the company's Doc Studio choice. Omitted = the column is not touched. */
-  estimate_format?: "tasks" | "detailed" | null;
+  /** HOW THIS ESTIMATE'S TASK LINES READ ON PAPER (cn-v1131, 0395; a third word since 0408): one of
+   *  lib/doc-style ESTIMATE_FORMATS for its own word, null for the company's Doc Studio choice.
+   *  Omitted = the column is not touched. */
+  estimate_format?: EstimateFormat | null;
   items: DraftLineItem[];
 }
 
@@ -1160,8 +1164,9 @@ export async function updateQuoteMeta(
     notes?: string;
     tax_rate?: number;
     valid_until?: string | null;
-    /** The estimate's own paper format (0395): "tasks" | "detailed", or null for the company's. */
-    estimate_format?: "tasks" | "detailed" | null;
+    /** The estimate's own paper format (0395; a third word since 0408): one of lib/doc-style
+     *  ESTIMATE_FORMATS, or null for the company's. */
+    estimate_format?: EstimateFormat | null;
   },
 ): Promise<{ ok: boolean; error?: string }> {
   const ctx = await requireStaff();
@@ -1174,8 +1179,9 @@ export async function updateQuoteMeta(
   if (meta.notes !== undefined) clean.notes = meta.notes.trim() || null;
   if (meta.tax_rate !== undefined) clean.tax_rate = meta.tax_rate || 0;
   if (meta.valid_until !== undefined) clean.valid_until = meta.valid_until;
-  // Validated to the column's own check: anything but the two words is "the company's" (null).
-  if (meta.estimate_format !== undefined) clean.estimate_format = meta.estimate_format === "tasks" || meta.estimate_format === "detailed" ? meta.estimate_format : null;
+  // Validated to the column's own check through the ONE format check (lib/doc-style isEstimateFormat):
+  // anything that is not one of its words is "the company's" (null).
+  if (meta.estimate_format !== undefined) clean.estimate_format = isEstimateFormat(meta.estimate_format) ? meta.estimate_format : null;
   if (Object.keys(clean).length === 0) return { ok: false, error: await ws.say("qs_nothingToUpdate") };
   // Only the tax rate moves `total` (through recalcQuote) — so only a tax-rate change on a
   // drawn contract trips the accepted-lock. Re-titling or re-noting an accepted quote is
@@ -1226,6 +1232,76 @@ export async function setQuoteCustomer(
   if (error) return { ok: false, error: dbError(error) };
   if (!rows || rows.length === 0) return { ok: false, error: await ws.say("qs_estimateUnavailable") };
   await bustDocPdf("quote", quoteId); // bill-to renders on the PDF (audit 7)
+  revalidatePath(`/quotes/${quoteId}`);
+  revalidatePath("/quotes");
+  return { ok: true };
+}
+
+/**
+ * THE ESTIMATE'S OWN JOB SITE (cn-v1158). The owner, 2026-11-10, pricing a unit for a customer that
+ * owns two complexes: "we need to have sites available to pick from on the estimate sheet". An
+ * estimate has had its own five address columns since 0177 / 0187 and every reader ranks them first
+ * (the print page, the customer's /q page, the customer's Accept, createJobFromQuote below), but no
+ * door wrote them, so an estimate with no job printed the customer's own address as the job site.
+ * This is that door: the Job Site line on the estimate's page (quotes/[id]/job-site-line).
+ *
+ * A SITE is a street and, when known, its unit, city, state and zip, cleaned by the one rule
+ * (lib/quote-site cleanQuoteSite: trimmed, empty is null, a part past its cap is refused whole and
+ * never cut). NULL clears all five, so the estimate goes back to printing its lead's or its
+ * customer's address, or its job's. Only an explicit null clears: anything else that is not an
+ * address is refused, so a malformed call can never wipe one.
+ *
+ * AN ESTIMATE ON A JOB TAKES NO ADDRESS OF ITS OWN: the job owns its site, and the sentence says
+ * where to change it. The write itself lands only while the estimate still has no job (the same
+ * compare-and-set createJobFromQuote links with), so a job made in the same second by another door,
+ * the customer's Accept link among them, is not left disagreeing with the paper. A CLEAR IS ALLOWED
+ * on a job: it is how an estimate that carried its own address into its job goes back to following
+ * the job once somebody corrects the address there, and without it the refusal's own advice would
+ * change nothing the estimate prints.
+ *
+ * Staff only. The row is read back (a zero-row update is a 204, not a success), the stored PDF is
+ * dropped (the customer's Download would go on serving the old address), and the page and the list
+ * are drawn again.
+ */
+export async function setQuoteSite(
+  quoteId: string,
+  site: QuoteSiteInput | null,
+): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
+
+  let cols: { [K in keyof QuoteSiteWrite]: string | null } = { address: null, unit: null, city: null, state: null, zip: null };
+  if (site !== null) {
+    const clean = cleanQuoteSite(site);
+    if (!clean.ok) return { ok: false, error: await ws.say(clean.why === "long" ? "qs_siteTooLong" : "qs_siteNeedsAddress") };
+    cols = clean.site;
+  }
+
+  // THIS COMPANY'S ESTIMATE, SAID TWICE: row security already keeps another company's estimate out of
+  // the read and the write below, and the id is scoped by hand as well (requireStaff hands back the
+  // company for exactly this), so an id-keyed write never rests on one rule alone. A caller with no
+  // company matches nothing and is told the estimate is not available.
+  const { data: cur, error: readErr } = await supabase.from("quotes").select("id, job_id").eq("id", quoteId).eq("org_id", ctx.orgId).maybeSingle();
+  if (readErr) return { ok: false, error: dbError(readErr) };
+  if (!cur) return { ok: false, error: await ws.say("qs_estimateUnavailable") };
+  if (site !== null && (cur as { job_id?: string | null }).job_id) return { ok: false, error: await ws.say("qs_siteJobOwns") };
+
+  let write = supabase.from("quotes").update({ ...cols, updated_at: new Date().toISOString() }).eq("id", quoteId).eq("org_id", ctx.orgId);
+  // Setting an address lands only while there is still no job; a clear has no such condition.
+  if (site !== null) write = write.is("job_id", null);
+  const { data: rows, error } = await write.select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!rows?.length) {
+    // Nothing landed: either a job was made between the read and the write, or the estimate is gone.
+    // One more read tells which, so the sentence names the thing that is true.
+    const { data: now } = await supabase.from("quotes").select("job_id").eq("id", quoteId).eq("org_id", ctx.orgId).maybeSingle();
+    if (site !== null && (now as { job_id?: string | null } | null)?.job_id) return { ok: false, error: await ws.say("qs_siteJobOwns") };
+    return { ok: false, error: await ws.say("qs_estimateUnavailable") };
+  }
+  // The job site prints on the PDF, and the street names the customer's link and the file.
+  await bustDocPdf("quote", quoteId, ctx.orgId);
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
   return { ok: true };
@@ -1531,8 +1607,8 @@ export async function saveQuote(input: SaveQuoteInput) {
   };
   // THE ESTIMATE'S OWN PAPER FORMAT (0395): its word, null for the company's, undefined = untouched.
   // Kept out of `fields` — save_quote_draft (0211) takes the header as it always has and is not edited.
-  const estimateFormat: "tasks" | "detailed" | null | undefined =
-    input.estimate_format === "tasks" || input.estimate_format === "detailed" ? input.estimate_format : input.estimate_format === null ? null : undefined;
+  const estimateFormat: EstimateFormat | null | undefined =
+    isEstimateFormat(input.estimate_format) ? input.estimate_format : input.estimate_format === null ? null : undefined;
   let quote: { id: string; quote_number?: string | null } | null = null;
   let updateItemsDone = false;
   // TWO PASSES AT MOST. A save whose id is standing here takes the update path; one with no id, or an
@@ -1762,6 +1838,39 @@ export async function saveQuote(input: SaveQuoteInput) {
 }
 
 /**
+ * THE ADDRESS A PLAIN COPY IS ABOUT TO LEAVE BEHIND (cn-v1158). An estimate with no address of its own
+ * prints its job's, else its lead's, else its customer's (lib/quote-site quoteSiteCandidates: the
+ * paper's one order). A plain copy keeps the customer and drops the job and the lead, so the address
+ * the paper printed can be one the copy no longer reaches. This reads it: the job's five columns when
+ * the estimate is on a job that has a street, else the lead's when it has a lead with a street. The
+ * customer's is never read: the copy keeps its customer and goes on following that address by itself.
+ *
+ * Two small reads by id through the caller's own client (row security applies: a job or a lead the
+ * caller cannot see answers as having no address), the lead's made only when the job gave no street.
+ * Each asks for the five address columns by lib/site-address's own list (SITE_COLS), never a retyped
+ * one. A read that FAILS is handed back as the failure and never as "no address": the copy door says
+ * it. Not exported: a "use server" file exports only its actions.
+ */
+async function siteACopyLeavesBehind(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  from: { job_id?: string | null; inquiry_id?: string | null },
+): Promise<{ site: SiteParts | null } | { error: unknown }> {
+  const records: QuoteSiteRecords = {};
+  if (from.job_id) {
+    const { data, error } = await supabase.from("jobs").select(SITE_COLS).eq("id", from.job_id).maybeSingle();
+    if (error) return { error };
+    records.job = sitePartsOf(data as SiteParts | null);
+  }
+  if (!siteKey(records.job) && from.inquiry_id) {
+    const { data, error } = await supabase.from("inquiries").select(SITE_COLS).eq("id", from.inquiry_id).maybeSingle();
+    if (error) return { error };
+    records.lead = sitePartsOf(data as SiteParts | null);
+  }
+  // The first record with a street, whole, in the paper's own order (the one list; never a second one here).
+  return { site: quoteSiteCandidates(records).find((c) => siteKey(c.parts))?.parts ?? null };
+}
+
+/**
  * Clone a quote (header fields + all line items) into a fresh draft titled
  * "… (copy)". Reuses the existing saveQuote insert path so totals and
  * revalidation all behave exactly like a new estimate.
@@ -1790,7 +1899,9 @@ export async function duplicateQuote(
   // its own.
   // (A const column list: each select is then a string LITERAL the client's select parser can read
   // into a row type, where a template built at run time is not.)
-  const columns = "customer_id, title, description, notes, tax_rate, valid_until, doc_type, circuits, job_id, inquiry_id, status" as const;
+  // address, unit, city, state, zip ride too (cn-v1158): the estimate's OWN job site, there since
+  // 0177 / 0187 and written by the Job Site line (setQuoteSite above). See the stamp below.
+  const columns = "customer_id, title, description, notes, tax_rate, valid_until, doc_type, circuits, job_id, inquiry_id, status, address, unit, city, state, zip" as const;
   const first = await supabase.from("quotes").select(`${columns}, estimate_format`).eq("id", id).maybeSingle();
   const withFormat = !(first.error && isMissingColumn(first.error));
   const { data: quote } = withFormat ? first : await supabase.from("quotes").select(columns).eq("id", id).maybeSingle();
@@ -1828,7 +1939,7 @@ export async function duplicateQuote(
     // A copy keeps the customer-facing word — a fixed-price Quote doesn't revert to Estimate.
     doc_type: quote.doc_type === "quote" ? "quote" : "estimate",
     // …and its own paper format (null = the company's), when the column was there to read.
-    ...(withFormat ? { estimate_format: format === "tasks" || format === "detailed" ? format : null } : {}),
+    ...(withFormat ? { estimate_format: isEstimateFormat(format) ? format : null } : {}),
     items: (items ?? []).map((it: any) => ({
       description: it.description,
       quantity: Number(it.quantity) || 1,
@@ -1859,6 +1970,55 @@ export async function duplicateQuote(
     }
   }
 
+  // What the copy could not bring with it, each said in its own sentence (the copy itself is made).
+  const warnings: string[] = [];
+
+  // THE COPY PRINTS THE PLACE ITS PAPER PRINTED (cn-v1158), in two halves.
+  //
+  // ITS OWN JOB SITE COMES WITH IT. Until the Job Site line no estimate carried an address of its
+  // own, so a copy had nothing to lose; now one can, and a copy or a revision of an estimate set to a
+  // customer's second building came back printing the customer's own address with no unit: the same
+  // paper, a different place, and nothing said. saveQuote has no address field (it is the builder's
+  // autosave, and the builder never sets one), so the five columns are written here, AS THEY ARE ON
+  // FILE, onto the row saveQuote just made, and read back. A revision on a job keeps it as well: it
+  // is the same paper as the estimate it revises, so it prints the same place.
+  //
+  // A PLAIN COPY ALSO KEEPS THE ADDRESS IT IS ABOUT TO LEAVE BEHIND. An estimate with no address of
+  // its own prints its job's, else its lead's, and a plain copy keeps neither the job nor the lead:
+  // it came back printing the customer's address, or none, and nothing said. So when the original
+  // has no address of its own, the one its paper printed (siteACopyLeavesBehind, above) is written
+  // onto the copy as the copy's own. A revision is not read for one: it keeps the job and the lead,
+  // so it goes on following them. An original that only ever printed its customer's address needs
+  // nothing either: the copy keeps the customer.
+  //
+  // The copy exists by now, so a lost address (a read or a write that failed) is said, never a
+  // failed copy; the copy's Job Site line shows where its address comes from.
+  const ownSite = sitePartsOf(quote as SiteParts);
+  let copySite: SiteParts | null = siteKey(ownSite) ? ownSite : null;
+  if (!copySite && !revision && res.id) {
+    const left = await siteACopyLeavesBehind(supabase, quote as { job_id?: string | null; inquiry_id?: string | null });
+    if ("error" in left) {
+      reportError("quotes.duplicateQuote.site", left.error, { from: id, to: res.id });
+      warnings.push(await ws.say("qs_copyNoSite"));
+    } else {
+      copySite = left.site;
+    }
+  }
+  if (copySite && res.id) {
+    const { data: sited, error: siteErr } = await supabase
+      .from("quotes")
+      .update({ address: copySite.address ?? null, unit: copySite.unit ?? null, city: copySite.city ?? null, state: copySite.state ?? null, zip: copySite.zip ?? null })
+      .eq("id", res.id)
+      .select("id");
+    if (siteErr || !sited?.length) {
+      if (siteErr) reportError("quotes.duplicateQuote.site", siteErr, { from: id, to: res.id });
+      warnings.push(await ws.say("qs_copyNoSite"));
+    } else {
+      // The stored PDF, if the save above already made one, would print the fallback address.
+      await bustDocPdf("quote", res.id, ctx.orgId);
+    }
+  }
+
   // THE CIRCUIT SCHEDULE COMES WITH IT. saveQuote has no circuits field (it is the builder's
   // autosave, and the builder never edits circuits), so the copy's schedule is written here, onto
   // the row saveQuote just made, and read back: a zero-row update is a 204, not an error. The copy
@@ -1874,14 +2034,10 @@ export async function duplicateQuote(
       .select("id");
     if (cErr || !wrote?.length) {
       if (cErr) reportError("quotes.duplicateQuote.circuits", cErr, { from: id, to: res.id });
-      return {
-        ok: true,
-        id: res.id,
-        warning: await ws.say(circuits.length === 1 ? "qs_copyNoCircuitsOne" : "qs_copyNoCircuitsMany", { n: circuits.length }),
-      };
+      warnings.push(await ws.say(circuits.length === 1 ? "qs_copyNoCircuitsOne" : "qs_copyNoCircuitsMany", { n: circuits.length }));
     }
   }
-  return { ok: true, id: res.id };
+  return { ok: true, id: res.id, ...(warnings.length ? { warning: warnings.join(" ") } : {}) };
 }
 
 /**

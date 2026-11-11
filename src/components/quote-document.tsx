@@ -3,7 +3,7 @@ import type { ResolvedSite } from "@/lib/site-address";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { CSSProperties } from "react";
 import { normalizeDocStyle, sheetStyleVars, type DocStyle, type EstimateFormat } from "@/lib/doc-style";
-import { coerceTaskDetail, detailExplains, lineQty, partMoney, taskMoney } from "@/lib/estimate/task-lines";
+import { laborMoney, paperBreakdown, partMoney } from "@/lib/estimate/task-lines";
 
 // The quote table's rhythm is a step tighter than the invoice's at every density.
 const QUOTE_DENSITY_ROW: Record<DocStyle["density"], string> = {
@@ -38,8 +38,9 @@ export type QuoteDocItem = {
   unit_price: number;
   line_total: number;
   /** The task behind the line (0386), when it was built from one: the office's full breakdown, or
-   *  the redacted shape public_quote ships. Read through coerceTaskDetail (the new `labor` rows or
-   *  an old row's `hours`/`rate` alike); printed only when `estimateFormat` says "detailed". */
+   *  the redacted shape public_quote ships — which under "grouped" (0408) carries no parts and the
+   *  wire-only `materials_total` in their place. Read by paperBreakdown (the new `labor` rows or an
+   *  old row's `hours`/`rate` alike); printed only when `estimateFormat` says "detailed" or "grouped". */
   detail?: unknown;
 };
 
@@ -97,10 +98,12 @@ export function QuoteDocument({
   /** Org doc_style, raw — normalized HERE (sanitize on read; public RPC hands it over untyped). */
   docStyle?: unknown;
   /** HOW THIS ESTIMATE'S TASK LINES READ (cn-v1131): "tasks" prints each task with its price alone;
-   *  "detailed" prints its labor rows and parts beneath it. Resolved by the mounter through THE ONE
-   *  READER, estimateFormatFor(quote, docStyle) — the estimate's own choice else the company's — so
-   *  this component never reads doc_style.estimate_format itself and the paper, the PDF, the public
-   *  link and the studio cannot disagree about one estimate. */
+   *  "detailed" prints its labor rows and parts beneath it; "grouped" (cn-v1158) prints its labor rows
+   *  and ONE "Materials" figure. Resolved by the mounter through THE ONE READER,
+   *  estimateFormatFor(quote, docStyle) — the estimate's own choice else the company's (the public
+   *  page takes the word public_quote resolved the same way) — so this component never reads
+   *  doc_style.estimate_format itself and the paper, the PDF, the public link and the studio cannot
+   *  disagree about one estimate. */
   estimateFormat: EstimateFormat;
 }) {
   const ds = normalizeDocStyle(docStyle);
@@ -177,21 +180,18 @@ export function QuoteDocument({
             const headerStyle = /\n/.test(raw) || parts.length <= 1;
             const head = headerStyle ? parts[0] ?? "" : "";
             const subs = head ? parts.slice(1) : parts.length > 1 ? parts : [];
-            // THE BREAKDOWN BEHIND A TASK LINE (0386; labor rows cn-v1131). Erik: the customer sees the
-            // estimate "in a per-company format" — "tasks" prints the line alone; "detailed" prints one
-            // bullet per labor row (its hours at its rate) and each part with its count beneath it.
-            // Only while it still ADDS UP to the line: a price edited by hand afterwards has no
-            // breakdown to show, and printing one that disagrees with the figure beside it would be a
-            // second number on the customer's paper. A row with no hours yet prints nothing.
-            const d = estimateFormat === "detailed" ? coerceTaskDetail(it.detail) : null;
-            const laborRows = d ? d.labor.filter((row) => row.hours !== null) : [];
-            const breakdown = d && (laborRows.length > 0 || d.materials.length > 0) && detailExplains(d, it) ? d : null;
-            // THE BREAKDOWN IS PER UNIT (cn-v1133): the Qty box multiplies it on the line, so when the
-            // customer is buying more than one of the task ONE sub-heading above the bullets says so —
-            // "For each one:" — and no bullet carries a word of its own. " each" after a part's money
-            // misread it: "Tandem breaker, 20A × 2 · $40.00 each" says $40 per breaker, when it is $20
-            // × 2 per task (skeptic #39, S1). The customer's words, never the crew's.
-            const perUnit = lineQty(it) !== 1;
+            // THE BREAKDOWN BEHIND A TASK LINE (0386; labor rows cn-v1131; one Materials line cn-v1158).
+            // Erik: the customer sees the estimate "in a per-company format" — "tasks" prints the line
+            // alone; "detailed" prints one bullet per labor row (its hours at its rate) and each part
+            // with its count beneath it; "grouped" prints the same labor bullets and the parts as ONE
+            // "Materials" figure under the task. WHAT prints is not decided here: paperBreakdown
+            // (lib/estimate/task-lines) is the one decision and this component only draws its answer.
+            // That decision holds the gate — a breakdown prints only while it still ADDS UP to the
+            // line: a price edited by hand afterwards has no breakdown to show, and printing one that
+            // disagrees with the figure beside it would be a second number on the customer's paper. It
+            // also leaves out a row with no hours yet, and it reads the customer's page, which under
+            // "grouped" is handed the parts' one figure and never the parts.
+            const breakdown = paperBreakdown(it, estimateFormat);
             return (
               <tr key={it.id ?? i} className="border-b border-slate-100 align-top [break-inside:avoid]">
                 <td className={`${rowPad} pr-2 text-slate-800`}>
@@ -203,25 +203,37 @@ export function QuoteDocument({
                       ))}
                     </ul>
                   )}
-                  {breakdown && perUnit && <div className="mt-0.5 text-[11px] text-slate-500">For each one:</div>}
+                  {/* THE BREAKDOWN IS PER UNIT (cn-v1133): the Qty box multiplies it on the line, so when
+                      the customer is buying more than one of the task ONE sub-heading above the bullets
+                      says so — "For each one:" — and no bullet carries a word of its own. " each" after
+                      a part's money misread it: "Tandem breaker, 20A × 2 · $40.00 each" says $40 per
+                      breaker, when it is $20 × 2 per task (skeptic #39, S1). The customer's words, never
+                      the crew's. */}
+                  {breakdown?.perUnit && <div className="mt-0.5 text-[11px] text-slate-500">For each one:</div>}
                   {breakdown && (
                     <ul className="ml-3 mt-0.5 list-disc text-[11px] text-slate-500 marker:text-slate-300">
                       {/* ONE BULLET PER LABOR ROW. A row that names a person reaches the public wire
                           with its label null (public_quote never ships who): the customer's paper
                           says "Labor", never the crew's names. The row's money is THE one arithmetic
-                          (taskMoney) over that row alone, so the bullets add up to the line to the cent. */}
-                      {laborRows.map((row, j) => (
+                          for a row (laborMoney — what taskMoney sums), so the bullets add up to the
+                          line to the cent. */}
+                      {breakdown.labor.map((row, j) => (
                         <li key={`l${j}`}>
-                          {row.label ?? "Labor"} · {row.hours} h × {formatCurrency(row.rate)} = {formatCurrency(taskMoney({ ...breakdown, labor: [row], materials: [] }).labor)}
+                          {row.label ?? "Labor"} · {row.hours} h × {formatCurrency(row.rate)} = {formatCurrency(laborMoney(row))}
                         </li>
                       ))}
-                      {breakdown.materials.map((m, j) => (
+                      {/* "detailed": each part by name. Under "grouped" this list is empty. */}
+                      {breakdown.parts.map((m, j) => (
                         <li key={j}>
                           {m.name}
                           {m.qty !== null ? ` × ${m.qty}` : ""}
                           {m.qty !== null && m.sell !== null ? ` · ${formatCurrency(partMoney(m))}` : ""}
                         </li>
                       ))}
+                      {/* "grouped": the parts as ONE line, the same cents the parts would have added up
+                          to (paperBreakdown hands over taskMoney's own figure; nothing is summed here).
+                          No priced part = no line at all, never "Materials · $0.00". */}
+                      {breakdown.materials !== null && <li>Materials · {formatCurrency(breakdown.materials)}</li>}
                     </ul>
                   )}
                 </td>

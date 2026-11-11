@@ -401,6 +401,17 @@ describe("the breakdown, read back and kept honest", () => {
     });
   });
 
+  it("carries only its own keys: the public wire's materials_total (0408, the grouped format's one figure) is dropped, so it can never ride a save", () => {
+    // public_quote ships it in place of the parts under "grouped"; paperBreakdown reads it off the RAW
+    // detail (task-lines-paper.test.ts). The reader every save door stores from must not know it.
+    const wire = { hours: null, rate: null, units: null, labor: [{ label: null, hours: 3, rate: 145 }], materials: [], materials_total: 480 };
+    const read = coerceTaskDetail(wire)!;
+    expect(read).toEqual({ task_id: "", labor: [{ label: null, person_id: null, hours: 3, rate: 145, rate_from: "legacy" }], units: null, kit_id: null, materials: [] });
+    expect(read).not.toHaveProperty("materials_total");
+    expect(coerceTaskDetail({ ...stored, materials_total: 480, anything_else: "x" })).toEqual(stored);
+    expect(taskMoney(read).parts).toBe(0); // and it is not money to the stored arithmetic either
+  });
+
   it("adds up in cents, and explains the line only while the sums match the UNIT price (the Qty box is this many of the task, cn-v1133)", () => {
     expect(taskMoney(stored)).toEqual({ labor: 435, parts: 480, total: 915 });
     expect(detailExplains(stored, { unit_price: 915 })).toBe(true);

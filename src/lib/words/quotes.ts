@@ -32,6 +32,18 @@ import type { WordCatalog } from "./types";
  * ("draft"); a caller that capitalizes (the status select) capitalizes the Spanish the same way.
  * cn-v1147: in Spanish the function words (a, de, la, y…) stay lowercase after the first word ("Lista de
  * Precios", "Mover a un Día"); English keeps every word capitalized.
+ *
+ * DOCUMENT STUDIO'S LABOR AND PARTS ON ESTIMATES (cn-v1158): the company's default for the paper format is the
+ * other end of the estimate's paper switch, so its control's words sit beside the switch's here and the two are
+ * ONE set: each of the three formats has one name, and both controls read it from the same key. The control is
+ * its own small file (doc-studio/estimate-lines-control) and reads the language itself; the rest of the studio is
+ * still English, like the other office pages' contents.
+ *
+ * THE ESTIMATE'S JOB SITE (cn-v1158): the line under the customer card and its one sheet (quotes/[id]/job-site-line).
+ * A job site = sitio de trabajo, the word the clock and the geofence already use. The Unit / Apt box is New Job's
+ * own, so its three words are read from the agenda's catalog (ag_rail_unitApt, ag_rail_optional, ag_rail_unitExample)
+ * and Open the Job from ag_btn_openTheJob: one box and one door, one set of words. The address it shows is what the
+ * PAPER prints, so a unit reads "Unit 14" in both languages, as the paper does.
  */
 export const words: WordCatalog = {
   prefix: "qt_",
@@ -43,10 +55,12 @@ export const words: WordCatalog = {
     "src/app/(app)/quotes/[id]/page.tsx",
     "src/app/(app)/quotes/[id]/circuit-schedule-card.tsx",
     "src/app/(app)/quotes/[id]/customer-select.tsx",
+    "src/app/(app)/quotes/[id]/job-site-line.tsx",
     "src/app/(app)/quotes/[id]/quote-type-toggle.tsx",
     "src/app/(app)/quotes/[id]/status-control.tsx",
     "src/app/(app)/quotes/[id]/duplicate-quote-button.tsx",
     "src/app/(app)/quotes/paper-format-switch.tsx",
+    "src/app/(app)/doc-studio/estimate-lines-control.tsx",
     "src/components/add-line-items.tsx",
     "src/components/share-icon-button.tsx",
     "src/components/preview-button.tsx",
@@ -161,7 +175,8 @@ export const words: WordCatalog = {
     qt_btn_newCustomer: "+ New Customer",
     qt_startedFromLead: "Started from the lead {name}.",
     qt_leadNotCustomerYet: "Lead — not a customer yet",
-    qt_leadNoAddress: "No address on this lead yet.",
+    // qt_leadNoAddress ("No address on this lead yet.") was retired in both languages in cn-v1158: the lead's
+    // address is the estimate's job site, and the Job Site line below is the one place that says it now.
     qt_madeOutToLead: "This estimate is made out to them. They become a customer when you win the work — there's nothing to do here now.",
     qt_preparedFor: "Prepared for",
     qt_nobodyAttachedYet: "Nobody attached yet — it prints without a name until you pick someone.",
@@ -169,6 +184,41 @@ export const words: WordCatalog = {
     qt_attachCustomerTitle: "Attach a customer",
     qt_btn_change: "Change",
     qt_btn_attachCustomer: "Attach Customer",
+
+    // ── The estimate's job site (quotes/[id]/job-site-line, cn-v1158; the owner, 2026-11-10: "we need to have sites
+    //    available to pick from on the estimate sheet"). The line under the customer card says the address the paper
+    //    prints and where it comes from; Change Job Site opens the one sheet. The words inside a row of that sheet are
+    //    a door's words, so they are Title Case (qt_btn_); the sentences beside the line are not ──
+    qt_jobSite: "Job Site",
+    qt_siteSetHere: "Set on this estimate",
+    qt_siteFromTheJob: "From the job",
+    qt_siteFromTheLead: "From the lead",
+    qt_siteFromTheCustomer: "From the customer",
+    qt_siteNone: "No job site yet. This estimate prints without one.",
+    // The address is short of a whole town: ANY of the city, the state or the zip is missing (the paper prints whatever
+    // part there is, so the old "prints it without a city, state or zip" was not true of an address with a city and
+    // no zip). Each sentence names the ONE thing to do, by where the address can be fixed: this sheet for an estimate
+    // with no job, the job itself for an estimate on one (a job owns its site).
+    qt_siteNoTown: "Part of this address's town is missing (city, state or zip). Change Job Site and pick a suggestion to fill it in.",
+    qt_siteNoTownJob: "Part of this address's town is missing (city, state or zip). Fix the address on the job.",
+    // An estimate that carried its own address into its job, after the job's address was changed: the estimate's own
+    // still outranks the job's on the paper, so the line says both and offers the one way back.
+    qt_siteJobDiffers: "This estimate prints its own address. The job's is {address}.",
+    qt_btn_changeJobSite: "Change Job Site",
+    qt_btn_useJobAddress: "Use the Job's Address",
+    // The sheet. The why line (140 characters at most): where the answer lands, on the paper and on the job after it.
+    qt_siteSheetWhy: "The estimate prints this as its job site, and a job made from it starts at this address.",
+    qt_btn_useCustomerAddress: "Use the Customer's Address",
+    qt_btn_useLeadAddress: "Use the Lead's Address",
+    qt_btn_customersAddress: "The Customer's Address",
+    qt_btn_siteFromJob: "From {job}",
+    qt_btn_siteInUse: "In Use",
+    qt_siteJobsNotLoaded: "The addresses from this customer's earlier jobs could not be loaded. Reload the page to see them.",
+    // Under the rows, when the page's read of the customer's jobs came back full or the picker's cap left an address
+    // out (lib/quote-site siteChoicesShort): a short list says it is short, and points at the boxes below it.
+    qt_siteListShort: "Showing this customer's most recent addresses. Type any other one below.",
+    qt_differentAddress: "A Different Address",
+    qt_btn_useThisAddress: "Use This Address",
 
     // ── The estimate's type, status, Duplicate and the paper format (quote-type-toggle, status-control, duplicate-quote-button, paper-format-switch) ──
     qt_btn_typeQuote: "Quote (Fixed)",
@@ -186,11 +236,31 @@ export const words: WordCatalog = {
     qt_btn_revise: "Revise",
     qt_btn_duplicate: "Duplicate",
     qt_laborPartsOnPaper: "Labor and Parts on the Paper",
-    qt_btn_companyDefaultOn: "Company Default · On",
-    qt_btn_companyDefaultOff: "Company Default · Off",
-    qt_btn_show: "Show",
-    qt_btn_hide: "Hide",
-    qt_paperFormatHelp: "Prints each task's hours at the rate and its parts beneath it, on the paper and the customer's link. The company default is set in Document Studio.",
+    // ONE CONTROL, FOUR SEGMENTS (cn-v1158; Erik, 2026-11-10: "an option to list out all the materials shown as it is
+    // now and an option to group the materials into one materials line"). The first says what the company's default
+    // is today, by the word Document Studio stored ('detailed' / 'grouped' / 'tasks'); the other three are the
+    // estimate's own choice. The old On / Off pair and Show went with the three-segment switch, their only reader.
+    //
+    // ONE NAME FOR EACH OF THE THREE FORMATS, EVERYWHERE (the owner's law: fewer words per door). The same three
+    // states used to wear three sets of names: List Every Part / One Materials Line / Hide on the estimate's switch,
+    // Every Part / One Line / Hidden after the dot of its first segment, and Tasks with Labor and Parts / Labor and
+    // One Materials Line / Tasks Only in Document Studio. Now each state has ONE name, said by ONE key that all three
+    // places read (quotes/paper-format-switch FORMAT_NAME): 'detailed' Every Part, 'grouped' One Materials Line (the
+    // name the owner knows), 'tasks' Hidden. The words after the dot of a Company Default segment are that name too,
+    // letter for letter (paper-format-switch.test.tsx holds them to it). Retired with their readers: qt_btn_listEveryPart,
+    // qt_btn_hide, qt_btn_linesTasksOnly, qt_btn_linesLaborAndParts, qt_btn_linesOneMaterialsLine.
+    qt_btn_companyDefaultEveryPart: "Company Default · Every Part",
+    qt_btn_companyDefaultOneLine: "Company Default · One Materials Line",
+    qt_btn_companyDefaultHidden: "Company Default · Hidden",
+    qt_btn_everyPart: "Every Part",
+    qt_btn_oneMaterialsLine: "One Materials Line",
+    qt_btn_hidden: "Hidden",
+    // The why line (140 characters at most): where the answer lands on the paper, and that the price does not move.
+    qt_paperFormatHelp: "Changes what prints under each task, never its price or total. Company default: Document Studio.",
+    // ── Document Studio's control for the company's default (doc-studio/estimate-lines-control). Its three choices are
+    // the three state names above. Its heading was "Estimate Lines", which reads wrongly over a choice called Hidden
+    // (hidden lines?), so it says what the choice is about, as the estimate's own switch does: the labor and the parts ──
+    qt_estimateLines: "Labor and Parts on Estimates",
 
     // ── Add Line Items (components/add-line-items; also drawn on billing) ──
     qt_addFromPriceList: "Add from Price List — tap to browse, or search…",
@@ -360,7 +430,6 @@ export const words: WordCatalog = {
     qt_btn_newCustomer: "+ Nuevo Cliente",
     qt_startedFromLead: "Empezó con el prospecto {name}.",
     qt_leadNotCustomerYet: "Prospecto — aún no es cliente",
-    qt_leadNoAddress: "Este prospecto aún no tiene dirección.",
     qt_madeOutToLead: "Este presupuesto está a su nombre. Se vuelve cliente cuando ganas el trabajo — no hay nada que hacer aquí por ahora.",
     qt_preparedFor: "Preparado para",
     qt_nobodyAttachedYet: "Nadie adjunto todavía — se imprime sin nombre hasta que elijas a alguien.",
@@ -368,6 +437,32 @@ export const words: WordCatalog = {
     qt_attachCustomerTitle: "Adjuntar un cliente",
     qt_btn_change: "Cambiar",
     qt_btn_attachCustomer: "Adjuntar Cliente",
+
+    // ── The estimate's job site (cn-v1158). Sitio de trabajo, as the clock and the geofence already say a job site
+    //    (tc_theJobsite, gf_theJobSite); ciudad for a town (ag_noTownYet); prospecto, cliente, trabajo, presupuesto and
+    //    el papel as everywhere else. "Fijado" agrees with "sitio", the heading it sits under ──
+    qt_jobSite: "Sitio de Trabajo",
+    qt_siteSetHere: "Fijado en este presupuesto",
+    qt_siteFromTheJob: "Del trabajo",
+    qt_siteFromTheLead: "Del prospecto",
+    qt_siteFromTheCustomer: "Del cliente",
+    qt_siteNone: "Aún no hay sitio de trabajo. Este presupuesto se imprime sin uno.",
+    // Tú ("usa", "elige", "corrige"); the door is named as it reads on the screen (qt_btn_changeJobSite).
+    qt_siteNoTown: "A esta dirección le falta parte de la ciudad (ciudad, estado o código postal). Usa Cambiar el Sitio de Trabajo y elige una sugerencia para completarla.",
+    qt_siteNoTownJob: "A esta dirección le falta parte de la ciudad (ciudad, estado o código postal). Corrige la dirección en el trabajo.",
+    qt_siteJobDiffers: "Este presupuesto imprime su propia dirección. La del trabajo es {address}.",
+    qt_btn_changeJobSite: "Cambiar el Sitio de Trabajo",
+    qt_btn_useJobAddress: "Usar la Dirección del Trabajo",
+    qt_siteSheetWhy: "El presupuesto imprime esto como su sitio de trabajo, y un trabajo creado de él empieza en esta dirección.",
+    qt_btn_useCustomerAddress: "Usar la Dirección del Cliente",
+    qt_btn_useLeadAddress: "Usar la Dirección del Prospecto",
+    qt_btn_customersAddress: "La Dirección del Cliente",
+    qt_btn_siteFromJob: "De {job}",
+    qt_btn_siteInUse: "En Uso",
+    qt_siteJobsNotLoaded: "No se pudieron cargar las direcciones de los trabajos anteriores de este cliente. Recarga la página para verlas.",
+    qt_siteListShort: "Se muestran las direcciones más recientes de este cliente. Escribe cualquier otra abajo.",
+    qt_differentAddress: "Otra Dirección",
+    qt_btn_useThisAddress: "Usar Esta Dirección",
 
     // ── The estimate's type, status, Duplicate and the paper format (quote-type-toggle, status-control, duplicate-quote-button, paper-format-switch) ──
     qt_btn_typeQuote: "Cotización (Precio Fijo)",
@@ -385,11 +480,18 @@ export const words: WordCatalog = {
     qt_btn_revise: "Crear Revisión",
     qt_btn_duplicate: "Duplicar",
     qt_laborPartsOnPaper: "Mano de Obra y Piezas en el Papel",
-    qt_btn_companyDefaultOn: "Predeterminado de la Empresa · Activado",
-    qt_btn_companyDefaultOff: "Predeterminado de la Empresa · Desactivado",
-    qt_btn_show: "Mostrar",
-    qt_btn_hide: "Ocultar",
-    qt_paperFormatHelp: "Imprime las horas de cada tarea a su tarifa y sus piezas debajo, en el papel y en el enlace del cliente. El predeterminado de la empresa se fija en Document Studio.",
+    // The four segments (cn-v1158): pieza, as the catalog says a part; "Una" opens its own name, and its segment after
+    // the dot, so it is capital in both. ONE name per format, the same three keys in all three places: Cada Pieza,
+    // Una Línea de Materiales, Oculto (the word the first segment's "· Oculto" already used).
+    qt_btn_companyDefaultEveryPart: "Predeterminado de la Empresa · Cada Pieza",
+    qt_btn_companyDefaultOneLine: "Predeterminado de la Empresa · Una Línea de Materiales",
+    qt_btn_companyDefaultHidden: "Predeterminado de la Empresa · Oculto",
+    qt_btn_everyPart: "Cada Pieza",
+    qt_btn_oneMaterialsLine: "Una Línea de Materiales",
+    qt_btn_hidden: "Oculto",
+    qt_paperFormatHelp: "Cambia lo que se imprime debajo de cada tarea, nunca su precio ni su total. Predeterminado de la empresa: Document Studio.",
+    // Document Studio's control for the company's default: the heading says what the three names are about.
+    qt_estimateLines: "Mano de Obra y Piezas en Presupuestos",
 
     // ── Add Line Items (components/add-line-items; also drawn on billing) ──
     qt_addFromPriceList: "Agregar de la Lista de Precios — toca para ver, o busca…",

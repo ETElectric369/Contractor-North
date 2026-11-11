@@ -32,7 +32,7 @@ import { coerceDraftLine, emptyTaskDetail, taskFlags, taskFromLine, type TaskKit
 import { ruleInputsKey, type RuleInputs } from "@/lib/estimate/reprice-rows";
 import { sameTask } from "@/lib/playbook/tasks";
 import type { DraftLineItem } from "@/lib/estimate/line-map";
-import type { EstimateFormat } from "@/lib/doc-style";
+import { isEstimateFormat, type EstimateFormat } from "@/lib/doc-style";
 import type { Customer, Inquiry, QuoteCircuit } from "@/lib/types";
 import { PaperFormatSwitch } from "./paper-format-switch";
 import { useLang } from "@/components/lang-provider";
@@ -62,6 +62,7 @@ import { createWorkOrderFromQuote } from "../work-orders/actions";
 import { createMaterialListFromQuote } from "../materials/actions";
 import { AddLineItems } from "@/components/add-line-items";
 import { CustomerSelect } from "./[id]/customer-select";
+import { JobSiteLine, type JobSiteData } from "./[id]/job-site-line";
 import { StatusControl } from "./[id]/status-control";
 import { QuoteTypeToggle } from "./[id]/quote-type-toggle";
 import { DuplicateQuoteButton } from "./[id]/duplicate-quote-button";
@@ -240,6 +241,9 @@ export interface SavedEstimate {
   lead: { id: string; name: string | null; company_name?: string | null; email?: string | null; phone?: string | null; intakePaths: string[]; row?: Inquiry | null } | null;
   /** The org's customers, for the customer card's picker. */
   customers: { id: string; name: string; company_name: string | null }[];
+  /** THE JOB SITE LINE under the customer card (cn-v1158): the records the paper picks its site from,
+   *  the job that owns the site once there is one, and the customer's other addresses for the picker. */
+  site: JobSiteData;
   /** The customer's pricing level: markup and labor rate. null = none — NEVER 0. */
   level: { markup: number | null; rate: number | null };
   /** What this estimate has already become (idempotent doors: View … instead of a twin). */
@@ -266,7 +270,7 @@ function headerFrom(props: EstimateEditorProps): EstimateHeader {
       jobId: q.job_id,
       captureId: null,
       docType: q.doc_type === "quote" ? "quote" : "estimate",
-      estimateFormat: q.estimate_format === "tasks" || q.estimate_format === "detailed" ? q.estimate_format : null,
+      estimateFormat: isEstimateFormat(q.estimate_format) ? q.estimate_format : null,
       title: q.title ?? "",
       description: q.description ?? "",
       notes: q.notes ?? "",
@@ -1020,6 +1024,11 @@ export function EstimateEditor(props: EstimateEditorProps) {
         <Card className="mb-6">
           <CardContent className="py-5">
             <CustomerSelect quoteId={savedId} customer={savedPage.customer} lead={savedPage.lead} customers={savedPage.customers} />
+            {/* WHO, THEN WHERE (cn-v1158): the job site this estimate prints, directly under who it is
+                for, with the one door that changes it. Only on a saved estimate, like the card. */}
+            <div className="mt-4 border-t border-slate-100 pt-4">
+              <JobSiteLine quoteId={savedId} {...savedPage.site} />
+            </div>
           </CardContent>
         </Card>
       )}
@@ -1637,8 +1646,9 @@ export function EstimateEditor(props: EstimateEditorProps) {
 
           <Card>
             <CardContent className="space-y-2 py-5 text-sm">
-              {/* THE PAPER SWITCH (cn-v1131): whether the task lines print their labor and parts beneath
-                  them on THIS estimate. Only while the estimate is still editable. */}
+              {/* THE PAPER SWITCH (cn-v1131; three ways since cn-v1158): how the task lines print their
+                  labor and parts beneath them on THIS estimate: every part, one materials line, or
+                  hidden. Only while the estimate is still editable. */}
               {!readOnly && (
                 <div className="border-b border-slate-100 pb-3">
                   <PaperFormatSwitch

@@ -5,13 +5,22 @@ import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 /**
- * THE ESTIMATE'S LEAD CARD SAYS THE ADDRESS AND OPENS THE LEAD (cn-v1157).
+ * THE ESTIMATE'S LEAD CARD OPENS THE LEAD (cn-v1157).
  *
  * The owner, 2026-11-10, after an estimate printed a lead's half-typed address: "because it was a lead
  * i had to find the lead on the leads page to update the address there since it wasnt accessible from
  * anywhere else". An estimate with no job prints its lead's address as the job site, and the estimate's
- * own page neither showed that address nor offered a way to it. The card shows it now and opens the
- * lead's ONE form in place — the same editor the Leads page opens, a second door to it.
+ * own page neither showed that address nor offered a way to it. The card opens the lead's ONE form in
+ * place — the same editor the Leads page opens, a second door to it.
+ *
+ * RE-PINNED ON PURPOSE (cn-v1158): cn-v1157 also drew the lead's address on this card, and this file
+ * pinned it there. The estimate now has a Job Site line directly under the card (job-site-line) that
+ * says the address the paper prints WHOEVER it comes from (the estimate itself, its job, its lead,
+ * its customer), so the card stopped saying it: one place for one fact, or the two could disagree
+ * the day an estimate is given a site of its own. The address assertions that stood here (the
+ * one-line address, a unit on it, a street with no town, "No address on this lead yet.") moved to
+ * job-site-line.test.tsx, restated against the line; what is pinned here now is that the card does
+ * NOT draw an address, and that every door it had is exactly where it was.
  */
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), replace: vi.fn(), back: vi.fn() }),
@@ -80,12 +89,16 @@ const leadOf = (row: Inquiry | null) => ({ id: "lead-1", name: "Dana Rook", phon
 const card = (props: Record<string, unknown>) => createElement(CustomerSelect, { quoteId: "q-36", customer: null, customers: [], ...props } as never);
 
 describe("an estimate made out to a lead", () => {
-  it("says the lead's address — the job site it prints until there is a job", () => {
+  it("names the lead and keeps the way to its row; the address is the Job Site line's to say, not the card's", () => {
     const html = en(card({ lead: leadOf(leadRow()) }));
     expect(html).toContain("Lead — not a customer yet");
-    expect(html).toContain("16 Larkspur Circle, Testville, CA 96161");
+    expect(html).toContain("Dana Rook");
     // The way to the lead's own row stays.
     expect(html).toContain('href="/leads?focus=lead-1"');
+    // Re-pinned in cn-v1158 (see the header): the card draws no address line and no pin beside one.
+    // (The street still stands inside the lead's own FORM, as a box to correct it in: next test.)
+    expect(html).not.toContain("16 Larkspur Circle, Testville, CA 96161");
+    expect(html).not.toContain("lucide-map-pin");
   });
 
   it("opens the lead's own form right there: Edit Lead, 44px, beside Attach Customer", () => {
@@ -102,34 +115,68 @@ describe("an estimate made out to a lead", () => {
     expect(en(card({ lead: leadOf(leadRow()) }))).not.toContain("Delete Lead");
   });
 
-  it("a lead with no address says so: the estimate would print no job site", () => {
+  it("a lead with no address: the card says nothing about it (the Job Site line says there is no job site), and Edit Lead is still the way to add one", () => {
     const html = en(card({ lead: leadOf(leadRow({ address: null, city: null, state: null, zip: null })) }));
-    expect(html).toContain("No address on this lead yet.");
+    // Re-pinned in cn-v1158: this sentence was the card's; it was retired with the card's address line.
+    expect(html).not.toContain("No address on this lead yet.");
+    expect(html).not.toContain("amber-700");
     expect(html).toContain("Edit Lead");
   });
 
-  it("a street typed with no town shows as typed (the hole is visible, not hidden)", () => {
-    const html = en(card({ lead: leadOf(leadRow({ address: "16 larkspur circle Testville", city: null, state: null, zip: null })) }));
-    expect(html).toContain("16 larkspur circle Testville");
-    expect(html).not.toContain("No address on this lead yet.");
+  it("whatever the lead's address looks like (a unit, a street with no town), the card is the same card", () => {
+    // These two cases pinned the card's address line in cn-v1157 ("a unit rides on the line", "a street
+    // typed with no town shows as typed"). Both are the Job Site line's cases now (job-site-line.test);
+    // here they prove the card no longer varies with the address at all, outside the lead's own form.
+    const outsideTheForm = (html: string) => html.slice(0, html.indexOf("<section data-modal")) + html.slice(html.indexOf("</section>") + "</section>".length);
+    const plain = outsideTheForm(en(card({ lead: leadOf(leadRow()) })));
+    expect(plain).toContain("Edit Lead");
+    expect(outsideTheForm(en(card({ lead: leadOf(leadRow({ unit: "11" })) })))).toBe(plain);
+    expect(outsideTheForm(en(card({ lead: leadOf(leadRow({ address: "16 larkspur circle Testville", city: null, state: null, zip: null })) })))).toBe(plain);
+    expect(outsideTheForm(en(card({ lead: leadOf(leadRow({ address: null, city: null, state: null, zip: null })) })))).toBe(plain);
   });
 
-  it("a unit rides on the line", () => {
-    expect(en(card({ lead: leadOf(leadRow({ unit: "11" })) }))).toContain("16 Larkspur Circle, Unit 11, Testville, CA 96161");
-  });
-
-  it("handed no whole row, it draws neither: the form must never open on half a lead", () => {
+  it("handed no whole row, it draws no door: the form must never open on half a lead", () => {
     const html = en(card({ lead: { id: "lead-1", name: "Dana Rook", phone: "(530) 555-0100" } }));
     expect(html).toContain("Dana Rook");
     expect(html).not.toContain("Edit Lead");
-    expect(html).not.toContain("No address on this lead yet.");
   });
 
   it("in Spanish", () => {
     const html = es(card({ lead: leadOf(leadRow({ address: null, city: null, state: null, zip: null })) }));
     expect(html).toContain("Editar Prospecto");
-    expect(html).toContain("Este prospecto aún no tiene dirección.");
     expect(html).not.toContain("Edit Lead");
+    // Re-pinned in cn-v1158: the Spanish of the retired sentence went with the English.
+    expect(html).not.toContain("Este prospecto aún no tiene dirección.");
+  });
+});
+
+describe("one place for one fact (cn-v1158): the lead's address is the Job Site line's", () => {
+  const select = readFileSync(join(__dirname, "customer-select.tsx"), "utf8");
+
+  it("the card reads no address: no formatter, no pin, and the retired key is in neither language", async () => {
+    expect(select).not.toContain("formatFullAddress");
+    expect(select).not.toContain("MapPin");
+    expect(select).not.toContain("qt_leadNoAddress");
+    expect(select).not.toMatch(/leadRow\.(address|unit|city|state|zip)/);
+    const { words: qt } = await import("@/lib/words/quotes");
+    expect(qt.en).not.toHaveProperty("qt_leadNoAddress");
+    expect(qt.es).not.toHaveProperty("qt_leadNoAddress");
+  });
+
+  it("the card's doors are exactly what they were: Edit Lead beside Attach Customer, and beside the started-from line", () => {
+    expect(select).toContain('{!customer && leadRow && <InquiryModal inquiry={leadRow} mode="edit" trigger="quiet" noDelete />}');
+    expect(select).toContain('{leadRow && <InquiryModal inquiry={leadRow} mode="edit" trigger="quiet" noDelete />}');
+    expect(select.split("<InquiryModal").length - 1).toBe(2);
+  });
+
+  it("the Job Site line stands directly under the card and says the lead's address (its own test drives it)", () => {
+    const editor = readFileSync(join(__dirname, "../estimate-editor.tsx"), "utf8");
+    const at = editor.indexOf("<CustomerSelect quoteId={savedId}");
+    expect(at).toBeGreaterThan(-1);
+    const after = editor.slice(at, editor.indexOf("</Card>", at));
+    expect(after).toContain("<JobSiteLine quoteId={savedId} {...savedPage.site} />");
+    const line = readFileSync(join(__dirname, "job-site-line.tsx"), "utf8");
+    expect(line).toContain('lead: "qt_siteFromTheLead",');
   });
 });
 

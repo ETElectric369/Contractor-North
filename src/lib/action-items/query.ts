@@ -351,12 +351,27 @@ async function buildActionItems(ctx: {
   // the job's business now. The ceiling is the org's midnight: today's visits are the agenda's rows.
   // A tech's own visits keep the two-week window: they only open for him (closing one out is the
   // office's), and his build reads nothing else.
+  // A VISIT ALREADY ANSWERED IS NOT ASKED ABOUT AGAIN (cn-v1158). This read was on status alone, so a
+  // visit marked Lost while still 'scheduled' came back here as a visit nobody closed out. Three doors
+  // write that answer onto a scheduled visit: the Didn't Happen? group on /inspections and a write-up
+  // row's ⋯ Lost (both setAppointmentOutcome, the row's through the registry's appointment.setOutcome),
+  // and the stamp an estimate leaves on the visits behind it when it is marked declined or expired
+  // (lib/appointments/behind-quote). Nort is NOT a fourth: appointment.setOutcome is a row's door and
+  // is not in AGENT_WRITE_ALLOWED, so when he declines an estimate the answer is that estimate's stamp,
+  // as it is for anyone. The answer was on the row all along (appointments.outcome, 0205: null means
+  // still open business) and this feeder never read it. ANY answer ends the asking, won as much as
+  // lost: that is how /inspections files a past visit, and what appointment.setOutcome's own
+  // description says ("it clears the visit from Needs You"). The test is IN THE QUERY, never in the
+  // loop below: the read is the oldest 50 with their exact count, so an answered visit dropped in
+  // code would still take a place in the 50 and still be counted, and the pile would say "N+" for
+  // visits nobody is asked about.
   const apptP: Promise<Read> = (isStaff ? floor(14) : Promise.resolve(daysAgoStr(todayStr, 14))).then((from) => {
     let q = supabase
       .from("appointments")
       .select("id, type, title, starts_at, status, job_id, inquiry_id, assigned_to, customers(name)", { count: "exact" })
       .eq("status", "scheduled")
       .eq("absorbed", false)
+      .is("outcome", null)
       .gte("starts_at", dayStartIso(from))
       .lt("starts_at", dayStartIso(todayStr));
     if (!isStaff) q = q.eq("assigned_to", userId);

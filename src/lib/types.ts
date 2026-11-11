@@ -308,7 +308,7 @@ export interface Quote {
   /** HOW THIS ESTIMATE'S TASK LINES READ ON PAPER (cn-v1131, 0395): "tasks" = one line per task,
    *  "detailed" = the labor and parts printed beneath it; null / absent = the company's Doc Studio
    *  choice. Every surface resolves it through estimateFormatFor (lib/doc-style). */
-  estimate_format?: "tasks" | "detailed" | null;
+  estimate_format?: "tasks" | "detailed" | "grouped" | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -335,7 +335,7 @@ export interface QuoteLineItem {
 export interface EditorQuote extends Quote {
   /** The lead this estimate was seeded from (0109); null when it started from scratch. */
   inquiry_id: string | null;
-  estimate_format: "tasks" | "detailed" | null;
+  estimate_format: "tasks" | "detailed" | "grouped" | null;
   /** The day to ask the customer again (0366) — never valid_until, which is the offer's own window. */
   follow_up_at: string | null;
   /** The estimate this one revises (0391); accepting it supersedes that one. */

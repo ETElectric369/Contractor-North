@@ -1,11 +1,15 @@
 import { describe, it, expect } from "vitest";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   bucketInspections,
   captureQuoteId,
+  filedUnder,
   hasCaptureData,
   inspectionLabel,
   inspectionRowTags,
   isGenericInspectionTitle,
+  type FiledUnder,
   type InspectionBucketRow,
 } from "@/lib/inspections";
 import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES } from "@/lib/statuses";
@@ -122,6 +126,23 @@ describe("bucketInspections", () => {
     expect(bucketInspections([r], new Set(["inq1"]), none, NOW).upcoming).toEqual([r]);
   });
 
+  // AS IT STANDS (pinned 2026-11-10, cn-v1158, so the next change here is made on purpose). A visit
+  // still scheduled or proposed is filed by its outcome only once its TIME HAS PASSED: one still
+  // ahead, or still waiting for a day, stays with the upcoming ones even when it already says lost.
+  // That is the one place this function is not "outcome first"; filedUnder is never asked about such
+  // a row, because it never reaches `filed`.
+  it("a visit still AHEAD, or waiting for a day, stays upcoming even with an outcome on it", () => {
+    const ahead = row({ outcome: "lost" });
+    const proposedAhead = row({ status: "proposed", outcome: "lost" });
+    const noDay = row({ starts_at: null, outcome: "lost" });
+    const b = bucketInspections([ahead, proposedAhead, noDay], none, none, NOW);
+    expect(b.upcoming.map((r) => r.id).sort()).toEqual([ahead.id, proposedAhead.id, noDay.id].sort());
+    expect(b.filed).toEqual([]);
+    // Marked completed, it files whatever its time: the completed branch asks no clock.
+    const doneAhead = row({ status: "completed", outcome: "lost" });
+    expect(bucketInspections([doneAhead], none, none, NOW).filed).toEqual([doneAhead]);
+  });
+
   it("cancelled always files away", () => {
     const r = row({ status: "cancelled", starts_at: past, capture: cap });
     expect(bucketInspections([r], none, none, NOW).filed).toEqual([r]);
@@ -166,6 +187,104 @@ describe("bucketInspections", () => {
     expect(b.toWriteUp.map((r) => r.id)).toEqual([w1.id, w2.id]);
     expect(b.upcoming.map((r) => r.id)).toEqual([u2.id, u1.id]);
     expect(b.filed.map((r) => r.id)).toEqual([f2.id, f1.id]);
+  });
+});
+
+/**
+ * THE FILED PILE'S HEADING IS BY OUTCOME FIRST (cn-v1158; the owner's standing rule: a visit that did
+ * not become work is LOST, everywhere). The page split the filed pile on status alone, so a visit that
+ * never happened and was answered Lost in the Didn't Happen? group, still 'scheduled', was drawn under
+ * "Completed & written up". One rule now names the heading, and this is its whole table.
+ */
+describe("filedUnder: which heading a filed row is drawn under", () => {
+  // THE WORDS THE APP STORES, read from where they are stored: 0205's check constraint, plus "nobody
+  // said" (null). Nothing here is invented, and a fourth word cannot arrive quietly: the constraint is
+  // named in one migration, so a later one that renames or widens it fails the first test below until
+  // somebody says which heading the new word files under.
+  const dir = join(process.cwd(), "supabase/migrations");
+  const naming = readdirSync(dir).filter((f) => readFileSync(join(dir, f), "utf8").includes("appointments_outcome_check"));
+  const sql = naming.length ? readFileSync(join(dir, naming[0]), "utf8") : "";
+  const stored = (/outcome is null or outcome in \(([^)]*)\)/.exec(sql)?.[1] ?? "")
+    .split(",")
+    .map((w) => w.trim().replace(/'/g, ""))
+    .filter(Boolean);
+
+  const TABLE: [status: string, outcome: string | null, want: FiledUnder][] = [
+    ["scheduled", null, "completed"],
+    ["scheduled", "won", "completed"],
+    ["scheduled", "lost", "lost"],
+    ["scheduled", "no_bid", "lost"],
+    ["proposed", null, "completed"],
+    ["proposed", "won", "completed"],
+    ["proposed", "lost", "lost"],
+    ["proposed", "no_bid", "lost"],
+    ["completed", null, "completed"],
+    ["completed", "won", "completed"],
+    ["completed", "lost", "lost"],
+    ["completed", "no_bid", "lost"],
+    ["cancelled", null, "cancelled"],
+    ["cancelled", "won", "cancelled"],
+    ["cancelled", "lost", "lost"],
+    ["cancelled", "no_bid", "lost"],
+  ];
+
+  it("the table holds every status the app stores against every outcome it stores, each pair once", () => {
+    expect(naming).toEqual(["0205_walkthrough_outcome.sql"]);
+    expect(stored).toEqual(["won", "lost", "no_bid"]);
+    // What Nort's door may write is the same three words.
+    expect(readFileSync(join(process.cwd(), "src/lib/actions/entities/appointment.ts"), "utf8")).toContain('outcome: z.enum(["won", "lost", "no_bid"])');
+    const pairs = APPOINTMENT_STATUSES.flatMap((s) => [null, ...stored].map((o) => `${s}/${o}`));
+    expect(TABLE.map(([s, o]) => `${s}/${o}`).sort()).toEqual([...pairs].sort());
+  });
+
+  it.each(TABLE)("%s + outcome %s files under %s", (status, outcome, want) => {
+    expect(filedUnder({ status, outcome })).toBe(want);
+  });
+
+  it("the four the rule turns on: lost outranks the status, and with no outcome the status says it", () => {
+    expect(filedUnder({ status: "cancelled", outcome: "lost" })).toBe("lost");
+    expect(filedUnder({ status: "completed", outcome: "lost" })).toBe("lost");
+    expect(filedUnder({ status: "completed", outcome: null })).toBe("completed");
+    expect(filedUnder({ status: "cancelled", outcome: null })).toBe("cancelled");
+  });
+
+  it("a row read without the column, or holding a word nobody stores, files by its status: never Lost on a guess", () => {
+    expect(filedUnder({ status: "completed" })).toBe("completed");
+    expect(filedUnder({ status: "cancelled" })).toBe("cancelled");
+    expect(filedUnder({ status: "cancelled", outcome: "" })).toBe("cancelled");
+    expect(filedUnder({ status: "completed", outcome: "LOST" })).toBe("completed");
+  });
+
+  it("the Didn't Happen? row answered Lost: it files (this page stops asking), and it files under Lost", () => {
+    // Scheduled, a past day, nothing captured, no estimate: the row the Didn't Happen? group draws.
+    const before = row({ starts_at: past });
+    expect(bucketInspections([before], none, none, NOW).missed).toEqual([before]);
+    // Lost is tapped. The outcome is all that changes: the status is still 'scheduled'.
+    const after = { ...before, outcome: "lost" };
+    const b = bucketInspections([after], none, none, NOW);
+    expect(b.filed).toEqual([after]);
+    expect([...b.missed, ...b.upcoming, ...b.toWriteUp]).toEqual([]);
+    expect(after.status).toBe("scheduled");
+    expect(filedUnder(after)).toBe("lost");
+  });
+
+  it("every filed row is under exactly one heading, and the three together hold the whole pile", () => {
+    const rows = [
+      row({ status: "completed", starts_at: past, job_id: "job1" }), // became work
+      row({ status: "completed", starts_at: past, outcome: "won" }),
+      row({ status: "completed", starts_at: past, outcome: "lost" }), // happened, and the bid was lost
+      row({ starts_at: past, outcome: "lost" }), // never happened, answered Lost
+      row({ starts_at: past, capture: cap, outcome: "no_bid" }), // the old word for the same ending
+      row({ status: "cancelled", starts_at: past }),
+      row({ status: "cancelled", starts_at: past, outcome: "lost" }), // called off AND lost: Lost
+    ];
+    const { filed } = bucketInspections(rows, none, none, NOW);
+    expect(filed).toHaveLength(rows.length);
+    const under = (g: FiledUnder) => filed.filter((r) => filedUnder(r) === g).map((r) => r.id).sort();
+    expect(under("completed")).toEqual([rows[0].id, rows[1].id].sort());
+    expect(under("lost")).toEqual([rows[2].id, rows[3].id, rows[4].id, rows[6].id].sort());
+    expect(under("cancelled")).toEqual([rows[5].id]);
+    expect(under("completed").length + under("lost").length + under("cancelled").length).toBe(filed.length);
   });
 });
 

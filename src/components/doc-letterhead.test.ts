@@ -118,6 +118,9 @@ describe("Document Studio has the one plain field, saved with the other knobs", 
   it("the page shows the tagline being typed, and a layout reset keeps it", () => {
     expect(studio).toContain("const coLive = { ...co, tagline: style.tagline };");
     expect(studio.match(/co=\{coLive\}/g)?.length).toBe(2);
-    expect(studio).toContain("apply({ ...DEFAULT_DOC_STYLE, tagline: style.tagline })");
+    // Re-pinned in cn-v1158: the reset keeps the tagline AND the company's estimate format (what every
+    // estimate with no word of its own prints is not layout either; doc-studio/estimate-lines-control.test.tsx
+    // holds that half). It was `apply({ ...DEFAULT_DOC_STYLE, tagline: style.tagline })`.
+    expect(studio).toContain("apply({ ...DEFAULT_DOC_STYLE, tagline: style.tagline, estimate_format: style.estimate_format })");
   });
 });

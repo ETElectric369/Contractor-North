@@ -144,6 +144,19 @@ describe("who feeds the count, and who asks it", () => {
     expect(body).toContain("commitCustomerPick(quoteId, made.id");
   });
 
+  // A FOURTH SAVER (cn-v1158): the estimate's Job Site line, drawn under the customer card. The job
+  // site prints on the paper, so a Preview tapped while Change Job Site is still on the wire would
+  // show the old address. It keeps its own transition like the three above, and feeds the count the
+  // same way.
+  it("the estimate's Job Site line counts its own transition (a row, a typed address, the job's address)", () => {
+    const body = feedsItsTransition("src/app/(app)/quotes/[id]/job-site-line.tsx", "JobSiteLine");
+    // Every way the site changes goes through the one save(), inside that transition.
+    expect(body).toMatch(/function save\(site: QuoteSiteInput \| null\) \{[\s\S]*?start\(async \(\) => \{\s*const res = await commitQuoteSite\(quoteId, site,/);
+    expect(body.split("start(async").length - 1).toBe(1);
+    // …and it is the editor's customer card that mounts it, in the same window as the Preview that waits.
+    expect(read("src/app/(app)/quotes/estimate-editor.tsx")).toContain("<JobSiteLine quoteId={savedId} {...savedPage.site} />");
+  });
+
   it("the estimate's type toggle counts its own transition", () => {
     const body = feedsItsTransition("src/app/(app)/quotes/[id]/quote-type-toggle.tsx", "QuoteTypeToggle");
     expect(body).toContain("const res = await setQuoteType(id, next);");

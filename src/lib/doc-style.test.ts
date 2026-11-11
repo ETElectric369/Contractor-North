@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_DOC_STYLE, TAGLINE_MAX, estimateFormatFor, normalizeDocStyle } from "@/lib/doc-style";
+import { DEFAULT_DOC_STYLE, ESTIMATE_FORMATS, TAGLINE_MAX, estimateFormatFor, isEstimateFormat, normalizeDocStyle, type EstimateFormat } from "@/lib/doc-style";
 
 /**
  * doc_style.tagline (Wave 0): the line under a company's name on its letterhead. It rides the public
@@ -49,8 +49,9 @@ describe("normalizeDocStyle: the tagline", () => {
 
 /**
  * doc_style.estimate_format (0386): how an estimate built from tasks reads to the customer. Rides
- * the public /q projection inside doc_style, so the one normalizer is its boundary: exactly two
- * words, and "tasks" (one line per task, the price beside it) for anything else.
+ * the public /q projection inside doc_style, so the one normalizer is its boundary: exactly three
+ * words (two until cn-v1158 added "grouped", the parts as ONE Materials line under each task), and
+ * "tasks" (one line per task, the price beside it) for anything else.
  */
 describe("normalizeDocStyle: the estimate format", () => {
   it("defaults to one line per task", () => {
@@ -63,6 +64,41 @@ describe("normalizeDocStyle: the estimate format", () => {
 
   it("keeps the detailed format when the company chose it", () => {
     expect(normalizeDocStyle({ estimate_format: "detailed" }).estimate_format).toBe("detailed");
+  });
+
+  it("keeps grouped (cn-v1158) when the company chose it, and a word that is not a format is tasks", () => {
+    expect(normalizeDocStyle({ estimate_format: "grouped" }).estimate_format).toBe("grouped");
+    expect(normalizeDocStyle({ estimate_format: "bogus" }).estimate_format).toBe("tasks");
+    // Near misses are not the word: the stored value is exact or it is the default.
+    for (const near of ["Grouped", "GROUPED", " grouped", "grouped ", "group", "materials", ["grouped"], { is: "grouped" }, true, null]) {
+      expect(normalizeDocStyle({ estimate_format: near }).estimate_format, String(near)).toBe("tasks");
+    }
+    // The other knobs are untouched by the new word.
+    expect(normalizeDocStyle({ estimate_format: "grouped", density: "airy", col_gap: 12 })).toMatchObject({ estimate_format: "grouped", density: "airy", col_gap: 12 });
+  });
+});
+
+/**
+ * isEstimateFormat (cn-v1158): THE one list of the ways a task line prints. Every door that stores or
+ * reads a format asks it — the normalizer above, estimateFormatFor below, the estimate's save doors
+ * and the customer's page, which takes the word public_quote resolved only when it is one of these.
+ */
+describe("isEstimateFormat: the three words, nothing else", () => {
+  it("tasks, detailed and grouped — in that order, and that is the whole list", () => {
+    expect([...ESTIMATE_FORMATS]).toEqual(["tasks", "detailed", "grouped"]);
+    for (const word of ESTIMATE_FORMATS) expect(isEstimateFormat(word)).toBe(true);
+  });
+
+  it("anything else is not a format: another word, another case, a padded word, or not a string at all", () => {
+    for (const not of ["bogus", "itemized", "", "Tasks", "DETAILED", "Grouped", " grouped", "grouped ", "tasks,detailed", 0, 1, true, false, null, undefined, [], ["grouped"], {}, { estimate_format: "grouped" }]) {
+      expect(isEstimateFormat(not), JSON.stringify(not)).toBe(false);
+    }
+  });
+
+  it("narrows: what passes is an EstimateFormat a paper can be handed", () => {
+    const raw: unknown = "grouped";
+    const format: EstimateFormat = isEstimateFormat(raw) ? raw : "tasks";
+    expect(format).toBe("grouped");
   });
 });
 
@@ -125,7 +161,9 @@ describe("the billing-type line: one switch, one reader", () => {
  * the PDF, the studio sample and the /q page's coalesce, so no two surfaces disagree about one estimate.
  */
 describe("estimateFormatFor: the estimate's own word, else the company's", () => {
-  const company = (estimate_format: "tasks" | "detailed") => ({ estimate_format });
+  // The company's word is any of the three since cn-v1158 (it was "tasks" | "detailed"): the type
+  // follows the one list, so "grouped" can be the company's default in the cases below.
+  const company = (estimate_format: EstimateFormat) => ({ estimate_format });
 
   it("the estimate's own choice wins over the company's", () => {
     expect(estimateFormatFor({ estimate_format: "detailed" }, company("tasks"))).toBe("detailed");
@@ -145,5 +183,33 @@ describe("estimateFormatFor: the estimate's own word, else the company's", () =>
     expect(estimateFormatFor({ estimate_format: 1 }, company("tasks"))).toBe("tasks");
     expect(estimateFormatFor({ estimate_format: "junk" }, { estimate_format: "nope" as never })).toBe("tasks");
     expect(estimateFormatFor({ estimate_format: "detailed" }, { estimate_format: "nope" as never })).toBe("detailed");
+  });
+
+  it("grouped (cn-v1158): the estimate's own grouped wins over either company default", () => {
+    expect(estimateFormatFor({ estimate_format: "grouped" }, company("tasks"))).toBe("grouped");
+    expect(estimateFormatFor({ estimate_format: "grouped" }, company("detailed"))).toBe("grouped");
+    // And the estimate's own word wins over a company that chose grouped.
+    expect(estimateFormatFor({ estimate_format: "tasks" }, company("grouped"))).toBe("tasks");
+    expect(estimateFormatFor({ estimate_format: "detailed" }, company("grouped"))).toBe("detailed");
+  });
+
+  it("grouped: a null estimate (or none) takes the company's grouped", () => {
+    expect(estimateFormatFor({ estimate_format: null }, company("grouped"))).toBe("grouped");
+    expect(estimateFormatFor({}, company("grouped"))).toBe("grouped");
+    expect(estimateFormatFor(null, company("grouped"))).toBe("grouped");
+    expect(estimateFormatFor(undefined, company("grouped"))).toBe("grouped");
+    // Read straight off a normalized doc_style, the way the print page hands it over.
+    expect(estimateFormatFor({ estimate_format: null }, normalizeDocStyle({ estimate_format: "grouped" }))).toBe("grouped");
+  });
+
+  it("'bogus' on the estimate is not a choice: it takes the company's, whichever of the three that is", () => {
+    for (const theirs of ESTIMATE_FORMATS) {
+      expect(estimateFormatFor({ estimate_format: "bogus" }, company(theirs)), theirs).toBe(theirs);
+      expect(estimateFormatFor({ estimate_format: "Grouped" }, company(theirs)), theirs).toBe(theirs);
+    }
+  });
+
+  it("every pairing: the estimate's word when it has one, else the company's — nine in, nine right", () => {
+    for (const own of ESTIMATE_FORMATS) for (const theirs of ESTIMATE_FORMATS) expect(estimateFormatFor({ estimate_format: own }, company(theirs))).toBe(own);
   });
 });

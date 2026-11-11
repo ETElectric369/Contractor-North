@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { pickSite, SITE_COLS } from "@/lib/site-address";
+import { quoteSiteCandidates } from "@/lib/quote-site";
 import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
@@ -82,12 +83,17 @@ export default async function QuotePrintPage({
 
       <QuoteDocument
         co={co}
-        site={pickSite([
-          { source: "quote", parts: q as never },
-          { source: "job", parts: (q as { jobs?: never }).jobs },
-          { source: "lead", parts: (q as { inquiries?: never }).inquiries },
-          { source: "customer", parts: (q as { customers?: never }).customers },
-        ])}
+        // THE ONE ORDERED LIST (lib/quote-site, cn-v1158): the estimate's own address, the job's, the
+        // lead's, the customer's. The estimate's page reads the same function for its Job Site line,
+        // so what that line says is what this page prints. The four records go in as they were read.
+        site={pickSite(
+          quoteSiteCandidates({
+            quote: q as never,
+            job: (q as { jobs?: never }).jobs,
+            lead: (q as { inquiries?: never }).inquiries,
+            customer: (q as { customers?: never }).customers,
+          }),
+        )}
         template={template}
         docLabel={label}
         number={q.quote_number}

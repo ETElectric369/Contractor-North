@@ -20,6 +20,7 @@ import {
   SAMPLE_TITLE,
   sampleTotals,
 } from "./sample-data";
+import { EstimateLinesControl } from "./estimate-lines-control";
 
 /**
  * THE DOCUMENT STUDIO, v2 — after Erik's first hands-on: "its clunky and limited... upgrade the
@@ -326,7 +327,11 @@ export function DocStudio({
           <button
             type="button"
             // The layout goes back to standard; the company's tagline is not layout, so it stays.
-            onClick={() => apply({ ...DEFAULT_DOC_STYLE, tagline: style.tagline })}
+            // NEITHER IS WHAT EVERY ESTIMATE PRINTS (cn-v1158): estimate_format is the company's default
+            // for the labor and the parts under each task, read by every estimate that has no word of
+            // its own. A layout reset that put it back to 'tasks' would quietly take the parts, or
+            // the one Materials line, off every such estimate. It stays as the company set it.
+            onClick={() => apply({ ...DEFAULT_DOC_STYLE, tagline: style.tagline, estimate_format: style.estimate_format })}
             title="Back to the standard layout"
             className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
           >
@@ -398,25 +403,16 @@ export function DocStudio({
             Billing Type Line
           </label>
         )}
-        {/* HOW A TASK LINE READS (0386). Erik: the customer sees the estimate "in a per-company
-            format". Tasks Only prints each task with its price; Tasks with Labor and Parts prints
-            each labor row (its hours at its rate) and each part beneath it. Only a line BUILT from a
-            task has a breakdown — the sample's last line is one, with two labor rows, so the switch
-            is visible in the preview. An estimate may choose for itself on its own page; this is
-            the company's default. */}
-        {docKind === "quote" && (
-          <div>
-            <Label>Estimate Lines</Label>
-            <SegmentedControl
-              activeId={style.estimate_format}
-              onSelect={(id) => apply({ ...style, estimate_format: id as DocStyle["estimate_format"] })}
-              items={[
-                { id: "tasks", label: "Tasks Only" },
-                { id: "detailed", label: "Tasks with Labor and Parts" },
-              ]}
-            />
-          </div>
-        )}
+        {/* HOW A TASK LINE READS (0386; three choices since cn-v1158). Erik: the customer sees the
+            estimate "in a per-company format". Hidden prints each task with its price; Every Part
+            prints each labor row (its hours at its rate) and each part beneath it; One Materials Line
+            prints the labor the same and the parts as one figure. The three names are the estimate's
+            own switch's, read from the same keys. Only a line BUILT from a task has a breakdown — the
+            sample's last line is one, with two labor rows, so the choice is visible in the preview.
+            An estimate may choose for itself on its own page; this is the company's default. The
+            control and its words are ./estimate-lines-control; the write is the studio's one
+            autosave (apply). */}
+        {docKind === "quote" && <EstimateLinesControl value={style.estimate_format} onChange={(estimate_format) => apply({ ...style, estimate_format })} />}
       </div>
 
       {/* ── The page itself ─────────────────────────────────────────────────── */}

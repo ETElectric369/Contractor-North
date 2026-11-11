@@ -30,6 +30,8 @@ vi.mock("./actions", () => ({
   deleteQuoteItem: vi.fn(),
   updateQuoteMeta: vi.fn(),
   setQuoteCustomer: vi.fn(),
+  // The Job Site line under the customer card (cn-v1158) is drawn with every saved estimate.
+  setQuoteSite: vi.fn(),
   setQuoteType: vi.fn(),
   readQuoteLineIds: vi.fn(),
   deleteQuote: vi.fn(),
@@ -106,6 +108,8 @@ export const savedProps = (q: Record<string, unknown> = {}, items: unknown[] = [
   customer: null,
   lead: null,
   customers: [],
+  // No address anywhere and no job: the Job Site line says so. A suite that is about the site hands its own.
+  site: { records: {}, job: null, otherJobs: [], otherJobsFailed: false, otherJobsFull: false },
   level: { markup: null, rate: null },
   existing: { invoice: null, workOrder: null, materialList: null },
   revises: null,

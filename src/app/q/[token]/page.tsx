@@ -7,6 +7,7 @@ import { companyFromOrg } from "@/components/doc-letterhead";
 import { templateFor } from "@/components/doc-templates";
 import { PublicQuoteAccept } from "./accept";
 import { QuoteDocument } from "@/components/quote-document";
+import { isEstimateFormat, type EstimateFormat } from "@/lib/doc-style";
 import { docLabel } from "@/lib/doc-label";
 import { docPageTitle, projectionPlace } from "@/lib/doc-place";
 import { NO_INDEX } from "@/lib/no-index";
@@ -48,11 +49,21 @@ export default async function PublicQuotePage({
   const co = companyFromOrg(org);
   const template = templateFor(org, "quote");
   const label = docLabel(q);
-  // THE FORMAT, AS public_quote RESOLVED IT (0387, 0395): the RPC ships a line's breakdown ONLY when
-  // the estimate reads "detailed" (its own choice else the company's), so any item carrying a detail
-  // means the format is detailed; none means "tasks" — and with no detail there is nothing to print
-  // either way. The format itself never rides the anonymous wire; the breakdown's presence is it.
-  const estimateFormat = (items as { detail?: unknown }[]).some((it) => it?.detail != null) ? "detailed" : "tasks";
+  // THE FORMAT, AS public_quote RESOLVED IT (0387, 0395; said outright since 0408). The RPC resolves
+  // the estimate's own choice else the company's — the same coalesce estimateFormatFor makes for the
+  // office's paper — and since 0408 ships that one word as quote.estimate_format, because a breakdown
+  // now reads two ways ("detailed": each part; "grouped": ONE Materials figure) and its presence
+  // alone no longer says which. It is the server's word about what it shipped, so it is taken as
+  // said, and only when it is one of the three (isEstimateFormat).
+  // UNTIL 0408 IS APPLIED the key is absent, and the old inference stands exactly as it was: the RPC
+  // ships a line's breakdown ONLY when the estimate reads "detailed", so any item carrying a detail
+  // means detailed and none means "tasks" — with no detail there is nothing to print either way.
+  const said = (q as { estimate_format?: unknown }).estimate_format;
+  const estimateFormat: EstimateFormat = isEstimateFormat(said)
+    ? said
+    : (items as { detail?: unknown }[]).some((it) => it?.detail != null)
+      ? "detailed"
+      : "tasks";
 
   return (
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">

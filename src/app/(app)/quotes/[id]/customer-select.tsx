@@ -3,13 +3,12 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { User, Pencil, X, Sprout, MapPin } from "lucide-react";
+import { User, Pencil, X, Sprout } from "lucide-react";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { InquiryModal } from "../../leads/inquiry-modal";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import type { Customer, Inquiry } from "@/lib/types";
-import { formatFullAddress } from "@/lib/utils";
 import { setQuoteCustomer } from "../actions";
 import { commitCustomerPick } from "./customer-pick";
 import { createCustomer } from "../../crm/actions";
@@ -31,8 +30,8 @@ interface LeadLite {
   company_name?: string | null;
   email?: string | null;
   phone?: string | null;
-  /** The lead's WHOLE row (quotes/[id]/page reads `inquiry:inquiry_id(*)`): what the card's address
-   *  line and its Edit Lead door read. Absent, the card shows neither. */
+  /** The lead's WHOLE row (quotes/[id]/page reads `inquiry:inquiry_id(*)`): what the card's Edit Lead
+   *  door opens the lead's own form on. Absent, the card draws no door. */
   row?: Inquiry | null;
 }
 
@@ -70,10 +69,12 @@ export function CustomerSelect({
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (savedTimer.current) clearTimeout(savedTimer.current); }, []);
   // MAKING ONE FROM HERE. Erik, on the Sarah Dale estimate: "it says sarah dale punch list and no
-  // address and i cant even edit it anywhere." The address on a quote comes from the attached
-  // customer — quotes.address/city/state/zip are never rendered — and this picker could only
-  // choose someone who already existed. First estimate for a new customer was therefore a dead
-  // end: no record to pick, no way to make one without leaving the quote and losing your place.
+  // address and i cant even edit it anywhere." The address on a quote came from the attached
+  // customer (nothing wrote the estimate's own address columns then; since cn-v1158 the Job Site
+  // line under this card does, and the estimate's own address outranks the customer's), and this
+  // picker could only choose someone who already existed. First estimate for a new customer was
+  // therefore a dead end: no record to pick, no way to make one without leaving the quote and
+  // losing your place.
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [newAddr, setNewAddr] = useState("");
@@ -192,13 +193,15 @@ export function CustomerSelect({
   // what mints the first — once. So this card names which one it is holding rather than measuring
   // a lead against a customer-shaped hole and reporting it empty.
   const leadName = lead?.name?.trim() || null;
-  // THE LEAD'S ADDRESS IS THIS ESTIMATE'S JOB SITE until a job exists (lib/doc-place rowPlace, the
-  // print page's pickSite), and it was shown nowhere on this page: Erik, 2026-11-10, read a half-typed
-  // address on the PDF and "had to find the lead on the leads page to update the address there since
-  // it wasnt accessible from anywhere else". So the card says the address, and Edit Lead opens the
-  // lead's own form right here (one editor, a second door to it; Delete Lead stays on the Leads page).
+  // THE LEAD'S ADDRESS IS THIS ESTIMATE'S JOB SITE until it has one of its own or a job (lib/doc-place
+  // rowPlace, the print page's pickSite), and it was shown nowhere on this page: Erik, 2026-11-10, read
+  // a half-typed address on the PDF and "had to find the lead on the leads page to update the address
+  // there since it wasnt accessible from anywhere else". So Edit Lead opens the lead's own form right
+  // here (one editor, a second door to it; Delete Lead stays on the Leads page).
+  // ONE PLACE FOR ONE FACT (cn-v1158): the address itself is no longer drawn on this card. The Job Site
+  // line directly under it (job-site-line) says the address the paper prints, whoever it comes from,
+  // and says in amber when there is none; this card keeps the door that corrects the LEAD's own.
   const leadRow = lead?.row ?? null;
-  const leadSite = leadRow ? formatFullAddress(leadRow.address, leadRow.city, leadRow.state, leadRow.zip, leadRow.unit) : "";
   return (
     <div className="flex items-start justify-between gap-3">
       {customer ? (
@@ -236,12 +239,6 @@ export function CustomerSelect({
               </div>
             </div>
           </Link>
-          {leadRow && (
-            <p className="mt-1.5 flex items-start gap-1 text-xs text-slate-600">
-              <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
-              {leadSite ? <span>{leadSite}</span> : <span className="text-amber-700">{t("qt_leadNoAddress")}</span>}
-            </p>
-          )}
           <p className="mt-1.5 text-xs text-slate-500">
             {t("qt_madeOutToLead")}
           </p>

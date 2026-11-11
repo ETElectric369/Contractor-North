@@ -27,10 +27,9 @@ describe("migration 0407: the words that went out", () => {
   /** The statements alone, without the header's words. */
   const code = sql.replace(/--.*$/gm, "");
 
-  it("is the one 0407 and nothing sits past it", () => {
+  it("is the one 0407 (what sits past it is the newest migration's own test: migration-0408.test.ts)", () => {
     const names = readdirSync(migrations);
     expect(names.filter((n) => n.startsWith("0407_"))).toEqual(["0407_the_words_that_went_out.sql"]);
-    expect(names.some((n) => /^040[8-9]_|^04[1-9]\d_|^0[5-9]\d\d_/.test(n))).toBe(false);
   });
 
   it("exists, names itself, runs under the house timeouts, and checks its ground before touching anything", () => {

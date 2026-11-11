@@ -48,8 +48,24 @@ export interface DocStyle {
    * buys the outcome). "detailed" = the same line with his hours, the rate and the parts printed
    * beneath it, from the line's `detail`. Only a line that WAS built from a task has a breakdown to
    * print, so a hand-typed estimate looks the same under either setting.
+   * "grouped" (0408) = the same breakdown with the parts folded into ONE "Materials" line under each
+   * task: his hours as "detailed" prints them, the parts as one figure. Erik, 2026-11-10: "an option
+   * to group the materials into one materials line as im finding that different people require
+   * different solutions."
    */
-  estimate_format: "tasks" | "detailed";
+  estimate_format: EstimateFormat;
+}
+
+/**
+ * THE THREE WAYS A TASK LINE PRINTS, AS ONE LIST (0395's two; 'grouped' since 0408). Every door that
+ * stores or reads a format asks isEstimateFormat, never its own copy of the words: six inline
+ * two-word whitelists stood before this, and one of them missed would have turned a Revise of a
+ * grouped estimate back into the company's default without a word.
+ */
+export const ESTIMATE_FORMATS = ["tasks", "detailed", "grouped"] as const;
+export type EstimateFormat = (typeof ESTIMATE_FORMATS)[number];
+export function isEstimateFormat(v: unknown): v is EstimateFormat {
+  return typeof v === "string" && (ESTIMATE_FORMATS as readonly string[]).includes(v);
 }
 
 /** The longest tagline a letterhead prints (one line under the name). */
@@ -88,7 +104,7 @@ export function normalizeDocStyle(raw: unknown): DocStyle {
     margin_x: clamp(r.margin_x, 0.3, 1.5, d.margin_x),
     margin_y: clamp(r.margin_y, 0.3, 1.5, d.margin_y),
     tagline: typeof r.tagline === "string" ? r.tagline.trim().slice(0, TAGLINE_MAX).trim() : "",
-    estimate_format: r.estimate_format === "detailed" ? "detailed" : "tasks",
+    estimate_format: isEstimateFormat(r.estimate_format) ? r.estimate_format : "tasks",
   };
 }
 
@@ -99,15 +115,13 @@ export function normalizeDocStyle(raw: unknown): DocStyle {
  * page through public_quote's coalesce, the studio sample) resolves the format HERE, so the paper
  * and the public link never disagree about one estimate.
  */
-export type EstimateFormat = DocStyle["estimate_format"];
-
 export function estimateFormatFor(
   quote: { estimate_format?: unknown } | null | undefined,
   docStyle: Pick<DocStyle, "estimate_format">,
 ): EstimateFormat {
   const own = quote?.estimate_format;
-  if (own === "detailed" || own === "tasks") return own;
-  return docStyle.estimate_format === "detailed" ? "detailed" : "tasks";
+  if (isEstimateFormat(own)) return own;
+  return isEstimateFormat(docStyle.estimate_format) ? docStyle.estimate_format : "tasks";
 }
 
 /** Row padding class per density — one map, both document tables. */

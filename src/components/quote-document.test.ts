@@ -124,6 +124,82 @@ describe("QuoteDocument prints the breakdown the format asks for", () => {
   });
 });
 
+/**
+ * ONE MATERIALS LINE (cn-v1158). Erik, 2026-11-10: "an option to list out all the materials shown as
+ * it is now and an option to group the materials into one materials line as im finding that different
+ * people require different solutions." The third format, "grouped", is "detailed" with the parts
+ * folded into ONE bullet under each task: the same labor bullets, the same gate, the same "For each
+ * one:", and the figure is the sum the parts' bullets would have added up to. The whole table of the
+ * three formats is tests/an-estimate-prints-three-ways.test.ts; the decision is paperBreakdown's
+ * (lib/estimate/task-lines-paper.test.ts). These are the document's own.
+ */
+describe("QuoteDocument, grouped: the labor bullets, then ONE Materials line under the task", () => {
+  it("one bullet per labor row exactly as detailed prints them, then the parts as one figure — no part is named", () => {
+    const html = render([line(880, twoRows)], "grouped");
+    expect(html).toContain("Labor · 4 h × $125.00 = $500.00");
+    expect(html).toContain("Helper · 4 h × $85.00 = $340.00");
+    expect(html).toContain("Materials · $40.00");
+    expect(html.indexOf("Helper · 4 h")).toBeLessThan(html.indexOf("Materials · $40.00"));
+    expect(html).not.toContain("Tandem breaker");
+    expect(html.match(/Materials · /g)).toHaveLength(1);
+    expect(html).not.toContain("For each one:");
+  });
+
+  it("an old row's {hours, rate} prints as the one Labor bullet and the Materials line", () => {
+    const html = render([line(290, { task_id: "t1", hours: 2, rate: 125, units: null, kit_id: null, materials: [breaker] })], "grouped");
+    expect(html).toContain("Labor · 2 h × $125.00 = $250.00");
+    expect(html).toContain("Materials · $40.00");
+    expect(html.match(/ h × /g)?.length).toBe(1);
+  });
+
+  it("no parts, or none priced: no Materials line at all — never $0.00", () => {
+    const none = render([line(840, { ...twoRows, materials: [] })], "grouped");
+    expect(none).toContain("Helper · 4 h × $85.00 = $340.00");
+    expect(none).not.toContain("Materials");
+    const unpriced = render([line(840, { ...twoRows, materials: [{ ...breaker, sell: null }, { ...breaker, name: "Blank plate", qty: null }] })], "grouped");
+    expect(unpriced).toContain("Labor · 4 h × $125.00 = $500.00");
+    expect(unpriced).not.toContain("Materials");
+    expect(unpriced).not.toContain("Blank plate");
+    expect(unpriced).not.toContain("Tandem breaker");
+  });
+
+  it("at qty 2 'For each one:' stands above the bullets and the figure is for ONE of the task; a hand-priced line prints none of it", () => {
+    const two = render([{ ...line(880, twoRows), quantity: 2, line_total: 1760 }], "grouped");
+    expect(two).toContain("For each one:");
+    expect(two.indexOf("For each one:")).toBeLessThan(two.indexOf("Labor · 4 h"));
+    expect(two).toContain("Materials · $40.00"); // one of the task, never $80.00 for the two
+    expect(two).not.toContain("$80.00");
+    expect(two).toContain("$1,760.00");
+    const hand = render([{ ...line(900, twoRows), quantity: 2, line_total: 1800 }], "grouped");
+    expect(hand).not.toContain("For each one:");
+    expect(hand).not.toContain(" h × ");
+    expect(hand).not.toContain("Materials");
+    expect(hand).toContain("$900.00");
+  });
+
+  it("the customer's page: public_quote's grouped detail — no parts, their total in their place — prints the same paper", () => {
+    const shipped = {
+      hours: null,
+      rate: null,
+      units: null,
+      labor: twoRows.labor.map(({ label, hours, rate }) => ({ label, hours, rate })),
+      materials: [],
+      materials_total: 40,
+    };
+    expect(render([line(880, shipped)], "grouped")).toBe(render([line(880, twoRows)], "grouped"));
+    // A total that does not add up to the line prints nothing: the line alone, as under "tasks".
+    expect(render([line(880, { ...shipped, materials_total: 45 })], "grouped")).toBe(render([line(880, shipped)], "tasks"));
+  });
+
+  it("a line with no detail prints as it always did under all three formats, and so does a note under a line", () => {
+    const plain: QuoteDocItem = { id: "q1", description: "Under-cabinet lighting run, kitchen", quantity: 1, unit: "lot", unit_price: 640, line_total: 640 };
+    expect(render([plain], "grouped")).toBe(render([plain], "tasks"));
+    const noted: QuoteDocItem = { id: "q2", description: "Panel upgrade, 200A\nIncludes the permit\nTwo-day job", quantity: 1, unit: "ea", unit_price: 2400, line_total: 2400 };
+    expect(render([noted], "grouped")).toBe(render([noted], "tasks"));
+    expect(render([noted], "grouped")).toContain("Includes the permit");
+  });
+});
+
 describe("A NOTE UNDER A LINE (cn-v1137): the description's lines after the head print as bullets", () => {
   it("'Head\\nNote line' prints the head and the note as one bullet under it, under either format", () => {
     const noted: QuoteDocItem = { id: "q2", description: "Panel upgrade, 200A\nIncludes the permit\nTwo-day job", quantity: 1, unit: "ea", unit_price: 2400, line_total: 2400 };

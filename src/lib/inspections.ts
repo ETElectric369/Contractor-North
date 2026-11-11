@@ -10,7 +10,8 @@
  *   • "Upcoming & proposed" — scheduled/proposed visits that are still ahead (or today).
  *   • "Didn't Happen?" (missed) — a visit still 'scheduled' on a day before today with NO capture and
  *     nothing written from it: it may never have happened, so it asks, one tap from Didn't Happen.
- *   • Filed — completed-and-written-up + cancelled, behind the ?view=completed toggle.
+ *   • Filed — everything settled, behind the ?view=completed toggle, under three headings by ONE
+ *     rule (filedUnder): completed and written up, lost (by OUTCOME, whatever the status), cancelled.
  *
  * The tags a row wears live here too (inspectionRowTags), for the same reason: one rule, one place.
  */
@@ -69,7 +70,7 @@ export interface InspectionRowTag {
  * `status === "completed"` alone, so every row of "To write up" — the OPEN pile, each row carrying a
  * Create Estimate button — advertised itself as finished work. BADGES AND TAGS SHOW ONLY WHAT IS
  * OPEN. Nothing is lost by dropping it: every heading on this page already says the bucket ("To
- * write up", "Completed & written up", "Cancelled").
+ * write up", "Completed & written up", "Lost", "Cancelled").
  */
 export function inspectionRowTags(
   row: { type?: string | null; status: string; capture?: unknown },
@@ -139,8 +140,37 @@ export interface InspectionBuckets<T> {
   /** A visit still 'scheduled' on a day BEFORE today with nothing captured and nothing written from
    *  it: it may never have happened. Newest first. Never joins My Day's pile. */
   missed: T[];
-  /** Completed-and-written-up + cancelled — newest first (the ?view=completed pile). */
+  /** Everything settled: written up, won, lost, cancelled. Newest first (the ?view=completed pile);
+   *  the page draws it under three headings, each row under the one filedUnder names. */
   filed: T[];
+}
+
+/** The three headings of the filed pile, in the order /inspections draws them. */
+export type FiledUnder = "completed" | "lost" | "cancelled";
+
+/**
+ * WHICH HEADING A FILED ROW IS DRAWN UNDER: THE OUTCOME FIRST, WHATEVER THE STATUS.
+ *
+ * The owner's standing rule: a visit that did not become work is LOST, everywhere. The page split the
+ * filed pile on status alone (cancelled, or else "Completed & written up"), so a visit that never
+ * happened and was answered Lost from the Didn't Happen? group (still 'scheduled', nothing captured,
+ * no estimate) was filed as completed and written up. It was neither.
+ *
+ *   lost        the outcome is lost or no_bid. no_bid is 0205's other word for the same ending: a few
+ *               old rows hold it and Nort's door can still write it, and every screen already reads
+ *               it as Lost (the visit page's ending card). A CANCELLED visit marked Lost is Lost too:
+ *               the answer somebody gave says more than the status the calendar was left in.
+ *   cancelled   called off, and nobody said it was lost.
+ *   completed   everything else that files: written up, on a job, billed, or won.
+ *
+ * It names the heading and nothing else. WHETHER a row files at all is bucketInspections' business
+ * (an outcome files a completed visit, and a scheduled or proposed one once its time has passed);
+ * this is asked of the rows it filed.
+ */
+export function filedUnder(row: Pick<InspectionBucketRow, "status" | "outcome">): FiledUnder {
+  if (row.outcome === "lost" || row.outcome === "no_bid") return "lost";
+  if (row.status === "cancelled") return "cancelled";
+  return "completed";
 }
 
 export function bucketInspections<T extends InspectionBucketRow>(

@@ -268,17 +268,43 @@ describe("the paper switch (Labor and Parts on the Paper)", () => {
   it("sits by the totals on both pages, seeded from the row, and goes through the one header write", () => {
     const t = text(builder({ companyEstimateFormat: "tasks" }));
     expect(t).toContain("Labor and Parts on the Paper");
-    expect(t).toContain("Company Default · Off");
-    expect(text(builder({ companyEstimateFormat: "detailed" }))).toContain("Company Default · On");
+    // FOUR SEGMENTS SINCE cn-v1158 (re-pinned on purpose: "Company Default · On / Off", Show and Hide became the
+    // company's default named by what it prints, then the three formats). RE-PINNED AGAIN the same release: ONE
+    // name for each format everywhere, so the segments are Every Part, One Materials Line and Hidden (they were
+    // List Every Part and Hide), and the default over a grouped company says "· One Materials Line" (was "· One Line").
+    expect(t).toContain("Company Default · Hidden Every Part One Materials Line Hidden");
+    expect(text(builder({ companyEstimateFormat: "detailed" }))).toContain("Company Default · Every Part");
+    expect(text(builder({ companyEstimateFormat: "grouped" }))).toContain("Company Default · One Materials Line");
+    /** The white (lit) segment of the pill. */
+    const lit = (html: string) => [...html.matchAll(/bg-white text-slate-900 shadow-sm">([^<]+)</g)].map((m) => m[1]);
     const stored = saved({ estimate_format: "detailed" }, [], {}, { companyEstimateFormat: "tasks" });
-    expect(stored).toMatch(/bg-white text-slate-900 shadow-sm">Show</);
-    expect(stored).not.toMatch(/bg-white text-slate-900 shadow-sm">Hide</);
+    expect(lit(stored)).toContain("Every Part");
+    expect(lit(stored)).not.toContain("Hidden");
+    expect(lit(stored)).not.toContain("Company Default · Hidden");
+    // A STORED 'grouped' OPENS ON ITS OWN SEGMENT: the seed asks the one check, so the third word is the
+    // estimate's choice on screen and never a quiet "Company Default" (what an inline two-word seed made of it).
+    const grouped = saved({ estimate_format: "grouped" }, [], {}, { companyEstimateFormat: "tasks" });
+    expect(lit(grouped)).toContain("One Materials Line");
+    expect(lit(grouped)).not.toContain("Company Default · Hidden");
+    // Nothing stored (null), or a word the paper does not know, is the company's.
+    expect(lit(saved({ estimate_format: null }, [], {}, { companyEstimateFormat: "grouped" }))).toContain("Company Default · One Materials Line");
+    expect(lit(saved({ estimate_format: "itemized" }, [], {}, { companyEstimateFormat: "tasks" }))).toContain("Company Default · Hidden");
     const src = read("src/app/(app)/quotes/estimate-editor.tsx");
     expect(src).toContain('import { PaperFormatSwitch } from "./paper-format-switch";');
-    expect(src).toContain('estimateFormat: q.estimate_format === "tasks" || q.estimate_format === "detailed" ? q.estimate_format : null,');
+    // Seeded through the ONE format check (lib/doc-style isEstimateFormat, three words since 0408), never an inline copy of the words.
+    expect(src).toContain("estimateFormat: isEstimateFormat(q.estimate_format) ? q.estimate_format : null,");
     expect(src).toContain('commitField("estimateFormat");');
+    // THE SWITCH'S WIRING, WHOLE (cn-v1158): it is handed the header's word and the company's, and a pick
+    // is typed into the header and committed at once — the ONE header write (use-quote-writes headerWrite →
+    // updateQuoteMeta), whichever of the four segments was tapped. The segment → word half is driven in
+    // paper-format-switch.test.tsx, the write in use-quote-writes.test.ts and estimate-format-doors.test.ts.
+    expect(src).toContain("value={header.estimateFormat}");
+    expect(src).toContain("companyDefault={companyEstimateFormat}");
+    expect(src).toMatch(/onChange=\{\(v\) => \{\s*session\.typeHeader\(\{ estimateFormat: v \}\);\s*commitField\("estimateFormat"\);\s*\}\}/);
     // Only while the estimate is still editable — the lock's own words say why a sent one is not.
-    expect(text(saved({}, [], { lock: { reason: "A signed contract." } }))).not.toContain("Labor and Parts on the Paper");
+    const locked = text(saved({ estimate_format: "grouped" }, [], { lock: { reason: "A signed contract." } }));
+    expect(locked).not.toContain("Labor and Parts on the Paper");
+    for (const segment of ["Company Default", "Every Part", "One Materials Line"]) expect(locked, segment).not.toContain(segment);
     // The new page no longer adopts a draft into the browser: a lead's draft is OPENED where it lives.
     const page = read("src/app/(app)/quotes/new/page.tsx");
     expect(page).toContain("if (existing?.id) redirect(`/quotes/${existing.id}`);");

@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ESTIMATE_VISIT_TYPES, appointmentTypeLabel, visitTitle } from "@/lib/statuses";
-import { bucketInspections, inspectionLabel, inspectionRowTags } from "@/lib/inspections";
+import { bucketInspections, filedUnder, inspectionLabel, inspectionRowTags, type FiledUnder } from "@/lib/inspections";
 import { MissedDoors } from "./missed-doors";
 import { AppointmentButton } from "../appointments/appointment-button";
 import { NewInspectionButton } from "../appointments/new-inspection-button";
@@ -30,8 +30,9 @@ export const dynamic = "force-dynamic";
  *   • "To write up" — the visit happened but its inquiry/job has no estimate yet; each row's
  *     next step is one button: Create estimate (capture prefills the estimator scope).
  *   • "Upcoming & proposed" — the calendar-shaped rest, by date/status.
- * Completed-and-written-up + cancelled FILE AWAY behind ?view=completed, exactly like the
- * estimates file-away pattern. Rows link to the appointment's capture surface.
+ * Everything settled FILES AWAY behind ?view=completed, exactly like the estimates file-away
+ * pattern, under three headings: Completed & written up, Lost, Cancelled (lib/inspections
+ * filedUnder). Rows link to the appointment's capture surface.
  */
 export default async function InspectionsPage({
   searchParams,
@@ -105,6 +106,11 @@ export default async function InspectionsPage({
     new Set(((billedJobs ?? []) as { job_id: string }[]).map((r) => r.job_id).filter(Boolean)),
     tz, // "before today" is the company's midnight (the Didn't Happen? group)
   );
+  // THE FILED PILE, EACH ROW UNDER ONE HEADING (lib/inspections filedUnder: the OUTCOME first,
+  // whatever the status). One pass, so no row can be drawn twice or fall between two filters; each
+  // group keeps the pile's order (newest first).
+  const filedBy: Record<FiledUnder, typeof filed> = { completed: [], lost: [], cancelled: [] };
+  for (const r of filed) filedBy[filedUnder(r)].push(r);
 
   // 44px targets, like every tap in the app (the pill still reads as a pill).
   const pill = (active: boolean) =>
@@ -157,15 +163,17 @@ export default async function InspectionsPage({
           // A CANCELLED VISIT IS NOT COMPLETED WORK. Both land in `filed` (correctly — they are
           // both settled), but rendering them under one heading reading "Completed & written up"
           // told Erik an inspection he cancelled had been written up into an estimate. Same
-          // rows, two honest headings.
-          <>
-            {filed.some((r) => r.status !== "cancelled") && (
-              <Section title={t("ip_completedWrittenUp")} rows={filed.filter((r) => r.status !== "cancelled")} tz={tz} lang={lang} t={t} />
-            )}
-            {filed.some((r) => r.status === "cancelled") && (
-              <Section title={t("ip_cancelled")} rows={filed.filter((r) => r.status === "cancelled")} tz={tz} lang={lang} t={t} />
-            )}
-          </>
+          // rows, honest headings.
+          // AND NEITHER IS A LOST ONE (cn-v1158). The split was on status alone, so a visit that
+          // never happened and was answered Lost in the Didn't Happen? group (still scheduled,
+          // nothing on it) was filed as "Completed & written up". A visit that did not become work
+          // is LOST, everywhere: the third heading sits between the two, and which heading a row is
+          // under is ONE rule, by outcome first (filedUnder). A group with no rows draws no heading.
+          <div className="space-y-6">
+            {filedBy.completed.length > 0 && <Section title={t("ip_completedWrittenUp")} rows={filedBy.completed} tz={tz} lang={lang} t={t} />}
+            {filedBy.lost.length > 0 && <Section title={t("ip_lost")} rows={filedBy.lost} tz={tz} lang={lang} t={t} />}
+            {filedBy.cancelled.length > 0 && <Section title={t("ip_cancelled")} rows={filedBy.cancelled} tz={tz} lang={lang} t={t} />}
+          </div>
         )
       ) : toWriteUp.length === 0 && upcoming.length === 0 && missed.length === 0 ? (
         <EmptyState

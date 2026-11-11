@@ -1,4 +1,5 @@
 import type { DraftLineItem, TaskDetail, TaskDetailMaterial, TaskLabor } from "./line-map";
+import type { EstimateFormat } from "@/lib/doc-style";
 import type { TaskMaterial, TaskValue } from "@/lib/playbook/tasks";
 import { describeChoice, priceBookLine, type BookPricing, type OptionedPriceItem } from "@/lib/pricing/item-options";
 import { kitLineView, type KitLineRaw, type KitPricing } from "@/lib/kit-line";
@@ -37,6 +38,12 @@ import { joinLineNote, splitLineNote } from "./line-note";
  * while it equals the UNIT price (detailExplains), and the job reads the same multiplier: a task at
  * qty 2 is twice the minutes and twice each part (taskMinutesFor, born-with-tasks). A kit's `units`
  * is a DIFFERENT multiplier, already inside the breakdown (expandTaskKit): qty 2 of a ×7 kit is 14.
+ *
+ * ── THREE WAYS IT PRINTS (cn-v1158) ─────────────────────────────────────────────────────────
+ *
+ * The line alone; the line with its labor and each part; or the line with its labor and ONE
+ * "Materials" figure. What prints under a line is one decision, paperBreakdown, asked by the office's
+ * papers and the customer's page alike. The format is only read there: it never touches a price.
  *
  * Pure. The page that calls it has already resolved the rate (laborRateFor) and the customer's
  * markup; the same function serves the inspection seed, the estimator's task mode and the builder.
@@ -314,6 +321,98 @@ export function detailExplains(d: TaskDetail, line: { unit_price: number }): boo
 export function lineQty(line: { quantity?: unknown }): number {
   const n = Number(line.quantity);
   return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+/** What prints under ONE task line — paperBreakdown's answer. The document only draws it. */
+export interface PaperBreakdown {
+  /** The bullets are for ONE of the task and the line's Qty is not 1: "For each one:" stands above them. */
+  perUnit: boolean;
+  /** One bullet each, in stored order: the labor rows he gave hours to. A row still asking is not here. */
+  labor: TaskLabor[];
+  /** "detailed": every part, to print by name with its count and its money (partMoney).
+   *  "grouped": always empty — no part's name reaches a grouped paper from here. */
+  parts: TaskDetailMaterial[];
+  /** "grouped": the ONE "Materials" figure, for one of the task (taskMoney's parts). Null = no
+   *  Materials bullet at all, because no part is priced — never a "$0.00". "detailed": always null. */
+  materials: number | null;
+}
+
+/** The name the wire's one figure wears while it is being added up (a part with no name counts for
+ *  nothing — `named`). Never printed: a grouped paper is handed `materials`, a number, and an empty
+ *  `parts`. It is the paper's own word for the figure all the same, so a later change that printed it
+ *  by mistake would put nothing on a customer's page that is not already there. */
+const WIRE_PART_NAME = "Materials";
+
+/** THE WIRE'S ONE FIGURE, AS SHIPPED (public_quote under "grouped", 0408): the parts' total for one
+ *  of the task. A number above zero (or the same as a numeric string); anything else is no figure. */
+function wireMaterialsTotal(raw: unknown): number | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const v = (raw as Record<string, unknown>).materials_total;
+  return typeof v === "number" || typeof v === "string" ? positive(v) : null;
+}
+
+/**
+ * THE PARTS BEHIND A GROUPED LINE, WHICHEVER SHAPE IS IN HAND. The office's row has its parts, and
+ * then they ARE the figure: the wire's number is not read at all, so a stray one beside real parts
+ * can never out-vote them. The customer's page has no parts under "grouped" (public_quote ships
+ * `materials` empty, so one Materials line on the paper is not a parts list in the page's data) and
+ * one number in their place. That number is read as the ONE part it stands for — counted once, at
+ * that price — so it goes through the same arithmetic (partMoney → taskMoney) and the same gate
+ * (detailExplains) as the parts themselves, with no second sum written for the wire.
+ */
+function partsInHandOrWire(d: TaskDetail, raw: unknown): TaskDetail {
+  if (d.materials.length > 0) return d;
+  const total = wireMaterialsTotal(raw);
+  return total === null ? d : { ...d, materials: [{ code: null, name: WIRE_PART_NAME, qty: 1, cost: null, sell: total }] };
+}
+
+/**
+ * WHAT PRINTS UNDER A TASK LINE — THE ONE DECISION (cn-v1158, 0408). Erik, 2026-11-10: "an option to
+ * list out all the materials shown as it is now and an option to group the materials into one
+ * materials line as im finding that different people require different solutions." So a task line
+ * reads one of three ways (lib/doc-style ESTIMATE_FORMATS), and every paper asks HERE which:
+ *
+ *   "tasks"    — the line alone; nothing prints beneath it.
+ *   "detailed" — one bullet per labor row he gave hours to, then each part by name.
+ *   "grouped"  — the same labor bullets, then the parts as ONE figure ("Materials · $X") under each
+ *                task, never one for the whole estimate (his call). No part is named.
+ *
+ * ONE GATE FOR ALL OF IT: a breakdown prints only while it still adds up to the line's UNIT price
+ * (detailExplains). A price edited by hand afterwards has no breakdown to show, and a second number
+ * beside the first is worse than none. The format is only READ here — it never changes a price, so
+ * the three papers of one estimate carry the same Qty, the same prices and the same totals.
+ *
+ * TWO SHAPES, ONE ANSWER. The office's papers (the print page, the PDF, the studio's sample) hold the
+ * row's own detail. The customer's page holds what public_quote ships: under "detailed" the parts'
+ * names, counts and prices; under "grouped" no parts and the wire-only `materials_total`
+ * (partsInHandOrWire). The gate holds on both, so one line prints the same bullets from either
+ * shape, and a figure that does not add up prints nothing rather than something wrong.
+ *
+ * `materials_total` IS READ FROM THE RAW DETAIL, HERE AND NOWHERE ELSE. It is not a field of
+ * TaskDetail and coerceTaskDetail does not carry it, so it cannot ride a save into
+ * quote_line_items.detail: every save door stores what coerceTaskDetail returns. It is read under
+ * "grouped" alone — under "detailed" the bullets are the parts, and a total with no parts to show
+ * for it would be money the customer's bullets do not add up to.
+ *
+ * Null = nothing prints: the format is "tasks" (or not a format), the line has no breakdown, the
+ * breakdown has nothing to say (no labor row with hours and no parts — under "grouped", none
+ * priced), or it no longer explains the unit price.
+ */
+export function paperBreakdown(
+  line: { quantity?: unknown; unit_price: number; detail?: unknown },
+  format: EstimateFormat,
+): PaperBreakdown | null {
+  if (format !== "detailed" && format !== "grouped") return null;
+  const read = coerceTaskDetail(line.detail);
+  if (!read) return null;
+  const d = format === "grouped" ? partsInHandOrWire(read, line.detail) : read;
+  const labor = d.labor.filter((r) => r.hours !== null);
+  const parts = format === "detailed" ? d.materials : [];
+  const figure = taskMoney(d).parts;
+  const materials = format === "grouped" && figure > 0 ? figure : null;
+  if (labor.length === 0 && parts.length === 0 && materials === null) return null;
+  if (!detailExplains(d, line)) return null;
+  return { perUnit: lineQty(line) !== 1, labor, parts, materials };
 }
 
 /** A kit line's count for `units` of the kit, through the kit's own minimum and rounding (0166). */

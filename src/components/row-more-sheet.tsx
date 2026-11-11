@@ -58,6 +58,19 @@ export function SheetLink({ href, children, className = SHEET_ROW }: { href: str
 /**
  * The sheet as it looks when open. No state: RowMoreSheet owns it, and tests read this one.
  * The rows are the caller's children, under the row's title and a subline.
+ *
+ * THE SHEET IS DRAWN ON THE PAGE, NEVER INSIDE ITS ROW (`portal`). A row lives wherever its list was
+ * put, and a list can sit in a wrapper that paints as one layer: the Schedule's waiting rail is
+ * `position: sticky` beside the calendar on a wide screen, and sticky ALWAYS makes a stacking context.
+ * A sheet drawn in place there was trapped in the rail's layer, under everything the page drew after
+ * it: the calendar's hour lines ran across the sheet, its day header stood over the scrim, and a click
+ * on Put on Hold… landed on the calendar's open spot behind it (its "Add to Schedule: tap an open
+ * time" hint showed over the sheet; Erik's screenshot, 2026-11-10). No z-index inside a trapped layer
+ * can lift it out. Drawn into <body> the sheet answers to no wrapper, so the one row sheet opens above
+ * the page wherever its row is. Nothing here leans on DOM nesting: no caller wraps the sheet in a
+ * <form>, its rows are buttons and links, and a sheet a row opens above it (Move to Another Day…)
+ * still renders inside this one, so it rides along and stacks above it as before. React's own events
+ * and context follow the component tree, not the DOM, so a row's handlers hear what they heard.
  */
 export function RowMoreSheetView({
   open,
@@ -73,7 +86,7 @@ export function RowMoreSheetView({
   children: ReactNode;
 }) {
   return (
-    <Modal open={open} onClose={onClose} title={title} size="sm">
+    <Modal open={open} onClose={onClose} title={title} size="sm" portal>
       <div className="space-y-2">
         {subline && <p className="text-xs text-slate-400">{subline}</p>}
         {children}

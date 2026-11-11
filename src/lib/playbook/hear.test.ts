@@ -296,5 +296,5 @@ describe("every model call site is on the ledger", () => {
     expect(files.length).toBeGreaterThan(5); // the grep works
     const blind = files.filter((f) => !readFileSync(join(process.cwd(), f), "utf8").includes("recordAiUsage"));
     expect(blind, `unmetered model call sites: ${blind.join(", ")}`).toEqual([]);
-  });
+  }, 30_000); // not the default 5 s: the grep walks all of src from a shell, and under a loaded disk it lost that race once
 });

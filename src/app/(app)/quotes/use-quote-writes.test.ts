@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import type { DraftLineItem, TaskDetail } from "@/lib/estimate/line-map";
+import { ESTIMATE_FORMATS } from "@/lib/doc-style";
 import {
   COULD_NOT_REACH,
   LINE_GONE,
@@ -11,6 +12,7 @@ import {
   WRITE_TIMEOUT_MS,
   createQuoteSession,
   firstSavePayload,
+  headerWrite,
   idsBySortOrder,
   isQuiet,
   repricedLines,
@@ -1176,5 +1178,70 @@ describe("a line of a refused append goes with its set (skeptic #39, B4)", () =>
     expect(s.get().items.slice(1).map((l) => [l.description, l.saved, l.unit_price])).toEqual([["A", true, 290], ["B", true, 77]]);
     expect(s.get().refusals).toEqual({});
     expect(calls(a.appendQuoteLines)).toHaveLength(2);
+  });
+});
+
+/**
+ * ONE MATERIALS LINE THROUGH THE ONE SAVE MODEL (cn-v1158). The paper switch grew a third word,
+ * 'grouped', and it takes the road the other two take: on a saved estimate a pick is ONE header
+ * write (updateQuoteMeta) and nothing beside it; on a cold estimate it is held and rides the first
+ * save. The store holds no list of the words — it sends what the header holds — so these cases pin
+ * the road, and the last one walks every word the paper knows down it.
+ */
+describe("One Materials Line through the one save model (cn-v1158)", () => {
+  it("on a saved estimate the pick is ONE header write with estimate_format 'grouped', and nothing else goes on the wire", async () => {
+    const { s, a } = saved([{ ...trench, id: "li-1" }]);
+    s.typeHeader({ estimateFormat: "grouped" });
+    expect(await s.commitHeader("estimateFormat")).toBe(true);
+    expect(calls(a.updateQuoteMeta)).toEqual([["q1", { estimate_format: "grouped" }]]);
+    for (const other of [a.saveQuote, a.updateQuoteItem, a.appendQuoteLines, a.deleteQuoteItem, a.setQuoteType, a.setQuoteCustomer, a.readQuoteLineIds]) expect(other).not.toHaveBeenCalled();
+    expect(s.get().header.estimateFormat).toBe("grouped");
+    expect(isQuiet(s.get())).toBe(true);
+    // The same pick again sends nothing; the company's (null) is a write of its own, with null and not a word.
+    expect(await s.commitHeader("estimateFormat")).toBe(true);
+    expect(a.updateQuoteMeta).toHaveBeenCalledTimes(1);
+    s.typeHeader({ estimateFormat: null });
+    expect(await s.commitHeader("estimateFormat")).toBe(true);
+    expect(calls(a.updateQuoteMeta)[1]).toEqual(["q1", { estimate_format: null }]);
+  });
+
+  it("a refused pick stays on the pill with the server's words beside it, and Retry sends 'grouped' again", async () => {
+    const { s, a } = saved([], { updateQuoteMeta: vi.fn().mockResolvedValueOnce({ ok: false, error: "That estimate isn't here to update." }).mockResolvedValue({ ok: true }) });
+    s.typeHeader({ estimateFormat: "grouped" });
+    expect(await s.commitHeader("estimateFormat")).toBe(false);
+    expect(s.get().header.estimateFormat).toBe("grouped"); // never snapped back to the company's behind his back
+    expect(s.get().refusals["header:estimateFormat"]).toBe("That estimate isn't here to update.");
+    expect(await s.retry("header:estimateFormat")).toBe(true);
+    expect(calls(a.updateQuoteMeta).map((c) => c[1])).toEqual([{ estimate_format: "grouped" }, { estimate_format: "grouped" }]);
+    expect(s.get().refusals).toEqual({});
+  });
+
+  it("on a cold estimate the pick is held, births nothing, and rides the FIRST SAVE as 'grouped'", async () => {
+    const { s, a } = unsaved([blank]);
+    s.typeHeader({ estimateFormat: "grouped" });
+    expect(await s.commitHeader("estimateFormat")).toBe(true);
+    expect(a.saveQuote).not.toHaveBeenCalled();
+    expect(a.updateQuoteMeta).not.toHaveBeenCalled();
+    expect(s.get().mode.kind).toBe("unsaved");
+    const key = s.get().items[0].key;
+    s.typeLine(key, { description: "Trench", unit_price: 290 });
+    expect(await s.commitLine(key)).toBe(true);
+    expect(a.saveQuote).toHaveBeenCalledTimes(1);
+    expect(calls(a.saveQuote)[0][0]).toMatchObject({ id: CLIENT, estimate_format: "grouped", items: [{ description: "Trench" }] });
+    // The first save carried it: no second write for the format behind it.
+    expect(a.updateQuoteMeta).not.toHaveBeenCalled();
+  });
+
+  it("every word the paper knows takes the same road: the first save's payload, and the one meta patch", () => {
+    expect(firstSavePayload("id-1", { ...header, estimateFormat: "grouped" }, [trench])).toMatchObject({ estimate_format: "grouped", items: [trench] });
+    for (const word of ESTIMATE_FORMATS) {
+      expect(firstSavePayload("id-1", { ...header, estimateFormat: word }, []).estimate_format, word).toBe(word);
+      expect(headerWrite("estimateFormat", { ...header, estimateFormat: word }), word).toEqual({ kind: "meta", meta: { estimate_format: word } });
+    }
+    // Null still means the company's: sent as null by both, never left out and never a word.
+    expect(firstSavePayload("id-1", header, []).estimate_format).toBeNull();
+    expect(headerWrite("estimateFormat", header)).toEqual({ kind: "meta", meta: { estimate_format: null } });
+    // The format alone is not substance: a cold estimate with only the pill moved is still nothing to save.
+    expect(substantive({ ...header, estimateFormat: "grouped" }, [blank])).toBe(false);
   });
 });

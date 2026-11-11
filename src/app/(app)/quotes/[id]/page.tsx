@@ -12,6 +12,8 @@ import { EstimateEditor, type SavedLineRow, type SavedQuoteRow } from "../estima
 import { extOf, intakePaths, uploadDisplayName } from "@/lib/playbook/uploads";
 import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
 import type { Customer, Inquiry } from "@/lib/types";
+import { SITE_JOBS_READ_LIMIT, siteJobsReadFull, sitePartsOf, type OtherJobSite } from "@/lib/quote-site";
+import type { SiteParts } from "@/lib/site-address";
 import { featureOn } from "@/lib/features";
 import { translator } from "@/lib/i18n";
 import { currentLang } from "@/lib/current-lang";
@@ -67,19 +69,25 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
     // (cn-v1132): the editor prices a task's hours through the one rule, on this page as on the new one.
     // The lead rides along (PROJECTION LAW): the "Prepared for" card has to be able to show WHO an
     // estimate with no customer is for, and a lead is a person with a name, a phone and an email —
-    // not a blank. THE WHOLE ROW (cn-v1157), never a short list: the card shows the lead's address
-    // (the job site this estimate prints until there is a job) and opens the lead's own form on it,
-    // and that form's save writes EVERY field it holds — a column missing here would be saved blank.
-    .select("*, customers(*, pricing_levels(markup_pct, labor_rate)), inquiry:inquiry_id(*)")
+    // not a blank. THE WHOLE ROW (cn-v1157), never a short list: the card opens the lead's own form
+    // on it, and that form's save writes EVERY field it holds — a column missing here would be saved
+    // blank. (The lead's address is the job site this estimate prints until it has one of its own or
+    // a job; since cn-v1158 the Job Site line under the card is the one place that says it.)
+    // THE JOB RIDES ALONG TOO (cn-v1158): its five address columns, for the Job Site line (an estimate
+    // on a job prints the job's site unless it carries its own), and its number and name for the door
+    // to it. The estimate's OWN five columns are already in the row's `*`.
+    .select("*, customers(*, pricing_levels(markup_pct, labor_rate)), inquiry:inquiry_id(*), jobs(id, job_number, name, address, unit, city, state, zip)")
     .eq("id", id)
     .maybeSingle();
 
   if (quoteErr) throw quoteErr; // a real failure shouldn't masquerade as 404
   if (!quote) notFound();
-  const q = quote as SavedQuoteRow & {
-    customers: (Customer & { pricing_levels?: { markup_pct?: number | null; labor_rate?: number | null } | null }) | null;
-    inquiry: Inquiry | null;
-  };
+  const q = quote as SavedQuoteRow &
+    SiteParts & {
+      customers: (Customer & { pricing_levels?: { markup_pct?: number | null; labor_rate?: number | null } | null }) | null;
+      inquiry: Inquiry | null;
+      jobs: (SiteParts & { id: string; job_number: string | null; name: string | null }) | null;
+    };
 
   // EVERY COLUMN THE EDITOR SHOWS (projection law): the words, the count, the price, the group
   // (category), the task behind the line (detail) and its place (sort_order). A FAILED READ IS AN
@@ -92,7 +100,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   // Has this quote already been turned into these records? (Drives idempotent UI: the map shows
   // "View …" instead of minting a duplicate.) Plus the org's customers, the book, the kits, the
   // team and the tax rates: the same catalog /quotes/new hands the editor.
-  const [{ data: existingInv }, { data: existingWo }, { data: existingMl }, { data: customers }, { data: priceItems, error: priceItemsErr }, kitsRead, { data: orgRow }, { data: visitBehind }, { data: taxRates }, { data: peopleRows, error: peopleErr }] =
+  const [{ data: existingInv }, { data: existingWo }, { data: existingMl }, { data: customers }, { data: priceItems, error: priceItemsErr }, kitsRead, { data: orgRow }, { data: visitBehind }, { data: taxRates }, { data: peopleRows, error: peopleErr }, { data: otherJobRows, error: otherJobsErr }] =
     await Promise.all([
       supabase.from("invoices").select("id").eq("quote_id", id).limit(1).maybeSingle(),
       supabase.from("work_orders").select("id").eq("quote_id", id).limit(1).maybeSingle(),
@@ -124,8 +132,28 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
       // THE TEAM, for a labor row's Who select (cn-v1131): bill rates off the staff-scoped profile_pay
       // view, active only, never their pay rate.
       supabase.from("profile_pay").select("id, full_name, bill_rate").eq("active", true).order("full_name"),
+      // WHERE ELSE THIS CUSTOMER HAS HAD WORK DONE (cn-v1158): the addresses of their other jobs, for
+      // the Job Site line's picker. A customer has one address on file; a second complex's address
+      // lives on the jobs already done there. Newest first, SITE_JOBS_READ_LIMIT at most (the picker
+      // shows eight different addresses), only jobs that have a street. The limit is lib/quote-site's
+      // own number, so the check below (did the read come back full?) can never be held against a
+      // different one. Skipped when there is nobody to ask about or the estimate is on a job already
+      // (a job owns its site, so there is no picker to fill).
+      q.customer_id && !q.job_id
+        ? supabase
+            .from("jobs")
+            .select("id, job_number, name, address, unit, city, state, zip")
+            .eq("customer_id", q.customer_id)
+            .not("address", "is", null)
+            .order("created_at", { ascending: false })
+            .limit(SITE_JOBS_READ_LIMIT)
+        : Promise.resolve({ data: null, error: null }),
     ]);
   if (peopleErr) reportError("quotes/[id]:people", peopleErr, { quoteId: id });
+  // A FAILED READ IS SAID, NEVER SHOWN AS "NONE": the picker tells him the earlier jobs' addresses
+  // could not be loaded, because one of them may be the very site he opened the picker for.
+  if (otherJobsErr) reportError("quotes/[id]:otherJobs", otherJobsErr, { quoteId: id });
+  const otherJobs = (otherJobRows ?? []) as OtherJobSite[];
   const people = ((peopleRows ?? []) as { id: string; full_name: string | null; bill_rate: number | string | null }[]).map((p) => ({
     id: p.id,
     name: p.full_name ?? "Crew",
@@ -207,6 +235,18 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           visitBehind: (visitBehind as { id: string; starts_at: string | null } | null) ?? null,
           showCircuits,
           panelJob: await panelJobFor(supabase, q, t("qt_theJob")),
+          // THE JOB SITE LINE (cn-v1158): the four records the paper picks its site from, each as its
+          // five address columns and nothing else (lib/quote-site reads them in the print page's own
+          // order), the job that owns the site once there is one, and the customer's other addresses.
+          // A read that came back FULL is said as well as one that failed: older jobs may hold an
+          // address the read never reached, and the picker says its list is the most recent ones.
+          site: {
+            records: { quote: sitePartsOf(q), job: sitePartsOf(q.jobs), lead: sitePartsOf(q.inquiry), customer: sitePartsOf(q.customers) },
+            job: q.job_id ? { id: q.job_id, job_number: q.jobs?.job_number ?? null, name: q.jobs?.name ?? null } : null,
+            otherJobs,
+            otherJobsFailed: !!otherJobsErr,
+            otherJobsFull: siteJobsReadFull(otherJobs),
+          },
         }}
         catalog={{
           orgId: String(org?.id ?? ""),

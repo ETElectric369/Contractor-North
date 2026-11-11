@@ -21,6 +21,9 @@ import type { WordCatalog } from "./types";
  * Inspección; Create Estimate = Crear Presupuesto.
  * cn-v1147: in Spanish the function words (a, de, la, y…) stay lowercase after the first word ("Lista de
  * Precios", "Mover a un Día"); English keeps every word capitalized.
+ * cn-v1158: ip_lost, the filed pile's third heading (lib/inspections filedUnder: a visit whose outcome is
+ * lost, whatever its status). A pile's name, so feminine plural like its two neighbours: Perdidas. The
+ * row's own button, ip_btn_lost, stays the singular Perdida: it answers for one visit.
  */
 export const words: WordCatalog = {
   prefix: "ip_",
@@ -38,6 +41,7 @@ export const words: WordCatalog = {
     ip_nothingFiledTitle: "Nothing filed away yet",
     ip_nothingFiledDesc: "Inspections land here once they're written up into an estimate (or called off).",
     ip_completedWrittenUp: "Completed & written up",
+    ip_lost: "Lost",
     ip_cancelled: "Cancelled",
     ip_noOpenInspections: "No open inspections",
     ip_emptyDescLeadsOn: "Start one from a lead, book one, or tap Start an Inspection when you're already there.",
@@ -63,6 +67,7 @@ export const words: WordCatalog = {
     ip_nothingFiledTitle: "Aún no hay nada archivado",
     ip_nothingFiledDesc: "Las inspecciones llegan aquí una vez que se redactan en un presupuesto (o se cancelan).",
     ip_completedWrittenUp: "Terminadas y redactadas",
+    ip_lost: "Perdidas",
     ip_cancelled: "Canceladas",
     ip_noOpenInspections: "No hay inspecciones abiertas",
     ip_emptyDescLeadsOn: "Empieza una desde un prospecto, agenda una, o toca Empezar una Inspección cuando ya estés ahí.",

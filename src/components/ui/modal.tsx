@@ -62,6 +62,11 @@ export function Modal({
    *  DOM nesting). Turn ON only when the Modal is mounted inside an ancestor with `backdrop-filter`,
    *  `transform`, or `filter` — those make the ancestor the containing block for the modal's
    *  `position:fixed` overlay, trapping + clipping it (e.g. a modal opened from a glass dropdown).
+   *  THE SAME GOES FOR AN ANCESTOR THAT PAINTS AS ONE LAYER: `position: sticky` (always a stacking
+   *  context), or `relative`/`absolute` with a z-index, `isolate`, an opacity under 1. The overlay's
+   *  z-[120] only counts INSIDE that layer, so the sheet is drawn under whatever the page draws after
+   *  the ancestor, and clicks on it land on what is behind (the waiting rail's ⋯ sheet under the
+   *  calendar, 2026-11-10: row-more-sheet portals for it).
    *  When portaled, a form INSIDE the modal must submit via ModalActions `formId` (the `form=` attr),
    *  not DOM nesting. */
   portal?: boolean;
