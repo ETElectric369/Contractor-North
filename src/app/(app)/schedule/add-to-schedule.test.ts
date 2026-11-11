@@ -14,9 +14,27 @@ import { renderToStaticMarkup } from "react-dom/server";
  */
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
-vi.mock("./actions", () => ({ addJobDay: vi.fn() }));
+vi.mock("./actions", () => ({ addJobDay: vi.fn(), startJobOnDay: vi.fn() }));
 
-import { AddToScheduleSheet, addableLine, defaultDraft, findAddable, nextDraft, type AddableJob } from "./add-to-schedule-sheet";
+import {
+  AddToScheduleSheet,
+  FoundRows,
+  PickedSections,
+  addableLine,
+  dayLineKey,
+  defaultDraft,
+  findAddable,
+  makesNewJob,
+  newJobForWords,
+  newJobHereWords,
+  newJobHref,
+  nextDraft,
+  type AddableJob,
+  type Picked,
+} from "./add-to-schedule-sheet";
+import { translator } from "@/lib/i18n";
+import { LangProvider } from "@/components/lang-provider";
+import type { FoundCustomer, PastJob } from "@/lib/schedule/find-for-day";
 import { TimeGrid, slotMinute } from "@/components/time-grid";
 
 const WORK_DAY = { start: "09:00", end: "17:00" };
@@ -171,5 +189,158 @@ describe("the open spots and the day's +, on the grid", () => {
     expect(view).toMatch(/\{canEdit && !target\.armed && \(\s*<button[\s\S]*?onClick=\{\(\) => onSlotTap\(anchorK, null\)\}/);
     const panel = readFileSync(join(process.cwd(), "src/app/(app)/schedule/calendar-panel.tsx"), "utf8");
     expect(panel).toMatch(/canEdit\s*\?\s*supabase\s*\.from\("jobs"\)\s*\.select\("id, job_number, name, status, address, city, planned_minutes, assigned_to, customers\(name\)"\)\s*\.in\("status", ACTIVE_JOB_STATUSES\)/);
+  });
+});
+
+/**
+ * A PLACE TO GO BACK TO, AND A PERSON (cn-v1159; Erik, 2026-11-10, on the Schedule: "it wont let me add
+ * to schedule unless its already a job and [a street] is a job already so why cant it find it?", "or
+ * rather is an address of a previous job i need to go back to for more work", "not even an address or a
+ * person as it states it can find"). The box said street, name, customer and searched the jobs in flight
+ * alone. It now also finds finished jobs and customers; a finished job asks how to go back; a customer
+ * starts a new job; anything not on file is the New Job form, opened on the day.
+ */
+describe("what the box can find, and what a pick does", () => {
+  const done: PastJob = { id: "p1", name: "41 Larkspur Ln #5", status: "complete", address: "41 Larkspur Ln", unit: "5", city: "Truckee", planned_minutes: 240, assigned_to: ["p-erik"], customers: { name: "Dana Rook" } };
+  const off: PastJob = { id: "p2", name: "Panel Upgrade", status: "cancelled", address: "12 Snowbell Rd", city: "Truckee", customers: null };
+  const rook: FoundCustomer = { id: "c1", name: "Dana Rook", company_name: null, address: "9 Bayberry Ct", unit: null, city: "Truckee" };
+  const vance: FoundCustomer = { id: "c2", name: "Theo Vance", company_name: "Catbird Builders", address: null, unit: null, city: null };
+  const en = translator("en");
+  const es = translator("es");
+  const sheet = readFileSync(join(process.cwd(), "src/app/(app)/schedule/add-to-schedule-sheet.tsx"), "utf8");
+  const html = renderToStaticMarkup(createElement(AddToScheduleSheet, { at: { day: "2026-09-28", minute: 720 }, jobs, team, workDay: WORK_DAY, onClose: () => {} }));
+
+  it("the box says what it finds, and with nothing typed says how to find the rest", () => {
+    // What is searched (jobs and customers) and by what (a street or a name): a lead is not, and the box does not say it is.
+    expect(html).toMatch(/<input[^>]*placeholder="Find a job or a customer: street or name"/);
+    expect(text(html)).toContain("Type a street or a name to find a finished job or a customer too.");
+    // Nothing is asked of the server until something is typed: no finished job, no customer, no searching line.
+    expect(text(html)).not.toMatch(/Finished Jobs|Customers|Looking through|Nothing matches/);
+  });
+
+  it("the rows it finds: finished jobs under their own heading with what they are now, customers under theirs, every row 44px", () => {
+    const rows = renderToStaticMarkup(createElement("ul", null, createElement(FoundRows, { past: [done, off], people: [rook, vance], picked: { kind: "past", job: done }, onPick: () => {} })));
+    const t = text(rows);
+    expect(t).toMatch(/Finished Jobs\s+41 Larkspur Ln #5\s+Dana Rook\s+complete\s+Panel Upgrade\s+12 Snowbell Rd\s+cancelled/);
+    expect(t).toMatch(/Customers\s+Dana Rook\s+9 Bayberry Ct · Truckee\s+Customer\s+Theo Vance\s+Catbird Builders\s+Customer/);
+    const buttons = rows.match(/<button\b[^>]*>/g) ?? [];
+    expect(buttons).toHaveLength(4);
+    for (const b of buttons) expect(b).toMatch(/\bmin-h-11\b/);
+    // The one picked is said to a screen reader and drawn picked; the others are not.
+    expect(rows.match(/aria-pressed="true"/g)).toHaveLength(1);
+    // With nothing found there is no heading left standing over nothing.
+    expect(renderToStaticMarkup(createElement("ul", null, createElement(FoundRows, { past: [], people: [], picked: null, onPick: () => {} })))).toBe("<ul></ul>");
+  });
+
+  it("a finished job ASKS how to go back: New Job Here first, Reopen This Job beside it, and each says what it does", () => {
+    const panel = (back: "new" | "reopen", picked: Picked = { kind: "past", job: done }) =>
+      renderToStaticMarkup(createElement(PickedSections, { picked, back, onBack: () => {}, work: "", onWork: () => {} }));
+    const asNew = panel("new");
+    expect(asNew).toMatch(/<button[^>]*aria-pressed="true"[^>]*>New Job Here<\/button>/);
+    expect(asNew).toMatch(/<button[^>]*aria-pressed="false"[^>]*>Reopen This Job<\/button>/);
+    expect(asNew.indexOf("New Job Here")).toBeLessThan(asNew.indexOf("Reopen This Job"));
+    // WHICH job is said in the section itself: its row may have left the list above by now.
+    expect(text(asNew)).toContain("41 Larkspur Ln #5 · Dana Rook · complete");
+    expect(text(panel("reopen"))).toContain("41 Larkspur Ln #5 · Dana Rook · complete");
+    expect(text(asNew)).toContain("A new job for Dana Rook at 41 Larkspur Ln #5. The old job stays complete.");
+    // A new job takes a few optional words; a reopened job already has its own.
+    expect(asNew).toMatch(/<input[^>]*id="add-to-schedule-work"[^>]*maxLength="500"/);
+    const reopened = panel("reopen");
+    expect(reopened).toMatch(/<button[^>]*aria-pressed="true"[^>]*>Reopen This Job<\/button>/);
+    expect(text(reopened)).toContain("This job goes back on the schedule as Scheduled. New hours and parts land on it.");
+    expect(reopened).not.toContain("add-to-schedule-work");
+    // Every door 44px.
+    for (const d of [...(asNew.match(/<(button|input)\b[^>]*>/g) ?? []), ...(reopened.match(/<(button|input)\b[^>]*>/g) ?? [])]) expect(d, d).toMatch(/\b(min-)?h-11\b/);
+    // A job in flight, or nothing picked, draws none of it.
+    expect(panel("new", { kind: "job", id: "j011" })).toBe("");
+    expect(renderToStaticMarkup(createElement(PickedSections, { picked: null, back: "new", onBack: () => {}, work: "", onWork: () => {} }))).toBe("");
+  });
+
+  it("the sentence under New Job Here names who and where when it has them, and never invents either", () => {
+    // "The old job", never its name: a job is named for its street, so both would carry the same one.
+    expect(newJobHereWords(done, "en", en)).toBe("A new job for Dana Rook at 41 Larkspur Ln #5. The old job stays complete.");
+    expect(newJobHereWords(off, "en", en)).toBe("A new job at 12 Snowbell Rd. The old job stays cancelled.");
+    expect(newJobHereWords({ ...off, address: null, customers: { name: "Sam Tillery" } }, "en", en)).toBe("A new job for Sam Tillery. The old job stays cancelled.");
+    // No street and nobody: nothing is claimed about its name (the namer decides it on the server).
+    expect(newJobHereWords({ ...off, address: null }, "en", en)).toBe("A new job. The old job stays cancelled.");
+    // Spanish says the status in lower case inside the sentence.
+    expect(newJobHereWords(done, "es", es)).toBe("Un trabajo nuevo para Dana Rook en 41 Larkspur Ln #5. El trabajo anterior sigue terminado.");
+  });
+
+  it("a customer starts a new job at the address on their card, or one named for them when there is none", () => {
+    const panel = (who: FoundCustomer) => text(renderToStaticMarkup(createElement(PickedSections, { picked: { kind: "customer", who }, back: "new", onBack: () => {}, work: "", onWork: () => {} })));
+    expect(panel(rook)).toContain("A new job for Dana Rook at 9 Bayberry Ct.");
+    expect(panel(rook)).toContain("What's the Work?");
+    // No claim about what the job will be called: a business is named for its company, not the person.
+    expect(newJobForWords(vance, en)).toBe("A new job for Theo Vance. No address is on their card: add it on the job.");
+    // No go-back choice for a person: there is no old job to reopen.
+    expect(panel(rook)).not.toMatch(/Reopen This Job|New Job Here/);
+  });
+
+  it("which picks make a new job, and what the day is to each", () => {
+    expect(makesNewJob({ kind: "customer", who: rook }, "reopen")).toBe(true);
+    expect(makesNewJob({ kind: "past", job: done }, "new")).toBe(true);
+    expect(makesNewJob({ kind: "past", job: done }, "reopen")).toBe(false);
+    expect(makesNewJob({ kind: "job", id: "j011" }, "new")).toBe(false);
+    expect(makesNewJob(null, "new")).toBe(false);
+    expect(dayLineKey(null, "new")).toBe("ag_rail_dayKeepsOthers");
+    expect(dayLineKey({ kind: "job", id: "j011" }, "new")).toBe("ag_rail_dayKeepsOthers");
+    expect(dayLineKey({ kind: "past", job: done }, "new")).toBe("ag_rail_dayNewJob");
+    expect(dayLineKey({ kind: "past", job: done }, "reopen")).toBe("ag_rail_dayReopen");
+    expect(dayLineKey({ kind: "customer", who: rook }, "new")).toBe("ag_rail_dayNewJob");
+  });
+
+  it("somebody or somewhere not on file yet: the New Job form, opened on the day and hour, by a link that leaves the sheet open", () => {
+    expect(html).toMatch(/<a[^>]*href="\/jobs\?new=1&amp;date=2026-09-28&amp;time=12:00"[^>]*>/);
+    expect(text(html)).toContain("New Job on Mon, Sep 28");
+    expect(text(html)).toContain("Not here? A new customer or a new address starts with a new job.");
+    expect(newJobHref("2026-09-28", "12:00")).toBe("/jobs?new=1&date=2026-09-28&time=12:00");
+    expect(newJobHref("2026-09-28", "")).toBe("/jobs?new=1&date=2026-09-28");
+    expect(newJobHref("", "12:00")).toBe("/jobs?new=1");
+    expect(newJobHref("2026-09-28", "25:99")).toBe("/jobs?new=1&date=2026-09-28");
+    // Only a day and a time ride in the address: never a name, a street or what was typed.
+    expect(sheet).not.toMatch(/jobs\?new=1[^`"]*\$\{(?!day\b|startHm\b|\/)/);
+    // The New Job form reads them, opens on that day, and takes them back off the address.
+    const form = readFileSync(join(process.cwd(), "src/app/(app)/schedule/new-job-button.tsx"), "utf8");
+    expect(form).toContain('const dayAsked = searchParams.get("date") ?? "";');
+    expect(form).toContain("setForm((f) => ({ ...f, scheduled_date: dayAsked, scheduled_time: hm }));");
+    expect(form).toContain('params.delete("date");');
+    expect(form).toContain('params.delete("time");');
+    // The carried day is the start of THAT open only: closing and saving each put the fresh form's snapshot
+    // back (two), beside the first render's own (one).
+    expect(form.match(/initialSnap\.current = JSON\.stringify\(emptyForm\(\)\);/g)).toHaveLength(3);
+    expect(form).toMatch(/function discard\(\) \{[\s\S]{0,420}initialSnap\.current = JSON\.stringify\(emptyForm\(\)\);/);
+  });
+
+  it("the search beyond the jobs in flight is asked of the server in a POST body, a moment after the typing stops, and a failure is said", () => {
+    expect(sheet).toContain('fetch("/api/schedule/find", {');
+    expect(sheet).toContain('method: "POST",');
+    expect(sheet).toContain("body: JSON.stringify({ q: query }),");
+    expect(sheet).not.toMatch(/api\/schedule\/find\?/);
+    expect(sheet).toContain("signal: asked.signal,");
+    expect(sheet).toContain('if (!asked.signal.aborted) setFinding("failed");');
+    expect(sheet).toContain('{finding === "failed" && <li className="px-3 py-2 text-xs text-amber-700">{t("ag_rail_searchFailed")}</li>}');
+    // Nothing anywhere is only said once the server HAS answered; before that it is the in-flight list's own sentence.
+    expect(sheet).toContain('t(asking && finding === "idle" && found ? "ag_rail_nothingMatches" : "ag_rail_noJobMatches")');
+  });
+
+  it("the save: a new job through startJobOnDay by ID alone, a reopen said to addJobDay, and a job made without its day is never made twice", () => {
+    expect(sheet).toContain('res = await startJobOnDay(going.kind === "customer" ? { customerId: going.who.id } : { pastJobId: going.job.id }, {');
+    expect(sheet).toContain("res = await addJobDay(id, payload, { reopen });");
+    expect(sheet).toContain("res = await addJobDay(id, payload, { reopen, cancelProposals: true });");
+    expect(sheet).toContain('const reopen = going.kind === "past";');
+    // Made, but its day failed: the pick becomes that job, so the next tap adds the day and makes nothing.
+    expect(sheet).toMatch(/if \(!res\.ok && res\.id\) \{[\s\S]*?setPicked\(\{ kind: "job", id: res\.id \}\);[\s\S]*?router\.refresh\(\);/);
+    // The button waits for something picked that it can act on.
+    expect(sheet).toContain('const ready = !!picked && (picked.kind !== "job" || !!job);');
+  });
+
+  it("Spanish: the same doors and sentences, none left in English", () => {
+    const wrap = (el: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(LangProvider, { lang: "es" } as never, el));
+    const t = text(
+      wrap(createElement("div", null, createElement("ul", null, createElement(FoundRows, { past: [done], people: [rook], picked: null, onPick: () => {} })), createElement(PickedSections, { picked: { kind: "past", job: done }, back: "new", onBack: () => {}, work: "", onWork: () => {} }))),
+    );
+    for (const w of ["Trabajos Terminados", "Clientes", "Cliente", "Para Regresar", "Trabajo Nuevo Aquí", "Reabrir Este Trabajo", "¿Cuál Es el Trabajo?"]) expect(t, w).toContain(w);
+    expect(t).not.toMatch(/Finished Jobs|Customers|Going Back|New Job Here|Reopen This Job|What's the Work/);
   });
 });

@@ -267,9 +267,24 @@ export function NewJobButton({
       return;
     }
     if (!newParam.take(claimant)) return;
+    /* FROM THE SCHEDULE (Add to Schedule's "New Job on Wed, Nov 11", cn-v1159): the day tapped there,
+       and its half hour, ride in as ?date= and ?time= and the form opens on them instead of today. Only
+       a day and a time, never a name or a street: an address bar's line is kept in logs. A day the URL
+       carried is where this form STARTS, so closing it untouched asks nothing (the fresh snapshot moves
+       with it); the time lives under More Options, which opens so the hour is seen and not a surprise. */
+    const dayAsked = searchParams.get("date") ?? "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dayAsked)) {
+      const timeAsked = searchParams.get("time") ?? "";
+      const hm = /^([01]\d|2[0-3]):[0-5]\d$/.test(timeAsked) ? timeAsked : "";
+      setForm((f) => ({ ...f, scheduled_date: dayAsked, scheduled_time: hm }));
+      initialSnap.current = JSON.stringify({ ...(JSON.parse(initialSnap.current ?? "{}") as object), scheduled_date: dayAsked, scheduled_time: hm });
+      if (hm) setMoreOpen(true);
+    }
     setOpen(true);
     const params = new URLSearchParams(Array.from(searchParams.entries()));
     params.delete("new");
+    params.delete("date");
+    params.delete("time");
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }, [searchParams, pathname, router, claimant]);
@@ -284,6 +299,9 @@ export function NewJobButton({
   function discard() {
     draft.clear();
     setForm(emptyForm());
+    // The next open starts from a fresh form again: a day the Schedule's link carried in was the start
+    // of THAT open only (skeptic #62: left in place, an untouched form read as changed and asked twice).
+    initialSnap.current = JSON.stringify(emptyForm());
     setFormKey((k) => k + 1);
     setMoreOpen(false);
     setOpen(false);
@@ -300,6 +318,7 @@ export function NewJobButton({
       // Saved — drop the draft and reset so reopening doesn't offer a duplicate.
       draft.clear();
       setForm(emptyForm());
+      initialSnap.current = JSON.stringify(emptyForm());
       setFormKey((k) => k + 1);
       setMoreOpen(false);
       setOpen(false);

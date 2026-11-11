@@ -198,7 +198,7 @@ export function workWordsForName(words: string | null | undefined): string {
 
 /** Does the street line already carry this unit ("12 Elm St #5", "12 Elm St Apt 5", "12 Elm St Suite
  *  5", "12 Elm St # 5")? Then the name adds no " #5": the unit is never on it twice. */
-function streetCarriesUnit(street: string, unit: string): boolean {
+export function streetCarriesUnit(street: string, unit: string): boolean {
   const s = street.toLowerCase();
   const u = unit.toLowerCase();
   if (!u || !s.endsWith(u)) return false;

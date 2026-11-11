@@ -17,6 +17,8 @@ const state = vi.hoisted(() => ({
   noHours: false,
   /** Every read of the days fails (a timeout): the writer must stop before it writes anything. */
   failSegRead: false,
+  /** The day rows cannot be written (the job's listed day already was): the range writer's late failure. */
+  failSegInsert: false,
 }));
 
 const HOURS = /\b(start_time|end_time)\b/;
@@ -44,6 +46,9 @@ function builder(table: string) {
   const filtersOf = () => Object.fromEntries(q.filters.map(([k, , v]) => [k, v]));
   const run = (single: boolean) => {
     const rows = state.db[table] ?? (state.db[table] = []);
+    if (state.failSegInsert && table === "job_schedule_segments" && q.op === "insert") {
+      return { data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } };
+    }
     if (state.failSegRead && table === "job_schedule_segments" && q.op === "select") {
       return { data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } };
     }
@@ -149,6 +154,7 @@ beforeEach(() => {
   state.writes = [];
   state.noHours = false;
   state.failSegRead = false;
+  state.failSegInsert = false;
   state.db = {
     // ET Electric's shape: Pacific, a 9-to-5 day.
     organizations: [{ id: "org-1", settings: { timezone: LA, work_day_start: "09:00", work_day_end: "17:00" } }],
@@ -485,5 +491,157 @@ describe("before 0370, Add to Schedule never redraws the job's other days", () =
     const r = await actions.addJobDay("j011", { day: "2026-09-28", start: "12:00", length: 120 });
     expect(r.ok).toBe(true);
     expect(r.note).toContain("Added Mon, Sep 28, 9:00 AM – 5:00 PM.");
+  });
+});
+
+/**
+ * GOING BACK (cn-v1159; Erik, 2026-11-10, on the Schedule: "it wont let me add to schedule unless its
+ * already a job and [a street] is a job already so why cant it find it?", "or rather is an address of a
+ * previous job i need to go back to for more work", "not even an address or a person as it states it
+ * can find"). Two writers behind what the sheet's search now finds: a finished job reopened (addJobDay
+ * with `reopen` said), and a NEW job made and put on the day (startJobOnDay) from a finished job's
+ * address or from a customer. The day added is years ahead and the days worked are behind, so nothing
+ * here leans on the machine's own today.
+ */
+describe("going back to a finished job, and a new job for a place or a person", () => {
+  const AHEAD = "2031-03-12";
+  const larkspur = (over: Row = {}) => {
+    state.db.customers.push({ id: "c-rook", name: "Dana Rook", address: "9 Bayberry Ct", unit: null, city: "Truckee", state: "CA", zip: "96161" });
+    state.db.jobs.push({
+      id: "old",
+      name: "41 Larkspur Ln #5",
+      status: "complete",
+      customer_id: "c-rook",
+      address: "41 Larkspur Ln",
+      unit: "5",
+      city: "Truckee",
+      state: "CA",
+      zip: "96161",
+      scheduled_start: at("2026-09-24", "09:00"),
+      scheduled_end: at("2026-09-24", "17:00"),
+      planned_minutes: 240,
+      assigned_to: ["p-erik"],
+      ...over,
+    });
+    state.db.job_schedule_segments.push(
+      { job_id: "old", start_date: "2026-09-22", end_date: "2026-09-22", start_time: null, end_time: null },
+      { job_id: "old", start_date: "2026-09-24", end_date: "2026-09-24", start_time: null, end_time: null },
+    );
+    state.db.time_entries.push({ job_id: "old", clock_in: at("2026-09-22", "08:00") }, { job_id: "old", clock_in: at("2026-09-24", "08:00") });
+  };
+  const newJobs = () => state.db.jobs.filter((j) => j.id !== "old");
+
+  it("Reopen This Job: the day goes on, the job is Scheduled again, and the days it was worked stay", async () => {
+    larkspur();
+    const r = await actions.addJobDay("old", { day: AHEAD, start: "10:00" }, { reopen: true });
+    expect(r.ok).toBe(true);
+    expect(r.note).toContain("It's reopened: Scheduled again.");
+    expect(job("old").status).toBe("scheduled");
+    // The day added is its plan now: the listed start moved onto it, at the hour asked.
+    expect(job("old").scheduled_start).toBe(at(AHEAD, "10:00"));
+    // Its size came with it (four hours), and the days it was worked are still on the calendar.
+    expect(job("old").scheduled_end).toBe(at(AHEAD, "14:00"));
+    expect(days("old")).toEqual(["2026-09-22..2026-09-22 usual", "2026-09-24..2026-09-24 usual", `${AHEAD}..${AHEAD} usual`]);
+    // The status write is the checked one: on the status it was read with, and it reads its rows.
+    const back = state.writes.find((w) => w.table === "jobs" && w.row?.status === "scheduled" && w.filters.status === "complete");
+    expect(back?.filters).toMatchObject({ id: "old", status: "complete" });
+    expect(back?.row).toMatchObject({ status: "scheduled", hold_reason: null });
+    expect(newJobs()).toEqual([]);
+  });
+
+  it("a job that was called off comes back the same way; without `reopen` said, either is refused and nothing is written", async () => {
+    larkspur({ status: "cancelled" });
+    const no = await actions.addJobDay("old", { day: AHEAD });
+    expect(no.ok).toBe(false);
+    expect(no.error).toMatch(/so it can't take another day/);
+    expect(await actions.addJobDay("old", { day: AHEAD }, { reopen: false })).toMatchObject({ ok: false });
+    expect(state.writes).toEqual([]);
+    expect((await actions.addJobDay("old", { day: AHEAD }, { reopen: true })).ok).toBe(true);
+    expect(job("old").status).toBe("scheduled");
+  });
+
+  it("`reopen` said for a job in flight changes nothing about it: the day joins its plan as always", async () => {
+    honeysuckle();
+    const r = await actions.addJobDay("j011", { day: "2026-09-28", start: "12:00", length: 300 }, { reopen: true });
+    expect(r.ok).toBe(true);
+    expect(r.note).not.toContain("reopened");
+    expect(job("j011").status).toBe("in_progress");
+    expect(days("j011")).toContain("2026-09-28..2026-09-28 12:00-17:00");
+  });
+
+  it("New Job Here: a new job for the same customer at the same address and unit, on the day; the old job is not touched", async () => {
+    larkspur();
+    const before = JSON.stringify(job("old"));
+    const r = await actions.startJobOnDay({ pastJobId: "old" }, { day: AHEAD, start: "13:00", length: 120, crew: { add: ["p-brian"] }, work: "  Add two outlets in the garage  " });
+    expect(r.ok).toBe(true);
+    const [made] = newJobs();
+    expect(newJobs()).toHaveLength(1);
+    expect(r.id).toBe(made.id);
+    // Who and where came from the old job's own row, and the name is the street as always.
+    expect(made).toMatchObject({ customer_id: "c-rook", address: "41 Larkspur Ln", unit: "5", city: "Truckee", state: "CA", zip: "96161", name: "41 Larkspur Ln #5", description: "Add two outlets in the garage", status: "scheduled" });
+    expect(made.scheduled_start).toBe(at(AHEAD, "13:00"));
+    expect(made.scheduled_end).toBe(at(AHEAD, "15:00"));
+    expect(made.assigned_to).toEqual(["p-brian"]);
+    expect(r.note).toMatch(/^New job: 41 Larkspur Ln #5\. Added /);
+    // The finished job is exactly as it was: its status, its days, its crew.
+    expect(JSON.stringify(job("old"))).toBe(before);
+    expect(days("old")).toEqual(["2026-09-22..2026-09-22 usual", "2026-09-24..2026-09-24 usual"]);
+  });
+
+  it("a customer: a new job at the address on their card; with no address it is named for them", async () => {
+    larkspur();
+    const r = await actions.startJobOnDay({ customerId: "c-rook" }, { day: AHEAD });
+    expect(r.ok).toBe(true);
+    expect(newJobs()[0]).toMatchObject({ customer_id: "c-rook", address: "9 Bayberry Ct", city: "Truckee", name: "9 Bayberry Ct", status: "scheduled" });
+    // Nobody sized it and no length was chosen: two hours from the work day's start, said.
+    expect(newJobs()[0].scheduled_start).toBe(at(AHEAD, "09:00"));
+    expect(r.note).toContain("New job: 9 Bayberry Ct.");
+
+    state.db.customers.push({ id: "c-vance", name: "Theo Vance", address: null, unit: null, city: null, state: null, zip: null });
+    const bare = await actions.startJobOnDay({ customerId: "c-vance" }, { day: AHEAD });
+    expect(bare.ok).toBe(true);
+    expect(newJobs()[1]).toMatchObject({ customer_id: "c-vance", address: null, name: "Theo Vance" });
+  });
+
+  it("a finished job with no street and nobody on it has only its name: the new job keeps it, never a dated stub", async () => {
+    state.db.jobs.push({ id: "old", name: "Shop Inventory Day", status: "complete", customer_id: null, address: null, unit: null, city: null, state: null, zip: null, assigned_to: [] });
+    const r = await actions.startJobOnDay({ pastJobId: "old" }, { day: AHEAD });
+    expect(r.ok).toBe(true);
+    expect(newJobs()[0]).toMatchObject({ name: "Shop Inventory Day", customer_id: null, address: null, status: "scheduled" });
+    expect(r.note).toContain("New job: Shop Inventory Day.");
+  });
+
+  it("checked BEFORE anything is made: a bad day, a bad start, a record that is gone leave no job behind", async () => {
+    larkspur();
+    expect((await actions.startJobOnDay({ pastJobId: "old" }, { day: "Wednesday" })).error).toBe("Pick a day.");
+    expect((await actions.startJobOnDay({ pastJobId: "old" }, { day: AHEAD, start: "25:00" })).error).toBe("Pick a start time.");
+    expect((await actions.startJobOnDay({ pastJobId: "nope" }, { day: AHEAD })).error).toBe("That job isn't available. It may have been deleted.");
+    expect((await actions.startJobOnDay({ customerId: "nope" }, { day: AHEAD })).error).toBe("That customer isn't available. They may have been deleted.");
+    expect(newJobs()).toEqual([]);
+    expect(state.writes).toEqual([]);
+  });
+
+  it("a day that does not go on leaves ONE job, waiting, and says so with its name and its id", async () => {
+    larkspur();
+    state.failSegRead = true;
+    const r = await actions.startJobOnDay({ pastJobId: "old" }, { day: AHEAD });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/^41 Larkspur Ln #5 was made, but it didn't go on that day: .+ It's on the Schedule under Waiting for a Day\.$/);
+    expect(newJobs()).toHaveLength(1);
+    expect(r.id).toBe(newJobs()[0].id);
+    expect(newJobs()[0]).toMatchObject({ status: "to_be_scheduled", scheduled_start: null });
+  });
+
+  it("a day that DID land with something unsaved is said as on the day, never as waiting (what is true is read, not assumed)", async () => {
+    larkspur();
+    state.failSegInsert = true;
+    const r = await actions.startJobOnDay({ pastJobId: "old" }, { day: AHEAD, start: "13:00" });
+    // The job's listed day was written before the day rows failed: it is drawn on the day, and a second try would be refused as already there.
+    expect(newJobs()).toHaveLength(1);
+    expect(newJobs()[0]).toMatchObject({ status: "scheduled", scheduled_start: at(AHEAD, "13:00") });
+    expect(r.ok).toBe(true);
+    expect(r.id).toBe(newJobs()[0].id);
+    expect(r.note).toMatch(/^New job: 41 Larkspur Ln #5\. It's on that day, but something didn't save: .+ Tap its block to check its time and crew\.$/);
+    expect(r.note).not.toContain("Waiting for a Day");
   });
 });

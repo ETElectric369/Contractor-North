@@ -25,6 +25,11 @@ export type JobStatus = (typeof JOB_STATUSES)[number];
  *  schedule/My-Day reads, and the clock-in "this job is now started" promotion. */
 export const ACTIVE_JOB_STATUSES: JobStatus[] = ["to_be_scheduled", "scheduled", "in_progress", "on_hold"];
 
+/** A job that is OVER: finished, or called off. Everything on the spine that is not in flight, worked
+ *  out and never listed, so a status added tomorrow is one or the other the day it is added. The
+ *  schedule's Add to Schedule reads these as a place to go back to (lib/schedule/find-for-day). */
+export const ENDED_JOB_STATUSES: JobStatus[] = JOB_STATUSES.filter((s) => !ACTIVE_JOB_STATUSES.includes(s));
+
 /**
  * WHICH DOOR A STATUS IS WRITTEN THROUGH (M2, Tess J-002).
  *

@@ -39,7 +39,7 @@ import { actualSpans } from "@/lib/schedule/plan-vs-actual";
 import { jobWords } from "@/lib/action-items/words";
 import { dayHoursOf, freezeDrawnDays, nextDayHours, readDayHours } from "@/lib/schedule/day-hours";
 import { ownHoursByJobDay, segmentCols, withDayHours, type SegmentRow } from "@/lib/schedule/segment-hours";
-import { ACTIVE_JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
+import { ACTIVE_JOB_STATUSES, ENDED_JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
 import { rescheduleAppointment, unscheduleAppointment } from "../appointments/actions";
 import {
   fitIntoDay,
@@ -1264,7 +1264,7 @@ export async function setJobDayTimes(
 export async function addJobDay(
   jobId: string,
   p: { day: string; start?: string; length?: JobLength; crew?: { add?: string[]; remove?: string[] } },
-  opts?: { cancelProposals?: boolean },
+  opts?: { cancelProposals?: boolean; reopen?: boolean },
 ): Promise<Result & { needsProposalConfirm?: boolean; note?: string; defaulted?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -1294,7 +1294,15 @@ export async function addJobDay(
   };
   // The job's name, else "That job" in the caller's words (only a refusal reads it).
   const called = async () => job.name?.trim() || (await ws.say("ag_thatJob"));
-  if (!(ACTIVE_JOB_STATUSES as string[]).includes(String(job.status ?? ""))) {
+  const statusWas = String(job.status ?? "");
+  const inFlight = (ACTIVE_JOB_STATUSES as string[]).includes(statusWas);
+  /* GOING BACK TO A FINISHED JOB (Erik, 2026-11-10: "an address of a previous job i need to go back to
+     for more work"). `reopen` is said by the sheet only after the person picked Reopen This Job: a job
+     that is complete or called off then takes the day and is Scheduled again. Without it such a job is
+     refused, as it always was: nothing reopens a finished job by accident, and only a status that ENDED
+     a job can be come back from. */
+  const reopening = !inFlight && opts?.reopen === true && (ENDED_JOB_STATUSES as string[]).includes(statusWas);
+  if (!inFlight && !reopening) {
     const lang = await ws.lang();
     const label = jobStatusLabel(String(job.status ?? ""), lang, translator(lang));
     // Spanish reads the status mid-sentence in lower case ("está terminado"), as English always has ("is complete").
@@ -1306,8 +1314,9 @@ export async function addJobDay(
   if (segErr) return { ok: false, error: segErr };
   const { tz, dayStartHm, dayEndHm } = await orgSchedulePrefs(supabase);
   const onHold = job.status === "on_hold";
-  // THE LIVE PLAN (a day, not on hold): its span, else none.
-  const plan = onHold ? null : planSpan(job, tz);
+  // THE LIVE PLAN (a day, not on hold, not a finished job coming back): its span, else none. A finished
+  // job's days are its HISTORY: the day added is its plan now, and the days it was worked stay drawn.
+  const plan = onHold || reopening ? null : planSpan(job, tz);
   /* A DAY OF ITS PLAN IT'S ALREADY ON is refused: its block there is the door (This Day's time, the
      crew). A day it sits on only as HISTORY (worked, outside the plan; or any day of a job with no live
      plan) takes the add: that day becomes a planned day at these hours. Refusing it would send the
@@ -1419,6 +1428,28 @@ export async function addJobDay(
         .select("id");
       notes.push(await ws.say(woke?.length ? "ag_srv_offHoldNow" : "ag_srv_stillOnHold"));
     }
+    if (reopening) {
+      /* THE STATUS FOLLOWS THE DAY, the way a hold's does above: the day is written first, then the job
+         is Scheduled again, on the status it was read with (a job somebody else moved meanwhile is left
+         as they put it) and with its row count read (the silent-write law). The same write the job
+         page's status control makes (jobs/actions setJobStatus): a nearer door to it, not a new power.
+         Google hears twice: the range writer pushed while the job was still over (an event taken off),
+         so it is pushed again once the job is live. A status that did not move is SAID, with its one
+         next step, never left as a day drawn on a job that still reads finished. */
+      const { data: back } = await supabase
+        .from("jobs")
+        .update({ status: "scheduled", hold_reason: null, updated_at: new Date().toISOString() })
+        .eq("id", jobId)
+        .eq("status", statusWas)
+        .select("id");
+      if (back?.length) {
+        await pushCalendarItem("job", jobId);
+        notes.push(await ws.say("ag_srv_reopenedNow"));
+      } else {
+        // No status is named: somebody moved it meanwhile, and what it reads now is theirs, not the one read above.
+        notes.push(await ws.say("ag_srv_stillEnded"));
+      }
+    }
   } else {
     if (!perDayHours) notes.push(await ws.say("ag_srv_usualHoursForNow"));
     res = await writeScheduleRanges(supabase, jobId, live.days, undefined, live.mirror);
@@ -1446,6 +1477,93 @@ export async function addJobDay(
   const added = await ws.say(defaulted ? "ag_srv_addedDayDefaulted" : "ag_srv_addedDay", { day: dayWords(day, lang), span });
   const note = [added, ...notes].join(" ");
   return { ok: true, note, ...(defaulted ? { defaulted: true } : {}) };
+}
+
+/**
+ * A NEW JOB, STRAIGHT ONTO A DAY, from what Add to Schedule's search found (Erik, 2026-11-10: "an
+ * address of a previous job i need to go back to for more work", and "not even an address or a person
+ * as it states it can find"). Two things it can start from, and it takes only their ID: who the job is
+ * for and where it is are READ HERE, through the caller's own session, never taken from the page.
+ *
+ *   · a FINISHED JOB (`pastJobId`): a new job for the same customer at the same address and unit. The
+ *     old job is not touched: it stays finished, with its bills and its hours.
+ *   · a CUSTOMER (`customerId`): a new job for them at the address on their card.
+ *
+ * TWO DOORS THAT ALREADY EXIST, ONE AFTER THE OTHER, and nothing new written by hand: createJob (the
+ * one writer of a new job: its name is the street as always, its billing the company's usual, no day
+ * yet), then addJobDay (the day, its hours, who is on it, and Scheduled). The day, the time and the
+ * length are checked BEFORE the job is made, so a bad day never leaves a job behind; if the day still
+ * does not go on (a failed write), the job is real and waiting for a day, and that is SAID with its
+ * name: it is on the Schedule's Waiting for a Day list, never lost and never made twice in silence.
+ * No money anywhere: a new job owes nothing and bills nothing.
+ */
+export async function startJobOnDay(
+  from: { pastJobId: string } | { customerId: string },
+  p: { day: string; start?: string; length?: JobLength; crew?: { add?: string[] }; work?: string },
+): Promise<Result & { note?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
+  const supabase = ctx.supabase;
+  const day = String(p?.day ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return { ok: false, error: await ws.say("ag_pickADay") };
+  const start = p?.start ? String(p.start).slice(0, 5) : undefined;
+  if (start !== undefined && readHm(start) == null) return { ok: false, error: await ws.say("ag_srv_pickStartTime") };
+  const bad = lengthProblem(p?.length);
+  if (bad) return { ok: false, error: await ws.say(bad) };
+
+  // WHO AND WHERE, from the record itself. PROJECTION LAW: every column the new job takes is in the list.
+  type Site = { customer_id: string | null; address: string | null; unit: string | null; city: string | null; state: string | null; zip: string | null };
+  let site: Site;
+  /** A finished job with no street and nobody on it has only its NAME to be known by: the new job keeps it. */
+  let nameKept = "";
+  if ("pastJobId" in from) {
+    const { data, error } = await supabase.from("jobs").select("id, name, customer_id, address, unit, city, state, zip").eq("id", String(from.pastJobId ?? "")).maybeSingle();
+    if (error) return { ok: false, error: dbError(error) };
+    if (!data) return { ok: false, error: await ws.say("ag_srv_jobGoneDeleted") };
+    site = data as unknown as Site;
+    if (!String(site.address ?? "").trim() && !site.customer_id) nameKept = String((data as { name?: string | null }).name ?? "").trim();
+  } else {
+    const { data, error } = await supabase.from("customers").select("id, address, unit, city, state, zip").eq("id", String(from.customerId ?? "")).maybeSingle();
+    if (error) return { ok: false, error: dbError(error) };
+    if (!data) return { ok: false, error: await ws.say("ag_srv_thatCustomerGone") };
+    const c = data as unknown as Omit<Site, "customer_id"> & { id: string };
+    site = { customer_id: c.id, address: c.address, unit: c.unit, city: c.city, state: c.state, zip: c.zip };
+  }
+
+  // The new job, through the one writer of a new job. "scheduled_date" is sent EMPTY on purpose: the
+  // job is made waiting for a day, and the day goes on below with the hours and crew the sheet chose.
+  const form = new FormData();
+  if (site.customer_id) form.set("customer_id", site.customer_id);
+  for (const k of ["address", "unit", "city", "state", "zip"] as const) {
+    const v = String(site[k] ?? "").trim();
+    if (v) form.set(k, v);
+  }
+  form.set("scheduled_date", "");
+  // With a street or a customer the name is the namer's, as on every new job (the street, else who).
+  if (nameKept) form.set("name", nameKept);
+  const work = String(p?.work ?? "").trim().slice(0, 500);
+  if (work) form.set("description", work);
+  const made = await createJob(form);
+  if (!made.ok || !made.id) return { ok: false, error: made.error ?? (await ws.say("ag_srv_jobNotMade")) };
+  const name = made.name?.trim() || (await ws.say("ag_thatJob"));
+
+  const on = await addJobDay(made.id, { day, start, length: p?.length, crew: { add: (p?.crew?.add ?? []).map(String).filter(Boolean) } });
+  if (!on.ok) {
+    /* THE JOB IS REAL; WHAT IS TRUE ABOUT ITS DAY IS READ, NOT ASSUMED (skeptic #62). The range writer
+       sets the job's listed day BEFORE it writes the day rows, so a failure after that leaves the job on
+       the day with something unsaved, and "waiting for a day" would be false: it is drawn on the day and
+       a second try is refused as already there. Three answers, each with its one next step:
+         · no listed day: it is waiting (said, and the sheet turns its pick into this job for the retry);
+         · a listed day: it IS on the day. Said as done, with what did not save and where to check it;
+         · the read itself failed: nothing is claimed either way, and the sheet's retry finds out. */
+    const why = on.error ?? "";
+    const { data: now, error: nowErr } = await supabase.from("jobs").select("id, scheduled_start").eq("id", made.id).maybeSingle();
+    if (nowErr || !now) return { ok: false, id: made.id, error: await ws.say("ag_srv_madeDayUnknown", { job: name, why }) };
+    if ((now as { scheduled_start?: string | null }).scheduled_start) return { ok: true, id: made.id, note: await ws.say("ag_srv_madePlacedCheck", { job: name, why }) };
+    return { ok: false, id: made.id, error: await ws.say("ag_srv_madeNotPlaced", { job: name, why }) };
+  }
+  return { ok: true, id: made.id, note: [await ws.say("ag_srv_newJobMade", { job: name }), on.note ?? ""].filter(Boolean).join(" ") };
 }
 
 /**
