@@ -12,6 +12,7 @@ import { join } from "node:path";
  */
 type Row = Record<string, unknown> & { id: string; job_id: string | null };
 type Filter = [op: "eq" | "is", col: string, value: unknown];
+type Bill = { id: string; org_id: string; quote_id: string | null };
 const s = vi.hoisted(() => ({
   staff: true,
   language: "en",
@@ -23,6 +24,10 @@ const s = vi.hoisted(() => ({
   reads: [] as string[],
   writes: [] as { patch: Record<string, unknown>; filters: Filter[]; readBack: string | null }[],
   profileReads: 0,
+  /** The bills on file (cn-v1160): the door asks which of them name the estimate it just wrote. */
+  bills: [] as Bill[],
+  billsError: null as null | { message: string },
+  billReads: [] as { cols: string; filters: Filter[] }[],
   client: null as unknown,
 }));
 
@@ -33,11 +38,19 @@ function fake() {
       let cols = "";
       let readBack: string | null = null;
       const filters: Filter[] = [];
-      const hits = (row: Row) => filters.every(([op, col, v]) => (op === "eq" ? row[col] === v : (row[col] ?? null) === v));
+      const hits = (row: Record<string, unknown>) => filters.every(([op, col, v]) => (op === "eq" ? row[col] === v : (row[col] ?? null) === v));
       const run = (single: boolean) => {
         if (table === "profiles") {
           s.profileReads += 1;
           return { data: { language: s.language }, error: null };
+        }
+        if (table === "invoices") {
+          // Only the columns asked for come back: a column not selected is a column not read.
+          s.billReads.push({ cols, filters: [...filters] });
+          if (s.billsError) return { data: null, error: s.billsError };
+          const names = cols.split(",").map((c) => c.trim());
+          const rows = s.bills.filter(hits).map((bill) => Object.fromEntries(names.map((n) => [n, (bill as Record<string, unknown>)[n]])));
+          return { data: single ? (rows[0] ?? null) : rows, error: null };
         }
         if (table !== "quotes") return { data: single ? null : [], error: null };
         if (patch) {
@@ -89,6 +102,7 @@ vi.mock("@/lib/pdf-cache", () => ({ bustDocPdf: vi.fn(async () => {}), warmDocPd
 
 import { setQuoteSite } from "./actions";
 import { bustDocPdf } from "@/lib/pdf-cache";
+import { reportError } from "@/lib/observe";
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
 
@@ -111,13 +125,17 @@ beforeEach(() => {
   s.reads = [];
   s.writes = [];
   s.profileReads = 0;
+  s.bills = [];
+  s.billsError = null;
+  s.billReads = [];
   s.client = fake();
 });
 
-/** Nothing reached the row, the stored PDF or the page. */
+/** Nothing reached the row, the stored PDF, the estimate's bills or the page. */
 const untouched = () => {
   expect(s.writes).toEqual([]);
   expect(bustDocPdf).not.toHaveBeenCalled();
+  expect(s.billReads).toEqual([]);
   expect(revalidatePath).not.toHaveBeenCalled();
 };
 
@@ -284,6 +302,103 @@ describe("setQuoteSite: what follows a save", () => {
   });
 });
 
+/**
+ * THE BILLS MADE FROM THE ESTIMATE (cn-v1160). A bill made straight from an estimate that has no job
+ * prints the place the estimate prints (lib/quote-site bornFromEstimateCandidates), so a new site on
+ * the estimate is a new site on that bill's paper. The office's door reads the page again on every
+ * open; the customer's Download serves the stored copy, and nothing else retires it (the database
+ * un-stamps a bill's copy when its JOB's address changes, 0349, and knows nothing of an estimate's).
+ */
+describe("setQuoteSite: the bills made from the estimate lose their stored copies too", () => {
+  const ASKED = [{ cols: "id", filters: [["eq", "quote_id", "q1"], ["eq", "org_id", "org-1"]] }];
+  const BILLS: Bill[] = [
+    { id: "inv-1", org_id: "org-1", quote_id: "q1" },
+    { id: "inv-2", org_id: "org-1", quote_id: "q1" },
+    { id: "inv-of-another-estimate", org_id: "org-1", quote_id: "q2" },
+    { id: "inv-of-no-estimate", org_id: "org-1", quote_id: null },
+    // The fake has no row security at all: it is the door's own filter that keeps this one out.
+    { id: "inv-of-another-company", org_id: "org-2", quote_id: "q1" },
+  ];
+  const dropped = () => vi.mocked(bustDocPdf).mock.calls;
+
+  it("every bill that names this estimate, in this company, and no other bill", async () => {
+    s.bills = BILLS;
+    expect(await setQuoteSite("q1", SITE)).toEqual({ ok: true });
+    expect(dropped()).toEqual([
+      ["quote", "q1", "org-1"],
+      ["invoice", "inv-1", "org-1"],
+      ["invoice", "inv-2", "org-1"],
+    ]);
+    // Asked once, for the id alone, by the estimate and the caller's own company.
+    expect(s.billReads).toEqual(ASKED);
+  });
+
+  it("a clear moves the bill's paper as a set does, so it drops the same copies", async () => {
+    s.quote = blankQuote({ ...SITE });
+    s.bills = BILLS;
+    expect(await setQuoteSite("q1", null)).toEqual({ ok: true });
+    expect(dropped()).toEqual([
+      ["quote", "q1", "org-1"],
+      ["invoice", "inv-1", "org-1"],
+      ["invoice", "inv-2", "org-1"],
+    ]);
+    expect(s.billReads).toEqual(ASKED);
+  });
+
+  it("an estimate nobody has billed drops its own copy and nothing else", async () => {
+    s.bills = BILLS.filter((b) => b.quote_id !== "q1");
+    expect(await setQuoteSite("q1", SITE)).toEqual({ ok: true });
+    expect(dropped()).toEqual([["quote", "q1", "org-1"]]);
+    expect(s.billReads).toEqual(ASKED);
+  });
+
+  it("ONLY A SAVE THAT LANDED: a refusal reads no bill and drops no copy", async () => {
+    const refusals: [string, () => void, Parameters<typeof setQuoteSite>[1]][] = [
+      ["not staff", () => void (s.staff = false), SITE],
+      ["no street", () => {}, { address: " " }],
+      ["on a job", () => void (s.quote = blankQuote({ job_id: "j1" })), SITE],
+      ["not there", () => void (s.quote = null), SITE],
+      ["a job made in the same second", () => void (s.afterFirstRead = () => void (s.quote!.job_id = "j-accepted")), SITE],
+      ["gone between the read and the write", () => void (s.afterFirstRead = () => void (s.quote = null)), null],
+      ["the read is refused", () => void (s.readError = { message: "the reader tripped" }), SITE],
+      ["the write is refused", () => void (s.writeError = { message: "the writer tripped" }), SITE],
+    ];
+    for (const [why, arrange, site] of refusals) {
+      vi.clearAllMocks();
+      s.staff = true;
+      s.quote = blankQuote();
+      s.readError = null;
+      s.writeError = null;
+      s.afterFirstRead = null;
+      s.bills = BILLS;
+      s.billReads = [];
+      arrange();
+      expect((await setQuoteSite("q1", site)).ok, why).toBe(false);
+      expect(s.billReads, why).toEqual([]);
+      expect(bustDocPdf, why).not.toHaveBeenCalled();
+    }
+  });
+
+  it("A READ OF THE BILLS THAT FAILS IS FILED AND NEVER COSTS THE SAVE: the address has landed", async () => {
+    s.bills = BILLS;
+    s.billsError = { message: "the bills tripped" };
+    expect(await setQuoteSite("q1", SITE)).toEqual({ ok: true });
+    expect(s.quote).toMatchObject(SITE);
+    expect(vi.mocked(reportError).mock.calls).toEqual([["setQuoteSite:bills", { message: "the bills tripped" }, { quoteId: "q1" }]]);
+    // The estimate's own copy went before the bills were asked for, and the pages are still drawn.
+    expect(dropped()).toEqual([["quote", "q1", "org-1"]]);
+    expect(vi.mocked(revalidatePath).mock.calls.map((c) => c[0])).toEqual(["/quotes/q1", "/quotes"]);
+  });
+
+  it("nothing is filed when the bills read well, with bills or without", async () => {
+    s.bills = BILLS;
+    await setQuoteSite("q1", SITE);
+    s.bills = [];
+    await setQuoteSite("q1", null);
+    expect(reportError).not.toHaveBeenCalled();
+  });
+});
+
 describe("setQuoteSite: a Spanish-reading office hears its refusals in Spanish", () => {
   it("no street, too long, on a job, not there", async () => {
     s.language = "es";
@@ -325,10 +440,24 @@ describe("the source: what the door promises the rest of the app", () => {
     expect(door).toContain('revalidatePath("/quotes");');
   });
 
+  it("the bills made from it are read by the estimate AND the caller's company, after the write is known to have landed, and dropped with the company's id (cn-v1160)", () => {
+    const bills = 'supabase.from("invoices").select("id").eq("quote_id", quoteId).eq("org_id", ctx.orgId);';
+    expect(door.split('.from("invoices")').length - 1).toBe(1);
+    expect(door).toContain(bills);
+    expect(door).toContain('await bustDocPdf("invoice", bill.id, ctx.orgId);');
+    // Never a bust without a company to pin it to: bustDocPdf runs on the service role.
+    for (const call of door.match(/bustDocPdf\([^)]*\)/g) ?? []) expect(call).toMatch(/, ctx\.orgId\)$/);
+    // After the zero-row refusal, so a save that did not land retires nobody's paper.
+    expect(door.indexOf("if (!rows?.length) {")).toBeGreaterThan(-1);
+    expect(door.indexOf("if (!rows?.length) {")).toBeLessThan(door.indexOf(bills));
+    expect(door.indexOf('await bustDocPdf("quote", quoteId, ctx.orgId);')).toBeLessThan(door.indexOf(bills));
+  });
+
   it("THE JOB BORN FROM AN ESTIMATE STILL TAKES THE ESTIMATE'S OWN ADDRESS FIRST: before the lead's, before the customer's", () => {
     const born = src.slice(src.indexOf("export async function createJobFromQuote("), src.indexOf("async function pushQuoteAccepted("));
-    // A column you do not select is a column you cannot inherit.
-    expect(born).toContain('.select("id, job_id, status, customer_id, title, quote_number, inquiry_id, address, unit, city, state, zip, revises_quote_id")');
+    // A column you do not select is a column you cannot inherit. (description joined the list in
+    // cn-v1160: the scope the job takes; the five address columns are as they were.)
+    expect(born).toContain('.select("id, job_id, status, customer_id, title, quote_number, inquiry_id, address, unit, city, state, zip, revises_quote_id, description")');
     const inherited = born.slice(born.indexOf("const inheritedAddress = await (async () => {"), born.indexOf("})();", born.indexOf("const inheritedAddress = await (async () => {")));
     const ownFirst = "if (q.address) return { address: q.address, unit: (q as { unit?: string | null }).unit ?? null, city: q.city, state: q.state, zip: q.zip };";
     expect(inherited).toContain(ownFirst);

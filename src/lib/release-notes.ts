@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1160", date: "2026-11-11", line: "Measure, Measure Area and 3D Scan are in the + menu; papers put the address under the customer's name beside the job site; a job takes its estimate's scope; the circuit card shows only when used." },
   { version: "cn-v1159", date: "2026-11-10", line: "Add to Schedule finds finished jobs and customers too: go back to an address with a new job there or reopen the old one, start a job for a customer, or open New Job on that day." },
   { version: "cn-v1158", date: "2026-11-10", line: "Estimates can print One Materials Line under each task; a Job Site line sets the address and unit an estimate prints; lost inspections file under Lost; the Schedule's ⋯ sheet opens above the calendar." },
   { version: "cn-v1157", date: "2026-11-10", line: "An inspection row opens the inspection (no surprise estimate); a customer pick saves itself; Preview sits beside Send and waits for a save; a lead opens its estimate; the mic says when it closes." },

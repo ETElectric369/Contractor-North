@@ -94,6 +94,48 @@ describe("the customer's PDF door names the file by the street", () => {
     );
   });
 
+  // A BILL MADE STRAIGHT FROM AN ESTIMATE (cn-v1160): its sheet prints the estimate's site, then that
+  // estimate's lead's, before the customer's own address, and the file is named for the same place.
+  it.each([
+    ["the estimate's own site", { address: "40 Snowbell Court", inquiries: { address: "16 Larkspur Circle" } }, "INV-090_40 Snowbell.pdf"],
+    ["that estimate's lead's, when it has none of its own", { address: null, inquiries: { address: "16 Larkspur Circle" } }, "INV-090_16 Larkspur.pdf"],
+    ["the customer's, when neither has one", { address: null, inquiries: null }, "INV-090_12 Thistlewood.pdf"],
+    ["the customer's, when the bill was made from no estimate", null, "INV-090_12 Thistlewood.pdf"],
+  ])("a bill with no job is named for %s", async (_name, quotes, filename) => {
+    rows = {
+      invoices: {
+        id: "33333333-3333-3333-3333-333333333333",
+        status: "sent",
+        invoice_number: "INV-090",
+        jobs: null,
+        customers: { address: "12 Thistlewood Way" },
+        quotes,
+      },
+      doc_pdf_cache: { path: "org/invoice/y/m0.75.pdf" },
+    };
+    const { GET } = await import("./api/share-pdf/[token]/route");
+    const res = await GET(new Request(`https://x.test/api/share-pdf/${TOKEN}`) as never, { params: Promise.resolve({ token: TOKEN }) });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-disposition")).toContain(`filename="${filename}"`);
+  });
+
+  it("a bill on a job is still named for the job's street, whatever the estimate says", async () => {
+    rows = {
+      invoices: {
+        id: "33333333-3333-3333-3333-333333333333",
+        status: "sent",
+        invoice_number: "INV-090",
+        jobs: { address: "9 Bayberry Lane" },
+        customers: { address: "12 Thistlewood Way" },
+        quotes: { address: "40 Snowbell Court", inquiries: { address: "16 Larkspur Circle" } },
+      },
+      doc_pdf_cache: { path: "org/invoice/y/m0.75.pdf" },
+    };
+    const { GET } = await import("./api/share-pdf/[token]/route");
+    const res = await GET(new Request(`https://x.test/api/share-pdf/${TOKEN}`) as never, { params: Promise.resolve({ token: TOKEN }) });
+    expect(res.headers.get("content-disposition")).toContain('filename="INV-090_9 Bayberry.pdf"');
+  });
+
   it("E-017_13897 Honeysuckle.pdf for an estimate", async () => {
     rows = {
       quotes: {

@@ -6,6 +6,7 @@ import {
   QUOTE_SITE_CAPS,
   SITE_CHOICE_JOBS_CAP,
   SITE_JOBS_READ_LIMIT,
+  bornFromEstimateCandidates,
   cleanQuoteSite,
   commitQuoteSite,
   quoteSiteCandidates,
@@ -110,6 +111,114 @@ describe("quoteSiteCandidates: the one ordered list", () => {
     }
     // …and the table is not vacuous: every source wins somewhere, and one row has no site at all.
     expect(rows.map((q) => shared(q)?.source ?? null)).toEqual(["quote", "job", "lead", "customer", null, "lead", "quote", "customer"]);
+  });
+});
+
+/**
+ * A PAPER BORN FROM AN ESTIMATE KNOWS ITS PLACE (cn-v1160, skeptic #61). An invoice, a work order and
+ * a materials list own no address. Each kept a list of its own: the invoice's was the job's then the
+ * customer's, the other two the job's alone. So a bill made straight from an estimate that never
+ * became a job printed the customer's own address under "Job site", while the estimate it came from
+ * printed the building the work is in. One order now: the paper's own job, then the estimate's own
+ * site, that estimate's lead's, the customer's.
+ */
+describe("bornFromEstimateCandidates: a paper born from an estimate", () => {
+  const SITES = { job: jobSite, quote: own, lead: leadSite, customer: custSite } as const;
+  const ORDER = ["job", "quote", "lead", "customer"] as const;
+  type Has = Record<(typeof ORDER)[number], boolean>;
+  const records = (has: Has) => ({
+    job: has.job ? SITES.job : { address: null },
+    quote: has.quote ? SITES.quote : { address: null },
+    lead: has.lead ? SITES.lead : { address: null },
+    customer: has.customer ? SITES.customer : { address: null },
+  });
+  /** Each of the four there or not: sixteen papers. */
+  const PAPERS = Array.from({ length: 16 }, (_, bits): [string, string, Has] => {
+    const has: Has = { job: !!(bits & 8), quote: !!(bits & 4), lead: !!(bits & 2), customer: !!(bits & 1) };
+    const there = ORDER.filter((k) => has[k]);
+    return [there.length ? there.join(" + ") : "no address anywhere", there[0] ?? "none", has];
+  });
+
+  it("its own job's, then the estimate's own, that estimate's lead's, the customer's", () => {
+    const list = bornFromEstimateCandidates({ job: jobSite, quote: own, lead: leadSite, customer: custSite });
+    expect(list.map((c) => c.source)).toEqual(["job", "quote", "lead", "customer"]);
+    // Each record is handed on untouched: the very object, never a copy or a tidied one.
+    expect(list[0].parts).toBe(jobSite);
+    expect(list[1].parts).toBe(own);
+    expect(list[2].parts).toBe(leadSite);
+    expect(list[3].parts).toBe(custSite);
+  });
+
+  it.each(PAPERS)("%s → %s", (_name, winner, has) => {
+    const site = pickSite(bornFromEstimateCandidates(records(has)));
+    expect(site?.source ?? "none").toBe(winner);
+    // Whole, from the one record that won: its street, its unit and its town, never a mix of two.
+    if (winner !== "none") expect(siteLines(site)).toEqual(siteLines(pickSite([{ source: winner, parts: SITES[winner as (typeof ORDER)[number]] }])));
+  });
+
+  it("the table is not vacuous: every record wins somewhere, and one paper has no site at all", () => {
+    expect([...new Set(PAPERS.map(([, winner]) => winner))].sort()).toEqual(["customer", "job", "lead", "none", "quote"]);
+  });
+
+  it("THE JOB IS WHERE THE WORK IS: a paper on a job that has an address prints it, whatever the estimate says", () => {
+    expect(pickSite(bornFromEstimateCandidates({ job: jobSite, quote: own, lead: leadSite, customer: custSite }))?.address).toBe("9 Bayberry Lane");
+    // An estimate's own address outranks the job's on the ESTIMATE's paper (quoteSiteCandidates). Not
+    // here: a bill, a work order and a list belong to the job once there is one.
+    expect(pickSite(quoteSiteCandidates({ job: jobSite, quote: own, lead: leadSite, customer: custSite }))?.address).toBe("40 Snowbell Court");
+  });
+
+  it("WITH NO JOB IT PRINTS THE PLACE THE ESTIMATE PRINTS: the same record, whole, for every estimate that has no job", () => {
+    for (const [, , has] of PAPERS.filter(([, , h]) => !h.job)) {
+      const { quote, lead, customer } = records(has);
+      expect(pickSite(bornFromEstimateCandidates({ quote, lead, customer }))).toEqual(pickSite(quoteSiteCandidates({ quote, lead, customer })));
+    }
+    // The skeptic's case: the customer owns two buildings and the estimate is for the second.
+    const bill = pickSite(bornFromEstimateCandidates({ job: null, quote: own, customer: custSite }));
+    expect(bill?.source).toBe("quote");
+    expect(siteLines(bill)).toEqual(["40 Snowbell Court", "Unit 14", "Testville, CA 96161"]);
+  });
+
+  it("a record left out is skipped exactly as an empty one is", () => {
+    expect(pickSite(bornFromEstimateCandidates({}))).toBeNull();
+    expect(pickSite(bornFromEstimateCandidates({ job: null, quote: null, lead: null, customer: null }))).toBeNull();
+    expect(pickSite(bornFromEstimateCandidates({ job: { address: "   " }, quote: { address: "" }, lead: { address: null, city: "Testville" } }))).toBeNull();
+    expect(pickSite(bornFromEstimateCandidates({ lead: leadSite }))?.source).toBe("lead");
+    expect(pickSite(bornFromEstimateCandidates({ job: undefined, quote: undefined, customer: custSite }))?.source).toBe("customer");
+  });
+
+  it("whole or not at all: a job's street never takes the estimate's unit or town", () => {
+    const site = pickSite(bornFromEstimateCandidates({ job: { address: "9 Bayberry Lane" }, quote: own, customer: custSite }));
+    expect(site).toMatchObject({ address: "9 Bayberry Lane", unit: null, city: null, state: null, zip: null, source: "job" });
+  });
+
+  it("A PAPER MADE FROM NO ESTIMATE DID NOT CHANGE: handing in no estimate picks what each paper's old list picked", () => {
+    // The lists the three papers used to write inline, kept here as the witnesses.
+    const invoiceWas = (job: SiteParts | null, customer: SiteParts | null) => pickSite([{ source: "job", parts: job }, { source: "customer", parts: customer }]);
+    const jobOnlyWas = (job: SiteParts | null) => pickSite([{ source: "job", parts: job }]);
+    const person = { name: "Dana Rook", company_name: null, email: null, phone: "(530) 555-0100" };
+    const jobs: (SiteParts | null)[] = [jobSite, { ...jobSite, billing_type: "tm" } as SiteParts, { address: null }, { address: "  " }, { address: "9 Bayberry Lane, Testville, CA 96161" }, null];
+    const customers: (SiteParts | null)[] = [{ ...person, ...custSite } as SiteParts, { ...person, address: null } as SiteParts, null];
+    for (const job of jobs) {
+      // The work order and the materials list: the job's site or none.
+      expect(pickSite(bornFromEstimateCandidates({ job }))).toEqual(jobOnlyWas(job));
+      // The invoice: the job's, else the customer's.
+      for (const customer of customers) expect(pickSite(bornFromEstimateCandidates({ job, customer }))).toEqual(invoiceWas(job, customer));
+    }
+  });
+
+  it("the order is written down once, and the three papers read it: none keeps a list of its own", () => {
+    const lib = read("src/lib/quote-site.ts");
+    expect(lib.match(/\{ source: "job", parts: of\.job \},\s*\{ source: "quote", parts: of\.quote \},\s*\{ source: "lead", parts: of\.lead \},\s*\{ source: "customer", parts: of\.customer \},/)).not.toBeNull();
+    for (const paper of ["src/lib/invoice-document-props.ts", "src/app/print/work-order/[id]/page.tsx", "src/app/print/material-list/[id]/page.tsx"]) {
+      const src = read(paper);
+      expect(src, paper).toMatch(/import \{ bornFromEstimateCandidates[^}]*\} from "@\/lib\/quote-site";/);
+      // Every site any of them picks goes through the one order: what pickSite is handed is always
+      // this list, never an inline one, and no source is named by hand.
+      const picked = [...src.matchAll(/pickSite\(\s*([\w.]*)/g)].map((m) => m[1]);
+      expect(picked.length, paper).toBeGreaterThanOrEqual(2);
+      expect([...new Set(picked)], paper).toEqual(["bornFromEstimateCandidates"]);
+      expect(src, paper).not.toMatch(/(?<![\w$])source:\s*["'](job|quote|lead|customer)["']/);
+    }
   });
 });
 

@@ -59,6 +59,7 @@ import { companyFromOrg } from "@/components/doc-letterhead";
 import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice, type TaskDetail } from "@/lib/estimate/line-map";
 import { coerceTaskDetail } from "@/lib/estimate/task-lines";
 import { bornWithTasks } from "@/lib/estimate/born-with-tasks";
+import { jobTakesScope, scopeForJob } from "@/lib/estimate/job-scope";
 import { estimateLines, retitleDismissal, retitleLineTask, syncJobTasks, syncWords } from "@/lib/estimate/sync-job-tasks";
 import { materialsWords, syncJobMaterials } from "@/lib/estimate/sync-job-materials";
 import { revisionOf, supersedeRevised, supersededWords } from "@/lib/estimate/revision";
@@ -1260,8 +1261,9 @@ export async function setQuoteCustomer(
  * change nothing the estimate prints.
  *
  * Staff only. The row is read back (a zero-row update is a 204, not a success), the stored PDF is
- * dropped (the customer's Download would go on serving the old address), and the page and the list
- * are drawn again.
+ * dropped (the customer's Download would go on serving the old address), the stored PDFs of the
+ * bills made from this estimate go with it (cn-v1160: a bill with no job prints this site), and the
+ * page and the list are drawn again.
  */
 export async function setQuoteSite(
   quoteId: string,
@@ -1302,6 +1304,16 @@ export async function setQuoteSite(
   }
   // The job site prints on the PDF, and the street names the customer's link and the file.
   await bustDocPdf("quote", quoteId, ctx.orgId);
+  // AND ON THE BILLS MADE FROM IT (cn-v1160). A bill made straight from an estimate that has no job
+  // now prints the place the estimate prints (lib/quote-site bornFromEstimateCandidates), so this
+  // save changes that bill's paper too. The office's own door reads the page again on every open
+  // and was never wrong; the customer's Download serves the stored copy, and would go on handing
+  // out the old address. Every bill that names this estimate, in this company, loses its stored
+  // copy: one whose own job has an address did not need it, and gets a fresh copy the next time the
+  // office opens or sends it. A read that fails is filed and never costs the save, which has landed.
+  const { data: bills, error: billsErr } = await supabase.from("invoices").select("id").eq("quote_id", quoteId).eq("org_id", ctx.orgId);
+  if (billsErr) reportError("setQuoteSite:bills", billsErr, { quoteId });
+  for (const bill of (bills ?? []) as { id: string }[]) await bustDocPdf("invoice", bill.id, ctx.orgId);
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
   return { ok: true };
@@ -2075,6 +2087,50 @@ async function paperworkNote(wo: { ok: boolean; error?: string }, list: { ok: bo
   return bits.length ? bits.join(" ") : null;
 }
 
+/**
+ * A JOB THAT ALREADY EXISTS TAKES THE ESTIMATE'S SCOPE, ONLY WHERE IT HAS NONE (cn-v1160; the rule is
+ * lib/estimate/job-scope). The owner, 2026-11-10, on a job made from an accepted estimate: "the scope
+ * remains empty when that can be filled from the estimate description all the way through we already
+ * have the information right?" The job's Description is the scope the crew reads, and New Invoice
+ * copies it onto the customer's bill.
+ *
+ * NEVER OVER WORDS A PERSON TYPED. The job's Description is read, and the estimate's words land only
+ * while it is empty: a compare-and-set on the exact value read (null, or the blank text that was
+ * there), pinned to the job's id and read back. Zero rows means the Description changed in that
+ * moment: if it holds words now, somebody typed them and they stand; if it is still empty, the write
+ * did not land, and that is filed.
+ *
+ * BEST-EFFORT, NEVER SILENT: the acceptance does not fail for this and is not held up by it. What
+ * could not be read or written is reported with the two ids and nothing about the customer.
+ *
+ * It stands outside createJobFromQuote so that door's own body still touches the jobs table in one
+ * place, the birth.
+ */
+async function jobTakesEstimateScope(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  of: { jobId: string; quoteId: string; estimateDescription: unknown },
+): Promise<void> {
+  const scope = scopeForJob(of.estimateDescription);
+  if (!scope) return; // the estimate has no words to give
+  const ids = { jobId: of.jobId, quoteId: of.quoteId };
+  try {
+    const { data: job, error: readErr } = await supabase.from("jobs").select("description").eq("id", of.jobId).maybeSingle();
+    if (readErr || !job) return reportError("createJobFromQuote:scope", readErr ?? new Error("the job could not be read"), ids);
+    const had = (job as { description?: string | null }).description ?? null;
+    if (!jobTakesScope(had)) return; // the job has words of its own: they stay
+    const fill = supabase.from("jobs").update({ description: scope }).eq("id", of.jobId);
+    const { data: wrote, error } = await (had === null ? fill.is("description", null) : fill.eq("description", had)).select("id");
+    if (error) return reportError("createJobFromQuote:scope", error, ids);
+    if (wrote?.length) return;
+    const { data: now, error: nowErr } = await supabase.from("jobs").select("description").eq("id", of.jobId).maybeSingle();
+    if (nowErr || !now || jobTakesScope((now as { description?: string | null }).description)) {
+      reportError("createJobFromQuote:scope", nowErr ?? new Error("zero rows"), ids);
+    }
+  } catch (e) {
+    reportError("createJobFromQuote:scope", e, ids);
+  }
+}
+
 export async function createJobFromQuote(
   quoteId: string,
   /** From updateQuoteStatus on an estimate already linked to a job: the estimate's figure as it stood
@@ -2102,7 +2158,9 @@ export async function createJobFromQuote(
     // address/city/state/zip (0177) so the job can inherit the site typed on the ESTIMATE. A
     // column you don't select is a column you can't inherit — the specific way the address kept
     // dying at every stage, and it is a `select` list every time, never a missing column.
-    .select("id, job_id, status, customer_id, title, quote_number, inquiry_id, address, unit, city, state, zip, revises_quote_id")
+    // description (cn-v1160), for the same reason: it is the scope the job takes (lib/estimate/job-scope),
+    // and this list never named it, so the job's Description was born empty every time.
+    .select("id, job_id, status, customer_id, title, quote_number, inquiry_id, address, unit, city, state, zip, revises_quote_id, description")
     .eq("id", quoteId)
     .maybeSingle();
   if (!q) return { ok: false, error: await ws.say("qs_quoteNotFound") };
@@ -2159,6 +2217,11 @@ export async function createJobFromQuote(
       reportError("createJobFromQuote:supersede", new Error(sup.error), { quoteId });
       return { ok: true, id: q.job_id, note: await ws.say("qs_supersedeFailed", { why: String(sup.error) }) };
     }
+    // THE JOB TAKES THIS ESTIMATE'S SCOPE WHERE IT HAS NONE OF ITS OWN (cn-v1160): a job made on the
+    // Schedule or from a visit, then priced, has an empty Description until somebody types the
+    // estimate's paragraph a second time. Only an empty one is filled; words a person typed stay, so a
+    // revision or a second estimate accepted onto the job changes nothing once it has a scope.
+    await jobTakesEstimateScope(supabase, { jobId: q.job_id, quoteId, estimateDescription: (q as { description?: unknown }).description });
     // THE PAPERWORK FIRST, THEN THE FOLLOW (cn-v1084): the take-off may ADOPT the job's own list (a
     // visit-born job's), seeding its plain lines and leaving the task parts to the materials sync,
     // which finds the visit's rows and re-keys them rather than adding them again. On a fresh list the
@@ -2251,6 +2314,8 @@ export async function createJobFromQuote(
     unit: inheritedAddress?.unit ?? null,
     todayStr: todayStrInTz(getOrgSettings((orgForName as { settings?: unknown } | null)?.settings).timezone),
   });
+  // What the job takes as its scope: the estimate's description, trimmed, or nothing (lib/estimate/job-scope).
+  const bornScope = scopeForJob((q as { description?: unknown }).description);
 
   const { data: job, error } = await supabase
     .from("jobs")
@@ -2258,6 +2323,12 @@ export async function createJobFromQuote(
       customer_id: resolvedCustomerId ?? q.customer_id,
       inquiry_id: q.inquiry_id ?? null, // carry the lead provenance forward: lead → quote → job
       name: jobName,
+      // THE JOB IS BORN WITH THE ESTIMATE'S SCOPE (cn-v1160; lib/estimate/job-scope). The owner,
+      // 2026-11-10: "the scope remains empty when that can be filled from the estimate description all
+      // the way through we already have the information right?" The job's Description is the scope the
+      // crew reads, and New Invoice copies it onto the customer's bill. An estimate with no words
+      // names no column, so the job is born with none, as before.
+      ...(bornScope ? { description: bornScope } : {}),
       // THE KIND OF BILLING TRAVELS WITH THE JOB (2026-10-03). This insert named no billing_type, so
       // the column fell to its default of 'fixed' — and on a company whose work is mostly T&M that is
       // the wrong answer nearly every time. It is not only a label: jobBillsItsActuals(billing_type)

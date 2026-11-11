@@ -6,7 +6,8 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { customerLines, invoiceTypeLabel, isDrawKind } from "@/lib/invoice-math";
 import { jobProgressFinancials, receivedBeforeThisInvoice, type JobProgressFinancials } from "@/lib/job-financials";
 import { readSupplierNames } from "@/lib/supplier-names";
-import { pickSite, SITE_COLS } from "@/lib/site-address";
+import { pickSite, SITE_COLS, type ResolvedSite, type SiteParts } from "@/lib/site-address";
+import { bornFromEstimateCandidates, sitePartsOf } from "@/lib/quote-site";
 import { CUSTOMER_VISIBLE_STATUSES } from "@/lib/customer-visible-docs";
 import { reportError } from "@/lib/observe";
 import type { Organization } from "@/lib/types";
@@ -38,6 +39,16 @@ import type { Organization } from "@/lib/types";
  * invoice row), a failed customer read prints no Bill To, a failed job read prints no job site and
  * no Progress Summary, and a failed progress read prints no Progress Summary.
  *
+ * THE JOB SITE OF A BILL MADE FROM AN ESTIMATE (cn-v1160, skeptic #61). An invoice owns no address.
+ * It prints its job's; with no job it used to print the customer's own address under "Job site",
+ * while the estimate it was made from printed the building the work is in. The order is one rule
+ * now (lib/quote-site bornFromEstimateCandidates): the job's site, then the source estimate's own,
+ * then that estimate's lead's, then the customer's. The estimate is read by the invoice's quote_id,
+ * its five address columns and its lead's five and nothing else. A failed read of it is filed, and
+ * it costs the bill something only when the job gave no address: then NO site is printed, never
+ * the customer's address in the place of one that could not be read, and the read is `degraded`
+ * (piece "estimate"). When the job gave the site, the bill is whole without it.
+ *
  * LEFT OFF IS FOR THE LIVE PAGES ONLY. A read with a piece missing says so (`degraded`, naming the
  * pieces). The /i page and the portal redraw on every open, so they draw what they have and say,
  * above the sheet, that part of the bill couldn't load (audit v1018): a partial bill is never passed
@@ -48,8 +59,10 @@ import type { Organization } from "@/lib/types";
  */
 export type InvoiceDocumentProps = Omit<ComponentProps<typeof InvoiceDocument>, "groupByKind">;
 
-/** A piece of the document whose read failed and was left off (see the header). */
-export type InvoiceDocPiece = "payments" | "customer" | "job" | "progress";
+/** A piece of the document whose read failed and was left off (see the header). `estimate`: the
+ *  estimate the bill was made from could not be read and the job gave no address, so the job site
+ *  was left off. */
+export type InvoiceDocPiece = "payments" | "customer" | "job" | "estimate" | "progress";
 
 export type InvoiceDocRead =
   /** `degraded`: the pieces left off because their read failed (empty when whole). */
@@ -73,8 +86,10 @@ type Db = { from: (table: string) => any };
 // the portal's job page (W3). It used to be a list of its own here, named PUBLIC_INVOICE_STATUSES.
 
 export const INVOICE_DOC_COLS = {
+  // quote_id (cn-v1160): the estimate the bill was made from, read below for the job site. A column
+  // you do not select is a column you cannot follow: without it here the estimate is never asked.
   invoice:
-    "id, org_id, job_id, customer_id, invoice_number, status, title, description, notes, created_at, due_date, subtotal, tax_rate, tax, total, amount_paid, invoice_kind",
+    "id, org_id, job_id, customer_id, quote_id, invoice_number, status, title, description, notes, created_at, due_date, subtotal, tax_rate, tax, total, amount_paid, invoice_kind",
   // import_key + edited: customerLineWords needs them to know an importer's untouched lump.
   // line_kind (0342): what the line was said to be, which the Cost Breakdown reads first.
   items: "id, description, quantity, unit, unit_price, line_total, import_source, import_key, edited, line_kind",
@@ -82,6 +97,10 @@ export const INVOICE_DOC_COLS = {
   payments: "id, amount, paid_at, method",
   customer: `name, company_name, email, phone, ${SITE_COLS}`,
   job: `billing_type, ${SITE_COLS}`,
+  // THE ESTIMATE THE BILL WAS MADE FROM, FOR ITS PLACE AND NOTHING ELSE: its own five address
+  // columns and its lead's five, with the lead's company to check it by (it never leaves this file).
+  // Never a price, a title, a note, or the lead's name or phone.
+  estimate: `${SITE_COLS}, inquiries(org_id, ${SITE_COLS})`,
   // `settings` is read, never passed on: see assembleInvoiceDocumentProps.
   org: "name, logo_url, address_line1, address_line2, city, state, zip, phone, email, license, doc_template, doc_templates, settings",
 } as const;
@@ -100,6 +119,12 @@ export type InvoiceDocInputs = {
   customer: Row | null;
   /** The job's row; `failed`: the read failed (no site, no progress). */
   job: { row: Row | null; failed: boolean };
+  /**
+   * The estimate the bill was made from (invoices.quote_id), as five address columns each: its own
+   * site and its lead's. Left out or null: the bill was made from no estimate, and its site is the
+   * job's, else the customer's, as it always was. `failed`: the read failed (see billSite).
+   */
+  estimate?: { site: SiteParts | null; lead: SiteParts | null; failed: boolean } | null;
   org: Row;
   supplierNames: ReadonlySet<string>;
   /** The job's progress figures, for a draw on a job; null when not one or the read failed. */
@@ -110,6 +135,44 @@ const num = (v: unknown): number => {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 };
+
+/**
+ * THE BILL'S JOB SITE, AND WHETHER A FAILED ESTIMATE READ COST THE BILL ITS SITE.
+ *
+ * One order, written once (lib/quote-site bornFromEstimateCandidates): the job's site, the source
+ * estimate's own, that estimate's lead's, the customer's. pickSite takes the first record that has
+ * an address, whole. Three cases, and in none of them is an address printed in the place of one
+ * that could not be read:
+ *   · the job's read failed: no site (a lower address under "Job site" would be a guess);
+ *   · the estimate's read failed: only the job's address may stand, because it outranks the
+ *     estimate's. With none, no site, and the read cost the bill something (`lost`);
+ *   · every read stood: the first address in the order.
+ * A bill made from no estimate has no estimate to rank, so it prints the job's, else the
+ * customer's, exactly as it did before there was an order to follow.
+ */
+function billSite(inp: InvoiceDocInputs): { site: ResolvedSite | null; lost: boolean } {
+  if (inp.job.failed) return { site: null, lost: false };
+  const job = (inp.job.row ?? null) as SiteParts | null;
+  const est = inp.estimate ?? null;
+  if (est?.failed) {
+    const fromJob = pickSite(bornFromEstimateCandidates({ job }));
+    return { site: fromJob, lost: !fromJob };
+  }
+  const site = pickSite(
+    bornFromEstimateCandidates({ job, quote: est?.site, lead: est?.lead, customer: (inp.customer ?? null) as SiteParts | null }),
+  );
+  return { site, lost: false };
+}
+
+/**
+ * THE ESTIMATE'S LEAD, WHEN IT IS THIS COMPANY'S; else no lead. Never an error and never a degraded
+ * read: a lead of another company has nothing to say on this bill. Its org_id is read for this check
+ * alone and goes no further (sitePartsOf keeps five address columns).
+ */
+function leadOfThisCompany(embed: unknown, orgId: string): SiteParts | null {
+  const one = (Array.isArray(embed) ? embed[0] : embed) as (SiteParts & { org_id?: unknown }) | null | undefined;
+  return one && String(one.org_id ?? "") === orgId ? one : null;
+}
 
 /**
  * THE PROPS, FROM THE INPUTS. Pure: the unit test holds the print path and the public path to the
@@ -148,14 +211,11 @@ export function assembleInvoiceDocumentProps(inp: InvoiceDocInputs): InvoiceDocu
           zip: c.zip ?? null,
         }
       : null,
-    // An invoice owns no site: the job's, else the customer's (pickSite). A job read that failed
-    // prints no site rather than the customer's address under a "Job site" heading.
-    site: inp.job.failed
-      ? null
-      : pickSite([
-          { source: "job", parts: (jobRow ?? null) as never },
-          { source: "customer", parts: (c ?? null) as never },
-        ]),
+    // An invoice owns no site: the job's, then the estimate's it was made from, that estimate's
+    // lead's, the customer's (billSite). A job read that failed prints no site rather than the
+    // customer's address under a "Job site" heading, and so does an estimate read that failed
+    // when the job gave none.
+    site: billSite(inp).site,
     // THE CUSTOMER'S WORDS, HERE (audit v994 PL1): the props never hold a supplier's name, so no
     // surface that carries them (the portal's view object) can leak one. InvoiceDocument applies the
     // same rule again as it draws, which changes nothing on words already scrubbed. The importer's
@@ -245,6 +305,8 @@ export async function readInvoiceDocumentProps(
   if (!orgId || (access.kind === "service" && orgId !== access.orgId)) return { kind: "missing" };
   const jobId = inv.job_id ? String(inv.job_id) : null;
   const customerId = inv.customer_id ? String(inv.customer_id) : null;
+  // The estimate the bill was made from (createInvoiceFromQuote stamps it). Read for its place only.
+  const quoteId = inv.quote_id ? String(inv.quote_id) : null;
   const cache = opts?.cache;
 
   const namesP = (() => {
@@ -273,7 +335,7 @@ export async function readInvoiceDocumentProps(
         })()
       : Promise.resolve({ fin: null, failed: false });
 
-  const [itemsR, paymentsR, customerR, jobR, orgR, names, progress] = await Promise.all([
+  const [itemsR, paymentsR, customerR, jobR, estimateR, orgR, names, progress] = await Promise.all([
     db.from("invoice_items").select(INVOICE_DOC_COLS.items).eq("invoice_id", invoiceId).eq("org_id", orgId).order("sort_order"),
     // Oldest first, the order the statement's running balance reads in.
     db.from("payments").select(INVOICE_DOC_COLS.payments).eq("invoice_id", invoiceId).eq("org_id", orgId).order("paid_at", { ascending: true }),
@@ -282,6 +344,16 @@ export async function readInvoiceDocumentProps(
       : Promise.resolve({ data: null, error: null }),
     jobId
       ? db.from("jobs").select(INVOICE_DOC_COLS.job).eq("id", jobId).eq("org_id", orgId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    // THE ESTIMATE THE BILL WAS MADE FROM, by its id, for its site and its lead's. Named to the
+    // invoice's own org like every read here. The lead it embeds is checked against that org in code
+    // below (leadOfThisCompany), never by a filter on the embed: a lead of another company is simply
+    // no lead. The service role sees every company, and a lead the office's own read could not see
+    // (RLS) must not print on the customer's copy either: the print path and the public path give
+    // one answer. An estimate that is not there for this reader is simply no estimate; only a read
+    // that ERRORS is a failure.
+    quoteId
+      ? db.from("quotes").select(INVOICE_DOC_COLS.estimate).eq("id", quoteId).eq("org_id", orgId).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
     db.from("organizations").select(INVOICE_DOC_COLS.org).eq("id", orgId).maybeSingle(),
     namesP,
@@ -304,27 +376,33 @@ export async function readInvoiceDocumentProps(
   if (paymentsR.error) reportError("invoiceDoc.payments", paymentsR.error, ctx);
   if (customerR.error) reportError("invoiceDoc.customer", customerR.error, ctx);
   if (jobR.error) reportError("invoiceDoc.job", jobR.error, ctx);
+  // Filed whenever it fails, whether or not the bill needed it: a bill whose job gave the site
+  // prints whole, and a read that keeps failing would otherwise be met first by a bill with no job.
+  if (estimateR.error) reportError("invoiceDoc.estimate", estimateR.error, { ...ctx, quoteId });
 
   const jobFailed = !!jobR.error;
+  const estimateFailed = !!estimateR.error;
+  const estimateRow = estimateFailed ? null : ((estimateR.data ?? null) as Row | null);
+  const inputs: InvoiceDocInputs = {
+    invoice: inv,
+    items: (itemsR.data ?? []) as Row[],
+    payments: paymentsR.error ? null : ((paymentsR.data ?? []) as Row[]),
+    customer: customerR.error ? null : ((customerR.data ?? null) as Row | null),
+    job: { row: jobFailed ? null : ((jobR.data ?? null) as Row | null), failed: jobFailed },
+    // Five address columns each and nothing else (sitePartsOf), whatever the rows held.
+    estimate: quoteId ? { site: sitePartsOf(estimateRow), lead: sitePartsOf(leadOfThisCompany(estimateRow?.inquiries, orgId)), failed: estimateFailed } : null,
+    org: orgR.data as Row,
+    supplierNames: names.names,
+    progress: jobFailed ? null : progress.fin,
+  };
   const degraded: InvoiceDocPiece[] = [];
   if (paymentsR.error) degraded.push("payments");
   if (customerR.error) degraded.push("customer");
   if (jobFailed) degraded.push("job");
+  // Only when it cost the bill its site (the job gave none): see billSite.
+  if (billSite(inputs).lost) degraded.push("estimate");
   if (progress.failed) degraded.push("progress");
-  return {
-    kind: "ok",
-    degraded,
-    props: assembleInvoiceDocumentProps({
-      invoice: inv,
-      items: (itemsR.data ?? []) as Row[],
-      payments: paymentsR.error ? null : ((paymentsR.data ?? []) as Row[]),
-      customer: customerR.error ? null : ((customerR.data ?? null) as Row | null),
-      job: { row: jobFailed ? null : ((jobR.data ?? null) as Row | null), failed: jobFailed },
-      org: orgR.data as Row,
-      supplierNames: names.names,
-      progress: jobFailed ? null : progress.fin,
-    }),
-  };
+  return { kind: "ok", degraded, props: assembleInvoiceDocumentProps(inputs) };
 }
 
 /**

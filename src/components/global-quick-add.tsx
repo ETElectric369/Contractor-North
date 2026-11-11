@@ -1,13 +1,30 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Plus, Camera, Briefcase, CalendarPlus, ClipboardCheck, FileText, Receipt, UserSearch, X, type LucideIcon } from "lucide-react";
 import { SnapOrNoteProvider, openSnapOrNote, snapStillSending } from "@/components/snap-or-note";
+import { QuickMeasureRows, useLidarDoors } from "@/components/quick-measure-rows";
+import { QuickMeasureSheet } from "@/components/quick-measure-sheet";
 import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
 import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
 import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
+import {
+  heldModelOf,
+  measureAppLeft,
+  measureHeld,
+  askMeasureContext,
+  measureOwnerKey,
+  measureStore,
+  reopenHeldModel,
+  runQuickMeasure,
+  setMeasureOwner,
+  subscribeMeasure,
+  type MeasureContext,
+  type MeasureKind,
+} from "@/lib/quick-measure";
+import { discardModel } from "@/lib/quick-measure-save";
 
 /**
  * THE + (W1-11: eight rows to six). It lives in the top bar on every page.
@@ -27,6 +44,16 @@ import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
  *
  * Papers waiting to be filed show up as Needs You rows on My Day; Add Cost stays on My Day's Now
  * card and the job's own page (job-scoped).
+ *
+ * MEASURE FROM THE + (cn-v1160). The owner, 2026-11-10: "a quick measure button on the top bar ...
+ * with dropdown for the 3 options", and, shown that a seventh 44px button does not fit a phone's bar
+ * (33px over at 375), "in the + menu agreed". The office's menu carries a Lidar group right under Snap
+ * or Note (components/quick-measure-rows): Measure, Measure Area and 3D Scan, drawn only where the
+ * plugin is on the bridge, which is read once after mount, so a browser's + and the server's render
+ * are what they were. A tap closes this menu FIRST and then opens the camera; where the result goes is
+ * lib/quick-measure's to say (the Inspector's own flow on a visit, else the one sheet mounted below,
+ * beside Snap or Note's). The crew's + is untouched: still Snap or Note in one tap, and nothing of
+ * the group mounts for a tech.
  *
  * THE WORDS (cn-v1139): each verb is a key in the nav catalog (lib/words/nav.ts nv_add_), read
  * through the person's translator when the rows are built (quickAddActions), so the English is
@@ -58,6 +85,16 @@ export function plusOpens(isStaff: boolean): "menu" | "snap-or-note" {
   return isStaff ? "menu" : "snap-or-note";
 }
 
+/**
+ * WHOSE + CARRIES THE LIDAR GROUP (cn-v1160): the office's, on a company in good standing. The group
+ * is rows in a menu, and only the office's + is a menu; giving it to the crew would turn their one-tap
+ * + into one. So for a tech nothing of it mounts, whatever his phone can do: no rows, no sheet, no
+ * mark, and the bridge is not asked. (A crew lead keeps the Inspector's own buttons on his visit.)
+ */
+export function plusMeasures(isStaff: boolean, lapsed = false): boolean {
+  return !lapsed && plusOpens(isStaff) === "menu";
+}
+
 /** A soft navigation that hasn't landed in this long, tapped again, is stuck: the next tap loads. */
 export const STUCK_MS = 10_000;
 
@@ -75,13 +112,18 @@ export type QuickAddGo = { way: "soft" } | { way: "full" } | { way: "offline"; s
  *     retries;
  *   · but never a full load while Snap or Note is still sending files: its queue lives in this
  *     page's memory and a reload would drop them without a word. That tap says so and waits;
+ *   · nor while the + is holding a 3D model that is not saved yet (cn-v1160, `holding`): the model
+ *     is 40 to 130 MB of this page's memory and minutes of walking, and nothing can bring it back
+ *     after a reload. That tap says so too, with the two ways out (save it, or discard it). The
+ *     files are said first: they finish on their own, the model waits for him;
  *   · otherwise the ordinary soft navigation.
  *
  * What it says comes from the nav catalog in the translator's language (cn-v1139), with the row's
- * own word in the {label} slot; English when not handed a translator.
+ * own word in the {label} slot (the held model's sentence is the shell catalog's, beside the rest of
+ * Measure's words); English when not handed a translator.
  */
 export function quickAddGo(
-  o: { online: boolean; lastFailed: boolean; stuck: boolean; label: string; sending?: number },
+  o: { online: boolean; lastFailed: boolean; stuck: boolean; label: string; sending?: number; holding?: boolean },
   t: (key: string) => string = translator("en"),
 ): QuickAddGo {
   if (!o.online) return { way: "offline", said: fillText(t("nv_add_noSignal"), { label: o.label }) };
@@ -92,21 +134,50 @@ export function quickAddGo(
         way: "wait",
         said: n === 1 ? fillText(t("nv_add_stillSendingOne"), { label: o.label }) : fillText(t("nv_add_stillSendingMany"), { n: String(n), label: o.label }),
       };
+    if (o.holding) return { way: "wait", said: fillText(t("sh_measure_holdingModel"), { label: o.label }) };
     return { way: "full" };
   }
   return { way: "soft" };
 }
 
+/** One mount's asking of who is on the phone: `live` until the + unmounts, `out` while an ask is. */
+export type WhoAsk = { live: boolean; out: boolean };
+
+/**
+ * WHO IS ON THE PHONE (cn-v1160). A 3D model the + holds is page memory, and a sign-out is a soft
+ * navigation, so the store hides what it holds whenever the + unmounts and gives it back only to the
+ * same person in the same company (lib/quick-measure `left`, setMeasureOwner). The name is a read over
+ * the network (POST /api/measure/context through askMeasureContext, the office's alone: a route, so
+ * with no signal it never stands in front of his saves the way a server action would). One ask at a time. An answer that comes back
+ * after the + unmounted is dropped: it names whoever was here when it was asked, and naming them now
+ * would hand what was hidden at the leaving to whoever is here instead. The mount on screen asks for
+ * itself. A failed ask names nobody, and the + asks again later (see its caller).
+ */
+export async function askWho(a: WhoAsk, ask: () => Promise<MeasureContext> = () => askMeasureContext("")): Promise<void> {
+  if (!a.live || a.out) return;
+  a.out = true;
+  try {
+    const c = await ask();
+    if (a.live) setMeasureOwner(measureOwnerKey(c));
+  } catch {
+    // A dropped connection says nothing about who is signed in: nobody is named by it.
+  } finally {
+    a.out = false;
+  }
+}
+
 const ROW =
   "relative z-10 flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15";
 
-/** The office's menu rows: Snap or Note first, then the typed creates. */
+/** The office's menu rows: Snap or Note first, then (where the phone can) the Lidar group, then the
+ *  typed creates. */
 export function QuickAddMenu({
   isStaff,
   features,
   onSnap,
   onGo,
   said = null,
+  lidar,
 }: {
   isStaff: boolean;
   features?: FeatureMap | null;
@@ -114,6 +185,9 @@ export function QuickAddMenu({
   onGo: (a: QuickAddAction) => void;
   /** A tap that couldn't go (no signal), said under the rows. */
   said?: string | null;
+  /** The Lidar group (components/quick-measure-rows), drawn right under Snap or Note: the two capture
+   *  doors together, the typed creates after them. With none, the menu is what it always was. */
+  lidar?: ReactNode;
 }) {
   // The paper door's name (cn-v1138) and the typed verbs (cn-v1139) in the person's language.
   const t = translator(useLang());
@@ -122,6 +196,7 @@ export function QuickAddMenu({
       <button type="button" onClick={onSnap} className={ROW}>
         <Camera className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {t("sh_snapOrNote")}
       </button>
+      {lidar}
       {quickAddActions(isStaff, features, t).map((a) => (
         <button type="button" key={a.href} onClick={() => onGo(a)} className={ROW}>
           <a.icon className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {a.label}
@@ -152,7 +227,8 @@ export function GlobalQuickAdd({
   lapsed?: boolean;
 }) {
   const router = useRouter();
-  const t = translator(useLang());
+  const lang = useLang();
+  const t = translator(lang);
   const [open, setOpen] = useState(false);
   const [said, setSaid] = useState<string | null>(null);
   /** The shell said the last navigation failed: the next tap is a full load. */
@@ -178,6 +254,63 @@ export function GlobalQuickAdd({
     failed.current = false;
   }, [pathname]);
 
+  // ── MEASURE FROM THE + (cn-v1160) ──────────────────────────────────────────────────────────
+  // The doors are the phone's own answer, read once after mount and only for a person whose + has
+  // the group at all (plusMeasures): until then, and in a browser, nothing of it is drawn.
+  const measures = plusMeasures(isStaff, lapsed);
+  const doors = useLidarDoors(measures);
+  const hasDoors = measures && (doors.measure || doors.scan);
+  const store = useSyncExternalStore(subscribeMeasure, measureStore, measureStore);
+  /** The 3D model waiting in the +, when it is this person's to see: the mark on the + and its rows. */
+  const held = measures ? heldModelOf(store) : null;
+  /** The held model is on its way out: a discard's trip, which first takes back down a file that had
+   *  already gone up. Kept HERE and not in the rows: the menu unmounts its rows when it closes, and a
+   *  menu opened again in the middle of that trip must find them waiting. The row above Discard opens
+   *  the sheet on the model, and its Finish Saving would write a job's row for a file being removed. */
+  const [letting, setLetting] = useState(false);
+
+  // WHOSE IT IS. The + is on every page of the app and on none outside it, so its unmounting IS the
+  // app being left (a sign-out, or a page outside the shell such as a paper's preview): what is held
+  // is hidden from that moment (measureAppLeft), and the mount that follows asks who is here.
+  const who = useRef<WhoAsk>({ live: false, out: false });
+  useEffect(() => {
+    if (!hasDoors) return;
+    const a: WhoAsk = { live: true, out: false };
+    who.current = a;
+    // EVERY MOUNT ASKS FOR ITSELF, whatever the store already says: a name in it is the answer to a
+    // question some earlier mount asked, and who is here now is this one's to find out.
+    void askWho(a);
+    return () => {
+      a.live = false;
+      measureAppLeft();
+    };
+  }, [hasDoors]);
+  // ONE ASK IS ENOUGH WHEN IT ANSWERS, and it nearly always does: the name is kept and nothing asks
+  // again. With no signal when the app opened it does not, and then nobody is named while a scan,
+  // which needs no signal, can still be held; the store drops a model left behind unnamed rather than
+  // hand it to the next person. So for as long as nobody is named the ask is made again at the
+  // moments that cost nothing: the menu opening or closing, a model coming to be held, the signal
+  // coming back. Never on a timer: the app sends its saves one at a time, and a read repeating over a
+  // bad connection would stand in front of his own.
+  const unnamed = hasDoors && (store.owner === null || store.left);
+  const holding = store.held !== null;
+  useEffect(() => {
+    if (!unnamed) return;
+    const ask = () => void askWho(who.current);
+    ask();
+    window.addEventListener("online", ask);
+    return () => window.removeEventListener("online", ask);
+  }, [unnamed, holding, open]);
+
+  /** A LIDAR ROW WAS TAPPED. The menu closes FIRST and then the screen opens: the measuring screen is
+   *  the phone's own, drawn over the page, and a menu left open under it would be the first thing he
+   *  met on the way back. Where the result goes is lib/quick-measure's to say. */
+  function pick(kind: MeasureKind) {
+    setSaid(null);
+    setOpen(false);
+    void runQuickMeasure(kind, { lang, words: t });
+  }
+
   function go(a: QuickAddAction) {
     const here = window.location.href;
     const p = pending.current;
@@ -191,6 +324,7 @@ export function GlobalQuickAdd({
         stuck,
         label: a.label,
         sending: snapStillSending(),
+        holding: measureHeld(),
       },
       t,
     );
@@ -236,6 +370,16 @@ export function GlobalQuickAdd({
       >
         {open ? <X className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
       </button>
+      {/* A 3D MODEL IS WAITING IN THE +: a mark, never a count (a badge counts what is open, and this is
+          one thing that waits). Beside the button and not inside it: the button clips what it holds to
+          its circle, and its face turns with the phone. It takes no tap; the row in the menu is the door. */}
+      {held && (
+        <span
+          role="img"
+          aria-label={t("sh_btn_measureHeldModel")}
+          className="pointer-events-none absolute right-0 top-0 h-3 w-3 rounded-full bg-amber-400 ring-2 ring-white"
+        />
+      )}
       {open && !crew && (
         <>
           <div className="fixed inset-0 z-[80]" onClick={() => setOpen(false)} />
@@ -258,6 +402,35 @@ export function GlobalQuickAdd({
               isStaff={isStaff}
               features={features}
               said={said}
+              lidar={
+                <QuickMeasureRows
+                  doors={doors}
+                  busy={store.busy !== null || letting}
+                  held={held !== null}
+                  // A model is in the + that this person has not been named for yet: it cannot be
+                  // shown and it cannot be scanned over, so 3D Scan waits for the name.
+                  scanWaits={store.held !== null && held === null}
+                  onPick={pick}
+                  onReopen={() => {
+                    // The sheet opens over the page, never under an open menu.
+                    setSaid(null);
+                    setOpen(false);
+                    reopenHeldModel();
+                  }}
+                  // The menu stays open: the group going back to 3D Scan, and the mark leaving the +,
+                  // are how he sees that it went. A sentence a tap had said about the held model is
+                  // no longer true once it has gone, so it goes too.
+                  onDiscard={async () => {
+                    setLetting(true);
+                    try {
+                      await discardModel();
+                    } finally {
+                      setLetting(false);
+                    }
+                    setSaid(null);
+                  }}
+                />
+              }
               onSnap={() => {
                 setOpen(false);
                 openSnapOrNote();
@@ -269,6 +442,10 @@ export function GlobalQuickAdd({
       )}
       {/* THE ONE PAPER DOOR'S QUEUE AND SHEET, mounted once, here (it renders nothing while closed). */}
       <SnapOrNoteProvider isStaff={isStaff} />
+      {/* MEASURE'S ONE RESULT SHEET, mounted once, beside it (nothing while no result is open). Outside
+          the menu, so closing the menu never takes an open sheet with it; and NEVER KEYED: a key around
+          an open Modal makes the new one close itself (the cn-v1156 law). It resets with state. */}
+      {measures && <QuickMeasureSheet features={features} />}
     </div>
   );
 }

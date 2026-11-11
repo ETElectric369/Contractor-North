@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
-import { pickSite, siteLines, SITE_COLS } from "@/lib/site-address";
+import { pickSite, siteLines, SITE_COLS, type ResolvedSite, type SiteParts } from "@/lib/site-address";
+import { bornFromEstimateCandidates } from "@/lib/quote-site";
 import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
@@ -7,10 +8,43 @@ import { companyFromOrg } from "@/components/doc-letterhead";
 import { DocHeader, templateFor } from "@/components/doc-templates";
 import { formatDateTime, formatDate, formatCityStateZip } from "@/lib/utils";
 import { docTitle } from "@/lib/doc-title";
+import { reportError } from "@/lib/observe";
 import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * WHERE THE WORK IS (cn-v1160). A work order owns no address: it prints its own job's site. One
+ * made from an estimate that has no job yet printed none at all, while the estimate it came from
+ * printed the building the work is in. It now prints the place the estimate prints, by the one
+ * order every paper born from an estimate follows (lib/quote-site bornFromEstimateCandidates): the
+ * job's site, then the estimate's own, then that estimate's lead's, then its customer's.
+ *
+ * THE ESTIMATE IS ASKED ONLY WHEN THE JOB GAVE NO ADDRESS, in a read of its own by the work order's
+ * quote_id (0049), so a work order on a job that has an address makes the reads it always made and
+ * prints what it always printed. Address columns only: never a price. A work order made from no
+ * estimate has nobody to ask and prints its job's site or none, as before. A read that fails is
+ * filed and prints no site: a blank a person can see, never another record's address.
+ */
+async function siteOf(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  w: { id?: string | null; quote_id?: string | null; jobs?: SiteParts | null },
+): Promise<ResolvedSite | null> {
+  const fromJob = pickSite(bornFromEstimateCandidates({ job: w.jobs }));
+  if (fromJob || !w.quote_id) return fromJob;
+  const { data, error } = await supabase
+    .from("quotes")
+    .select(`${SITE_COLS}, inquiries(${SITE_COLS}), customers(${SITE_COLS})`)
+    .eq("id", w.quote_id)
+    .maybeSingle();
+  if (error) {
+    reportError("print.workOrder.estimateSite", error, { workOrderId: w.id ?? null, quoteId: w.quote_id });
+    return null;
+  }
+  const estimate = data as (SiteParts & { inquiries?: SiteParts | null; customers?: SiteParts | null }) | null;
+  return pickSite(bornFromEstimateCandidates({ job: w.jobs, quote: estimate, lead: estimate?.inquiries, customer: estimate?.customers }));
+}
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
@@ -41,6 +75,7 @@ export default async function WorkOrderPrintPage({
   const template = templateFor(org as Organization | null, "work_order");
   const w = wo as any;
   const customer = w.customers;
+  const siteRows = siteLines(await siteOf(supabase, w));
 
   return (
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">
@@ -84,10 +119,12 @@ export default async function WorkOrderPrintPage({
           <div className="text-right">
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Job site</div>
             <div className="mt-1 text-slate-700">
-              {w.jobs?.name ?? "—"}
+              {/* The dash stands for "no job and no place". With no job but a place (the estimate's,
+                  siteOf above) the address is the answer, and a dash over it would say there is none. */}
+              {w.jobs?.name ?? (siteRows.length ? null : "—")}
               {/* The whole address, not the street. The customer block beside this one has
                   printed a full address all along; this said "Job site" and gave a street. */}
-              {siteLines(pickSite([{ source: "job", parts: w.jobs }])).map((l) => (
+              {siteRows.map((l) => (
                 <div key={l} className="text-slate-500">{l}</div>
               ))}
             </div>

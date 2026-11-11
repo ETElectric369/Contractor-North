@@ -68,6 +68,40 @@ export function quoteSiteCandidates(of: QuoteSiteRecords): { source: QuoteSiteSo
   ];
 }
 
+/** Which record a paper born from an estimate took its site from. */
+export type BornSiteSource = "job" | "quote" | "lead" | "customer";
+
+/**
+ * A PAPER BORN FROM AN ESTIMATE (an invoice, a work order, a materials list) owns no address of its
+ * own (cn-v1160). It prints its own JOB's site first: the job is where the work is. With no job (a
+ * bill made straight from an estimate that never became one) it prints the place the ESTIMATE prints,
+ * in the estimate's own order: the estimate's own site, then the lead's, then the customer's. Until
+ * now the list skipped the estimate and its lead, so such a bill printed the customer's own address
+ * under "Job site" while the estimate it came from printed the building the work is in (skeptic #61).
+ *
+ * A caller hands in what it read and leaves out what it has not got: a missing record is skipped by
+ * pickSite exactly as an empty one is. The SQL twin is the site_candidates list of
+ * public.invoice_document_projection (migration 0409), read by the customer's page for its title; a
+ * database suite holds the two to this order.
+ */
+export function bornFromEstimateCandidates(of: {
+  /** The paper's own job. */
+  job?: SiteParts | null;
+  /** The estimate it was made from: that estimate's own address. */
+  quote?: SiteParts | null;
+  /** The lead that estimate was started from. */
+  lead?: SiteParts | null;
+  /** The customer it is made out to. */
+  customer?: SiteParts | null;
+}): { source: BornSiteSource; parts?: SiteParts | null }[] {
+  return [
+    { source: "job", parts: of.job },
+    { source: "quote", parts: of.quote },
+    { source: "lead", parts: of.lead },
+    { source: "customer", parts: of.customer },
+  ];
+}
+
 /** A row's five address columns and nothing else, so a client component is never handed a whole row. */
 export function sitePartsOf(row: SiteParts | null | undefined): SiteParts | null {
   if (!row) return null;

@@ -195,6 +195,8 @@ export const words: WordCatalog = {
     qe_couldntChangeType: "Couldn't change the type.",
     qe_aLine: "A line",
     qe_couldntBeSaved: "couldn't be saved.",
+    // The estimate's ⋯ row that opens the Circuit Schedule card on an estimate that has none yet (cn-v1160).
+    qe_btn_addCircuitSchedule: "Add Circuit Schedule",
   },
   es: {
     qe_btn_viewInvoice: "Ver Factura",
@@ -340,5 +342,6 @@ export const words: WordCatalog = {
     qe_couldntChangeType: "No se pudo cambiar el tipo.",
     qe_aLine: "Una línea",
     qe_couldntBeSaved: "no se pudo guardar.",
+    qe_btn_addCircuitSchedule: "Agregar Tabla de Circuitos",
   },
 };

@@ -98,7 +98,9 @@ export async function sendDueReminders(
       if (s.remind_invoice_due) {
         const { data: invs, error: invErr } = await supabase
           .from("invoices")
-          .select("id, invoice_number, total, amount_paid, public_token, customers(name, email, address), jobs(address)")
+          // quotes(address, inquiries(address)) (cn-v1160): the reminder's link carries the street the
+          // bill's paper prints (lib/doc-place rowPlace), the estimate's site before the customer's own.
+          .select("id, invoice_number, total, amount_paid, public_token, customers(name, email, address), jobs(address), quotes(address, inquiries(address))")
           .eq("org_id", org.id)
           .in("status", ["sent", "partial"])
           .lt("due_date", today);

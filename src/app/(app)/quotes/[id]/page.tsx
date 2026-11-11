@@ -15,6 +15,7 @@ import type { Customer, Inquiry } from "@/lib/types";
 import { SITE_JOBS_READ_LIMIT, siteJobsReadFull, sitePartsOf, type OtherJobSite } from "@/lib/quote-site";
 import type { SiteParts } from "@/lib/site-address";
 import { featureOn } from "@/lib/features";
+import { circuitCard } from "@/lib/estimate/circuit-card";
 import { translator } from "@/lib/i18n";
 import { currentLang } from "@/lib/current-lang";
 
@@ -161,20 +162,25 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   }));
 
   // THE SWITCH BOARD (0352), from the settings row already read: Kits off hides the kit chips (never
-  // in catalog mode, where kits price the estimate: rule i), and Panel Map off hides an EMPTY circuit
-  // schedule. An estimate that has circuits keeps them: they are on the proposal the customer signs.
+  // in catalog mode, where kits price the estimate: rule i).
   const org = orgRow as { id?: string; settings?: unknown } | null;
   const orgS = getOrgSettings(org?.settings);
   const kitDoors = featureOn(orgS.features, "kits") || orgS.estimating_mode === "catalog";
   const kits = kitsRead.rows as Parameters<typeof partsKitsOnly>[0] | null;
   if (kitsRead.state === "failed") reportError("quotes/[id]:kits", kitsRead.error, { quoteId: id });
-  const showCircuits = featureOn(orgS.features, "panel_map") || (Array.isArray(q.circuits) && q.circuits.length > 0);
   const companyPaperFormat = normalizeDocStyle(orgS.doc_style).estimate_format;
 
   // Asked of the server rule itself, never guessed from the status: acceptance alone locks nothing,
   // so a status-only gate would have hidden controls that still work. null = every control stays
   // live. Read once: the editor shows its reason, and the Duplicate door follows it.
   const lock = await quoteEditLock(q.id);
+  // THE CIRCUIT SCHEDULE IS ASKED FOR, NOT DRAWN ON EVERY ESTIMATE (cn-v1160). The owner, 2026-11-10:
+  // "we do not need the circuit schedule on the estimates page, right now it shows up on the bottom
+  // of every one and i imagine that will be chosen as an option". Panel Map on used to draw an empty
+  // card under every estimate. Now the card shows only when the estimate HAS circuits (they are on
+  // the proposal the customer signs), and otherwise Panel Map on offers one row in the estimate's ⋯,
+  // Add Circuit Schedule, which opens it on this estimate alone; never on a locked one.
+  const card = circuitCard({ panelMapOn: featureOn(orgS.features, "panel_map"), circuits: q.circuits, locked: !!lock });
   const kitsNote = kitDoors && !lock ? plainKitsReadWords(kitsRead) : null; // only where the picker is
   // The revision chain (0391): what this estimate revises, and — when it is superseded — the accepted
   // revision that replaced it (newest, if ever two).
@@ -233,7 +239,8 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           revises,
           supersededBy,
           visitBehind: (visitBehind as { id: string; starts_at: string | null } | null) ?? null,
-          showCircuits,
+          showCircuits: card.has,
+          canAddCircuits: card.canAdd,
           panelJob: await panelJobFor(supabase, q, t("qt_theJob")),
           // THE JOB SITE LINE (cn-v1158): the four records the paper picks its site from, each as its
           // five address columns and nothing else (lib/quote-site reads them in the print page's own

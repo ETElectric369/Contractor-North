@@ -1,6 +1,6 @@
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { ResolvedSite } from "@/lib/site-address";
-import { DocHeader, DocParty, DocSite, DocTotals, DocNote, DocDescription, type DocPartyCustomer } from "@/components/doc-templates";
+import { DocHeader, DocPartyHeader, DocTotals, DocNote, DocDescription, type DocPartyCustomer } from "@/components/doc-templates";
 import { DENSITY_ROW, normalizeDocStyle, sheetStyleVars } from "@/lib/doc-style";
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
@@ -143,17 +143,12 @@ export function InvoiceDocument({
         }}
       />
 
-      {/* Bill-to (two columns to save vertical space: identity + contact | location)
-          + Balance. Mirrors the letterhead grouping above — contact behind an accent rule. */}
+      {/* Bill to | Job site, one header row (cn-v1160, the owner's layout B: the address under the
+          customer's name), + Balance. An invoice to a property manager otherwise states nowhere
+          that the work happened. */}
       <div className="mt-6 flex items-start justify-between gap-6">
         <div className="min-w-0 flex-1">
-          <DocParty label="Bill to" customer={c} brand={co.brand} />
-          {/* An invoice to a property manager otherwise states nowhere that the work happened. */}
-          {site && (
-            <div className="mt-4">
-              <DocSite site={site} brand={co.brand} />
-            </div>
-          )}
+          <DocPartyHeader label="Bill to" customer={c} site={site} brand={co.brand} />
         </div>
         <div className="shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-5 py-3 text-right">
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Balance due</div>

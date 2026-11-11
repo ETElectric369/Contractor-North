@@ -521,7 +521,9 @@ export async function invoiceShareText(
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { data: invoice } = await ctx.supabase
     .from("invoices")
-    .select("invoice_number, status, total, amount_paid, public_token, org_id, organizations(name), jobs(address), customers(address)")
+    // quotes(address, inquiries(address)) (cn-v1160): the link of a bill made straight from an estimate
+    // carries the street its paper prints (lib/doc-place rowPlace), not the customer's own.
+    .select("invoice_number, status, total, amount_paid, public_token, org_id, organizations(name), jobs(address), customers(address), quotes(address, inquiries(address))")
     .eq("id", id)
     .maybeSingle();
   if (!invoice) return { ok: false, error: "Invoice not found." };
@@ -626,7 +628,8 @@ export async function previewInvoiceSend(id: string, kind: "invoice" | "receipt"
   const { supabase, orgId, userId } = ctx;
   const { data: invoice } = await supabase
     .from("invoices")
-    .select("invoice_number, title, total, amount_paid, status, public_token, org_id, customers(name, email, phone, address), jobs(address)")
+    // quotes(address, inquiries(address)): the same link the send itself builds (rowPlace, cn-v1160).
+    .select("invoice_number, title, total, amount_paid, status, public_token, org_id, customers(name, email, phone, address), jobs(address), quotes(address, inquiries(address))")
     .eq("id", id)
     .eq("org_id", orgId)
     .maybeSingle();
@@ -672,7 +675,8 @@ export async function textInvoice(
   const supabase = ctx.supabase;
   const { data: invoice } = await supabase
     .from("invoices")
-    .select("invoice_number, title, total, amount_paid, status, public_token, org_id, customer_id, customers(name, phone, address), jobs(address)")
+    // quotes(address, inquiries(address)): the street on the texted link (rowPlace, cn-v1160).
+    .select("invoice_number, title, total, amount_paid, status, public_token, org_id, customer_id, customers(name, phone, address), jobs(address), quotes(address, inquiries(address))")
     .eq("id", id)
     .maybeSingle();
   if (!invoice) return { ok: false, error: "Invoice not found." };
@@ -4765,7 +4769,8 @@ export async function collectArtifacts(invoiceId: string, collectAmount?: number
 
   const { data: inv } = await supabase
     .from("invoices")
-    .select("id, invoice_number, status, total, amount_paid, public_token, org_id, jobs(address), customers(address)")
+    // quotes(address, inquiries(address)): the street on the receipt link (rowPlace, cn-v1160).
+    .select("id, invoice_number, status, total, amount_paid, public_token, org_id, jobs(address), customers(address), quotes(address, inquiries(address))")
     .eq("id", invoiceId)
     .maybeSingle();
   if (!inv) return { ok: false, error: "Invoice not found." };

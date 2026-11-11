@@ -21,7 +21,7 @@ import { playbookForForm } from "@/lib/playbook/parse";
 import { applicableNeeds, clearInapplicable, isAnswered, isOpen, isSettled, missingNeeds, splitAsk } from "@/lib/playbook/resolve";
 import type { Answers, AnswerValue, Need, Playbook } from "@/lib/playbook/types";
 import { briefProvenanceKeys, computeBriefFills, type PlanBrief } from "@/lib/plan-brief";
-import { captureId, inspectorReadiness, looseNumber, parseInspectorCapture, type CaptureItem, type CaptureMeasure, type CapturePhotoMeta } from "@/lib/inspection/capture";
+import { captureId, inspectorReadiness, looseNumber, MAX_MEASURES, parseInspectorCapture, type CaptureItem, type CaptureMeasure, type CapturePhotoMeta } from "@/lib/inspection/capture";
 import { createStarterInspectionSheet } from "../../forms/actions";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { getPosition } from "@/lib/geo";
@@ -45,24 +45,40 @@ import { addDocument } from "../../jobs/actions";
 import { inspectorDoors } from "@/lib/inspection/doors";
 import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
+import { measureLabelWordsIn, measuredRowLabelIn } from "@/lib/inspection/measured-label";
+import { keepModelInPlus, registerMeasureHost, type MeasureHost } from "@/lib/quick-measure";
 
 /**
- * A MEASURED ROW'S STORED LABEL IS ENGLISH (skeptic #50). "Measured length" is a RECORD — the office, the
- * estimate and every later reader open the capture as stored — so Measure writes the row's label through
- * translator("en") whatever the tech's language, and the sheet draws the tech's own word for it (the
- * catalog's Spanish) while the stored text is still one of the four; anything he typed over it is shown as
- * typed. An English reader sees the stored text either way.
+ * A MEASURED ROW'S STORED LABEL IS ENGLISH (skeptic #50): the rule and its four keys live in
+ * lib/inspection/measured-label since cn-v1160 (the + menu's Measure names a result with them and must
+ * not import this file). These two are that rule bound to the English catalog, under the names this
+ * file and its tests have always used.
  */
-const MEASURED_LABEL_KEYS = ["vi_measuredLength", "vi_measuredLengthApprox", "vi_measuredArea", "vi_measuredAreaApprox"] as const;
 /** The label Measure writes on its row: neutral, not a guess, and English for the record. */
 export function measuredRowLabel(mode: MeasureMode, approx: boolean): string {
-  return translator("en")(mode === "area" ? (approx ? "vi_measuredAreaApprox" : "vi_measuredArea") : approx ? "vi_measuredLengthApprox" : "vi_measuredLength");
+  return measuredRowLabelIn(translator("en"), mode, approx);
 }
 /** The label as the reader sees it in the row's box: the catalog's word for a stored Measure label, else as stored. */
 export function measureLabelWords(label: string, t: (key: string) => string): string {
-  const en = translator("en");
-  const key = MEASURED_LABEL_KEYS.find((k) => en(k) === label);
-  return key ? t(key) : label;
+  return measureLabelWordsIn(translator("en"), label, t);
+}
+
+// ── MEASURE FROM THE + (cn-v1160): the three decisions the Inspector's side makes, kept pure ──────
+/** THE 51st MEASUREMENT (the scout's F1): the save clamps the list to MAX_MEASURES and says ok, so a
+ *  row past the cap would vanish without a word. Every door that adds a row asks this first. */
+export function measuresFull(count: number): boolean {
+  return count >= MAX_MEASURES;
+}
+/** A model the + is holding, offered to this visit: taken only when nothing is kept here already (one
+ *  kept model per Inspector) and nothing is measuring or scanning (the send would be turned away). */
+export function canAdoptModel(kept: KeptModel | null, busy: boolean): boolean {
+  return !kept && !busy;
+}
+/** LEAVING THE VISIT WITH A MODEL THAT NEVER WENT UP (F2): the model to hand to the +, or null. Only
+ *  the office (the + menu's Measure group is theirs alone), and only a model whose FILE never landed: a
+ *  landed one owes only the visit's row, which only this visit can write, so it stays as it was. */
+export function modelForThePlus(kept: KeptModel | null, office: boolean): KeptModel | null {
+  return office && kept && kept.landed === null ? kept : null;
 }
 
 /** A numeric field that can be EMPTY. Deliberately not NumberInput: its value is a `number` and
@@ -843,8 +859,18 @@ export function Inspector({
   // row's label box takes the cursor so he can say what it was. A cancel is a cancel (nothing
   // said); a phone that cannot measure says the plugin's own sentence (nothing silent).
   const measuringRef = useRef(false);
+  /** True, and said where every refusal here is said, when the visit holds all the rows it can (F1).
+   *  Measure and the typed Add a Measurement both ask it: past the cap a row would be cut on save. */
+  const atMeasureCap = () => {
+    if (!measuresFull(measuresRef.current.length)) return false;
+    setError(fillText(t("vi_measuresFull"), { n: String(MAX_MEASURES) }));
+    return true;
+  };
   async function measureInto(taskId: string | null, mode: MeasureMode) {
     if (measuringRef.current) return; // a double tap is one measurement (the plugin would refuse the second in words)
+    // At the cap the save would cut the new row without a word (F1): said BEFORE the camera opens, so
+    // he never measures something that cannot be kept. Nort's door says the same.
+    if (atMeasureCap()) return;
     measuringRef.current = true;
     setMeasuring(true);
     setError(null);
@@ -890,6 +916,9 @@ export function Inspector({
   /** A model whose trip did not finish, kept for one more tap without another walk. It belongs to
    *  the place it was scanned for (keptStep), and it is let go by a button, never only by luck. */
   const unsentModelRef = useRef<KeptModel | null>(null);
+  /** The page has gone (unmounted). A send that was out then hands nothing to the + as it leaves; if
+   *  it then FAILS, scan3dInto hands the model over itself (cn-v1160, the skeptic's S1). */
+  const pageGoneRef = useRef(false);
   const [keptModel, setKeptModel] = useState<KeptModel | null>(null);
   /** Keep a model, or let go of it: the ref the taps read, the state the Discard button is drawn from. */
   function keep(k: KeptModel | null) {
@@ -956,6 +985,12 @@ export function Inspector({
         // upload() said why (the signal); the model waits here for one more tap, for this place.
         keep({ model, path, taskId, landed: null });
         setError((e) => `${e ?? t("vi_modelDidntUpload")} ${keptWords(false, lang, t)}`);
+        // The page went while it was going up, so nobody will tap here again: the office's + takes it
+        // now (the unmount handed nothing while the send was out, or it would be sent twice).
+        if (pageGoneRef.current) {
+          const k = modelForThePlus(unsentModelRef.current, officeAccessRef.current);
+          if (k && keepModelInPlus({ model: k.model, path: k.path })) keep(null);
+        }
         return;
       }
       keep(null);
@@ -1115,6 +1150,53 @@ export function Inspector({
     },
   });
   useEffect(() => registerNortDoors(() => doorsRef.current), []);
+
+  // ── MEASURE FROM THE + (cn-v1160) ──────────────────────────────────────────────────────────
+  // Erik: "quick access to the lidar measure tool". On this page the + runs THESE functions, the
+  // buttons' own, for the task that is open (else the visit): a write from outside would be erased by
+  // this sheet's next autosave, which sends its whole measures section. Rebuilt each render and read
+  // through one provider registered once (Nort's doors' pattern); a reader offers nothing.
+  /** The open task, while it is still on the sheet; else the visit (null). */
+  const measurePlace = () => {
+    const id = openTaskIdRef.current;
+    return id && tasksNow().some((x) => x.id === id) ? id : null;
+  };
+  const hostRef = useRef<MeasureHost | null>(null);
+  hostRef.current = readOnly
+    ? null
+    : {
+        measure: (mode) => measureInto(measurePlace(), mode),
+        scan: () => scan3dInto(measurePlace()),
+        // A model the + is holding: kept here for the open place and sent down this sheet's own path,
+        // exactly as a kept model's next tap would send it. One kept model at a time: when this sheet
+        // already keeps one, the + keeps its own and nothing here changes.
+        adoptModel: (m) => {
+          if (!canAdoptModel(unsentModelRef.current, measuringRef.current)) return false;
+          const at = measurePlace();
+          keep({ model: m.model, path: m.path, taskId: at, landed: null });
+          void scan3dInto(at);
+          return true;
+        },
+      };
+  useEffect(() => registerMeasureHost(() => hostRef.current), []);
+  // LEAVING WITH A MODEL THAT NEVER WENT UP (F2): it lived in this page's memory and went with it,
+  // without a word. The office's + takes it now and offers it again; a crew lead (no Measure in his +),
+  // a + that already holds one, or a model whose file landed (only this visit can write its row) leave
+  // it as it always was. NOT WHILE A SEND IS OUT: that send may yet land, and a + holding the model
+  // would still say Not Saved and send it a second time; a send that fails after the page has gone
+  // hands it over itself (scan3dInto).
+  const officeAccessRef = useRef(office);
+  officeAccessRef.current = office;
+  useEffect(() => {
+    // Set again on mount: a development double-mount runs this cleanup once while the page stays.
+    pageGoneRef.current = false;
+    return () => {
+      pageGoneRef.current = true;
+      if (measuringRef.current) return;
+      const k = modelForThePlus(unsentModelRef.current, officeAccessRef.current);
+      if (k) keepModelInPlus({ model: k.model, path: k.path });
+    };
+  }, []);
 
   // ── THE PRELIMINARY REPORT'S ANSWERS ─────────────────────────────────────────────────────
   // What the plan reading prepared that THIS sheet still has open. Booking an inspection from
@@ -1907,7 +1989,7 @@ export function Inspector({
                   </div>
                 ))}
                 {!readOnly && (
-                  <AddRow label={t("vi_btn_addAMeasurement")} onClick={() => setMeasures([...measures, { id: captureId(), label: "", value: null, unit: "", task_id: task.id }])} />
+                  <AddRow label={t("vi_btn_addAMeasurement")} onClick={() => !atMeasureCap() && setMeasures([...measures, { id: captureId(), label: "", value: null, unit: "", task_id: task.id }])} />
                 )}
               </div>
               {/* THE NOTE — what is true about this piece, in his words. */}
@@ -2456,7 +2538,7 @@ export function Inspector({
             ))}
             <AddRow
               label={t("vi_btn_addAMeasurement")}
-              onClick={() => setMeasures([...measures, { id: captureId(), label: "", value: null, unit: "" }])}
+              onClick={() => !atMeasureCap() && setMeasures([...measures, { id: captureId(), label: "", value: null, unit: "" }])}
             />
             <Textarea
               rows={2}
@@ -2664,7 +2746,7 @@ export function Inspector({
             // because they are the same kind of thing: something you can reach for, named, not a
             // box announcing itself. Tap one and its question opens upstairs with the rest.
             ...reach.map((n) => ({ k: n.key, label: n.label, on: () => open1(n.key) })),
-            { k: "measures", label: t("vi_btn_measurement"), on: () => { open1("measures"); setMeasures((m) => [...m, { id: captureId(), label: "", value: null, unit: "" }]); } },
+            { k: "measures", label: t("vi_btn_measurement"), on: () => { open1("measures"); if (!atMeasureCap()) setMeasures((m) => [...m, { id: captureId(), label: "", value: null, unit: "" }]); } },
             { k: "items", label: t("vi_btn_material"), on: () => { open1("items"); setItems((i) => [...i, { id: captureId(), description: "", quantity: null, unit: "ea" }]); } },
             { k: "notes", label: t("vi_btn_note"), on: () => open1("notes") },
           ].filter((x) => !shows(x.k, false));

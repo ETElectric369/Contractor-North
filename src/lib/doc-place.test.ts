@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { docFileName, docPageTitle, docPlace, placeSlug, projectionPlace, rowPlace, withPlace } from "./doc-place";
 import { contentDisposition } from "./content-disposition";
 import { getOrgSettings, orgDocUrl } from "./org-settings";
+import { pickSite } from "./site-address";
+import { bornFromEstimateCandidates, quoteSiteCandidates } from "./quote-site";
 
 describe("docPlace — the street number and name, without the street label", () => {
   it("Erik's two examples", () => {
@@ -91,6 +95,154 @@ describe("docPlace — the street number and name, without the street label", ()
     const noAddress = { name: "Tess Zane", address: null };
     expect(rowPlace({ customers: noAddress })).toBe("");
     expect(rowPlace(null)).toBe("");
+  });
+
+  /**
+   * AN INVOICE MADE FROM AN ESTIMATE IS NAMED FOR THE PLACE ITS PAPER PRINTS (cn-v1160, skeptic #61).
+   * A bill made straight from an estimate that never became a job prints that estimate's site, then
+   * its lead's, before the customer's own address. The link and the file used to skip both, so a bill
+   * for a customer's second building was named for the customer's own street over a sheet that said
+   * the other address. Every name and street here is invented.
+   */
+  describe("rowPlace: an invoice read with the estimate it was made from", () => {
+    const job = { address: "9 Bayberry Lane" };
+    const est = { address: "40 Snowbell Court" };
+    const lead = { address: "16 Larkspur Circle" };
+    const customers = { name: "Dana Rook", address: "12 Thistlewood Way" };
+
+    it("the job's, then the estimate's own site, that estimate's lead's, then the customer's", () => {
+      expect(rowPlace({ jobs: job, quotes: { ...est, inquiries: lead }, customers })).toBe("9 Bayberry");
+      expect(rowPlace({ jobs: null, quotes: { ...est, inquiries: lead }, customers })).toBe("40 Snowbell");
+      expect(rowPlace({ jobs: { address: null }, quotes: { address: null, inquiries: lead }, customers })).toBe("16 Larkspur");
+      expect(rowPlace({ jobs: null, quotes: { address: "  ", inquiries: { address: "" } }, customers })).toBe("12 Thistlewood");
+      // Nobody has an address: no place at all, and never the customer's name in its stead.
+      const nameOnly = { name: "Dana Rook", address: null };
+      expect(rowPlace({ jobs: null, quotes: { address: null, inquiries: null }, customers: nameOnly })).toBe("");
+    });
+
+    const KEYS = ["job", "quote", "lead", "customer"] as const;
+    const SITES = { job, quote: est, lead, customer: customers };
+    const PAPERS = Array.from({ length: 16 }, (_, bits): [string, Record<(typeof KEYS)[number], boolean>] => {
+      const has = { job: !!(bits & 8), quote: !!(bits & 4), lead: !!(bits & 2), customer: !!(bits & 1) };
+      return [KEYS.filter((k) => has[k]).join(" + ") || "no address anywhere", has];
+    });
+
+    it.each(PAPERS)("the same order as the paper (%s)", (_name, has) => {
+      const at = (k: (typeof KEYS)[number]) => (has[k] ? SITES[k] : { address: null });
+      const row = { jobs: at("job"), quotes: { ...at("quote"), inquiries: at("lead") }, customers: at("customer") };
+      // What the bill's sheet prints: the one order (lib/quote-site), first record with an address.
+      const printed = pickSite(bornFromEstimateCandidates({ job: at("job"), quote: at("quote"), lead: at("lead"), customer: at("customer") }));
+      expect(rowPlace(row)).toBe(docPlace(printed?.address));
+      // …and it is a real street whenever anybody has one.
+      expect(rowPlace(row) !== "").toBe(KEYS.some((k) => has[k]));
+    });
+
+    it("read without the embed, or made from no estimate: named exactly as before", () => {
+      expect(rowPlace({ jobs: job, customers })).toBe("9 Bayberry");
+      expect(rowPlace({ jobs: null, customers })).toBe("12 Thistlewood");
+      // The embed arrives as null when the bill was made from no estimate.
+      expect(rowPlace({ jobs: null, quotes: null, customers })).toBe("12 Thistlewood");
+      expect(rowPlace({ jobs: job, quotes: null, customers })).toBe("9 Bayberry");
+      expect(rowPlace({ jobs: null, quotes: undefined, customers })).toBe("12 Thistlewood");
+    });
+
+    it("the embed in the shapes it can arrive in: a list, an empty list, the lead under its alias", () => {
+      expect(rowPlace({ jobs: [], quotes: [{ ...est, inquiries: [lead] }], customers: [customers] })).toBe("40 Snowbell");
+      expect(rowPlace({ quotes: [{ address: null, inquiries: [lead] }], customers })).toBe("16 Larkspur");
+      expect(rowPlace({ quotes: { address: null, inquiry: lead }, customers })).toBe("16 Larkspur");
+      expect(rowPlace({ quotes: [], customers })).toBe("12 Thistlewood");
+    });
+
+    it("only the street: never the customer's name, the unit or the town", () => {
+      const row = { jobs: null, quotes: { address: "40 Snowbell Court #14, Testville, CA 96161", inquiries: null }, customers };
+      expect(rowPlace(row)).toBe("40 Snowbell");
+      expect(docFileName("INV-090", rowPlace(row))).toBe("INV-090_40 Snowbell.pdf");
+      expect(withPlace("/i/tok", rowPlace(row))).toBe("/i/tok/40-snowbell");
+    });
+  });
+
+  describe("rowPlace: an estimate row keeps its own order", () => {
+    const KEYS = ["quote", "job", "lead", "customer"] as const;
+    const SITES = { quote: { address: "40 Snowbell Court" }, job: { address: "9 Bayberry Lane" }, lead: { address: "16 Larkspur Circle" }, customer: { address: "12 Thistlewood Way" } };
+    const PAPERS = Array.from({ length: 16 }, (_, bits): [string, Record<(typeof KEYS)[number], boolean>] => {
+      const has = { quote: !!(bits & 8), job: !!(bits & 4), lead: !!(bits & 2), customer: !!(bits & 1) };
+      return [KEYS.filter((k) => has[k]).join(" + ") || "no address anywhere", has];
+    });
+
+    it.each(PAPERS)("its own site, the job's, the lead's, the customer's (%s)", (_name, has) => {
+      const at = (k: (typeof KEYS)[number]) => (has[k] ? SITES[k] : { address: null });
+      // An estimate's readers name no quotes(…) embed: the row is its own address and three embeds.
+      const row = { address: at("quote").address, jobs: at("job"), inquiries: at("lead"), customers: at("customer") };
+      const printed = pickSite(quoteSiteCandidates({ quote: at("quote"), job: at("job"), lead: at("lead"), customer: at("customer") }));
+      expect(rowPlace(row)).toBe(docPlace(printed?.address));
+      // The same row read with the lead under its alias (the reminder's and the send's selects).
+      expect(rowPlace({ address: row.address, jobs: row.jobs, inquiry: row.inquiries, customers: row.customers })).toBe(docPlace(printed?.address));
+    });
+
+    it("its own site still outranks the job's: the invoice's order did not leak into it", () => {
+      expect(rowPlace({ address: "40 Snowbell Court", jobs: { address: "9 Bayberry Lane" } })).toBe("40 Snowbell");
+      expect(rowPlace({ address: null, jobs: { address: "9 Bayberry Lane" }, inquiries: { address: "16 Larkspur Circle" } })).toBe("9 Bayberry");
+    });
+  });
+
+  describe("every invoice reader that names a place reads the estimate the bill was made from", () => {
+    const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
+    const EMBED = "quotes(address, inquiries(address))";
+    /** Each file that names an invoice's place, and how many invoice reads in it do. */
+    const READERS: [string, number][] = [
+      ["src/app/(app)/billing/actions.ts", 4], // the share sheet, the review sheet, the text, the Pay Now sheet's receipt link
+      ["src/app/print/invoice/[id]/page.tsx", 1], // the page title Save As PDF offers
+      ["src/app/api/share-pdf/[token]/route.ts", 1], // the customer's download
+      ["src/app/api/pdf/[doc]/[id]/route.ts", 1], // the office's download
+      ["src/lib/reminders-engine.ts", 1], // the overdue reminder's link
+      ["src/lib/invoice-email.ts", 1], // the emailed link
+    ];
+    /** Every select in a file that reads a place: it names the job's address embed. */
+    const placeSelects = (src: string) => [...src.matchAll(/\.select\(\s*"([^"]*jobs\(address\)[^"]*)"/g)].map((m) => m[1]);
+    const isEstimateRead = (select: string) => /\bquote_number\b/.test(select);
+
+    it.each(READERS)("%s: %i invoice read(s), each with the embed", (file, count) => {
+      const selects = placeSelects(read(file));
+      const invoices = selects.filter((s) => !isEstimateRead(s));
+      expect(invoices).toHaveLength(count);
+      for (const select of invoices) {
+        // A column you do not select is a column you cannot rank: without the embed rowPlace falls
+        // straight from the job's street to the customer's, as it did.
+        expect(select).toContain(EMBED);
+        expect(select).toContain("customers(");
+      }
+      // An estimate's own read is as it was: its own address column, the job's, the lead's, the customer's.
+      for (const select of selects.filter(isEstimateRead)) {
+        expect(select).not.toContain("quotes(");
+        const ownColumns = select.replace(/\([^()]*\)/g, "").split(",").map((c) => c.trim());
+        expect(ownColumns).toContain("address");
+        expect(select).toMatch(/inquir(ies|y:inquiry_id)\(address\)/);
+        expect(select).toContain("customers(");
+      }
+    });
+
+    it("the list is every file that calls rowPlace: a new reader of an invoice's place has to join it", () => {
+      const callers: string[] = [];
+      const walk = (dir: string) => {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          const p = join(dir, e.name);
+          if (e.isDirectory()) walk(p);
+          else if (/\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name) && /\browPlace\(/.test(readFileSync(p, "utf8"))) callers.push(relative(process.cwd(), p));
+        }
+      };
+      walk(join(process.cwd(), "src"));
+      // The two that read ESTIMATES only (the estimate's own send doors, and its print page).
+      const estimatesOnly = ["src/app/(app)/quotes/actions.ts", "src/app/print/quote/[id]/page.tsx"];
+      expect(callers.filter((f) => f !== "src/lib/doc-place.ts").sort()).toEqual([...READERS.map(([f]) => f), ...estimatesOnly].sort());
+    });
+
+    it("the embed is the one rowPlace reads: the estimate's own address, and its lead's inside it", () => {
+      expect(rowPlace({ jobs: null, quotes: { address: "40 Snowbell Court", inquiries: { address: "16 Larkspur Circle" } }, customers: { address: "12 Thistlewood Way" } })).toBe("40 Snowbell");
+      const lib = read("src/lib/doc-place.ts");
+      expect(lib).toContain("`quotes(address, inquiries(address))`");
+      // The rule file stays a leaf: it imports nothing, so a customer's page pulls no dictionary through it.
+      expect(lib).not.toMatch(/^import /m);
+    });
   });
 
   it("projectionPlace reads public_invoice / public_quote, null candidates included", () => {

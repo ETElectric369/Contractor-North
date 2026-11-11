@@ -63,17 +63,44 @@ export function docPlace(...addresses: (string | null | undefined)[]): string {
 type Addr = { address?: string | null } | { address?: string | null }[] | null | undefined;
 const addressOf = (a: Addr) => (Array.isArray(a) ? a[0] : a)?.address;
 
+/** The estimate a bill was made from, as an invoice reads it: `quotes(address, inquiries(address))`. */
+type FromEstimate = { address?: string | null; inquiries?: Addr; inquiry?: Addr };
+const estimateOf = (q: FromEstimate | FromEstimate[] | null | undefined) => (Array.isArray(q) ? q[0] : q) ?? null;
+
 /**
  * The place of an invoice or quote row read with its `address` embeds — `jobs(address)`,
  * `customers(address)`, and for a quote its own `address` and `inquiries(address)`. Most specific
  * first: the quote's own site, the job's, the lead's, then the customer's.
+ *
+ * AN INVOICE MADE FROM AN ESTIMATE IS NAMED FOR THE PLACE ITS PAPER PRINTS (cn-v1160). A bill made
+ * straight from an estimate that never became a job prints that estimate's site, then its lead's,
+ * before it falls to the customer's own address (lib/quote-site bornFromEstimateCandidates). The
+ * link and the file used to skip both, so a bill for the second building was "INV-090_<the
+ * customer's own street>" over a sheet that said the other address. An invoice read with
+ * `quotes(address, inquiries(address))` ranks those two between the job's and the customer's: the
+ * same order as the paper. An invoice read without the embed, or made from no estimate, is named
+ * exactly as before; an estimate row carries no such embed, so its own order does not move.
  */
 export function rowPlace(
-  row: { address?: string | null; jobs?: Addr; inquiries?: Addr; inquiry?: Addr; customers?: Addr } | null | undefined,
+  row:
+    | {
+        address?: string | null;
+        jobs?: Addr;
+        inquiries?: Addr;
+        inquiry?: Addr;
+        customers?: Addr;
+        quotes?: FromEstimate | FromEstimate[] | null;
+      }
+    | null
+    | undefined,
 ): string {
+  const from = estimateOf(row?.quotes);
   return docPlace(
     row?.address,
     addressOf(row?.jobs),
+    // A bill born from an estimate: that estimate's own site, then that estimate's lead's.
+    from?.address,
+    addressOf(from?.inquiries ?? from?.inquiry),
     addressOf(row?.inquiries ?? row?.inquiry),
     addressOf(row?.customers),
   );

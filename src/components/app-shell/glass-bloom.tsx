@@ -4,7 +4,7 @@ import {
   Home, Sun, Briefcase, CalendarDays, Users, Receipt, Settings, Sparkles, Wand2,
   Clock, ListChecks, List, Play, FileText, Columns3, ClipboardCheck, Map as MapIcon,
   Mail, Wallet, Tags, Boxes, Calculator, Stamp, HardHat, BookOpen, FileSpreadsheet,
-  Wrench, CheckCircle2, Circle,
+  Wrench, CheckCircle2, Circle, Zap,
   type LucideIcon,
 } from "lucide-react";
 import type { NavTree, TreeNode } from "@/lib/nav-tree";
@@ -30,7 +30,7 @@ const ICONS: Record<string, LucideIcon> = {
   listCheck: ListChecks, list: List, play: Play, fileText: FileText, layoutBoard: Columns3,
   clipboardCheck: ClipboardCheck, map: MapIcon, mail: Mail, wallet: Wallet, tags: Tags,
   boxes: Boxes, calculator: Calculator, stamp: Stamp, hardhat: HardHat, bookOpen: BookOpen,
-  fileSpreadsheet: FileSpreadsheet, wrench: Wrench, checkbox: CheckCircle2,
+  fileSpreadsheet: FileSpreadsheet, wrench: Wrench, checkbox: CheckCircle2, zap: Zap,
 };
 
 /** Convert a string-iconed NavTree (lib/nav-tree) into component-iconed BloomNodes. */

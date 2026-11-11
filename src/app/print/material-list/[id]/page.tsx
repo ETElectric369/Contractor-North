@@ -1,6 +1,7 @@
 import { COMPANY_FIELD } from "@/lib/vendor-words";
 import { notFound } from "next/navigation";
-import { pickSite, siteLines, SITE_COLS } from "@/lib/site-address";
+import { pickSite, siteLines, SITE_COLS, type SiteParts } from "@/lib/site-address";
+import { bornFromEstimateCandidates } from "@/lib/quote-site";
 import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
@@ -9,6 +10,7 @@ import { companyFromOrg } from "@/components/doc-letterhead";
 import { DocHeader, templateFor } from "@/components/doc-templates";
 import { formatDate } from "@/lib/utils";
 import { docTitle } from "@/lib/doc-title";
+import { reportError } from "@/lib/observe";
 import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
 
@@ -40,18 +42,43 @@ export default async function MaterialListPrintPage({
   const [{ data: list }, { data: { user } }] = await Promise.all([
     supabase
       .from("material_lists")
-      .select(`name, created_at, jobs(job_number, name, ${SITE_COLS})`)
+      // quote_id (0049): the estimate the list was taken off, asked below for where the work is.
+      .select(`name, created_at, quote_id, jobs(job_number, name, ${SITE_COLS})`)
       .eq("id", id)
       .maybeSingle(),
     supabase.auth.getUser(),
   ]);
   if (!list) notFound();
+  const l = list as any;
+  const job = l.jobs as (SiteParts & { name?: string | null }) | null;
 
-  const [{ data: meRow }, { data: org }] = await Promise.all([
+  /**
+   * WHERE THE WORK IS (cn-v1160). A list owns no address: it prints its own job's site. One taken off
+   * an estimate that has no job yet printed no place at all, on a sheet that is handed to a supply
+   * house, while the estimate it came from printed the building the work is in. It now prints the
+   * place the estimate prints, by the one order every paper born from an estimate follows
+   * (lib/quote-site bornFromEstimateCandidates): the job's site, then the estimate's own, then that
+   * estimate's lead's, then its customer's.
+   *
+   * THE ESTIMATE IS ASKED ONLY WHEN THE JOB GAVE NO ADDRESS, in a read of its own by the list's
+   * quote_id, so a list on a job that has an address prints what it always printed. ADDRESS COLUMNS
+   * ONLY: this sheet is the crew's too, and no price is asked for (the projection law). An estimate
+   * and a lead are the office's to read (0056), so the crew's own read of them comes back empty and
+   * their sheet is as it was. A read that fails is filed and prints no place: a blank a person can
+   * see, never another record's address.
+   */
+  const fromJob = pickSite(bornFromEstimateCandidates({ job }));
+  const [{ data: meRow }, { data: org }, estimateRead] = await Promise.all([
     supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle(),
     supabase.from("organizations").select("*").maybeSingle(),
+    !fromJob && l.quote_id
+      ? supabase.from("quotes").select(`${SITE_COLS}, inquiries(${SITE_COLS}), customers(${SITE_COLS})`).eq("id", l.quote_id).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
   ]);
   const viewerIsStaff = isStaffRole((meRow as any)?.role ?? "");
+  if (estimateRead.error) reportError("print.materialList.estimateSite", estimateRead.error, { listId: id, quoteId: l.quote_id });
+  const estimate = (estimateRead.error ? null : estimateRead.data) as (SiteParts & { inquiries?: SiteParts | null; customers?: SiteParts | null }) | null;
+  const site = fromJob ?? pickSite(bornFromEstimateCandidates({ job, quote: estimate, lead: estimate?.inquiries, customer: estimate?.customers }));
 
   // PROJECTION LAW: a column never selected cannot leak — the crew's sheet never asks for
   // vendor, so it can't ride the RSC payload to a phone either.
@@ -63,8 +90,6 @@ export default async function MaterialListPrintPage({
 
   const company = companyFromOrg(org as Organization | null);
   const template = templateFor(org as Organization | null, "material_list");
-  const l = list as any;
-  const job = l.jobs;
 
   return (
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">
@@ -84,17 +109,19 @@ export default async function MaterialListPrintPage({
           }}
         />
 
-        {job && (
+        {/* A list with no job but a place (the estimate's, above) says "Job site": there is no job to
+            name, and the address is what the supply house needs. */}
+        {(job || site) && (
           <div className="mt-6 text-sm">
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Job</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{job ? "Job" : "Job site"}</div>
             <div className="mt-1 text-slate-700">
-              {job.name}
+              {job?.name}
               {/* A street with no city is not a deliverable address, and this sheet is handed
                   to a supply house. */}
               {/* Its OWN lines, not a comma join: these job rows are blobs ending in ", Tahoe City,
                   CA 96145, USA", so joining would print the dwelling AFTER the ZIP — the exact
                   thing the own-line rule exists to stop. This sheet goes to a supply house. */}
-              {siteLines(pickSite([{ source: "job", parts: job }])).map((l) => (
+              {siteLines(site).map((l) => (
                 <div key={l} className="text-slate-500">{l}</div>
               ))}
             </div>

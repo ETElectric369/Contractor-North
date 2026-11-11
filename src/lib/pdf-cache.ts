@@ -1,4 +1,5 @@
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { reportError } from "@/lib/observe";
 
 /**
  * THE STORED-PDF CACHE, SHARED HALF (0198).
@@ -146,9 +147,33 @@ export async function bustLeadPdfs(inquiryId: string, orgId?: string | null): Pr
     let quoQ = svc.from("quotes").select("id").eq("inquiry_id", inquiryId);
     if (org) quoQ = quoQ.eq("org_id", org);
     const { data: qs } = await quoQ;
-    for (const q of (qs ?? []) as { id: string }[]) await bustDocPdf("quote", q.id, org);
+    const quoteIds = ((qs ?? []) as { id: string }[]).map((q) => q.id);
+    for (const id of quoteIds) await bustDocPdf("quote", id, org);
+    await bustBillsOfQuotes(quoteIds, org);
   } catch {
     /* best-effort */
+  }
+}
+
+/**
+ * AND THE BILLS BORN FROM THOSE ESTIMATES (cn-v1160). A bill made straight from an estimate with no
+ * job prints the place the estimate prints, which for a lead's estimate is the lead's address
+ * (lib/quote-site), so a lead's edit or delete changes that bill's paper too; the customer's Download
+ * would go on serving the old one. The same drop setQuoteSite makes for one estimate's bills. Only
+ * inside a known company (this runs on the service role, and the ids come off a client form). A read
+ * that fails is reported and never costs the edit, which has landed.
+ */
+export async function bustBillsOfQuotes(quoteIds: readonly string[], orgId: string | null | undefined): Promise<void> {
+  try {
+    if (!quoteIds.length || !orgId) return;
+    const { data: bills, error } = await createServiceClient().from("invoices").select("id").in("quote_id", [...quoteIds]).eq("org_id", orgId);
+    if (error) {
+      reportError("bustBillsOfQuotes", error, { quotes: quoteIds.length });
+      return;
+    }
+    for (const b of (bills ?? []) as { id: string }[]) await bustDocPdf("invoice", b.id, orgId);
+  } catch (e) {
+    reportError("bustBillsOfQuotes", e, { quotes: quoteIds.length });
   }
 }
 

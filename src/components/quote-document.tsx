@@ -11,7 +11,7 @@ const QUOTE_DENSITY_ROW: Record<DocStyle["density"], string> = {
   default: "py-1",
   airy: "py-2",
 };
-import { DocHeader, DocParty, DocSite, DocTotals, DocNote, DocDescription, type DocPartyCustomer } from "@/components/doc-templates";
+import { DocHeader, DocPartyHeader, DocTotals, DocNote, DocDescription, type DocPartyCustomer } from "@/components/doc-templates";
 import { lineItemParts } from "@/components/line-item-text";
 import type { QuoteCircuit } from "@/lib/types";
 
@@ -129,18 +129,11 @@ export function QuoteDocument({
         }}
       />
 
-      {/* Prepared-for (two columns: identity + contact | location), mirroring the
-          invoice "Bill to" grouping — contact behind a brand accent rule. */}
+      {/* Prepared-for | Job site, one header row (cn-v1160, the owner's layout B): the address
+          under the customer's name, WHERE THE WORK HAPPENS in the right half. No site, an empty half. */}
       <div className="mt-6">
-        <DocParty label="Prepared for" customer={c} brand={co.brand} />
+        <DocPartyHeader label="Prepared for" customer={c} site={site} brand={co.brand} />
       </div>
-
-      {/* WHERE THE WORK HAPPENS. Absent = exactly today's output, so this is additive. */}
-      {site && (
-        <div className="mt-5">
-          <DocSite site={site} brand={co.brand} />
-        </div>
-      )}
 
       {title && <div className="mt-5 text-base font-semibold text-slate-900">{title}</div>}
       {/* WHICH KIND OF NUMBER THIS IS, said on the paper. Andrew: "time and material estimate vs.

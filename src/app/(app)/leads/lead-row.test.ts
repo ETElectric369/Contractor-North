@@ -379,7 +379,7 @@ describe("H. editing a lead drops its estimates' stored PDFs", () => {
     const fn = cache.slice(cache.indexOf("export async function bustLeadPdfs("), cache.indexOf("/** Same check, keyed the way the PUBLIC pages"));
     expect(fn).toContain('svc.from("quotes").select("id").eq("inquiry_id", inquiryId)');
     expect(fn).toContain('if (org) quoQ = quoQ.eq("org_id", org);');
-    expect(fn).toContain('await bustDocPdf("quote", q.id, org)');
+    expect(fn).toContain('await bustDocPdf("quote", id, org)');
   });
 });
 

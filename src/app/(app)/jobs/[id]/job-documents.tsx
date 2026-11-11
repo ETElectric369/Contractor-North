@@ -11,6 +11,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { MediaLightbox } from "@/components/media-lightbox";
+import { ModelViewer, modelKind } from "@/components/model-viewer";
 import { prettyBytes, readReceiptDocument, type ReceiptTone } from "@/lib/receipt-capture";
 import { isCostableCategory, NOT_A_COST_CATEGORY } from "@/lib/job-photos";
 import { useLang } from "@/components/lang-provider";
@@ -38,8 +39,31 @@ interface Doc {
   signedUrl: string | null;
 }
 
-const isImage = (d: Doc) => /\.(jpe?g|png|webp|gif|heic)($|\?)/i.test(d.signedUrl ?? d.name);
-const isPdf = (d: Doc) => /\.pdf($|\?)/i.test(d.signedUrl ?? d.name);
+const isImage = (d: Pick<Doc, "signedUrl" | "name">) => /\.(jpe?g|png|webp|gif|heic)($|\?)/i.test(d.signedUrl ?? d.name);
+const isPdf = (d: Pick<Doc, "signedUrl" | "name">) => /\.pdf($|\?)/i.test(d.signedUrl ?? d.name);
+/** A 3D model (3D Scan's USDZ filed from a visit, a dropped GLB), by the stored file first: a renamed
+ *  paper keeps its file's extension, and modelKind is the test the Inspector's tile and the customer's
+ *  page already use. */
+const isModel = (d: Pick<Doc, "file_url" | "name" | "signedUrl">) =>
+  (modelKind(d.file_url) ?? modelKind(d.name) ?? modelKind(d.signedUrl)) !== null;
+
+/** WHERE A PAPER OPENS (cn-v1160, the scout's F3: a 3D model left the app through window.open, unlike
+ *  the visit's tile and the customer's page). A model spins in the in-app viewer, a picture or a PDF in
+ *  the lightbox, anything else in its own tab; a note with no file opens nothing. */
+export function paperOpensIn(d: Pick<Doc, "file_url" | "name" | "signedUrl">): "model" | "lightbox" | "tab" | null {
+  if (!d.signedUrl) return null;
+  if (isModel(d)) return "model";
+  if (isImage(d) || isPdf(d)) return "lightbox";
+  return "tab";
+}
+
+/** The name the viewer is handed: Open in AR stages the file under it and Quick Look reads the
+ *  extension, so a paper renamed to plain words is named by its stored file instead. */
+export function paperModelName(d: Pick<Doc, "file_url" | "name">): string {
+  if (modelKind(d.name)) return d.name;
+  const file = String(d.file_url ?? "").split("?")[0].split("/").pop() ?? "";
+  return modelKind(file) ? file : d.name;
+}
 
 /** What the reader said about one document, under its row. `done` = a bill exists for it (created
  *  now, or found already), so the Record as Cost verb goes away — a warning tone can still ride a
@@ -148,6 +172,8 @@ export function JobDocuments({
   const [openAtStart] = useState(() => looseCount > 0 || !!tieNote);
   const [pending, start] = useTransition();
   const [viewing, setViewing] = useState<Doc | null>(null);
+  /** A 3D paper open in the in-app viewer. */
+  const [viewing3d, setViewing3d] = useState<Doc | null>(null);
   // Inline rename / re-categorize editor — null when closed.
   const [editing, setEditing] = useState<Doc | null>(null);
   const [editName, setEditName] = useState("");
@@ -210,8 +236,10 @@ export function JobDocuments({
   }
 
   function open(d: Doc) {
-    if (d.signedUrl && (isImage(d) || isPdf(d))) setViewing(d);
-    else if (d.signedUrl) window.open(d.signedUrl, "_blank");
+    const where = paperOpensIn(d);
+    if (where === "model") setViewing3d(d);
+    else if (where === "lightbox") setViewing(d);
+    else if (where === "tab" && d.signedUrl) window.open(d.signedUrl, "_blank");
   }
 
   function remove(d: Doc) {
@@ -460,6 +488,7 @@ export function JobDocuments({
       {viewing?.signedUrl && (
         <MediaLightbox url={viewing.signedUrl} name={viewing.name} onClose={() => setViewing(null)} />
       )}
+      {viewing3d?.signedUrl && <ModelViewer url={viewing3d.signedUrl} name={paperModelName(viewing3d)} onClose={() => setViewing3d(null)} />}
 
       <Modal
         open={!!editing}

@@ -72,7 +72,9 @@ export async function deliverInvoiceEmail(
   const message = opts?.message;
   const { data: invoice } = await supabase
     .from("invoices")
-    .select("*, customers(name, email, address), jobs(address)")
+    // quotes(address, inquiries(address)) (cn-v1160): the emailed link carries the street the bill's
+    // paper prints (lib/doc-place rowPlace), the estimate's site before the customer's own.
+    .select("*, customers(name, email, address), jobs(address), quotes(address, inquiries(address))")
     .eq("id", id)
     .maybeSingle();
   if (!invoice) return { ok: false, error: "Invoice not found." };

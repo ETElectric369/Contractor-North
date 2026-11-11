@@ -116,6 +116,7 @@ export const savedProps = (q: Record<string, unknown> = {}, items: unknown[] = [
   supersededBy: null,
   visitBehind: null,
   showCircuits: false,
+  canAddCircuits: false,
   panelJob: null,
   ...extra,
 });

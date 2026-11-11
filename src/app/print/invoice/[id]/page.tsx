@@ -12,7 +12,9 @@ export const dynamic = "force-dynamic";
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   const supabase = await createClient();
-  const { data } = await supabase.from("invoices").select("invoice_number, jobs(address), customers(address)").eq("id", id).maybeSingle();
+  // quotes(address, inquiries(address)) (cn-v1160): a bill made straight from an estimate is named for
+  // the place its paper prints, the estimate's own site or its lead's, before the customer's street.
+  const { data } = await supabase.from("invoices").select("invoice_number, jobs(address), customers(address), quotes(address, inquiries(address))").eq("id", id).maybeSingle();
   // "INV-080_235 Thistlewood": what Save As PDF names the file (lib/doc-place). Never the customer's name.
   return { title: data ? docPageTitle((data as any).invoice_number, rowPlace(data as any)) : "Invoice" };
 }

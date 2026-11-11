@@ -325,7 +325,10 @@ describe("the sheet's source reads every word through t()", () => {
   it("a measured row's stored label is the English literal whatever the tech reads (a record the office and the estimate open); the box draws the catalog's word for it, and his own words as typed", () => {
     // The mechanism: Measure writes the row through translator("en"), never the sheet's t.
     expect(src).toContain("const label = measuredRowLabel(mode, r.approx);");
-    expect(src).toContain('return translator("en")(mode === "area" ? (approx ? "vi_measuredAreaApprox" : "vi_measuredArea") : approx ? "vi_measuredLengthApprox" : "vi_measuredLength");');
+    // cn-v1160: the rule lives in lib/inspection/measured-label now (the + menu's Measure names a result with it);
+    // the Inspector binds it to translator("en"), so the stored label is still English whatever he reads.
+    expect(src).toContain('return measuredRowLabelIn(translator("en"), mode, approx);');
+    expect(readFileSync(join(process.cwd(), "src/lib/inspection/measured-label.ts"), "utf8")).toContain('return mode === "area" ? (approx ? "vi_measuredAreaApprox" : "vi_measuredArea") : approx ? "vi_measuredLengthApprox" : "vi_measuredLength";');
     expect(src.split("value={measureLabelWords(m.label, t)}").length - 1).toBe(2);
     expect(src).not.toMatch(/const label = t\(/);
     // A Spanish tech's saved label equals the English literal.
@@ -598,6 +601,7 @@ describe("the Inspector catalog (vi_)", () => {
       vi_uploadTooBig: "{what} is too big to send ({mb} MB). {action}",
       vi_uploadNoSignal: "{what} didn't go: no signal. Try again where there's service.",
       vi_uploadFailed: "Upload failed.",
+      vi_measuresFull: "{n} measurements is the most a visit holds. Take one off first.",
       vi_the3dModel: "The 3D model",
       vi_theFile: "The file",
       vi_scanSmallerArea: "Scan a smaller area.",

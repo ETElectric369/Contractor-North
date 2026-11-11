@@ -124,7 +124,7 @@ describe("one door: the ⋯'s Print / PDF row is gone, and the different verbs s
     expect(qe.en).not.toHaveProperty("qe_btn_printPdf");
     expect(qe.es).not.toHaveProperty("qe_btn_printPdf");
     // What the ⋯ still holds: what this estimate becomes, and Delete.
-    expect([...tree.matchAll(/id: "(qm-[a-z]+)"/g)].map((m) => m[1])).toEqual(["qm-inv", "qm-inv", "qm-job", "qm-job", "qm-wo", "qm-wo", "qm-ml", "qm-ml", "qm-del"]);
+    expect([...tree.matchAll(/id: "(qm-[a-z]+)"/g)].map((m) => m[1])).toEqual(["qm-inv", "qm-inv", "qm-job", "qm-job", "qm-wo", "qm-wo", "qm-ml", "qm-ml", "qm-circuits", "qm-del"]);
   });
 
   it("Share (the customer's own link) stays on the title line: a different verb, not a second Preview", () => {

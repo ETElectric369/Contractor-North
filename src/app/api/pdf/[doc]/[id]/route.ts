@@ -45,7 +45,10 @@ async function docFilename(supabase: Awaited<ReturnType<typeof createClient>>, d
   if (doc === "invoice") {
     const { data: inv } = await supabase
       .from("invoices")
-      .select("invoice_number, jobs(address), customers(address)")
+      // quotes(address, inquiries(address)) (cn-v1160): a bill made straight from an estimate is
+      // named for the place its paper prints (lib/doc-place rowPlace), the same name the customer's
+      // own download carries.
+      .select("invoice_number, jobs(address), customers(address), quotes(address, inquiries(address))")
       .eq("id", id)
       .maybeSingle();
     if (inv?.invoice_number) filename = docFileName(inv.invoice_number, rowPlace(inv));

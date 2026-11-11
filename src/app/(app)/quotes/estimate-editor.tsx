@@ -253,8 +253,12 @@ export interface SavedEstimate {
   supersededBy: { id: string; quote_number: string | null } | null;
   /** The visit this was written up from (capture.quote_id). */
   visitBehind: { id: string; starts_at: string | null } | null;
-  /** The circuit schedule card: shown when the Panel Map switch is on or the estimate has circuits. */
+  /** The circuit schedule card (cn-v1160): shown when the estimate HAS circuits, never just because
+   *  the Panel Map switch is on (an empty card under every estimate was what the owner asked away). */
   showCircuits: boolean;
+  /** The ⋯ row Add Circuit Schedule, which opens the card on this estimate alone: Panel Map on, no
+   *  circuits yet, not locked (lib/estimate/circuit-card). */
+  canAddCircuits: boolean;
   panelJob: { id: string; label: string } | null;
 }
 
@@ -320,6 +324,9 @@ function linesFrom(props: EstimateEditorProps): (DraftLineItem & { id?: string |
   return props.seed.items.length ? props.seed.items.map((l) => coerceDraftLine({ ...l })) : [blankItem()];
 }
 
+/** Where the ⋯ row Add Circuit Schedule scrolls to once the card is drawn. */
+const CIRCUITS_CARD_ID = "estimate-circuit-schedule";
+
 /** The ⋯ menu's map for a saved estimate — the same tree the page used to build server-side, built
  *  here so an estimate born on this screen has the same doors without a reload. */
 function quoteTree(
@@ -331,6 +338,8 @@ function quoteTree(
   lineCount: number;
   existing: SavedEstimate["existing"];
   revisesId: string | null;
+  /** Opens the circuit schedule card on this estimate; null = the row is not drawn. */
+  addCircuits?: (() => void) | null;
   },
   t: (key: string) => string,
 ): NavTree {
@@ -365,6 +374,12 @@ function quoteTree(
                 ? []
                 : [{ id: "qm-ml", label: t("qe_btn_createMaterialList"), icon: "boxes", run: () => createMaterialListFromQuote(q.id), hrefPrefix: "/materials/" }]),
           ]
+        : []),
+      // ADD CIRCUIT SCHEDULE (cn-v1160): the card is no longer drawn empty under every estimate, so this
+      // is where a schedule is started on the one estimate that wants it. It opens the card in place and
+      // answers ok; the menu then closes and refreshes, which keeps the editor's state.
+      ...(q.addCircuits
+        ? [{ id: "qm-circuits", label: t("qe_btn_addCircuitSchedule"), icon: "zap", run: async () => { q.addCircuits?.(); return { ok: true }; } }]
         : []),
       // NO PRINT ROW HERE ANY MORE (2026-11-10): the PDF's one door is the header's Preview, beside
       // Send (components/preview-button), at the address this row carried. Print and Download PDF
@@ -558,6 +573,12 @@ export function EstimateEditor(props: EstimateEditorProps) {
   // disagree with every write the server then accepts (S7).
   const lock: { reason: string } | null = props.mode === "saved" ? props.saved.lock : null;
   const readOnly = !!lock;
+  // THE CIRCUIT SCHEDULE, OPENED ON THIS ESTIMATE from its ⋯ row (cn-v1160). Held here, so the menu's
+  // refresh after the row answers keeps it; once rows are saved the page's own read shows the card.
+  const [circuitsOpen, setCircuitsOpen] = useState(false);
+  useEffect(() => {
+    if (circuitsOpen) document.getElementById(CIRCUITS_CARD_ID)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [circuitsOpen]);
 
   /* ── LINES ────────────────────────────────────────────────────────────────────────────────── */
   // ADD A TASK (cn-v1131): a task line by hand — no inspection, no estimator. It lands under Tasks
@@ -905,6 +926,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
           lineCount: items.filter((l) => l.description.trim()).length,
           existing: savedPage?.existing ?? { invoice: null, workOrder: null, materialList: null },
           revisesId: savedPage?.quote.revises_quote_id ?? null,
+          addCircuits: savedPage?.canAddCircuits && !circuitsOpen ? () => setCircuitsOpen(true) : null,
           },
           t,
         )
@@ -1689,8 +1711,8 @@ export function EstimateEditor(props: EstimateEditorProps) {
         </div>
       </div>
 
-      {savedPage?.showCircuits && savedId && (
-        <div className="mt-6">
+      {savedPage && (savedPage.showCircuits || circuitsOpen) && savedId && (
+        <div id={CIRCUITS_CARD_ID} className="mt-6 scroll-mt-20">
           <CircuitScheduleCard quoteId={savedId} initial={(savedPage.quote.circuits ?? []) as QuoteCircuit[]} panelJob={savedPage.panelJob} />
         </div>
       )}

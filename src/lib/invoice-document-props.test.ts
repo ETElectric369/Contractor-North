@@ -10,10 +10,14 @@ vi.mock("@/lib/observe", () => ({ reportError: (where: string) => void reported.
 
 import {
   INVOICE_DOC_COLS,
+  assembleInvoiceDocumentProps,
   readInvoiceDocumentProps,
   resolvePublicInvoice,
+  type InvoiceDocAccess,
+  type InvoiceDocInputs,
   type InvoiceDocRead,
 } from "@/lib/invoice-document-props";
+import { pickSite } from "@/lib/site-address";
 import { CUSTOMER_VISIBLE_STATUSES } from "@/lib/customer-visible-docs";
 import { InvoiceDocument } from "@/components/invoice-document";
 import { ProgressReportCard } from "@/components/progress-report-card";
@@ -127,38 +131,76 @@ const ROWS: Rows = {
 
 type Query = { table: string; select: string; filters: [string, string, unknown][]; range?: [number, number] };
 
+/** A row as PostgREST hands it back for a select with one embed: the columns named, of the row and
+ *  of the row it embeds, and no others. */
+function named(select: string, row: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  // Split on the commas that are not inside the embed's parentheses.
+  for (const part of select.split(/,(?![^()]*\))/).map((p) => p.trim()).filter(Boolean)) {
+    const embed = /^(\w+)\((.*)\)$/.exec(part);
+    if (!embed) {
+      if (part in row) out[part] = row[part];
+      continue;
+    }
+    const inner = row[embed[1]] as Record<string, unknown> | null | undefined;
+    out[embed[1]] = inner ? Object.fromEntries(embed[2].split(",").map((c) => c.trim()).filter((c) => c in inner).map((c) => [c, inner[c]])) : null;
+  }
+  return out;
+}
+
 /**
  * A PostgREST-shaped client over plain rows: select / eq / is / in / order / limit / maybeSingle,
  * awaitable. `rls`: the rows a signed-in office member of ORG would see (every table narrowed to its
- * org, the way RLS does). `fail`: tables whose read answers with an error.
+ * org, the way RLS does). `fail`: tables whose read answers with an error. `rows`: another world than
+ * ROWS (the bill made from an estimate, cn-v1160). `whole`: the estimate read comes back with every
+ * column the rows hold, as if somebody had widened its select.
  */
-function client(opts: { rls?: boolean; fail?: string[] } = {}) {
+function client(opts: { rls?: boolean; fail?: string[]; rows?: Rows; whole?: boolean } = {}) {
   const queries: Query[] = [];
+  const all = opts.rows ?? ROWS;
+  /** What this reader may see of a table: everything for the service role, its own org's rows under RLS. */
+  const seen = (t: string) => (x: Record<string, unknown>) =>
+    !opts.rls || (t === "organizations" ? x.id === ORG : !("org_id" in x) || x.org_id === ORG);
   const from = (table: string) => {
     const q: Query = { table, select: "", filters: [] };
     queries.push(q);
     const rows = () => {
-      let r = [...(ROWS[table] ?? [])];
-      if (opts.rls) r = r.filter((x) => (table === "organizations" ? x.id === ORG : !("org_id" in x) || x.org_id === ORG));
+      let r = [...(all[table] ?? [])].filter(seen(table));
       // The two embeds the money readers use: an invoice's lines, and a line's invoice.
       if (table === "invoices" && q.select.includes("invoice_items(")) {
-        r = r.map((x) => ({ ...x, invoice_items: (ROWS.invoice_items ?? []).filter((it) => it.invoice_id === x.id) }));
+        r = r.map((x) => ({ ...x, invoice_items: (all.invoice_items ?? []).filter((it) => it.invoice_id === x.id) }));
       }
       if (table === "invoice_items" && q.select.includes("invoices!inner(")) {
-        r = r.map((x) => ({ ...x, invoices: (ROWS.invoices ?? []).find((i) => i.id === x.invoice_id) ?? null })).filter((x) => x.invoices);
+        r = r.map((x) => ({ ...x, invoices: (all.invoices ?? []).find((i) => i.id === x.invoice_id) ?? null })).filter((x) => x.invoices);
+      }
+      // THE ESTIMATE A BILL WAS MADE FROM, WITH ITS LEAD (cn-v1160): embedded the way PostgREST embeds
+      // a to-one row. The lead is one this reader may see (RLS for the office; the service role sees
+      // every company's), narrowed by any filter on the embedded row itself: "inquiries.org_id" nulls
+      // the EMBED when it does not hold, and never drops the estimate.
+      const withLead = table === "quotes" && q.select.includes("inquiries(");
+      const onLead = (op: string, col: string) => withLead && op === "eq" && col.startsWith("inquiries.");
+      if (withLead) {
+        const leads = (all.inquiries ?? []).filter(seen("inquiries"));
+        const asked = q.filters.filter(([op, col]) => onLead(op, col));
+        r = r.map((x) => ({
+          ...x,
+          inquiries: leads.find((l) => l.id === x.inquiry_id && asked.every(([, col, val]) => l[col.slice("inquiries.".length)] === val)) ?? null,
+        }));
       }
       const at = (x: Record<string, unknown>, col: string): unknown =>
         col.includes(".") ? (x[col.split(".")[0]] as Record<string, unknown> | null)?.[col.split(".")[1]] : x[col];
       for (const [op, col, val] of q.filters) {
-        if (op === "eq") r = r.filter((x) => x[col] === val);
+        if (op === "eq" && !onLead(op, col)) r = r.filter((x) => x[col] === val);
         if (op === "neq") r = r.filter((x) => at(x, col) !== val);
         if (op === "overlaps") r = r.filter((x) => ((x[col] as unknown[] | undefined) ?? []).some((v) => (val as unknown[]).includes(v)));
         if (op === "is") r = r.filter((x) => (x[col] ?? null) === val);
         if (op === "in") r = r.filter((x) => (val as unknown[]).includes(x[col]));
       }
-      // PostgREST returns the columns named, no more (an embed returns its row whole here).
+      // PostgREST returns the columns named, no more (an embed returns its row whole here, except
+      // the estimate's lead, which is cut to the columns named unless `whole` says otherwise).
       const cols = q.select.split(",").map((c) => c.trim()).filter(Boolean);
-      if (!q.select.includes("(") && !cols.includes("*")) r = r.map((x) => Object.fromEntries(cols.filter((c) => c in x).map((c) => [c, x[c]])));
+      if (withLead && !opts.whole) r = r.map((x) => named(q.select, x));
+      else if (!q.select.includes("(") && !cols.includes("*")) r = r.map((x) => Object.fromEntries(cols.filter((c) => c in x).map((c) => [c, x[c]])));
       if (q.range) r = r.slice(q.range[0], q.range[1] + 1);
       return r;
     };
@@ -427,6 +469,318 @@ describe("a read that fails degrades honestly", () => {
     expect((await readInvoiceDocumentProps(client(), INV, { kind: "service", orgId: OTHER })).kind).toBe("missing");
     expect((await readInvoiceDocumentProps(client(), INV, { kind: "service", orgId: ORG, jobId: OTHER_JOB })).kind).toBe("missing");
     expect((await readInvoiceDocumentProps(client(), "../etc", { kind: "staff" })).kind).toBe("missing");
+  });
+});
+
+/**
+ * A BILL MADE FROM AN ESTIMATE PRINTS THE PLACE THE ESTIMATE PRINTS (cn-v1160, skeptic #61). An
+ * invoice owns no address. It printed its job's, else the customer's own, so a bill made straight
+ * from an estimate that never became a job said "Job site: <where the customer lives>" while the
+ * estimate it came from said the building the work is in. The order is one rule now
+ * (lib/quote-site bornFromEstimateCandidates): the job's, the source estimate's own, that
+ * estimate's lead's, the customer's. Every name and street here is invented.
+ */
+const BILL = "d1111111-1111-4111-8111-111111111111";
+const BILL_JOB = "d2222222-2222-4222-8222-222222222222";
+const BILL_CUST = "d3333333-3333-4333-8333-333333333333";
+const EST = "d4444444-4444-4444-8444-444444444444";
+const LEAD = "d5555555-5555-4555-8555-555555555555";
+
+const PLACES = {
+  job: { address: "9 Bayberry Lane", unit: null, city: "Testville", state: "CA", zip: "96161" },
+  quote: { address: "40 Snowbell Court", unit: "14", city: "Testville", state: "CA", zip: "96161" },
+  lead: { address: "16 Larkspur Circle", unit: null, city: "Testville", state: "CA", zip: "96161" },
+  customer: { address: "12 Thistlewood Way", unit: null, city: "Testville", state: "CA", zip: "96161" },
+} as const;
+const NOWHERE = { address: null, unit: null, city: null, state: null, zip: null };
+type Who = keyof typeof PLACES;
+type Has = Record<Who, boolean>;
+const ORDER: readonly Who[] = ["job", "quote", "lead", "customer"];
+const EVERYWHERE: Has = { job: true, quote: true, lead: true, customer: true };
+/** The skeptic's bill: no address on the job, the estimate priced a second building. */
+const NO_JOB_ADDRESS: Has = { job: false, quote: true, lead: true, customer: true };
+
+/**
+ * One bill (INV-090) made from one estimate (E-040), each of the four records with an address or
+ * without one. It is not a draw, so nothing but the estimate's own read asks the quotes table. What
+ * the estimate and its lead hold besides an address is planted in capitals: none of it is the
+ * bill's to read.
+ */
+function billWorld(has: Has): Rows {
+  const at = (k: Who) => (has[k] ? PLACES[k] : NOWHERE);
+  return {
+    ...ROWS,
+    invoices: [
+      {
+        id: BILL, org_id: ORG, job_id: BILL_JOB, customer_id: BILL_CUST, quote_id: EST, invoice_number: "INV-090", status: "sent", title: "Unit 14 panel",
+        description: null, notes: null, created_at: "2026-11-10T18:00:00Z", due_date: null, subtotal: 100, tax_rate: 0, tax: 0, total: 100, amount_paid: 0,
+        invoice_kind: null, public_token: "b".repeat(32),
+      },
+    ],
+    invoice_items: [{ id: "b1", invoice_id: BILL, org_id: ORG, sort_order: 0, description: "Panel swap", quantity: 1, unit: "ea", unit_price: 100, line_total: 100, import_source: null, import_key: null, edited: false, line_kind: null }],
+    payments: [],
+    jobs: [{ id: BILL_JOB, org_id: ORG, billing_type: "fixed", ...at("job") }],
+    customers: [{ id: BILL_CUST, org_id: ORG, name: "Dana Rook", company_name: null, email: "dana@example.com", phone: "(530) 555-0100", ...at("customer") }],
+    quotes: [{ id: EST, org_id: ORG, job_id: null, inquiry_id: LEAD, quote_number: "E-040", title: "ESTIMATE TITLE", notes: "ESTIMATE NOTE", total: 4321, status: "accepted", ...at("quote") }],
+    inquiries: [{ id: LEAD, org_id: ORG, name: "LEAD NAME", phone: "LEAD PHONE", message: "LEAD MESSAGE", ...at("lead") }],
+  };
+}
+
+describe("a bill made from an estimate prints the place the estimate prints", () => {
+  const STAFF: InvoiceDocAccess = { kind: "staff" };
+  const SERVICE: InvoiceDocAccess = { kind: "service", orgId: ORG };
+  const estimateReads = (qs: Query[]) => qs.filter((q) => q.table === "quotes" && q.select === INVOICE_DOC_COLS.estimate);
+  /** The estimate's own read answers with an error (and no other read does). */
+  const ESTIMATE_FAILS = [`quotes=${INVOICE_DOC_COLS.estimate}`];
+  const sheet = (r: InvoiceDocRead) =>
+    renderToStaticMarkup(createElement(InvoiceDocument, ok(r))).replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ");
+
+  it("THE SKEPTIC'S CASE: the job gave no address and the estimate has a site of its own: the building, not where the customer lives", async () => {
+    const r = await readInvoiceDocumentProps(client({ rows: billWorld(NO_JOB_ADDRESS) }), BILL, SERVICE);
+    const p = ok(r);
+    expect(p.site).toEqual({ address: "40 Snowbell Court", unit: "14", city: "Testville", state: "CA", zip: "96161", source: "quote", complete: true });
+    // Bill To is still the customer's own address: only the Job site moved.
+    expect(p.customer).toMatchObject({ name: "Dana Rook", address: "12 Thistlewood Way" });
+    expect(sheet(r)).toContain("Job site 40 Snowbell Court Unit 14 Testville, CA 96161");
+    expect(r.kind === "ok" && r.degraded).toEqual([]);
+    expect(reported).toEqual([]);
+  });
+
+  /** Each of the four with an address or without: sixteen bills. */
+  const BILLS = Array.from({ length: 16 }, (_, bits): [string, Who | "none", Has] => {
+    const has: Has = { job: !!(bits & 8), quote: !!(bits & 4), lead: !!(bits & 2), customer: !!(bits & 1) };
+    const there = ORDER.filter((k) => has[k]);
+    return [there.length ? there.join(" + ") : "no address anywhere", there[0] ?? "none", has];
+  });
+
+  it.each(BILLS)("%s → %s, the same on the print path, the /i link and the portal", async (_name, winner, has) => {
+    const rows = billWorld(has);
+    const office = await readInvoiceDocumentProps(client({ rls: true, rows }), BILL, STAFF);
+    const link = await readInvoiceDocumentProps(client({ rows }), BILL, SERVICE);
+    const portal = await readInvoiceDocumentProps(client({ rows }), BILL, { kind: "service", orgId: ORG, jobId: BILL_JOB });
+    expect(ok(link)).toEqual(ok(office));
+    expect(ok(portal)).toEqual(ok(office));
+    // The first record in the order that has an address, whole: its street, its unit and its town.
+    expect(ok(office).site ?? null).toEqual(winner === "none" ? null : pickSite([{ source: winner, parts: PLACES[winner] }]));
+    for (const r of [office, link, portal]) expect(r.kind === "ok" && r.degraded).toEqual([]);
+    expect(reported).toEqual([]);
+  });
+
+  it("the table is not vacuous: every record wins somewhere, and one bill has no site at all", () => {
+    expect([...new Set(BILLS.map(([, winner]) => winner))].sort()).toEqual(["customer", "job", "lead", "none", "quote"]);
+  });
+
+  it("a bill with no job at all reads the same as one whose job has no address", async () => {
+    for (const has of [NO_JOB_ADDRESS, { job: false, quote: false, lead: true, customer: true }, { job: false, quote: false, lead: false, customer: true }]) {
+      const rows = billWorld(has);
+      rows.invoices[0].job_id = null;
+      const db = client({ rows });
+      const office = ok(await readInvoiceDocumentProps(client({ rls: true, rows }), BILL, STAFF));
+      const link = ok(await readInvoiceDocumentProps(db, BILL, SERVICE));
+      expect(link).toEqual(office);
+      expect(db.queries.filter((q) => q.table === "jobs")).toEqual([]);
+      const winner = ORDER.find((k) => has[k])!;
+      expect(link.site).toEqual(pickSite([{ source: winner, parts: PLACES[winner] }]));
+      // No job, so no billing model to state: the bill says nothing rather than guess one.
+      expect(link.billingLabel).toBeNull();
+    }
+  });
+
+  it.each([
+    [true, true],
+    [true, false],
+    [false, true],
+    [false, false],
+  ])("A BILL MADE FROM NO ESTIMATE (job address %s, customer address %s) asks for no estimate and prints what it printed before", async (job, customer) => {
+    const rows = billWorld({ job, quote: true, lead: true, customer });
+    rows.invoices[0].quote_id = null;
+    for (const [db, access] of [[client({ rows }), SERVICE], [client({ rls: true, rows }), STAFF]] as const) {
+      const p = ok(await readInvoiceDocumentProps(db, BILL, access));
+      // The estimate and its lead are on file with addresses of their own; nobody asked them.
+      expect(db.queries.filter((q) => q.table === "quotes" || q.table === "inquiries")).toEqual([]);
+      // The list this file used to write inline, kept here as the witness.
+      const was = pickSite([{ source: "job", parts: rows.jobs[0] as never }, { source: "customer", parts: rows.customers[0] as never }]);
+      expect(p.site ?? null).toEqual(was);
+    }
+    expect(reported).toEqual([]);
+  });
+
+  it("the fixture every other test reads (INV-080) names no estimate, and asks for none", async () => {
+    const db = client();
+    const p = ok(await readInvoiceDocumentProps(db, INV, SERVICE));
+    expect(estimateReads(db.queries)).toEqual([]);
+    expect(p.site).toMatchObject({ address: "235 Thistlewood Court", source: "job" });
+  });
+
+  it("THE ESTIMATE READ NAMES THE INVOICE'S OWN ORG, on the estimate and on the lead it embeds; every read of the bill is pinned", async () => {
+    const db = client({ rows: billWorld(EVERYWHERE) });
+    ok(await readInvoiceDocumentProps(db, BILL, SERVICE));
+    const asked = estimateReads(db.queries);
+    expect(asked).toHaveLength(1);
+    // The estimate by its id in the invoice's org; its lead is checked against that org in code
+    // (never a filter on a to-one embed without !inner, a form this app has never run).
+    expect(asked[0].filters).toEqual([
+      ["eq", "id", EST],
+      ["eq", "org_id", ORG],
+    ]);
+    // It rode with the other reads, not after them: one read of each piece, the estimate among them.
+    expect(db.queries.map((q) => q.table)).toEqual(expect.arrayContaining(["invoices", "invoice_items", "payments", "customers", "jobs", "quotes", "organizations"]));
+    for (const q of db.queries) {
+      const pinned = q.filters.some(([op, col, val]) => op === "eq" && ((col === "org_id" && val === ORG) || (q.table === "organizations" && col === "id" && val === ORG)));
+      expect(pinned, `${q.table} (${q.select})`).toBe(true);
+    }
+    // The office asks the very same question (RLS narrows it further; it never widens it).
+    const office = client({ rls: true, rows: billWorld(EVERYWHERE) });
+    ok(await readInvoiceDocumentProps(office, BILL, STAFF));
+    expect(estimateReads(office.queries).map((q) => q.filters)).toEqual([asked[0].filters]);
+  });
+
+  it("an estimate that is another company's is not there for this bill: nothing of it prints, on either path, and nothing is called a failure", async () => {
+    const rows = billWorld(NO_JOB_ADDRESS);
+    rows.quotes[0].org_id = OTHER;
+    for (const [db, access] of [[client({ rows }), SERVICE], [client({ rls: true, rows }), STAFF]] as const) {
+      const r = await readInvoiceDocumentProps(db, BILL, access);
+      // Not the other company's building, and not the lead reached through it: the customer's, as before.
+      expect(ok(r).site).toMatchObject({ address: "12 Thistlewood Way", source: "customer" });
+      expect(r.kind === "ok" && r.degraded).toEqual([]);
+    }
+    expect(reported).toEqual([]);
+  });
+
+  it("a lead that is another company's never prints: the service role is handed it, and the read takes it for no lead", async () => {
+    const rows = billWorld({ job: false, quote: false, lead: true, customer: true });
+    rows.inquiries[0].org_id = OTHER;
+    // The premise: the very read the file makes hands the service role the other company's lead.
+    const bare = await client({ rows }).from("quotes").select(INVOICE_DOC_COLS.estimate).eq("id", EST).eq("org_id", ORG).maybeSingle();
+    expect(bare.data.inquiries).toMatchObject({ address: "16 Larkspur Circle", org_id: OTHER });
+    // The real read: the customer's address on both paths. The office's RLS never showed it that lead,
+    // so a /i link that printed it would have parted from the PDF.
+    const link = ok(await readInvoiceDocumentProps(client({ rows }), BILL, SERVICE));
+    const office = ok(await readInvoiceDocumentProps(client({ rls: true, rows }), BILL, STAFF));
+    expect(link.site).toMatchObject({ address: "12 Thistlewood Way", source: "customer" });
+    expect(link).toEqual(office);
+    expect(reported).toEqual([]);
+  });
+
+  it("NOTHING BUT TEN ADDRESS COLUMNS IS ASKED OF THE ESTIMATE AND ITS LEAD (and the lead's company, to check it by), and nothing else of theirs can leave", async () => {
+    expect(INVOICE_DOC_COLS.estimate).toBe("address, unit, city, state, zip, inquiries(org_id, address, unit, city, state, zip)");
+    // A column you do not select is a column you cannot follow: the invoice read names quote_id.
+    expect(INVOICE_DOC_COLS.invoice.split(", ")).toContain("quote_id");
+    const src = readFileSync(join(process.cwd(), "src/lib/invoice-document-props.ts"), "utf8");
+    // One read of quotes in the file, by that list, by id and org; the lead is reached only inside it.
+    expect(src.match(/from\("quotes"\)/g)).toHaveLength(1);
+    expect(src).toContain('db.from("quotes").select(INVOICE_DOC_COLS.estimate).eq("id", quoteId).eq("org_id", orgId).maybeSingle()');
+    expect(src).not.toContain('"inquiries.org_id"');
+    // The lead's company is checked in code, and a lead of another company is no lead.
+    expect(src).toContain("lead: sitePartsOf(leadOfThisCompany(estimateRow?.inquiries, orgId))");
+    expect(src).not.toMatch(/from\("inquiries"\)/);
+    // Even a read that came back WIDER than it was asked (the whole rows) lets nothing else through.
+    for (const whole of [false, true]) {
+      const p = ok(await readInvoiceDocumentProps(client({ rows: billWorld(NO_JOB_ADDRESS), whole }), BILL, SERVICE));
+      const json = JSON.stringify(p, (_k, v) => (v instanceof Set ? [...v] : v));
+      for (const banned of ["ESTIMATE TITLE", "ESTIMATE NOTE", "4321", "E-040", "LEAD NAME", "LEAD PHONE", "LEAD MESSAGE", EST, LEAD, BILL_JOB, BILL_CUST, ORG]) {
+        expect(json, banned).not.toContain(banned);
+      }
+      expect(Object.keys(p.site ?? {}).sort()).toEqual(["address", "city", "complete", "source", "state", "unit", "zip"]);
+    }
+    // …and the lead's, when it is the lead's address that prints.
+    const viaLead = ok(await readInvoiceDocumentProps(client({ rows: billWorld({ job: false, quote: false, lead: true, customer: true }), whole: true }), BILL, SERVICE));
+    expect(viaLead.site).toEqual({ ...PLACES.lead, source: "lead", complete: true });
+    expect(JSON.stringify(viaLead, (_k, v) => (v instanceof Set ? [...v] : v))).not.toMatch(/LEAD (NAME|PHONE|MESSAGE)/);
+  });
+
+  it("THE ESTIMATE'S READ FAILS AND THE JOB GAVE NO ADDRESS: no site, never the customer's address under Job site; filed; the read is degraded", async () => {
+    // Whatever the estimate would have said: with its own site, or with none at all (when the
+    // customer's address would have been the right one, nobody can know it from a read that failed).
+    for (const has of [NO_JOB_ADDRESS, { job: false, quote: false, lead: false, customer: true }]) {
+      for (const access of [STAFF, SERVICE]) {
+        reported.length = 0;
+        const r = await readInvoiceDocumentProps(client({ rls: access.kind === "staff", rows: billWorld(has), fail: ESTIMATE_FAILS }), BILL, access);
+        expect(r.kind).toBe("ok");
+        if (r.kind !== "ok") continue;
+        expect(r.props.site).toBeNull();
+        expect(r.degraded).toEqual(["estimate"]);
+        expect(reported).toEqual(["invoiceDoc.estimate"]);
+        // The rest of the bill is whole, and the sheet prints no Job site heading over nothing.
+        expect(r.props.customer).toMatchObject({ name: "Dana Rook", address: "12 Thistlewood Way" });
+        expect(r.props.items).toHaveLength(1);
+        expect(sheet(r)).not.toContain("Job site");
+        expect(sheet(r)).toContain("12 Thistlewood Way");
+      }
+    }
+  });
+
+  it("…the same for a bill with no job at all", async () => {
+    const rows = billWorld(NO_JOB_ADDRESS);
+    rows.invoices[0].job_id = null;
+    const r = await readInvoiceDocumentProps(client({ rows, fail: ESTIMATE_FAILS }), BILL, SERVICE);
+    expect(ok(r).site).toBeNull();
+    expect(r.kind === "ok" && r.degraded).toEqual(["estimate"]);
+    expect(reported).toEqual(["invoiceDoc.estimate"]);
+  });
+
+  it("THE ESTIMATE'S READ FAILS AND THE JOB GAVE THE SITE: the bill is whole without it, so it is not degraded; the failure is still filed", async () => {
+    for (const access of [STAFF, SERVICE]) {
+      reported.length = 0;
+      const rls = access.kind === "staff";
+      const r = await readInvoiceDocumentProps(client({ rls, rows: billWorld(EVERYWHERE), fail: ESTIMATE_FAILS }), BILL, access);
+      expect(ok(r).site).toMatchObject({ address: "9 Bayberry Lane", source: "job" });
+      expect(r.kind === "ok" && r.degraded).toEqual([]);
+      expect(reported).toEqual(["invoiceDoc.estimate"]);
+      // Byte for byte the bill a clean read draws: the job outranks the estimate, so nothing was lost.
+      expect(ok(r)).toEqual(ok(await readInvoiceDocumentProps(client({ rls, rows: billWorld(EVERYWHERE) }), BILL, access)));
+    }
+  });
+
+  it("a failed JOB read prints no site whatever the estimate says: the job outranks it, and the job is unknown", async () => {
+    const stood = await readInvoiceDocumentProps(client({ rows: billWorld(EVERYWHERE), fail: ["jobs"] }), BILL, SERVICE);
+    expect(ok(stood).site).toBeNull();
+    expect(stood.kind === "ok" && stood.degraded).toEqual(["job"]);
+    expect(reported).toEqual(["invoiceDoc.job"]);
+    // Both reads lost: still no site, the job's piece is the one named, and both failures are filed.
+    reported.length = 0;
+    const both = await readInvoiceDocumentProps(client({ rows: billWorld(EVERYWHERE), fail: ["jobs", ...ESTIMATE_FAILS] }), BILL, SERVICE);
+    expect(ok(both).site).toBeNull();
+    expect(both.kind === "ok" && both.degraded).toEqual(["job"]);
+    expect([...reported].sort()).toEqual(["invoiceDoc.estimate", "invoiceDoc.job"]);
+  });
+
+  it("both readers of `degraded` say something true about the new piece", () => {
+    // The PDF: any piece left off is refused, by name, so a bill with no site is never stored as the customer's copy.
+    const print = readFileSync(join(process.cwd(), "src/app/print/invoice/[id]/page.tsx"), "utf8");
+    expect(print).toMatch(/if \(read\.degraded\.length > 0\) \{\s*throw new Error\(`This invoice couldn't be read in full just now \(\$\{read\.degraded\.join\(", "\)\}\)\.`\);/);
+    // The /i link: "part of this bill" covers the job site, and it never names a piece it cannot explain.
+    const link = readFileSync(join(process.cwd(), "src/app/i/[token]/page.tsx"), "utf8");
+    expect(link).toMatch(/\{doc\.degraded\.length > 0 && \(/);
+    expect(link).toContain("Part of this bill couldn&apos;t load just now.");
+    expect(link).not.toMatch(/degraded\.includes\(/);
+  });
+
+  it("THE PURE ASSEMBLY: the estimate is a piece a caller may leave out, and then nothing changed", () => {
+    const base: Omit<InvoiceDocInputs, "customer" | "job" | "estimate"> = {
+      invoice: { invoice_number: "INV-090", created_at: "2026-11-10T18:00:00Z", subtotal: 100, tax: 0, total: 100, amount_paid: 0 },
+      items: [],
+      payments: [],
+      org: { name: "Testville Electric", settings: {} },
+      supplierNames: new Set<string>(),
+      progress: null,
+    };
+    const site = (inp: Pick<InvoiceDocInputs, "job" | "estimate">) => assembleInvoiceDocumentProps({ ...base, customer: { name: "Dana Rook", ...PLACES.customer }, ...inp }).site ?? null;
+    const noJob = { row: null, failed: false };
+    const onJob = { row: { billing_type: "fixed", ...PLACES.job }, failed: false };
+    // No estimate handed in (the portal's and the line-words' own tests call it this way): the job's, else the customer's.
+    expect(site({ job: onJob })).toMatchObject({ address: "9 Bayberry Lane", source: "job" });
+    expect(site({ job: noJob })).toMatchObject({ address: "12 Thistlewood Way", source: "customer" });
+    expect(site({ job: noJob, estimate: null })).toMatchObject({ address: "12 Thistlewood Way", source: "customer" });
+    // An estimate handed in: its own site, then its lead's, between the job's and the customer's.
+    expect(site({ job: noJob, estimate: { site: PLACES.quote, lead: PLACES.lead, failed: false } })).toMatchObject({ address: "40 Snowbell Court", unit: "14", source: "quote" });
+    expect(site({ job: noJob, estimate: { site: null, lead: PLACES.lead, failed: false } })).toMatchObject({ address: "16 Larkspur Circle", source: "lead" });
+    expect(site({ job: noJob, estimate: { site: NOWHERE, lead: NOWHERE, failed: false } })).toMatchObject({ address: "12 Thistlewood Way", source: "customer" });
+    expect(site({ job: onJob, estimate: { site: PLACES.quote, lead: PLACES.lead, failed: false } })).toMatchObject({ address: "9 Bayberry Lane", source: "job" });
+    // A read that failed: only an address ranked above it may stand.
+    expect(site({ job: noJob, estimate: { site: null, lead: null, failed: true } })).toBeNull();
+    expect(site({ job: onJob, estimate: { site: null, lead: null, failed: true } })).toMatchObject({ address: "9 Bayberry Lane", source: "job" });
+    expect(site({ job: { row: null, failed: true }, estimate: { site: PLACES.quote, lead: PLACES.lead, failed: false } })).toBeNull();
   });
 });
 

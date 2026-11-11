@@ -180,36 +180,39 @@ export type DocPartyCustomer = {
   phone?: string | null;
 } | null;
 
-/** The "Bill to" / "Prepared for" party block shared by the invoice + quote bodies:
- *  a two-column identity+contact | location grid, with contact behind a brand accent rule. */
+/** The "Bill to" / "Prepared for" party block shared by the invoice + quote bodies: ONE column,
+ *  the name, the company, the mailing address, then contact behind a brand accent rule.
+ *
+ *  ONE COLUMN, NOT TWO (cn-v1160). The owner, 2026-11-10, in Document Studio: "it seems like the
+ *  main address has creeped out way to the right and i have no idea how to bring that back over to
+ *  the left margin under customer name". Nothing had crept: the block was built as a two-column
+ *  grid, identity + contact | location, so the mailing address always printed in the right half.
+ *  He picked layout B: the address under the name, and the Job Site moves up into the freed right
+ *  half (DocPartyHeader below), so the paper reads bill-to | site and is shorter, not longer. */
 export function DocParty({ label, customer, brand }: { label: string; customer: DocPartyCustomer; brand: string }) {
   const c = customer;
   return (
     <>
       <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</div>
       {c ? (
-        <div className="mt-1 grid grid-cols-2 gap-x-6 text-sm">
-          <div className="min-w-0">
-            <div className="font-medium text-slate-900">{c.name}</div>
-            {c.company_name && <div className="text-slate-700">{c.company_name}</div>}
-            {(c.phone || c.email) && (
-              <div className="mt-1.5 space-y-0.5 border-l-2 pl-2.5 text-slate-600" style={{ borderColor: brand }}>
-                {c.phone && <div>{c.phone}</div>}
-                {c.email && <div className="break-words">{c.email}</div>}
-              </div>
-            )}
-          </div>
-          <div className="min-w-0 text-slate-700">
-            {c.address && <div>{c.address}</div>}
-            {unitLine((c as { unit?: string | null }).unit) && <div>{unitLine((c as { unit?: string | null }).unit)}</div>}
-            {/* NEVER THE TOWN TWICE. Erik's own customer row is "94248 CA-70, Chilcoot, CA 96105,
-                USA" AND carries city "Chilcoot-Vinton" — so this printed Chilcoot on one line and
-                Chilcoot-Vinton on the next, on every document. When the address line already ends
-                in a city/state/ZIP, the parts line is a duplicate. */}
-            {(c.city || c.state || c.zip) && !addressHasCityStateZipTail(c.address) && (
-              <div>{formatCityStateZip(c.city, c.state, c.zip)}</div>
-            )}
-          </div>
+        <div className="mt-1 min-w-0 text-sm">
+          <div className="font-medium text-slate-900">{c.name}</div>
+          {c.company_name && <div className="text-slate-700">{c.company_name}</div>}
+          {c.address && <div className="text-slate-700">{c.address}</div>}
+          {unitLine((c as { unit?: string | null }).unit) && <div className="text-slate-700">{unitLine((c as { unit?: string | null }).unit)}</div>}
+          {/* NEVER THE TOWN TWICE. Erik's own customer row is "94248 CA-70, Chilcoot, CA 96105,
+              USA" AND carries city "Chilcoot-Vinton" — so this printed Chilcoot on one line and
+              Chilcoot-Vinton on the next, on every document. When the address line already ends
+              in a city/state/ZIP, the parts line is a duplicate. */}
+          {(c.city || c.state || c.zip) && !addressHasCityStateZipTail(c.address) && (
+            <div className="text-slate-700">{formatCityStateZip(c.city, c.state, c.zip)}</div>
+          )}
+          {(c.phone || c.email) && (
+            <div className="mt-1.5 space-y-0.5 border-l-2 pl-2.5 text-slate-600" style={{ borderColor: brand }}>
+              {c.phone && <div>{c.phone}</div>}
+              {c.email && <div className="break-words">{c.email}</div>}
+            </div>
+          )}
         </div>
       ) : (
         <div className="mt-1 text-sm text-slate-400">—</div>
@@ -246,6 +249,38 @@ export function DocSite({ label = "Job site", site, brand }: { label?: string; s
         ))}
       </div>
     </>
+  );
+}
+
+/**
+ * THE PAPER'S HEADER ROW: the party on the left, the Job Site in the right half of the SAME row
+ * (cn-v1160, the owner's layout B). The estimate and the invoice both draw it through this one
+ * piece, so the two papers cannot drift apart. Two columns at every width, as the party grid was:
+ * the sheet is US-letter geometry that a phone shrinks, and the portal's own phone rule
+ * (.portal-bill .grid-cols-2 in globals.css) stacks it, party first. No site: the right half is
+ * simply empty, never a bare "Job site" heading, and the party keeps its half so it does not
+ * stretch across the sheet.
+ */
+export function DocPartyHeader({
+  label,
+  customer,
+  site,
+  brand,
+}: {
+  label: string;
+  customer: DocPartyCustomer;
+  site?: ResolvedSite | null;
+  brand: string;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-x-6">
+      <div className="min-w-0">
+        <DocParty label={label} customer={customer} brand={brand} />
+      </div>
+      <div className="min-w-0">
+        <DocSite site={site ?? null} brand={brand} />
+      </div>
+    </div>
   );
 }
 

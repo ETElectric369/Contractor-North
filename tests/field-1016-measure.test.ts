@@ -153,7 +153,10 @@ describe("the wiring, pinned", () => {
     // The row's label is the catalog's (neutral, not a guess), stored in ENGLISH whatever the tech reads — a record the office
     // and the estimate open (cn-v1144, skeptic #50); the box draws it in the reader's language (measureLabelWords).
     expect(fn).toContain("const label = measuredRowLabel(mode, r.approx);");
-    expect(insp).toContain('return translator("en")(mode === "area" ? (approx ? "vi_measuredAreaApprox" : "vi_measuredArea") : approx ? "vi_measuredLengthApprox" : "vi_measuredLength");');
+    // cn-v1160: the rule moved to lib/inspection/measured-label (the + menu's Measure names a result with it too);
+    // the Inspector binds it to the ENGLISH catalog, and the rule itself still picks one of the four keys.
+    expect(insp).toContain('return measuredRowLabelIn(translator("en"), mode, approx);');
+    expect(read("src/lib/inspection/measured-label.ts")).toContain('return mode === "area" ? (approx ? "vi_measuredAreaApprox" : "vi_measuredArea") : approx ? "vi_measuredLengthApprox" : "vi_measuredLength";');
     expect(insp.split("value={measureLabelWords(m.label, t)}").length - 1).toBe(2); // the task's rows and the visit's
     expect(en("vi_measuredArea")).toBe("Measured area");
     expect(en("vi_measuredLength")).toBe("Measured length");

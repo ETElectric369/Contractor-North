@@ -4,7 +4,7 @@ import { dbError } from "@/lib/db-error";
 import { placeJobOnDay, planDayTimes } from "../schedule/actions";
 
 import { customerAddressFrom } from "@/lib/inquiries/lead-address";
-import { bustDocPdf, bustLeadPdfs } from "@/lib/pdf-cache";
+import { bustBillsOfQuotes, bustDocPdf, bustLeadPdfs } from "@/lib/pdf-cache";
 import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
@@ -494,6 +494,8 @@ export async function deleteInquiry(id: string): Promise<Result> {
   if (error) return { ok: false, error: dbError(error) };
   if (!gone?.length) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadUnavailable") };
   for (const q of (itsQuotes ?? []) as { id: string }[]) await bustDocPdf("quote", q.id, ctx.orgId);
+  // And the bills born from them, which print the lead's address too (cn-v1160; lib/pdf-cache).
+  await bustBillsOfQuotes(((itsQuotes ?? []) as { id: string }[]).map((q) => q.id), ctx.orgId);
   if (filePaths.length) {
     await createServiceClient()
       .storage.from(INTAKE_BUCKET)

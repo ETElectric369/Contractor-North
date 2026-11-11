@@ -34,7 +34,9 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ token: str
   let row: ShareRow | null = null;
   const { data: inv } = await svc
     .from("invoices")
-    .select("id, status, invoice_number, jobs(address), customers(address)")
+    // quotes(address, inquiries(address)) (cn-v1160): the file of a bill made straight from an
+    // estimate is named for the place its paper prints (lib/doc-place rowPlace), not the customer's street.
+    .select("id, status, invoice_number, jobs(address), customers(address), quotes(address, inquiries(address))")
     .eq("public_token", token)
     .maybeSingle();
   if (inv && customerMayOpen("invoice", (inv as ShareRow).status)) {

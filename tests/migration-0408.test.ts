@@ -78,9 +78,8 @@ describe("migration 0408: one Materials line under each task", () => {
   const quoteCode = noComments(quote.body);
   const total = fnText(sql, "create or replace function public.task_parts_total(p_detail jsonb)");
 
-  it("is the one 0408 and nothing sits past it", () => {
+  it("is the one 0408 (what sits past it is the newest migration's own test: migration-0409.test.ts)", () => {
     expect(names.filter((n) => n.startsWith("0408_"))).toEqual(["0408_one_materials_line_under_each_task.sql"]);
-    expect(names.some((n) => /^0409_|^04[1-9]\d_|^0[5-9]\d\d_|^[1-9]\d{3}_/.test(n))).toBe(false);
   });
 
   it("names itself, quotes the owner, runs under the house timeouts, and opens no transaction of its own", () => {
