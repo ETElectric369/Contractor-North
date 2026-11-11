@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { AFFORDANCES, KIND_STREAM, type ActionItem, type ActionKind } from "./types";
 import { allDoors, doorVerb, rowButtons, type RowDoor } from "./row-buttons";
+import { NOT_A_COST_CATEGORY, isCostableCategory, sortJobPapers } from "@/lib/job-photos";
+import { TECH_DOCUMENT_CATEGORIES, documentsForViewer, isTechDocument } from "@/lib/tech-documents";
+import { categoryIsShowable } from "@/lib/portal/doc-kinds";
+import { dict } from "@/lib/i18n";
 import { titleCaseIn } from "../../../tests/title-case-words";
 
 /**
@@ -37,7 +43,7 @@ describe("the table", () => {
       [row("quote_accepted", { affordances: ["schedule", "open"], targetId: "job-1" }), "Pick a Day"],
       [row("inquiry"), "Called"],
       [row("appointment"), "Close Out"],
-      [row("inspection_writeup"), "Write It Up"],
+      [row("inspection_writeup"), "Open the Inspection"],
       [row("job_to_schedule"), "Pick a Day"],
       [row("materials_needed", { openToBuy: 6 }), "Buy Materials · 6 Open"],
       [row("job_unbilled_work"), "Add Costs"],
@@ -194,10 +200,139 @@ describe("the laws", () => {
 
 
 describe("an inspection to write up can be OPENED, not only written up or called lost (cn-v1071)", () => {
-  it("⋯ holds Open the Visit (its own page, where the attach door marks it won) ahead of Lost", () => {
-    const b = rowButtons(row("inspection_writeup", { id: "appt-9" }), { leadsOn: true, isStaff: true });
-    expect(b.primary?.label).toBe("Write It Up");
-    expect(b.more.map((d) => d.label)).toEqual(["Open the Visit", "Lost"]);
-    expect(b.more[0].act).toEqual({ type: "open", href: "/appointments/appt-9" });
+  it("ONE door opens it (zero duplicate doors): the button goes to the visit's own page, where the attach door marks it won; ⋯ holds the endings only", () => {
+    // cn-v1071 put "Open the Visit" under ⋯ when every door on this row led to a NEW estimate. Since
+    // cn-v1157 the row's one button is that same page (the feeder's href is /appointments/<id>), so
+    // the ⋯ row was the same door twice under a second name (skeptic #60): it is gone.
+    const b = rowButtons(row("inspection_writeup", { id: "appt-9", href: "/appointments/appt-9" }), { leadsOn: true, isStaff: true });
+    expect(b.primary).toEqual({ label: "Open the Inspection", act: { type: "open", href: "/appointments/appt-9" } });
+    expect(b.more.map((d) => d.label)).toEqual(["Lost"]);
+    // No second door, under any name, opens a page: exactly one "open" on the whole row.
+    const opens = allDoors(b).filter((d) => d.act.type === "open");
+    expect(opens).toHaveLength(1);
+    expect(allDoors(b).map((d) => d.label)).not.toContain("Open the Visit");
+    // …and the feeder really does point the row at the visit (the page the old ⋯ row named).
+    const q = readFileSync(join(process.cwd(), "src/lib/action-items/query.ts"), "utf8");
+    const at = q.indexOf('kind: "inspection_writeup"');
+    expect(q.slice(at, q.indexOf("writeUpApptIds.add", at))).toContain("href: `/appointments/${a.id}`");
+  });
+
+  it("Write It Up is gone from the row; the primary button goes to the row's own href (the visit)", () => {
+    const item = row("inspection_writeup", { id: "appt-9", href: "/appointments/appt-9" });
+    const b = rowButtons(item, staff);
+    expect(b.primary).toEqual({ label: "Open the Inspection", act: { type: "open", href: "/appointments/appt-9" } });
+    expect(allDoors(b).map((d) => d.label)).not.toContain("Write It Up");
+  });
+
+  it("⋯ gains Didn't Happen only when the row carries the wontHappen verb (a visit not yet completed)", () => {
+    const withIt = rowButtons(row("inspection_writeup", { affordances: ["dismiss", "wontHappen", "open"] }), staff);
+    expect(withIt.more.map((d) => d.label)).toEqual(["Didn't Happen", "Lost"]);
+    const door = withIt.more.find((d) => d.label === "Didn't Happen")!;
+    expect(door.act).toMatchObject({ type: "confirm", verb: "wontHappen" });
+    const without = rowButtons(row("inspection_writeup", { affordances: ["dismiss", "open"] }), staff);
+    expect(without.more.map((d) => d.label)).not.toContain("Didn't Happen");
+  });
+});
+
+/**
+ * A RECEIPT THAT NEVER WAS A COST (the owner, 2026-11-10: "it's a quote from my supplier not a bill,
+ * everything is closed"). The row had one door, Record It, which leads to adding a cost nobody paid.
+ * Its ⋯ now holds Not a Cost: the same two words a tray paper's type uses, behind the list's own
+ * confirm, on this kind of row only.
+ */
+describe("a receipt row's Not a Cost", () => {
+  const receipt = (o: Partial<ActionItem> = {}) =>
+    row("receipt_unbilled", { id: "receipt-doc-1", title: "Receipt · Jun 18", subtitle: "Larkspur · J-014", href: "/jobs/job-1?tab=costs", ...o });
+
+  it("Record It stays the row's one button; ⋯ holds Not a Cost and nothing else", () => {
+    const b = rowButtons(receipt(), staff);
+    expect(b.primary).toEqual({ label: "Record It", act: { type: "open", href: "/jobs/job-1?tab=costs" } });
+    expect(b.also).toBeNull();
+    expect(labels(b.more)).toEqual(["Not a Cost"]);
+    expect(AFFORDANCES.receipt_unbilled).toEqual(["notACost", "open"]);
+  });
+
+  it("it asks first, with the list's own confirm, and says what it does and the way back", () => {
+    const door = rowButtons(receipt(), staff).more[0];
+    expect(door.act).toEqual({
+      type: "confirm",
+      verb: "notACost",
+      title: "Not a Cost?",
+      body: "Files Receipt · Jun 18 as Not a Cost, so it stops asking to be recorded. It stays with the job's papers for the office, and the crew does not see it. No cost is recorded or removed. To change it back, use the pencil under Receipts & Papers on the job's Costs tab.",
+      button: "Not a Cost",
+      keep: "Keep It",
+    });
+    expect(doorVerb(door)).toBe("notACost");
+    const said = door.act.type === "confirm" ? `${door.act.title} ${door.act.body} ${door.act.button}` : "";
+    expect(said).not.toMatch(/delet|dismiss|shelf/i);
+    // It never says the crew sees the paper, and never names Other: that was the door's first draft,
+    // which would have handed a supplier's prices to the crew.
+    expect(said).not.toMatch(/\bOther\b|shows to the crew/);
+    // A bill photo reads by its own title.
+    const bill = rowButtons(receipt({ title: "Bill from Sam · Sep 27" }), staff).more[0];
+    expect(bill.act).toMatchObject({ body: expect.stringMatching(/^Files Bill from Sam · Sep 27 as Not a Cost, so it stops asking to be recorded\./) });
+  });
+
+  it("the words are true in code: Not a Cost is its own category, the office's alone as the Receipt was, and the pencil is the way back", () => {
+    expect(NOT_A_COST_CATEGORY).toBe("Not a Cost");
+    // "so it stops asking to be recorded": not costable, so no Record as Cost and no row.
+    expect(isCostableCategory(NOT_A_COST_CATEGORY)).toBe(false);
+    // "the crew does not see it": the crew's list names what it lets through, and this is not on it.
+    expect(isTechDocument({ category: NOT_A_COST_CATEGORY })).toBe(false);
+    expect(TECH_DOCUMENT_CATEGORIES as readonly string[]).not.toContain(NOT_A_COST_CATEGORY);
+    const paper = { id: "doc-1", name: "IMG_0412.jpg", file_url: "org/job-1/IMG_0412.jpg" };
+    const crewIsHanded = (category: string) => documentsForViewer([{ ...paper, category }], false).map((d) => d.id);
+    expect(crewIsHanded("Receipt")).toEqual([]);
+    expect(crewIsHanded(NOT_A_COST_CATEGORY)).toEqual([]);
+    // "Other" is what the crew IS handed, which is why the door never files a paper under it.
+    expect(crewIsHanded("Other")).toEqual(["doc-1"]);
+    // Nor the customer: the page's allow-list, and the database's twin of it (0326), leave it out.
+    expect(categoryIsShowable(NOT_A_COST_CATEGORY)).toBe(false);
+    const shown = readFileSync(join(process.cwd(), "supabase/migrations/0326_the_customer_sees_the_latest_drawing.sql"), "utf8");
+    expect(shown).toContain("select coalesce(p_category in ('Photo', 'Plan', 'Permit', 'Other'), false)");
+    // "stays with the job's papers for the office": for the office it is on neither Photos list, so it
+    // stays on the Costs tab's own, where "the pencil under Receipts & Papers" re-files it.
+    const office = sortJobPapers([{ ...paper, category: NOT_A_COST_CATEGORY }], [], []);
+    expect([...office.photos, ...office.pictures]).toEqual([]);
+    expect(office.loose).toEqual([]);
+    const list = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-documents.tsx"), "utf8");
+    expect(list).toContain('const CATEGORIES = ["Receipt", "Bill", "Invoice", NOT_A_COST_CATEGORY, "Photo", "Plan", "Permit", "Other"];');
+    expect(list).toContain('title={t("jb_renameRecategorize")}');
+    expect(dict("en").jb_receiptsPapers).toBe("Receipts & Papers");
+    expect(dict("en").jb_tabCosts).toBe("Costs");
+    // File a Paper (Not a Cost)'s Other Paper is a person choosing Other on purpose: left as it was.
+    expect(readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-cost-capture.tsx"), "utf8")).toContain('{ category: "Other", label: "Other Paper" }');
+  });
+
+  it("only where the row carries the verb: the Couldn't Check line, and a row built without it, have no ⋯", () => {
+    expect(rowButtons(receipt({ affordances: ["open"] }), staff)).toEqual({ primary: { label: "Record It", act: { type: "open", href: "/jobs/job-1?tab=costs" } }, also: null, more: [] });
+    expect(rowButtons(receipt({ id: "receipts-unread", affordances: ["open"] }), staff)).toEqual({ primary: null, also: null, more: [] });
+    expect(rowButtons(receipt({ id: "receipts-unread" }), staff)).toEqual({ primary: null, also: null, more: [] });
+  });
+
+  it("the office's door: a tech is never handed one that only refuses", () => {
+    expect(rowButtons(receipt(), { leadsOn: true, isStaff: false }).more).toEqual([]);
+  });
+
+  it("on receipt rows only: no other kind draws it, even handed the verb", () => {
+    for (const k of (Object.keys(AFFORDANCES) as ActionKind[]).filter((x) => x !== "receipt_unbilled")) {
+      const handed = row(k, { affordances: [...AFFORDANCES[k], "notACost"], phone: "555-0100", waitKey: `${k}:x`, payee: "Metro Supply", targetId: "job-1" });
+      for (const ctx of [staff, { leadsOn: false, isStaff: true }]) {
+        const doors = allDoors(rowButtons(handed, ctx));
+        expect(doors.map((d) => d.label), k).not.toContain("Not a Cost");
+        expect(doors.map(doorVerb), k).not.toContain("notACost");
+      }
+    }
+  });
+
+  it("a pile of receipts keeps its one verb, which only opens it: Not a Cost is each row's own", () => {
+    const pile = row("receipt_unbilled", {
+      id: "pile:receipts_not_on_a_bill",
+      affordances: ["open"],
+      pile: { name: "receipts_not_on_a_bill", label: "Receipts Not on a Bill", count: 2, capped: false, listHref: "/bills?tab=receipts#all-bills", listLabel: "See All on Bills", verb: "Record It" },
+      children: [receipt(), receipt({ id: "receipt-doc-2" })],
+    });
+    expect(rowButtons(pile, staff)).toEqual({ primary: { label: "Record It", act: { type: "unfold" } }, also: null, more: [] });
+    expect(labels(rowButtons(pile.children![1], staff).more)).toEqual(["Not a Cost"]);
   });
 });

@@ -136,7 +136,9 @@ export const DOCK: DockSection[] = [
   // main dock after Today before Clock". It had been a child pill under Today, and the man
   // planning a week lives on this screen too much for it to sit one level down. Office-only
   // (/schedule redirects techs to /planner); /calendar, /appointments and /map are server
-  // redirects into /schedule, so no owns[] needed.
+  // redirects into /schedule, so no owns[] needed. A VISIT'S OWN PAGE (/appointments/<id>) is a
+  // real page no cluster owns by its URL: an inspection lives under Sales, any other booking here,
+  // and its page says which (activeNav below, DECLARES_HOME).
   {
     key: "schedule",
     label: "Schedule",
@@ -485,4 +487,69 @@ export function activeSection(
       under(basePath(s.href)) ||
       s.children.some((c) => (c.href ? under(basePath(c.href)) : false) || c.owns?.some(under)),
   );
+}
+
+/**
+ * WHERE THE SHELL IS, for the nav: the pathname, the whole location (query and all), and the home
+ * the page standing there has DECLARED — a dock row's id (components/nav-home) — when it has.
+ */
+export type NavAt = { pathname: string; current: string; home?: string | null };
+
+/**
+ * THE NAV FOR A LOCATION: the lit cluster and its one lit row, for the rail, the phone bar, the
+ * page column, the strip and the sheet alike.
+ *
+ *   1. The pathname's own cluster and row, exactly as activeSection and activeRowHref answer. A
+ *      declared home is IGNORED here: a route a cluster owns needs no telling, and no page can talk
+ *      the shell out of what the URL says.
+ *   2. Else the home the page declared, when THIS person's dock draws that row: its cluster lit and
+ *      the row lit. A visit's URL (/appointments/<id>) cannot say whether it is an inspection (Sales ›
+ *      Inspections) or a booking on the Schedule, and the shell reads no database; the page has read
+ *      the row, so the page says (Erik, 2026-11-10: "the sub-nav disappears when an inspection is
+ *      clicked"). A row a switch or a role has put away lights nothing, as its own page does.
+ *   3. Else nothing, as before: light nothing rather than lie.
+ */
+export function activeNav(
+  at: NavAt,
+  sections: DockSection[] = DOCK,
+): { section: DockSection | undefined; rowHref: string | undefined } {
+  const own = activeSection(at.pathname, sections);
+  if (own) return { section: own, rowHref: activeRowHref(own.children, at.pathname, at.current) };
+  if (at.home) {
+    for (const section of sections) {
+      const row = section.children.find((c) => c.id === at.home && c.href);
+      if (row) return { section, rowHref: row.href };
+    }
+  }
+  return { section: undefined, rowHref: undefined };
+}
+
+/**
+ * THE ROUTE FAMILIES WHOSE PAGE DECLARES ITS HOME (a prefix; the pages under it). Named here because
+ * the declaration arrives WITH the page: between the tap and the page there is the loading spinner,
+ * on the new URL, with nobody yet to say where it lives. Without this list the sub-nav would blink
+ * out for that half second on every visit opened from its own list. dock.test.ts holds every entry
+ * to a page that renders <NavHome>, and to a prefix no cluster owns.
+ */
+export const DECLARES_HOME: readonly string[] = ["/appointments"];
+
+/** Is the shell still waiting for this location's page to say where it lives? Never when a cluster
+ *  owns the pathname, and never once the page has spoken (a home it named that this person's dock
+ *  does not draw is still an answer). */
+export function awaitsHome(at: NavAt, sections: DockSection[] = DOCK): boolean {
+  if (at.home != null) return false;
+  if (!DECLARES_HOME.some((base) => at.pathname.startsWith(base + "/"))) return false;
+  return !activeSection(at.pathname, sections);
+}
+
+/**
+ * THE LOCATION THE NAV IS DRAWN FOR. This one — unless its page has not said where it lives yet
+ * (awaitsHome): then the last location that had settled, so nothing in the nav moves while a page is
+ * on its way. The whole location is held, never just its cluster, so every rule that reads the
+ * pathname (the Jobs strip standing down on a job's own page) answers as it did a moment ago. With
+ * nothing settled yet (a hard load straight onto a visit) it is this one, and nothing lights until
+ * the page speaks.
+ */
+export function navDrawnAt(now: NavAt, settled: NavAt | null, sections: DockSection[] = DOCK): NavAt {
+  return settled && awaitsHome(now, sections) ? settled : now;
 }

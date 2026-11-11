@@ -53,7 +53,8 @@ vi.mock("../work-orders/actions", () => ({ createWorkOrderFromQuote: vi.fn() }))
 vi.mock("../materials/actions", () => ({ createMaterialListFromQuote: vi.fn() }));
 vi.mock("../crm/actions", () => ({ createCustomer: vi.fn(), updateCustomer: vi.fn() }));
 vi.mock("../crm/[id]/edit-customer-button", () => ({ EditCustomerButton: () => null }));
-vi.mock("../leads/actions", () => ({ intakeFileUrl: vi.fn() }));
+// The lead's own form is a door on the customer card now (cn-v1157): its three doors are stubbed too.
+vi.mock("../leads/actions", () => ({ intakeFileUrl: vi.fn(), createInquiry: vi.fn(), updateInquiry: vi.fn(), deleteInquiry: vi.fn() }));
 
 /** The words as a person reads them: tags gone, the server's entity escapes undone. */
 export const text = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ");

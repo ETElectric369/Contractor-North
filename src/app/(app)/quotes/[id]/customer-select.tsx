@@ -1,17 +1,21 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { User, Pencil, Check, X, Sprout } from "lucide-react";
+import { User, Pencil, X, Sprout, MapPin } from "lucide-react";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
+import { InquiryModal } from "../../leads/inquiry-modal";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import type { Customer } from "@/lib/types";
+import type { Customer, Inquiry } from "@/lib/types";
+import { formatFullAddress } from "@/lib/utils";
 import { setQuoteCustomer } from "../actions";
+import { commitCustomerPick } from "./customer-pick";
 import { createCustomer } from "../../crm/actions";
 import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
+import { useSaveInFlight } from "@/lib/saves-in-flight";
 
 interface CustomerLite {
   id: string;
@@ -27,6 +31,9 @@ interface LeadLite {
   company_name?: string | null;
   email?: string | null;
   phone?: string | null;
+  /** The lead's WHOLE row (quotes/[id]/page reads `inquiry:inquiry_id(*)`): what the card's address
+   *  line and its Edit Lead door read. Absent, the card shows neither. */
+  row?: Inquiry | null;
 }
 
 /**
@@ -54,7 +61,14 @@ export function CustomerSelect({
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(customer?.id ?? "");
   const [pending, start] = useTransition();
+  // THE PICK IS A SAVE, SO IT IS COUNTED (cn-v1157): the header's Preview waits for the count, and the
+  // paper is made out to whoever is attached. Counting only; the pick itself is unchanged.
+  useSaveInFlight(pending);
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  // The "Saved" word clears itself after two seconds; the timer dies with the card (and with a second pick).
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (savedTimer.current) clearTimeout(savedTimer.current); }, []);
   // MAKING ONE FROM HERE. Erik, on the Sarah Dale estimate: "it says sarah dale punch list and no
   // address and i cant even edit it anywhere." The address on a quote comes from the attached
   // customer — quotes.address/city/state/zip are never rendered — and this picker could only
@@ -75,7 +89,7 @@ export function CustomerSelect({
       if (!made.ok || !made.id) return setError(made.error ?? t("qt_couldntCreateCustomer"));
       // ATTACH IN THE SAME BREATH. A created-but-unattached customer is the same dead end one
       // step further along, and it's the step somebody walks away from.
-      const res = await setQuoteCustomer(quoteId, made.id);
+      const res = await commitCustomerPick(quoteId, made.id, { setQuoteCustomer, fallbackError: t("qt_createdNotAttached") });
       if (!res.ok) return setError(res.error ?? t("qt_createdNotAttached"));
       setCreating(false);
       setEditing(false);
@@ -85,13 +99,24 @@ export function CustomerSelect({
     });
   }
 
-  function save() {
+  // THE PICK IS THE SAVE: a changed select writes at once. A refusal puts the previous value back
+  // and keeps the box open, saying the server's sentence.
+  function pick(next: string) {
+    const previous = value;
+    setValue(next);
     setError(null);
+    setSaved(false);
     start(async () => {
-      const res = await setQuoteCustomer(quoteId, value || null);
-      if (!res.ok) return setError(res.error ?? t("qt_couldntChangeCustomer"));
+      const res = await commitCustomerPick(quoteId, next, { setQuoteCustomer, fallbackError: t("qt_couldntChangeCustomer") });
+      if (!res.ok) {
+        setValue(previous);
+        return setError(res.error ?? t("qt_couldntChangeCustomer"));
+      }
+      setSaved(true);
       setEditing(false);
       router.refresh();
+      if (savedTimer.current) clearTimeout(savedTimer.current);
+      savedTimer.current = setTimeout(() => setSaved(false), 2000);
     });
   }
 
@@ -123,7 +148,7 @@ export function CustomerSelect({
         <div className="flex items-center gap-2">
           <Select
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => pick(e.target.value)}
             disabled={pending}
             aria-label={t("qt_colCustomer")}
           >
@@ -137,14 +162,6 @@ export function CustomerSelect({
               </option>
             ))}
           </Select>
-          <button
-            onClick={save}
-            disabled={pending}
-            className="shrink-0 rounded-md bg-[rgb(var(--glass-ink))] p-1.5 text-white hover:bg-[rgb(var(--glass-ink))]/90 disabled:opacity-50"
-            aria-label={t("qt_saveCustomer")}
-          >
-            <Check className="h-4 w-4" />
-          </button>
           <button
             onClick={() => {
               setValue(customer?.id ?? "");
@@ -164,6 +181,7 @@ export function CustomerSelect({
         >
           {t("qt_btn_newCustomer")}
         </button>
+        {pending && <p className="text-xs text-slate-400">{t("qt_btn_saving")}</p>}
         {error && <p className="text-sm text-red-600">{error}</p>}
       </div>
     );
@@ -174,6 +192,13 @@ export function CustomerSelect({
   // what mints the first — once. So this card names which one it is holding rather than measuring
   // a lead against a customer-shaped hole and reporting it empty.
   const leadName = lead?.name?.trim() || null;
+  // THE LEAD'S ADDRESS IS THIS ESTIMATE'S JOB SITE until a job exists (lib/doc-place rowPlace, the
+  // print page's pickSite), and it was shown nowhere on this page: Erik, 2026-11-10, read a half-typed
+  // address on the PDF and "had to find the lead on the leads page to update the address there since
+  // it wasnt accessible from anywhere else". So the card says the address, and Edit Lead opens the
+  // lead's own form right here (one editor, a second door to it; Delete Lead stays on the Leads page).
+  const leadRow = lead?.row ?? null;
+  const leadSite = leadRow ? formatFullAddress(leadRow.address, leadRow.city, leadRow.state, leadRow.zip, leadRow.unit) : "";
   return (
     <div className="flex items-start justify-between gap-3">
       {customer ? (
@@ -191,7 +216,10 @@ export function CustomerSelect({
             </div>
           </Link>
           {leadName && (
-            <p className="mt-1.5 text-xs text-slate-400">{fillText(t("qt_startedFromLead"), { name: leadName })}</p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2">
+              <p className="text-xs text-slate-400">{fillText(t("qt_startedFromLead"), { name: leadName })}</p>
+              {leadRow && <InquiryModal inquiry={leadRow} mode="edit" trigger="quiet" noDelete />}
+            </div>
           )}
         </div>
       ) : leadName ? (
@@ -208,6 +236,12 @@ export function CustomerSelect({
               </div>
             </div>
           </Link>
+          {leadRow && (
+            <p className="mt-1.5 flex items-start gap-1 text-xs text-slate-600">
+              <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+              {leadSite ? <span>{leadSite}</span> : <span className="text-amber-700">{t("qt_leadNoAddress")}</span>}
+            </p>
+          )}
           <p className="mt-1.5 text-xs text-slate-500">
             {t("qt_madeOutToLead")}
           </p>
@@ -218,7 +252,10 @@ export function CustomerSelect({
           <p className="text-sm text-slate-400">{t("qt_nobodyAttachedYet")}</p>
         </div>
       )}
-      <div className="flex shrink-0 items-center gap-2">
+      {/* With the lead's own door beside Attach Customer the two stack on a phone, so the card's words
+          keep their width; from the small breakpoint up they sit in a row as before. */}
+      <div className={!customer && leadRow ? "flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-2" : "flex shrink-0 items-center gap-2"}>
+        {saved && <span role="status" className="text-xs font-medium text-emerald-600">{t("qt_btn_saved")}</span>}
         <button
           onClick={() => setEditing(true)}
           className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800"
@@ -227,6 +264,7 @@ export function CustomerSelect({
           <Pencil className="h-4 w-4 shrink-0" /> {customer ? t("qt_btn_change") : t("qt_btn_attachCustomer")}
         </button>
         {customer && <EditCustomerButton customer={customer} />}
+        {!customer && leadRow && <InquiryModal inquiry={leadRow} mode="edit" trigger="quiet" noDelete />}
       </div>
     </div>
   );

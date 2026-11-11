@@ -295,7 +295,10 @@ describe("the visit page's header: at most one main button, then ⋯", () => {
     expect(menu).toContain('rowLabel={t("vp_btn_editDetails")}');
     expect(translator("en")("vp_btn_editDetails")).toBe("Edit Details…");
     expect(menu).toContain("triggerClassName={ACTIONS_ROW_CLS}");
-    expect(menu).toContain("afterDeleteHref={scheduleDayHref}");
+    // Where the page goes once its visit is gone: the visit's home (lib/appointments/visit-home), Sales ›
+    // Inspections for an inspection, its Schedule day for any other booking (visit-leaves-home.test).
+    expect(menu).toContain("afterDeleteHref={home.href}");
+    expect(menu).toContain("afterHref={home.href}");
     expect(page).toContain('const VISIT_ACTIONS_MENU: NavTree = { center: { label: t("vp_btn_actions"), icon: "more" }, nodes: [] };');
     expect(translator("en")("vp_btn_actions")).toBe("Actions");
     // The rows' words come from the catalog (the visit-page-in-Spanish wave), the English byte for byte.

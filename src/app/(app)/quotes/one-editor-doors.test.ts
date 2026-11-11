@@ -78,7 +78,7 @@ vi.mock("@/lib/estimate/revision", async (importOriginal) => ({ ...(await import
 vi.mock("@/app/(app)/work-orders/actions", async (importOriginal) => ({ ...(await importOriginal<object>()), createWorkOrderFromQuote: rules.createWorkOrderFromQuote }));
 vi.mock("@/app/(app)/materials/actions", async (importOriginal) => ({ ...(await importOriginal<object>()), createMaterialListFromQuote: rules.createMaterialListFromQuote }));
 
-const { appendQuoteLines, updateQuoteItem, deleteQuoteItem, saveQuote, readQuoteForEditor, readQuoteLineIds, createJobFromQuote } = await import("./actions");
+const { setQuoteCustomer, appendQuoteLines, updateQuoteItem, deleteQuoteItem, saveQuote, readQuoteForEditor, readQuoteLineIds, createJobFromQuote } = await import("./actions");
 const { LINE_GONE } = await import("./use-quote-writes");
 
 const gate = (c: Call) => c.table === "quotes" && c.verb === "select" && c.select === "status, job_id, quote_number, doc_type";
@@ -472,6 +472,122 @@ describe("saveQuote is idempotent by the client's id", () => {
   });
 });
 
+/**
+ * THE WRITE-UP STAMP (capture.quote_id on the visit the estimate writes up), DRIVEN. It is the only
+ * link a visit with no lead ever gets to its estimate: without it the Inspections tab keeps the visit
+ * in To Write Up, and Start the Estimate on its page finds nothing standing and births a twin. So it
+ * is tried twice (each a fresh read-modify-write of the capture), and a failure that stands after the
+ * second is said to the person AND filed in the sink (skeptic #60: the warning reached nobody, and
+ * its remedy sent them through Start the Estimate).
+ */
+describe("saveQuote ties the estimate to the inspection it writes up: twice at most, never silently", () => {
+  const input = { customer_id: null, job_id: null, title: "Larkspur panel", notes: "", tax_rate: 0, valid_until: null, items: [plain], id: "q-client", capture_appointment_id: "appt-1" };
+  const visitRead = (c: Call) => c.table === "appointments" && c.verb === "select" && c.select === "id, capture";
+  const visitStamp = (c: Call) => c.table === "appointments" && c.verb === "update";
+  const SENTENCE =
+    "The estimate is saved, but it could not be tied to its inspection, so the inspection can still show as waiting to be written up. Do not start another estimate from that inspection. When this estimate is settled, mark the inspection Won or Lost on its own page.";
+  let reportError: ReturnType<typeof vi.fn>;
+  beforeEach(async () => {
+    reportError = (await import("@/lib/observe")).reportError as unknown as ReturnType<typeof vi.fn>;
+    reportError.mockClear();
+  });
+
+  it("lands on the first try: one read, one write that keeps what the capture already held and is read back; nothing is said, nothing is filed", async () => {
+    s.answer = (c) => {
+      if (visitRead(c)) return { data: { id: "appt-1", capture: { notes: "two circuits, the Snowbell side" } }, error: null };
+      if (visitStamp(c)) return { data: [{ id: "appt-1" }], error: null };
+      return base(c);
+    };
+    const res = await saveQuote(input);
+    expect(res).toMatchObject({ ok: true, id: "q-client" });
+    expect(res).not.toHaveProperty("warning");
+    expect(s.calls.filter(visitRead)).toHaveLength(1);
+    const stamps = s.calls.filter(visitStamp);
+    expect(stamps).toHaveLength(1);
+    expect((stamps[0].payload as { capture: unknown }).capture).toEqual({ notes: "two circuits, the Snowbell side", quote_id: "q-client" });
+    expect(stamps[0].select).toBe("id"); // the row count is read (silent-write law)
+    expect(stamps[0].filters).toContainEqual(["eq", "id", "appt-1"]);
+    expect(reportError).not.toHaveBeenCalled();
+  });
+
+  it("the first write matches no row: the capture is READ AGAIN (never the first try's copy written back) and the second write lands; nothing is said, nothing is filed", async () => {
+    let reads = 0;
+    let writes = 0;
+    s.answer = (c) => {
+      // The inspector wrote a photo between the two tries: the second read is what the second write carries.
+      if (visitRead(c)) return { data: { id: "appt-1", capture: ++reads === 1 ? { notes: "a" } : { notes: "a", photos: ["p1"] } }, error: null };
+      if (visitStamp(c)) return { data: ++writes === 1 ? [] : [{ id: "appt-1" }], error: null };
+      return base(c);
+    };
+    const res = await saveQuote(input);
+    expect(res).toMatchObject({ ok: true, id: "q-client" });
+    expect(res).not.toHaveProperty("warning");
+    expect(s.calls.filter(visitRead)).toHaveLength(2);
+    const stamps = s.calls.filter(visitStamp);
+    expect(stamps).toHaveLength(2);
+    expect((stamps[1].payload as { capture: unknown }).capture).toEqual({ notes: "a", photos: ["p1"], quote_id: "q-client" });
+    expect(reportError).not.toHaveBeenCalled();
+  });
+
+  it("both tries fail (an error, then zero rows): the SAVE STANDS, the sentence comes back as the warning, and the sink gets the two ids and nothing about the customer", async () => {
+    let writes = 0;
+    s.answer = (c) => {
+      if (visitRead(c)) return { data: { id: "appt-1", capture: null }, error: null };
+      if (visitStamp(c)) return ++writes === 1 ? { data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } } : { data: [], error: null };
+      return base(c);
+    };
+    const res = await saveQuote(input);
+    expect(res).toMatchObject({ ok: true, id: "q-client", quote_number: "E-010", warning: SENTENCE });
+    expect(s.calls.filter(visitStamp)).toHaveLength(2); // twice, not three times
+    expect(reportError).toHaveBeenCalledTimes(1);
+    const [where, err, extra] = reportError.mock.calls[0];
+    expect(where).toBe("saveQuote:stamp");
+    expect((err as Error).message).toBe("zero rows"); // the LAST failure
+    expect(extra).toEqual({ quoteId: "q-client", appointmentId: "appt-1" });
+    expect(JSON.stringify(extra)).not.toContain("Larkspur");
+  });
+
+  it("a READ that fails twice is the same failure, said and filed (it used to be skipped without a word); one that fails once is retried", async () => {
+    s.answer = (c) => (visitRead(c) ? { data: null, error: { code: "XX000", message: "the reader tripped" } } : base(c));
+    const res = await saveQuote(input);
+    expect(res).toMatchObject({ ok: true, warning: SENTENCE });
+    expect(s.calls.filter(visitRead)).toHaveLength(2);
+    expect(s.calls.filter(visitStamp)).toEqual([]);
+    expect(reportError).toHaveBeenCalledTimes(1);
+    expect(reportError.mock.calls[0][0]).toBe("saveQuote:stamp");
+    expect(reportError.mock.calls[0][1]).toMatchObject({ message: "the reader tripped" });
+    // Once, then fine.
+    s.calls = [];
+    reportError.mockClear();
+    let reads = 0;
+    s.answer = (c) => {
+      if (visitRead(c)) return ++reads === 1 ? { data: null, error: { code: "XX000", message: "the reader tripped" } } : { data: { id: "appt-1", capture: {} }, error: null };
+      if (visitStamp(c)) return { data: [{ id: "appt-1" }], error: null };
+      return base(c);
+    };
+    expect(await saveQuote(input)).not.toHaveProperty("warning");
+    expect(s.calls.filter(visitStamp)).toHaveLength(1);
+    expect(reportError).not.toHaveBeenCalled();
+  });
+
+  it("already stamped with this estimate: nothing is written. A visit that is not there for this caller: nothing is written, said or filed (the clean no-op it always was)", async () => {
+    s.answer = (c) => (visitRead(c) ? { data: { id: "appt-1", capture: { quote_id: "q-client" } }, error: null } : base(c));
+    expect(await saveQuote(input)).not.toHaveProperty("warning");
+    expect(s.calls.filter(visitRead)).toHaveLength(1);
+    expect(s.calls.filter(visitStamp)).toEqual([]);
+    s.calls = [];
+    s.answer = (c) => (visitRead(c) ? { data: null, error: null } : base(c));
+    expect(await saveQuote(input)).not.toHaveProperty("warning");
+    expect(s.calls.filter(visitRead)).toHaveLength(1); // not asked twice: it is not a failure
+    expect(s.calls.filter(visitStamp)).toEqual([]);
+    expect(reportError).not.toHaveBeenCalled();
+    // No visit named at all: the appointments table is never touched.
+    s.calls = [];
+    expect((await saveQuote({ ...input, capture_appointment_id: null })).ok).toBe(true);
+    expect(s.calls.filter((c) => c.table === "appointments")).toEqual([]);
+  });
+});
+
 describe("readQuoteForEditor", () => {
   const editorQuote = (c: Call) => c.table === "quotes" && c.verb === "select" && !!c.select?.includes("quote_number, customer_id");
   const editorItems = (c: Call) => c.table === "quote_line_items" && c.verb === "select" && !!c.select?.includes("line_total");
@@ -585,5 +701,16 @@ describe("createJobFromQuote: the link is compare-and-set (cn-v1133)", () => {
     const stuck = await createJobFromQuote("q1");
     expect(stuck.ok).toBe(false);
     expect(stuck.error).toContain("An empty job was left behind — delete it on Jobs.");
+  });
+});
+
+describe("setQuoteCustomer: a zero-row update is a refusal in words", () => {
+  it("returns the estimate-unavailable sentence, and says ok when a row came back", async () => {
+    s.answer = (c) => (c.table === "quotes" && c.verb === "update" ? { data: [], error: null } : base(c));
+    expect(await setQuoteCustomer("q-gone", null)).toEqual({ ok: false, error: "That estimate isn't available." });
+    const upd = s.calls.find((c) => c.table === "quotes" && c.verb === "update");
+    expect(upd?.select).toBe("id");
+    s.answer = base;
+    expect(await setQuoteCustomer("q1", null)).toEqual({ ok: true });
   });
 });

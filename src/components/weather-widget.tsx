@@ -5,6 +5,8 @@ import { Cloud, MapPin, MapPinOff } from "lucide-react";
 import * as geo from "@/lib/geo";
 import type { GeoCoords } from "@/lib/geo";
 import { isNativeShell } from "@/lib/native-shell";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 import { reportClientError } from "@/app/report-client-error";
 
 interface WeatherData {
@@ -30,9 +32,7 @@ export const READING_MAX_MS = 30 * 60 * 1000;
 export const FOLLOW_KEY = "weather:follow";
 
 // Denied means the OS is blocking the INSTALLED app's location (independent of Safari's) — no prompt we
-// fire can fix that, so never loop a doomed one; give the honest way out instead.
-const DENIED_HINT =
-  "iPhone has location blocked for the installed app — Settings → North → Location, or delete & re-add the app.";
+// fire can fix that, so never loop a doomed one; give the honest way out instead (sh_wx_denied).
 function readCity(loc: string): GeoCoords | null {
   try {
     const r = localStorage.getItem(`geocity:${loc}`);
@@ -264,6 +264,8 @@ export function WeatherRow({
   onLocate: () => void;
   onToggleHint: () => void;
 }) {
+  const t = translator(useLang());
+  const DENIED_HINT = t("sh_wx_denied");
   const shopLine = source === "device" && !usingDevice && status === "ok" && !!data;
   return (
     <div className="relative flex min-w-0 shrink flex-col items-end text-xs text-slate-500">
@@ -275,26 +277,25 @@ export function WeatherRow({
           <Cloud className="h-7 w-7 text-sky-400" />
         )}
         {status === "loading" || !data ? (
-          <span title={status === "error" ? "Weather unavailable" : undefined}>—</span>
+          <span title={status === "error" ? t("sh_wx_unavailable") : undefined}>—</span>
         ) : (
           <>
             <span className="whitespace-nowrap text-lg font-semibold leading-none text-slate-700">{data.tempF}°F</span>
             <span className="max-w-[9rem] truncate">{data.description}</span>
-            {usingDevice &&
-              (town ? (
-                <span className="inline-flex max-w-[8rem] items-center gap-0.5 truncate text-emerald-600" title="Following your location">
-                  <MapPin className="h-3 w-3 shrink-0" />
-                  {town}
-                </span>
-              ) : (
-                <MapPin className="h-3.5 w-3.5 text-emerald-500" aria-label="Your location" />
-              ))}
+            {usingDevice && !town && <MapPin className="h-3.5 w-3.5 text-emerald-500" aria-label={t("sh_wx_yourLocation")} />}
           </>
         )}
       </div>
+      {usingDevice && !!town && status === "ok" && !!data && (
+        // THE PLACE ON ITS OWN LINE (owner, 11-09): under the figures, the shop line's shape and size.
+        <div className="max-w-[18rem] truncate text-[11px] leading-snug text-emerald-600" title={t("sh_wx_following")} data-weather-town>
+          <MapPin className="mr-0.5 inline h-3 w-3 align-[-1px]" />
+          {town}
+        </div>
+      )}
       {shopLine && (
         <div className="max-w-[18rem] truncate text-[11px] leading-snug text-slate-500">
-          Weather for {label || "the shop"} —{" "}
+          {fillText(t("sh_wx_forShop"), { place: label || t("sh_wx_theShop") })}{" "}
           <button
             type="button"
             onClick={denied ? onToggleHint : onLocate}
@@ -302,9 +303,9 @@ export function WeatherRow({
             className={denied ? "inline-flex items-center gap-0.5 font-medium text-amber-600 hover:text-amber-700" : "inline-flex items-center gap-0.5 font-medium text-sky-600 hover:text-sky-700"}
           >
             {denied ? <MapPinOff className="h-3 w-3" /> : <MapPin className="h-3 w-3" />}
-            Turn On Location
+            {t("sh_wx_turnOn")}
           </button>{" "}
-          to follow you.
+          {t("sh_wx_toFollow")}
         </div>
       )}
       {denied && hint && (
@@ -342,6 +343,8 @@ export function WeatherWidget({
   compact?: boolean;
 }) {
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+  const t = translator(useLang());
+  const DENIED_HINT = t("sh_wx_denied");
   const [data, setData] = useState<WeatherData | null>(null);
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
   const [usingDevice, setUsingDevice] = useState(false); // true = showing the user's own GPS location
@@ -501,7 +504,7 @@ export function WeatherWidget({
       )}
       <div className="flex-1">
         {status === "loading" || !data ? (
-          <div className="text-sm text-slate-400">{status === "error" ? "Weather unavailable" : "Loading weather…"}</div>
+          <div className="text-sm text-slate-400">{status === "error" ? t("sh_wx_unavailable") : t("sh_wx_loading")}</div>
         ) : (
           <>
             <div className="flex items-baseline gap-2">
@@ -509,15 +512,15 @@ export function WeatherWidget({
               <span className="text-sm text-slate-600">{data.description}</span>
             </div>
             <div className="text-xs text-slate-500">
-              Feels like {data.feelsF}°
-              {data.windMph != null ? ` · Wind ${data.windMph} mph` : ""}
-              {data.humidity != null ? ` · Humidity ${data.humidity}%` : ""}
+              {fillText(t("sh_wx_feels"), { n: String(data.feelsF) })}
+              {data.windMph != null ? ` · ${fillText(t("sh_wx_wind"), { n: String(data.windMph) })}` : ""}
+              {data.humidity != null ? ` · ${fillText(t("sh_wx_humidity"), { n: String(data.humidity) })}` : ""}
               {" · "}
               {usingDevice ? (
-                <span className="text-emerald-600">{town ?? "Your location"}</span>
+                <span className="text-emerald-600">{town ?? t("sh_wx_yourLocation")}</span>
               ) : (
                 <>
-                  {label || "Shop area"}
+                  {label || t("sh_wx_shopArea")}
                   {source === "device" && (
                     <>
                       {" · "}
@@ -528,7 +531,7 @@ export function WeatherWidget({
                           title={DENIED_HINT}
                           className="inline-flex items-center gap-0.5 font-medium text-amber-600 hover:text-amber-700"
                         >
-                          <MapPinOff className="h-3 w-3" /> Location Blocked
+                          <MapPinOff className="h-3 w-3" /> {t("sh_wx_blocked")}
                         </button>
                       ) : (
                         <button
@@ -536,7 +539,7 @@ export function WeatherWidget({
                           onClick={locate}
                           className="inline-flex items-center gap-0.5 font-medium text-sky-600 hover:text-sky-700"
                         >
-                          <MapPin className="h-3 w-3" /> Turn On Location
+                          <MapPin className="h-3 w-3" /> {t("sh_wx_turnOn")}
                         </button>
                       )}
                     </>

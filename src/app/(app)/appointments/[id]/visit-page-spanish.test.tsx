@@ -352,6 +352,8 @@ describe("the visit page catalog (vp_)", () => {
       "src/app/(app)/appointments/unschedule-button.tsx",
       "src/app/(app)/appointments/start-job-actions.ts",
       "src/app/(app)/leads/intake-files.tsx",
+      // cn-v1157: the page when there is no visit to show (its own test: [id]/not-found.test.tsx).
+      "src/app/(app)/appointments/[id]/not-found.tsx",
     ]);
   });
 
@@ -553,7 +555,9 @@ describe("the visit page catalog (vp_)", () => {
     // the Edit Details modal, Clear the Date, Start the Job's server, the shared libraries, the clock-in's
     // clash) is the rest. A key added to the catalog and to neither table is a hole.
     for (const k of Object.keys(replaced)) expect(vp.en, k).toHaveProperty(k);
-    expect(Object.keys(vp.en)).toHaveLength(Object.keys(replaced).length + 122);
+    // + the five What Is This For? words (cn-v1157), pinned in visit-title-field.test
+    // + the three words of the page with no visit to show (cn-v1157: vp_visitGone, vp_visitGoneTech, vp_btn_backToInspections), pinned in not-found.test
+    expect(Object.keys(vp.en)).toHaveLength(Object.keys(replaced).length + 122 + 5 + 3);
     for (const [k, literal] of Object.entries(replaced)) expect(dict("en")[k], k).toBe(literal);
     // The sentences the old card assembled, re-assembled through the slots, are the old sentences.
     const en = dict("en");

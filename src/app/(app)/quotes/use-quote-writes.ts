@@ -179,6 +179,12 @@ export interface SessionState {
   follow: Readonly<Record<string, { said?: string; note?: string }>>;
   /** What the job's list did after a line was removed (the line is gone, so this sits under the list). */
   said: string | null;
+  /** A sentence the first save came back with that has to be READ (saveQuote's warning: the estimate
+   *  stood, its inspection was not tied to it). Not a refusal: nothing to retry, and it holds nothing
+   *  up (isQuiet does not read it). The editor says it as a sticky toast, which lives in the app's
+   *  layout and so outlasts the hand-off to the saved page; a line under the list went with the page a
+   *  moment after it was drawn. Kept for the life of the session: no later write clears it. */
+  warning: string | null;
 }
 
 /** Nothing on the wire, nothing refused, nothing waiting or queued: the estimate on the screen is the
@@ -187,7 +193,7 @@ export const isQuiet = (s: SessionState): boolean => s.pending === null && Objec
 
 /** Everything the session writes through. The editor hands in the server actions; a test hands in fakes. */
 export interface SessionActions {
-  saveQuote: (input: FirstSaveInput) => Promise<{ ok: true; id: string; quote_number?: string | null } | { ok: false; error?: string; code?: string }>;
+  saveQuote: (input: FirstSaveInput) => Promise<{ ok: true; id: string; quote_number?: string | null; warning?: string } | { ok: false; error?: string; code?: string }>;
   /** Each line under the id the client chose; idempotent on the server (B2). `said` / `note` are the
    *  job-followed words (what the job's list did with a kit added to an accepted, job-linked estimate),
    *  the same two updateQuoteItem answers with; both optional, so an append that followed nothing says nothing. */
@@ -492,6 +498,7 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
     waiting: {},
     follow: {},
     said: null,
+    warning: null,
   };
   // WHAT THE SERVER HOLDS (or was last asked to hold): the header and each line as last SENT, taken
   // inside the call from the payload that went, so a blur that changed nothing writes nothing, and a
@@ -589,6 +596,9 @@ export function createQuoteSession(init: SessionInit): QuoteSession {
         set({
           mode: { kind: "saved", id: res.id, number: res.quote_number ?? null, status: "draft", bornHere: true },
           items: state.items.map((l) => (sent.has(l.key) ? { ...l, saved: true } : l)),
+          // A save that stood but could not tie its inspection says so (saveQuote's warning): held on
+          // its own, apart from `said`, which the next write replaces and the hand-off leaves behind.
+          ...(res.warning ? { warning: res.warning } : {}),
         });
         await readBack(res.id);
       },

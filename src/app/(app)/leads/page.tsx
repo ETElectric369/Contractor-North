@@ -14,6 +14,8 @@ import { InquiryRow } from "./inquiry-row";
 import { ReferralTally } from "./referral-tally";
 import type { Inquiry } from "@/lib/types";
 import { readLeadVisits } from "@/lib/leads/visit-read";
+import { BECAME_CAP, leadBecame, type BecameJobRow, type BecameQuoteRow, type LeadBecameAnswer } from "@/lib/leads/became";
+import { reportError } from "@/lib/observe";
 import { orderLeadBoard } from "@/lib/leads/board-order";
 import { viewerSwitches } from "@/lib/viewer-switches";
 import { featureOn } from "@/lib/features";
@@ -66,6 +68,37 @@ export default async function InquiriesPage({
       .eq("id", focus)
       .maybeSingle();
     focusExtra = (data as Inquiry) ?? null;
+  }
+
+  /**
+   * WHAT THAT LEAD BECAME, AS DOORS (cn-v1157; lib/leads/became). Erik, 2026-11-10: "i had no way to
+   * get back to his estimate even though it says right on the screen Became An Estimate". A converted
+   * lead only ever shows here as the ?focus= row, so this is two small reads for that one row: the
+   * estimates and the jobs made from it (0109's inquiry_id on each), newest first. THE READS' ERRORS
+   * ARE KEPT: a failed read reaches the row as UNREAD and the row says so — never as "nothing".
+   */
+  let became: LeadBecameAnswer = null;
+  if (focusExtra?.converted_at) {
+    const [quotesRead, jobsRead] = await Promise.all([
+      supabase
+        .from("quotes")
+        .select("id, quote_number, title")
+        .eq("inquiry_id", focusExtra.id)
+        .order("created_at", { ascending: false })
+        .limit(BECAME_CAP),
+      supabase
+        .from("jobs")
+        .select("id, job_number, name")
+        .eq("inquiry_id", focusExtra.id)
+        .order("created_at", { ascending: false })
+        .limit(BECAME_CAP),
+    ]);
+    if (quotesRead.error) reportError("leads:became:quotes", quotesRead.error, { leadId: focusExtra.id });
+    if (jobsRead.error) reportError("leads:became:jobs", jobsRead.error, { leadId: focusExtra.id });
+    became = leadBecame(
+      { data: quotesRead.data as BecameQuoteRow[] | null, error: quotesRead.error },
+      { data: jobsRead.data as BecameJobRow[] | null, error: jobsRead.error },
+    );
   }
 
   /**
@@ -170,6 +203,7 @@ export default async function InquiriesPage({
                 businessPhone={businessPhone}
                 estimateDoor={featureOn(sw.features, "estimates")}
                 referralsOn={featureOn(sw.features, "referrals")}
+                became={focusExtra && i.id === focusExtra.id ? became : null}
               />
             ))}
           </ul>

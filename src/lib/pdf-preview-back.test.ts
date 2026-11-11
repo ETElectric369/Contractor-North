@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pdfPreviewBackHref } from "./pdf-preview-back";
+import { pdfPreviewBackHref, pdfPreviewHref } from "./pdf-preview-back";
 
 /** The PDF viewer's Back on a direct open (no history to pop). It is the page's only exit in the
  *  iOS shell, so it must always name a real in-app page and never leave the app. */
@@ -39,5 +39,26 @@ describe("pdfPreviewBackHref", () => {
   it("never builds a path out of an id that isn't one", () => {
     expect(pdfPreviewBackHref("invoice", "../../evil", "")).toBe("/planner");
     expect(pdfPreviewBackHref("invoice", "x/y", "")).toBe("/planner");
+  });
+});
+
+/** The header's Preview on an invoice and on an estimate (components/preview-button, 2026-11-10). */
+describe("pdfPreviewHref", () => {
+  const ID = "bb68b095-1c2d-4e5f-8a9b-0c1d2e3f4a5b";
+
+  it("is the address the two ⋯ rows wrote by hand: the viewer, the document, and back= its own page", () => {
+    expect(pdfPreviewHref("invoice", ID)).toBe(`/print/pdf-preview?doc=invoice&id=${ID}&back=/billing/${ID}`);
+    expect(pdfPreviewHref("quote", ID)).toBe(`/print/pdf-preview?doc=quote&id=${ID}&back=/quotes/${ID}`);
+  });
+
+  it("names the page Back would fall back to anyway, so the way in and the way home agree", () => {
+    for (const doc of ["invoice", "quote"] as const) {
+      const q = new URLSearchParams(pdfPreviewHref(doc, ID).split("?")[1]);
+      expect(q.get("doc")).toBe(doc);
+      expect(q.get("id")).toBe(ID);
+      expect(q.get("back")).toBe(pdfPreviewBackHref(doc, ID, ""));
+      // ...and that back= is one the viewer follows as given.
+      expect(pdfPreviewBackHref(doc, ID, q.get("back")!)).toBe(q.get("back"));
+    }
   });
 });

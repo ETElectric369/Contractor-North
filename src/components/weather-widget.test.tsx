@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { LangProvider } from "@/components/lang-provider";
 import { FOLLOW_KEY, WeatherRow, kmBetween, shouldRefetch, weatherFollower, type WeatherGeo } from "./weather-widget";
 
 vi.mock("@/app/report-client-error", () => ({ reportClientError: vi.fn() }));
@@ -188,5 +189,32 @@ describe("the compact row says which place it shows", () => {
     const html = renderToStaticMarkup(<WeatherRow {...base} usingDevice town="Bayberry" label="Snowbell" />);
     expect(html).toContain("Bayberry");
     expect(html).not.toContain("Weather for");
+  });
+  it("the town is on its own line under the figures, not inline with them", () => {
+    const html = renderToStaticMarkup(<WeatherRow {...base} usingDevice town="Bayberry" label="Snowbell" />);
+    const line = html.match(/<div[^>]*data-weather-town[^>]*>.*?<\/div>/)?.[0] ?? "";
+    expect(line).toContain("Bayberry");
+    expect(line).toContain("text-[11px]");
+    expect(html.indexOf("data-weather-town")).toBeGreaterThan(html.indexOf("41°F"));
+    // the inline row (the first flex row) no longer holds the town
+    const inlineRow = html.slice(0, html.indexOf("data-weather-town"));
+    expect(inlineRow.match(/Bayberry/g) ?? []).toHaveLength(0);
+  });
+  it("no town: the bare pin stays inline", () => {
+    const html = renderToStaticMarkup(<WeatherRow {...base} usingDevice town={null} label="Snowbell" />);
+    expect(html).not.toContain("data-weather-town");
+    expect(html).toContain('aria-label="Your location"');
+  });
+  it("the Spanish render carries no English word", () => {
+    const shop = renderToStaticMarkup(<LangProvider lang="es"><WeatherRow {...base} usingDevice={false} town={null} label="Snowbell" /></LangProvider>);
+    expect(shop).toContain("Clima de Snowbell —");
+    expect(shop).toContain("Activar Ubicación");
+    const near = renderToStaticMarkup(<LangProvider lang="es"><WeatherRow {...base} usingDevice town="Bayberry" label="Snowbell" /></LangProvider>);
+    const bare = renderToStaticMarkup(<LangProvider lang="es"><WeatherRow {...base} usingDevice town={null} label="Snowbell" /></LangProvider>);
+    for (const html of [shop, near, bare]) {
+      expect(html).not.toMatch(/Weather for|Turn On Location|to follow you|Following your location|Your location|unavailable/);
+    }
+    expect(near).toContain("Siguiendo tu ubicación");
+    expect(bare).toContain("Tu ubicación");
   });
 });

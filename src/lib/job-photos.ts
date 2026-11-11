@@ -44,6 +44,32 @@ export function isCostableCategory(category: string | null | undefined): boolean
   return category === "Receipt" || category === "Bill";
 }
 
+/**
+ * NOT A COST: the category a paper filed as a Receipt or a Bill is given when a person says it never
+ * was one (a supplier's quote, a packing slip). Its own stored value, the same two words Organize
+ * uses as a label, and one of the pencil's Category choices (job-documents), so the office sees the
+ * paper under that name and can re-file it.
+ *
+ * SAYING WHAT A PAPER IS NOT LEAVES ITS AUDIENCE AS IT WAS. A Receipt is the office's alone, and so
+ * is this: it is not costable (no Record as Cost, never "Not on a Bill Yet", no Needs You row), it is
+ * NOT on the crew's allow-list (tech-documents) and NOT on the customer's (portal/doc-kinds, 0326's
+ * document_category_is_showable), each of which names what it lets through, so a new word reaches
+ * nobody until someone decides it should. A picture so filed stays on the Costs tab's list
+ * (sortJobPapers' last arm), never on the Photos tab. NOT "Other": that is a job paper the crew is
+ * handed, and one tap on My Day would have put a supplier's prices in front of them.
+ */
+export const NOT_A_COST_CATEGORY = "Not a Cost";
+
+/**
+ * THE OFFICE'S OWN PAPERS: money paper, and a paper a person said was never a cost. The customer's
+ * page does not offer either — not listed with a "can't be shown" line under it, simply not on that
+ * list — the way a Receipt never was (jobs/portal-share-actions jobShareState). Without this a paper
+ * filed as Not a Cost turned up on the Customer Page tab as a row that could only refuse.
+ */
+export function isOfficeOnlyCategory(category: string | null | undefined): boolean {
+  return isMoneyCategory(category) || category === NOT_A_COST_CATEGORY;
+}
+
 const IMAGE_FILE = /\.(jpe?g|png|webp|gif|heic)($|\?)/i;
 const PDF_FILE = /\.pdf($|\?)/i;
 

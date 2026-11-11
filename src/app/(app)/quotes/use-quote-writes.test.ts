@@ -460,6 +460,33 @@ describe("birth without litter", () => {
     expect(a.saveQuote).toHaveBeenCalledTimes(1);
   });
 
+  it("a first save that stood but came back with a warning (its inspection was not tied): the sentence is held on its own, holds nothing up, and no later write takes it away", async () => {
+    // skeptic #60: it went into `said`, a line under the list, and the hand-off replaced the page the
+    // moment the session was quiet — which the warning never delayed. The editor says `warning` as a
+    // sticky toast instead (pinned in inspection-opens-not-estimates.test.ts).
+    const sentence = "The estimate is saved, but it could not be tied to its inspection.";
+    const { s, a } = unsaved([trench], { saveQuote: vi.fn(async (input) => ({ ok: true as const, id: input.id, quote_number: "E-012", warning: sentence })) }, CLIENT, { ...header, captureId: "appt-1" });
+    expect(s.get().warning).toBeNull();
+    await s.mount();
+    expect(calls(a.saveQuote)[0][0]).toMatchObject({ capture_appointment_id: "appt-1" });
+    expect(s.get().mode.kind).toBe("saved");
+    expect(s.get().warning).toBe(sentence);
+    expect(s.get().said).toBeNull(); // not the line under the list, which the next write replaces
+    expect(s.get().refusals).toEqual({}); // a warning is not a refusal: there is nothing to retry
+    expect(isQuiet(s.get())).toBe(true); // …and the hand-off is not held for it
+    // A later write, and the said-line being cleared, leave it standing.
+    const key = s.get().items[0].key;
+    s.typeLine(key, { quantity: 3 });
+    await s.commitLine(key);
+    s.clearSaid();
+    expect(a.updateQuoteItem).toHaveBeenCalledTimes(1);
+    expect(s.get().warning).toBe(sentence);
+    // A save with nothing to say leaves it empty.
+    const plainSave = unsaved([trench]);
+    await plainSave.s.mount();
+    expect(plainSave.s.get().warning).toBeNull();
+  });
+
   it("a refused first save leaves an unsaved editor whose Retry calls saveQuote again with the SAME id and the estimate as it stands", async () => {
     const { s, a } = unsaved([trench], { saveQuote: vi.fn().mockResolvedValueOnce({ ok: false, error: "Couldn't save." }).mockResolvedValue({ ok: true, id: CLIENT, quote_number: "E-013" }) });
     await s.mount();

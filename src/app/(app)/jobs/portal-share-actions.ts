@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireStaff } from "@/lib/staff-guard";
 import { dbError } from "@/lib/db-error";
 import { reportError } from "@/lib/observe";
+import { isOfficeOnlyCategory } from "@/lib/job-photos";
 import { signDocumentUrls } from "@/lib/signed-docs";
 import {
   PHOTO_NOT_IN_JOB_FOLDER,
@@ -17,7 +18,6 @@ import {
 } from "@/lib/portal/share-input";
 import { CUSTOMER_SHOWN_JOB_STATUSES, isJobPhotoPath } from "@/lib/portal/job-view-shape";
 import {
-  COMPANY_PAPER_CATEGORIES,
   MONEY_PAPER_REFUSAL,
   docFormat,
   organizeRowIsMoney,
@@ -676,8 +676,10 @@ export async function jobShareState(jobId: string): Promise<
     const shares = (sh.data ?? []) as SharedPaperRow[];
     sharedPhotoIds = shares.filter((r) => !r.removed_at && r.kind === "photo").map((r) => r.document_id);
     const docRows = (docs.data ?? []) as (PaperDoc & { created_at: string })[];
-    // Receipts, bills and invoices never appear on this list at all: they are never shown.
-    const candidates = docRows.filter((d) => !(COMPANY_PAPER_CATEGORIES as readonly string[]).includes(String(d.category ?? "")));
+    // Receipts, bills and invoices never appear on this list at all: they are never shown. Nor does a
+    // paper filed as Not a Cost (lib/job-photos isOfficeOnlyCategory): it was a Receipt until a person
+    // said otherwise, and saying what a paper is NOT must not put it on the customer's list.
+    const candidates = docRows.filter((d) => !isOfficeOnlyCategory(d.category));
     const ids = candidates.map((d) => d.id);
     const [oi, signed] = await Promise.all([
       ids.length

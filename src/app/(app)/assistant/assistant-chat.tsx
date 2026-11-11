@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { trace } from "@/lib/nort/trace";
+import { trace, traceDrop } from "@/lib/nort/trace";
+import { voiceRequestRefusal } from "@/lib/voice-failure";
 import { useRouter } from "next/navigation";
 import { APP_VERSION } from "@/lib/version";
 import { Send, Sparkles, Loader2, Mic, Check, Square, FileText, X } from "lucide-react";
@@ -760,10 +761,15 @@ export function AssistantChat({
     speech.setResultHandler((t) => sendRef.current?.(t, true));
     const unsub = speech.onListeningState(setListening);
     speech.onStatus?.((s) => setStatus(s)); // show each voice step so a failure is visible, not silent
+    // The mic asks this as it gives up on silence: its closing line is SPOKEN only while this is a
+    // voice session. Typing leaves voice mode with the mic still running (send, below), and that mic
+    // then closes quietly, with the status line.
+    speech.setVoiceSessionCheck?.(() => voiceModeRef.current);
     setListening(speech.isListening()); // catch an in-gesture start that already happened (first open)
     return () => {
       speech.setResultHandler(null);
       speech.onStatus?.(null);
+      speech.setVoiceSessionCheck?.(null);
       unsub();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -960,7 +966,13 @@ export function AssistantChat({
 
   async function send(text: string, viaVoice = false) {
     const content = text.trim();
-    if (!content || streaming || inFlightRef.current) return;
+    if (!content) return;
+    if (streaming || inFlightRef.current) {
+      // A transcript that lands while a turn is streaming is discarded (never queued, never replayed):
+      // only its LENGTH is traced, so the drop leaves evidence (the owner spoke and nothing came back).
+      if (viaVoice) traceDrop("transcript discarded", `in flight, ${content.length} chars`);
+      return;
+    }
     inFlightRef.current = true;
     // A new question is the user moving on: a reload-time catch-up still probing for the last one
     // would otherwise land its line under THIS question, and its marker is replaced below anyway.
@@ -1065,6 +1077,19 @@ export function AssistantChat({
         const errText = await res.text().catch(() => t("nt_requestFailed"));
         setMessages((m) => [...m, { role: "assistant", content: errText }]);
         setStreaming(false);
+        // A voice turn that did not go through is SAID (a driver cannot read the screen): the route's own
+        // sentence when it sent one (never its bare label: "Unauthorized" is not a sentence), else the
+        // generic line; and the mic is re-armed the way a spoken reply re-arms it. A typed turn stays
+        // as it was. A SHUT DOOR IS NOT ASKED AGAIN (lib/voice-failure voiceRequestRefusal): signed out
+        // (401) or refused for this person (403, Nort is off) would be refused every turn, so the line
+        // is said once and the voice session ENDS, mic and all, instead of re-arming into a loop.
+        if (viaVoice) {
+          const refusal = voiceRequestRefusal(res.status, errText, { failed: t("nt_voiceRequestFailedLine"), signedOut: t("nt_voiceSignedOutLine"), closing: t("nt_closingMicLine") });
+          say(refusal.line, () => {
+            if (!refusal.rearm) stopVoice();
+            else if (voiceModeRef.current) startMic();
+          });
+        }
         return;
       }
 

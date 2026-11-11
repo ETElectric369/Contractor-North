@@ -27,6 +27,10 @@ const lines: string[] = [];
  * turn (or the fence) that ran dark makes the batch worth a row. */
 const SCREEN_LINES = new Set(["screen hidden", "screen visible"]);
 let hiddenSeen = false;
+// A DROP is news even in the foreground: a turn thrown away (a too-small blob, a failed or empty
+// transcription, a transcript the in-flight guard discarded, a live turn cut, the no-speech budget
+// spent). Rare, so the sink stays quiet; an ordinary foreground turn still ships nothing.
+let dropSeen = false;
 let turnNo = 0;
 let installed = false;
 // This page load's own mark: the ms it began plus two random characters (two loads in the same ms).
@@ -66,6 +70,13 @@ export function trace(stage: string, extra?: string) {
   }
 }
 
+/** A trace line for a DROPPED turn: the next flush ships the buffer even if the screen never hid. */
+export function traceDrop(stage: string, extra?: string) {
+  if (!isNativeShell()) return;
+  dropSeen = true;
+  trace(stage, extra);
+}
+
 /** Ship the turn's lines to the ops sink if any of them ran with the screen dark; otherwise drop
  *  them (a foreground turn is not news). */
 export function flushTrace(why: string) {
@@ -73,7 +84,9 @@ export function flushTrace(why: string) {
   const mine = lines.splice(0, lines.length);
   const wasHidden = hiddenSeen;
   hiddenSeen = false;
-  if (!wasHidden || !isNativeShell()) return;
+  const wasDrop = dropSeen;
+  dropSeen = false;
+  if (!(wasHidden || wasDrop) || !isNativeShell()) return;
   try {
     void reportClientError("nort-voice", `trace turn ${turnNo} (load ${loadId}, flush ${++flushNo})`, { why, at: clock(), lines: mine.join("\n") }, "trace").catch(() => {});
   } catch {

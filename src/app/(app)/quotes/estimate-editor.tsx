@@ -19,6 +19,8 @@ import { NumberInput } from "@/components/ui/number-input";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { LineItemText } from "@/components/line-item-text";
 import { SendButton } from "@/components/send-sheet";
+import { PreviewButton } from "@/components/preview-button";
+import { useSaveInFlight } from "@/lib/saves-in-flight";
 import { ShareIconButton } from "@/components/share-icon-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import type { NavTree } from "@/lib/nav-tree";
@@ -31,7 +33,7 @@ import { ruleInputsKey, type RuleInputs } from "@/lib/estimate/reprice-rows";
 import { sameTask } from "@/lib/playbook/tasks";
 import type { DraftLineItem } from "@/lib/estimate/line-map";
 import type { EstimateFormat } from "@/lib/doc-style";
-import type { Customer, QuoteCircuit } from "@/lib/types";
+import type { Customer, Inquiry, QuoteCircuit } from "@/lib/types";
 import { PaperFormatSwitch } from "./paper-format-switch";
 import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
@@ -233,8 +235,9 @@ export interface SavedEstimate {
   lock: { reason: string } | null;
   /** The attached customer's full row (CustomerSelect's EditCustomerButton needs every field). */
   customer: Customer | null;
-  /** The lead on quotes.inquiry_id, with what it attached at intake. */
-  lead: { id: string; name: string | null; company_name?: string | null; email?: string | null; phone?: string | null; intakePaths: string[] } | null;
+  /** The lead on quotes.inquiry_id, with what it attached at intake. `row` is the lead's WHOLE row,
+   *  for the card's Edit Lead door (the lead's own form writes every field it holds). */
+  lead: { id: string; name: string | null; company_name?: string | null; email?: string | null; phone?: string | null; intakePaths: string[]; row?: Inquiry | null } | null;
   /** The org's customers, for the customer card's picker. */
   customers: { id: string; name: string; company_name: string | null }[];
   /** The customer's pricing level: markup and labor rate. null = none — NEVER 0. */
@@ -359,7 +362,9 @@ function quoteTree(
                 : [{ id: "qm-ml", label: t("qe_btn_createMaterialList"), icon: "boxes", run: () => createMaterialListFromQuote(q.id), hrefPrefix: "/materials/" }]),
           ]
         : []),
-      { id: "qm-print", label: t("qe_btn_printPdf"), icon: "fileSpreadsheet", href: `/print/pdf-preview?doc=quote&id=${q.id}&back=/quotes/${q.id}` },
+      // NO PRINT ROW HERE ANY MORE (2026-11-10): the PDF's one door is the header's Preview, beside
+      // Send (components/preview-button), at the address this row carried. Print and Download PDF
+      // are inside that screen, as they always were.
       {
         id: "qm-del",
         label: t("qe_btn_deleteQuote"),
@@ -434,6 +439,8 @@ export function EstimateEditor(props: EstimateEditorProps) {
   );
   const { header, items, mode } = state;
   const busy = state.pending !== null;
+  // The header's Preview shows what is SAVED, so it waits for this (lib/saves-in-flight).
+  useSaveInFlight(busy);
   const status = mode.kind === "saved" ? mode.status : "draft";
   const savedId = mode.kind === "saved" ? mode.id : null;
 
@@ -652,6 +659,17 @@ export function EstimateEditor(props: EstimateEditorProps) {
   // route — a failed stash, a hand-off still waiting on a refusal, on an estimator error he has not
   // dismissed, on an open review (skeptic #39, N3) — so the way to the row is never missing. Nothing
   // he typed is lost for a page move.
+  // A SAVE THAT STOOD BUT CAME BACK WITH A SENTENCE TO READ (saveQuote's warning: the estimate could
+  // not be tied to its inspection) is a STICKY TOAST, said the moment it lands. The hand-off below
+  // does not wait on it and does not need to carry it: the toast lives in the app's layout, so it
+  // stays up through the navigation to the saved page and waits there for Got It. A line under the
+  // list was drawn on this page and gone with it a moment later, read by nobody. Once per sentence.
+  const warned = useRef<string | null>(null);
+  useEffect(() => {
+    if (!state.warning || warned.current === state.warning) return;
+    warned.current = state.warning;
+    toast(state.warning, "info", undefined, { sticky: true });
+  }, [state.warning, toast]);
   const handedOff = useRef(false);
   useEffect(() => {
     if (props.mode !== "unsaved" || mode.kind !== "saved" || !mode.bornHere || handedOff.current) return;
@@ -974,9 +992,14 @@ export function EstimateEditor(props: EstimateEditorProps) {
               </p>
             )}
           </div>
-          {/* Impulse verbs first (Send / advance status / Duplicate); the ⋯ Actions menu rides LAST. */}
+          {/* Impulse verbs first (Send / Preview / advance status / Duplicate); the ⋯ Actions menu rides
+              LAST. PREVIEW STANDS BESIDE SEND AT EVERY STATUS (Erik, 2026-11-10: "a preview button on
+              the top bar next to send … so i dont have to search for it"): the estimate as its real
+              PDF, the door the ⋯'s Print / PDF row was. This header is drawn only once there is a row,
+              so an estimate nobody has saved offers no Preview. The row wraps; Send stays first. */}
           <div className="flex flex-wrap items-center gap-2">
             <SendButton kind="quote" id={savedId} number={mode.kind === "saved" ? mode.number : null} textReady={catalog.textReady} label={t("qt_btn_send")} />
+            <PreviewButton doc="quote" id={savedId} />
             <StatusControl id={savedId} status={status} />
             {(catalog.estimatesOn || lock) && <DuplicateQuoteButton id={savedId} />}
             {(catalog.estimatesOn || lock) && (status === "sent" || status === "accepted") && <DuplicateQuoteButton id={savedId} revision />}

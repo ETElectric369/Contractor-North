@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { MediaLightbox } from "@/components/media-lightbox";
 import { prettyBytes, readReceiptDocument, type ReceiptTone } from "@/lib/receipt-capture";
-import { isCostableCategory } from "@/lib/job-photos";
+import { isCostableCategory, NOT_A_COST_CATEGORY } from "@/lib/job-photos";
 import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
 import { deleteDocument, linkReceiptToBill, updateDocument } from "../actions";
@@ -21,8 +21,12 @@ import { deleteDocument, linkReceiptToBill, updateDocument } from "../actions";
  *  that decides which papers can be "Not on a Bill Yet"). */
 const COSTABLE = isCostableCategory;
 
-/** The pencil's choices: what a filed paper can be re-filed as. */
-const CATEGORIES = ["Receipt", "Bill", "Invoice", "Photo", "Plan", "Permit", "Other"];
+/** The pencil's choices: what a filed paper can be re-filed as. The first four are the office's own
+ *  papers (never the crew's, never the customer's): the money papers, then Not a Cost, a paper that
+ *  was filed as a Receipt or a Bill and never was one (lib/job-photos; Needs You's ⋯ files it so).
+ *  It is listed here so the office sees the paper under that name and can re-file it, to a Photo, a
+ *  Plan, a Permit or Other when the crew should have it. */
+const CATEGORIES = ["Receipt", "Bill", "Invoice", NOT_A_COST_CATEGORY, "Photo", "Plan", "Permit", "Other"];
 
 interface Doc {
   id: string;

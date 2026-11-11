@@ -198,7 +198,10 @@ describe("query.ts reads it once, on the same floors, and keeps the rest", () =>
     // what made My Day disagree with every other screen the day the word changed (visit-word.test).
     // The stored TITLE goes through visitTitle for the same reason — a row stamped "Walk-Through:
     // <who>" between 2026-09-30 and 2026-10-03 would make this row the odd one out instead.
-    expect(q).toContain("title: visitTitle(a.title) || appointmentTypeLabel(a.type),");
+    // The write-up row says it through inspectionLabel (a bare title gives way to who and where, and
+    // the type's label is the last resort); the stored title still goes through visitTitle.
+    expect(q).toContain("title: visitTitle(a.title),");
+    expect(q).toContain("typeLabel: appointmentTypeLabel(a.type),");
     expect(q).toContain('title: visitTitle(a.title) || type || "Appointment",');
     expect(q).not.toContain('"Site inspection"');
   });

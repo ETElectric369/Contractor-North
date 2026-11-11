@@ -10,7 +10,8 @@ import type { ActionKind, Affordance } from "./types";
  * stripped HERE, to the record the verb writes, so a verb never writes zero rows and reports success
  * (the silent-write law): unbilled-<visit> / jdone-<job> (visit_unbilled), qdraft-<estimate>
  * (quote_draft), onhold-<job> (job_on_hold), nocosts-<job> (job_unbilled_work), materials-<job>
- * (materials_needed). A won estimate's day goes on its JOB, which the row names as `target`.
+ * (materials_needed), receipt-<document> (receipt_unbilled). A won estimate's day goes on its JOB,
+ * which the row names as `target`.
  *
  * No task arms and no convert branch (Wave 1, W1-16): tasks and Reminders never reach Needs You
  * (0358). The registry keeps task.* and inquiry.convert for Nort; nothing here reaches them. Nor
@@ -89,6 +90,18 @@ export function resolveRowVerb(
   if (verb === "assign") {
     if (kind === "job_to_schedule") return { name: "job.assign", input: { id, assignee: payload?.assignee ?? "" } };
     return null;
+  }
+
+  // Didn't Happen on an inspection row: the visit page's Won't Happen rule (appointment.wontHappen).
+  if (verb === "wontHappen") {
+    return kind === "inspection_writeup" ? { name: "appointment.wontHappen", input: { id } } : null;
+  }
+
+  // Not a Cost on a receipt row: the paper is filed under that name by the job's own paper list rule
+  // (document.notACost). The row is receipt-<document>; the Couldn't Check line maps to nothing.
+  if (verb === "notACost") {
+    const doc = kind === "receipt_unbilled" ? recordId(id, "receipt-") : null;
+    return doc ? { name: "document.notACost", input: { id: doc } } : null;
   }
 
   if (verb === "dismiss") {

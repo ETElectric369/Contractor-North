@@ -1218,11 +1218,13 @@ export async function setQuoteCustomer(
     if (!safeCustomerId) return { ok: false, error: await ws.say("qs_customerUnavailable") };
   }
 
-  const { error } = await supabase
+  const { data: rows, error } = await supabase
     .from("quotes")
     .update({ customer_id: safeCustomerId, updated_at: new Date().toISOString() })
-    .eq("id", quoteId);
+    .eq("id", quoteId)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!rows || rows.length === 0) return { ok: false, error: await ws.say("qs_estimateUnavailable") };
   await bustDocPdf("quote", quoteId); // bill-to renders on the PDF (audit 7)
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
@@ -1651,25 +1653,55 @@ export async function saveQuote(input: SaveQuoteInput) {
   // Write-up backlink: stamp the new quote's id onto the source inspection's capture jsonb
   // so /inspections can file the row (the lead-less Inspect-now path has no inquiry/job link).
   // RLS-scoped read → a bad/cross-org id is a clean no-op; best-effort, never fails the save.
+  let stampWarning: string | undefined;
   if (input.capture_appointment_id) {
-    const { data: appt } = await supabase
-      .from("appointments")
-      .select("id, capture")
-      .eq("id", input.capture_appointment_id)
-      .maybeSingle();
-    if (appt) {
+    // TWO TRIES AT MOST, each a fresh read-modify-write: the capture is jsonb the inspector writes
+    // too, so the second try reads it again and never writes the first try's copy back over it. A
+    // visit that is not there for this caller ends it at once, the clean no-op it always was.
+    let tied: "landed" | "no-visit" | "failed" = "failed";
+    let why: unknown = null;
+    let wrote = false;
+    for (let attempt = 0; attempt < 2 && tied === "failed"; attempt++) {
+      const { data: appt, error: readErr } = await supabase
+        .from("appointments")
+        .select("id, capture")
+        .eq("id", input.capture_appointment_id)
+        .maybeSingle();
+      if (readErr) {
+        why = readErr;
+        continue;
+      }
+      if (!appt) {
+        tied = "no-visit";
+        break;
+      }
       const existing =
         appt.capture && typeof appt.capture === "object" ? (appt.capture as Record<string, unknown>) : {};
       // Stamp ONCE: autosave calls this every ~2s — a read-modify-write of the capture jsonb
       // on every tick would clobber concurrent inspector writes (review) and churn revalidates.
-      if (existing.quote_id !== quote.id) {
-        await supabase
-          .from("appointments")
-          .update({ capture: { ...existing, quote_id: quote.id }, updated_at: new Date().toISOString() })
-          .eq("id", appt.id);
-        revalidatePath("/inspections");
+      if (existing.quote_id === quote.id) {
+        tied = "landed";
+        break;
       }
+      wrote = true;
+      const { data: stamped, error: stampErr } = await supabase
+        .from("appointments")
+        .update({ capture: { ...existing, quote_id: quote.id }, updated_at: new Date().toISOString() })
+        .eq("id", appt.id)
+        .select("id");
+      if (!stampErr && stamped?.length) tied = "landed";
+      else why = stampErr ?? new Error("zero rows");
     }
+    // NOT SILENT, TO ANYONE: a stamp that failed twice (the read, the write, or a write that matched
+    // no row) leaves the visit untied. Its page would offer Start the Estimate over a finished one,
+    // and a visit with no lead would birth a TWIN there. The save stands; the sentence says what is
+    // true and what not to do (the editor shows it as a toast that waits to be read), and the error
+    // sink gets the two ids, nothing about the customer.
+    if (tied === "failed") {
+      reportError("saveQuote:stamp", why ?? new Error("the stamp did not land"), { quoteId: quote.id, appointmentId: input.capture_appointment_id });
+      stampWarning = await ws.say("qs_stampNotLinked");
+    }
+    if (wrote) revalidatePath("/inspections");
   }
 
   // THE DEED STAMPS THE RECORD (Andrew's orphaned lead). Converting a lead to a BLANK builder
@@ -1725,6 +1757,7 @@ export async function saveQuote(input: SaveQuoteInput) {
     subtotal: stored?.subtotal ?? subtotal,
     tax: stored?.tax ?? tax,
     total: stored?.total ?? total,
+    ...(stampWarning ? { warning: stampWarning } : {}),
   };
 }
 

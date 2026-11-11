@@ -60,8 +60,9 @@ const deleteNode = (id: string, label: string, del: DeleteVerb, listHref: string
 });
 
 /** The invoice ⋯ — Job is the one relationship NOT already linked on the page
- *  (customer + source estimate sit in the header meta row, Print is a solid
- *  header button, the Back link owns "All invoices"). Credit/refund and QBO are
+ *  (customer + source estimate sit in the header meta row, Preview — the PDF, with
+ *  Print inside it — is a header button beside the primary since 2026-11-10 and so
+ *  has no row here, the Back link owns "All invoices"). Credit/refund and QBO are
  *  composed in as modal-owning children by the page; Delete rides last.
  *
  *  DELETE WAS OFFERED AT EVERY STATUS, AND THE DIALOG WAS WRONG ABOUT ITS OWN RULE
@@ -93,7 +94,7 @@ export function invoiceSectionTree(
   rel: { jobId?: string | null },
   del: DeleteVerb,
   invoice?: { status?: string | null; hasPayments?: boolean },
-  /** THE PAGE COMPOSES THE JOB LINK ITSELF (W1-26): the invoice ⋯ has an order - Preview / Print,
+  /** THE PAGE COMPOSES THE JOB LINK ITSELF (W1-26): the invoice ⋯ has an order -
    *  Send Again, Get Paid, Job, Credit / Refund, QuickBooks, the status deeds, then Delete - and the
    *  menu draws its children before its nodes, so a Job node here would land after all of them.
    *  `false` leaves it out; absent keeps it, for any caller that composes nothing. */

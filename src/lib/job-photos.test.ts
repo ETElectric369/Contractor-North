@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { billPapers, isImageDoc, papersOffThisJob, sortJobPapers, type JobPaperRow, type PaperTie } from "./job-photos";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { NOT_A_COST_CATEGORY, billPapers, isCostableCategory, isImageDoc, isMoneyCategory, isOfficeOnlyCategory, papersOffThisJob, sortJobPapers, type JobPaperRow, type PaperTie } from "./job-photos";
 import { documentsForViewer } from "./tech-documents";
 
 /**
@@ -86,6 +88,42 @@ describe("the Photos grid holds the job's photos, never its receipts", () => {
     const t = sortJobPapers([doc("x", "Estimate")], [], BILLS);
     expect(ids(t.photos)).toEqual([]);
     expect(ids(t.pictures)).toEqual([]);
+  });
+
+  // 2026-11-10: a paper that was filed as a Receipt and never was one (a supplier's quote) is filed
+  // as Not a Cost. It is the office's alone, as the Receipt was: off the Photos tab (grid and fold,
+  // which the crew see), on the Costs tab's list with the other pictures kept there, and no cost.
+  it("a picture filed as Not a Cost stays off the Photos tab and is on no bill list: the office's paper, not a cost", () => {
+    expect(NOT_A_COST_CATEGORY).toBe("Not a Cost");
+    expect(isCostableCategory(NOT_A_COST_CATEGORY)).toBe(false);
+    expect(isCostableCategory("Receipt") && isCostableCategory("Bill")).toBe(true);
+    expect(isMoneyCategory(NOT_A_COST_CATEGORY)).toBe(false);
+    const quote = doc("quote-pic", NOT_A_COST_CATEGORY);
+    const pdf = doc("quote-pdf", NOT_A_COST_CATEGORY, "org/job/quote.pdf", "quote.pdf");
+    const office = sortJobPapers([quote, pdf], [], BILLS);
+    expect(ids(office.photos)).toEqual([]);
+    expect(ids(office.pictures)).toEqual([]);
+    expect(Array.from(office.photoTabIds)).toEqual([]);
+    expect(office.moneyPictures).toBe(1); // the picture, counted with the ones kept on the Costs tab
+    expect(ids(office.loose)).toEqual([]); // never "Not on a Bill Yet": it is not a cost
+    // A tech is handed neither, so his tab holds neither (the same picture as a Receipt: neither).
+    expect(ids(documentsForViewer([quote, pdf], false))).toEqual([]);
+    expect(ids(documentsForViewer([{ ...quote, category: "Receipt" }], false))).toEqual([]);
+    // Filed as Other it would be in the crew's fold: the reason the door has a word of its own.
+    expect(ids(sortJobPapers(documentsForViewer([{ ...quote, category: "Other" }], false), [], []).pictures)).toEqual(["quote-pic"]);
+  });
+
+  // The customer's page lists the papers that COULD be shown; the office's own papers are not on it
+  // at all. A paper filed as Not a Cost was a Receipt until a person said otherwise, so it stays off
+  // that list the way the Receipt was — it must never become a row that can only refuse.
+  it("the office's own papers: money paper and Not a Cost, and nothing a customer may be shown", () => {
+    for (const c of ["Receipt", "Bill", "Invoice", NOT_A_COST_CATEGORY]) expect(isOfficeOnlyCategory(c)).toBe(true);
+    for (const c of ["Photo", "Plan", "Permit", "Other", "", null, undefined]) expect(isOfficeOnlyCategory(c)).toBe(false);
+  });
+
+  it("the Customer Page tab's list is built with that rule", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/portal-share-actions.ts"), "utf8");
+    expect(src).toContain("const candidates = docRows.filter((d) => !isOfficeOnlyCategory(d.category));");
   });
 });
 

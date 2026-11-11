@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { WorkShapeControls } from "@/components/work-shape-controls";
 import { useRouter } from "next/navigation";
-import { Phone, Mail, Globe, MapPin, UserPlus } from "lucide-react";
+import { Phone, Mail, Globe, MapPin, UserPlus, FileText, Briefcase } from "lucide-react";
 import { DayField } from "@/components/day-field";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,7 @@ import { leadBucketWords } from "@/lib/lead-triage";
 import { useLang } from "@/components/lang-provider";
 import { translator, fillText } from "@/lib/i18n";
 import { leadNextStep, monthDay, type LeadBucketLetter, type LeadVisitsAnswer } from "@/lib/leads/next-step";
+import { BECAME_UNREAD, becameHref, type LeadBecameAnswer } from "@/lib/leads/became";
 import { IntakeFiles } from "./intake-files";
 import { PlanBriefPanel } from "./plan-brief-panel";
 import { intakePaths } from "@/lib/playbook/uploads";
@@ -105,6 +106,7 @@ export function InquiryRow({
   businessPhone = null,
   estimateDoor = true,
   referralsOn = false,
+  became = null,
 }: {
   inquiry: Inquiry;
   customers: { id: string; name: string }[];
@@ -125,6 +127,9 @@ export function InquiryRow({
   estimateDoor?: boolean;
   /** The Track Referrals switch: on, the ⋯ panel says who referred them. */
   referralsOn?: boolean;
+  /** What a CONVERTED lead became (lib/leads/became, three answers): its estimates and jobs as doors,
+   *  none, or unread. Only a ?focus= row is ever converted, so the page reads it for that one row. */
+  became?: LeadBecameAnswer;
 }) {
   const lang = useLang();
   const t = translator(lang);
@@ -270,12 +275,10 @@ export function InquiryRow({
 
       {/* ── LINE 3: THE THREE VERBS, on their own row and centred (Erik: "they should line up on the
           page centered instead of all over the place"). A CONVERTED LEAD IS PROVENANCE, NOT A LEAD:
-          a ?focus= row that already became an estimate or a job offers no verbs (its chip says what
-          it became). ── */}
+          a ?focus= row that already became an estimate or a job offers no verbs: its chip says what
+          it became, and BecameDoors opens it. ── */}
       {inquiry.converted_at ? (
-        <p className="text-center text-xs text-slate-400">
-          {t("ld_alreadyConverted")}
-        </p>
+        <BecameDoors became={became} t={t} />
       ) : (
         <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} customers={customers} workKind={(inquiry as { work_kind?: string | null }).work_kind ?? null} businessPhone={businessPhone} estimateDoor={estimateDoor} />
       )}
@@ -289,6 +292,41 @@ export function InquiryRow({
 
       {open && <LeadDetails inquiry={inquiry} todayYmd={todayYmd} referralsOn={referralsOn} />}
     </li>
+  );
+}
+
+/**
+ * WHAT IT BECAME, AS DOORS (cn-v1157; lib/leads/became). Erik, 2026-11-10: "i had no way to get back
+ * to his estimate even though it says right on the screen Became An Estimate". The chip named it and
+ * the line under it said the estimate or job "carries the work now" — with no way to open either. So
+ * the line is a door per record now, the job first (where the work lives once there is one), then the
+ * estimates newest first, each with its number and what it is called. A read that failed SAYS so; a
+ * lead whose records this reader cannot see keeps the old sentence, which is still true.
+ */
+export function BecameDoors({ became, t = ENGLISH }: { became: LeadBecameAnswer; t?: Words }) {
+  if (became === BECAME_UNREAD) {
+    return (
+      <p role="status" className="text-center text-xs text-amber-700">
+        {t("ld_becameUnread")}
+      </p>
+    );
+  }
+  if (!became?.length) return <p className="text-center text-xs text-slate-400">{t("ld_alreadyConverted")}</p>;
+  return (
+    <div className="flex w-full flex-wrap items-center justify-center gap-2">
+      {became.map((door) => {
+        const Icon = door.kind === "estimate" ? FileText : Briefcase;
+        return (
+          <Link key={`${door.kind}-${door.id}`} href={becameHref(door)} className={`${PANEL_BTN} max-w-full`}>
+            <Icon className="h-4 w-4 shrink-0 text-slate-400" />
+            <span className="shrink-0">
+              {fillText(t(door.kind === "estimate" ? "ld_btn_openEstimate" : "ld_btn_openJob"), { number: door.number ?? "" }).trim()}
+            </span>
+            {door.title && <span className="truncate font-normal text-slate-500">· {door.title}</span>}
+          </Link>
+        );
+      })}
+    </div>
   );
 }
 

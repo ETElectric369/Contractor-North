@@ -175,17 +175,21 @@ describe("the saved page's doors, on the editor", () => {
     expect(src).toContain('{ id: "qm-job", label: t("qe_btn_createJob"), icon: "briefcase", run: () => createJobFromQuote(q.id), hrefPrefix: "/jobs/" }');
     expect(src).toContain('label: t("qe_btn_createWorkOrder")');
     expect(src).toContain('label: t("qe_btn_createMaterialList")');
-    expect(src).toContain('label: t("qe_btn_printPdf")');
     expect(src).toContain('label: t("qe_btn_deleteQuote")');
-    expect([qe.en.qe_btn_viewInvoice, qe.en.qe_btn_createInvoice, qe.en.qe_btn_createJob, qe.en.qe_btn_createWorkOrder, qe.en.qe_btn_createMaterialList, qe.en.qe_btn_printPdf, qe.en.qe_btn_deleteQuote]).toEqual([
+    expect([qe.en.qe_btn_viewInvoice, qe.en.qe_btn_createInvoice, qe.en.qe_btn_createJob, qe.en.qe_btn_createWorkOrder, qe.en.qe_btn_createMaterialList, qe.en.qe_btn_deleteQuote]).toEqual([
       "View Invoice",
       "Create Invoice",
       "Create Job",
       "Create Work Order",
       "Create Material List",
-      "Print / PDF",
       "Delete Quote",
     ]);
+    // The Print / PDF row left the ⋯ on 2026-11-10: the PDF's one door is the header's Preview, beside
+    // Send (pinned in quotes/preview-door.test.tsx), and the row's words were retired with it.
+    expect(src).not.toContain("qm-print");
+    expect(src).not.toContain("qe_btn_printPdf");
+    expect(qe.en).not.toHaveProperty("qe_btn_printPdf");
+    expect(qe.es).not.toHaveProperty("qe_btn_printPdf");
     expect(src).toContain('const replaced = q.status === "superseded";');
     expect(src).toContain('const noPaperYet = replaced || (!!q.revisesId && q.status !== "accepted");');
   });

@@ -3,7 +3,7 @@ import { viewerSortsBank } from "@/lib/bank-viewer";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, NeedsYou, PileName, WaitingItem } from "./types";
 import { AFFORDANCES, KIND_STREAM, appointmentAffordances, sortActionItems, waitingForViewer, waitingRow } from "./types";
-import { bucketInspections } from "@/lib/inspections";
+import { bucketInspections, inspectionLabel } from "@/lib/inspections";
 import { leadRidesItsWriteUp, lessRidden } from "./lead-rides-its-writeup";
 import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES, visitTitle } from "@/lib/statuses";
 import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
@@ -369,7 +369,7 @@ async function buildActionItems(ctx: {
     ? floor(60).then((from) =>
         supabase
           .from("appointments")
-          .select("id, type, title, status, starts_at, capture, inquiry_id, job_id, outcome, customers(name), inquiries(name)", { count: "exact" })
+          .select("id, type, title, status, starts_at, location, capture, inquiry_id, job_id, outcome, customers(name), inquiries(name)", { count: "exact" })
           .eq("absorbed", false) // a booking absorbed into its job stopped being a visit (0237)
           .in("type", [...ESTIMATE_VISIT_TYPES])
           .gte("starts_at", dayStartIso(from))
@@ -850,9 +850,19 @@ async function buildActionItems(ctx: {
       new Date(),
       new Set(qs.map((q) => q.id).filter(Boolean)),
       billedJobs, // jobs with real (non-draft, non-void) billing — the visit already turned into money
+      tz ?? "UTC",
     );
     for (const a of toWriteUp) {
       const who = (a as any).customers?.name ?? (a as any).inquiries?.name ?? null;
+      const label = inspectionLabel({
+        title: visitTitle(a.title),
+        typeLabel: appointmentTypeLabel(a.type),
+        customer: who,
+        street: (a as any).location ?? null,
+        // THE ROW STILL SAYS ITS KIND: this feeder carries every estimate visit, and the row has no
+        // tag of its own, so when the title gives way to who and where the type's label is line two.
+        kindUnder: true,
+      });
       items.push({
         id: a.id,
         kind: "inspection_writeup",
@@ -862,15 +872,20 @@ async function buildActionItems(ctx: {
         // left behind the day the owner names a different word, which is the fault he reported.
         // And a STORED title from the three days the visit was a "Walk-Through" is re-said here too
         // (visitTitle), so Needs You never prints a word no other screen uses.
-        title: visitTitle(a.title) || appointmentTypeLabel(a.type),
-        subtitle: who,
+        // ...and a title that is only the bare word (or the type's label) gives way to WHO and WHERE
+        // (inspectionLabel), so every row says what the visit is for. The day is the row's own `when`.
+        title: label.title,
+        subtitle: label.subtitle || null,
         who: null,
         // The DAY IT HAPPENED, not a due date — how long this has been sitting is the pressure.
         when: a.starts_at ?? null,
         urgency: 1,
         done: false,
-        href: `/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}`,
-        affordances: AFFORDANCES.inspection_writeup,
+        // A TAP OPENS THE INSPECTION (the owner, 11-10): reading or changing the report comes first;
+        // the estimate and the job are chosen from the visit page, never made by a tap on a row.
+        href: `/appointments/${a.id}`,
+        // Didn't Happen (the visit page's Won't Happen) is offered while the visit is not completed.
+        affordances: a.status === "completed" ? AFFORDANCES.inspection_writeup : [...AFFORDANCES.inspection_writeup, "wontHappen"],
       });
       writeUpApptIds.add(a.id);
       if (a.inquiry_id) writeUpLeadIds.add(String(a.inquiry_id));

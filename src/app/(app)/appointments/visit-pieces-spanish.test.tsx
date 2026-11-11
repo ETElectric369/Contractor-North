@@ -441,7 +441,8 @@ describe("the visit page catalog (vp_), builder D's half", () => {
   ];
 
   it("names the four screens this half added, after C's seven", () => {
-    expect(vp.files.slice(7)).toEqual([
+    // (cn-v1157 named one more after them: the page with no visit to show, [id]/not-found.tsx.)
+    expect(vp.files.slice(7, 11)).toEqual([
       "src/app/(app)/appointments/appointment-button.tsx",
       "src/app/(app)/appointments/unschedule-button.tsx",
       "src/app/(app)/appointments/start-job-actions.ts",
@@ -627,6 +628,8 @@ describe("the visit page catalog (vp_), builder D's half", () => {
       expect(vp.es[k], k).not.toBe(v);
     }
     // The whole catalog: C's 138 (the Lost door got its own vp_btn_ key, skeptic #50) and these 122.
-    expect(Object.keys(vp.en)).toHaveLength(260);
+    // + the five What Is This For? words (vp_whatIsThisFor…, vp_titleSav…, vp_titleNotSaved)
+    // + the three words of the page with no visit to show (vp_visitGone, vp_visitGoneTech, vp_btn_backToInspections)
+    expect(Object.keys(vp.en)).toHaveLength(268);
   });
 });

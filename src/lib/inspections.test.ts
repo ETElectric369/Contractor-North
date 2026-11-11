@@ -3,7 +3,9 @@ import {
   bucketInspections,
   captureQuoteId,
   hasCaptureData,
+  inspectionLabel,
   inspectionRowTags,
+  isGenericInspectionTitle,
   type InspectionBucketRow,
 } from "@/lib/inspections";
 import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES } from "@/lib/statuses";
@@ -61,9 +63,45 @@ describe("bucketInspections", () => {
     expect(bucketInspections([r], none, none, NOW).toWriteUp).toEqual([r]);
   });
 
-  it("past WITHOUT capture stays upcoming — it may not have happened; hiding it would lie", () => {
+  it("a past DAY, still scheduled, WITHOUT capture is MISSED (Didn't Happen?) — never upcoming, never to write up", () => {
     const r = row({ starts_at: past });
-    expect(bucketInspections([r], none, none, NOW).upcoming).toEqual([r]);
+    const b = bucketInspections([r], none, none, NOW);
+    expect(b.missed).toEqual([r]);
+    expect(b.upcoming).toEqual([]);
+    expect(b.toWriteUp).toEqual([]);
+  });
+
+  it("missed needs ALL of: scheduled, before today, no capture, not settled", () => {
+    const proposed = row({ status: "proposed", starts_at: past });
+    const withNotes = row({ starts_at: past, capture: cap });
+    const withOutcome = row({ starts_at: past, outcome: "lost" });
+    const onAJob = row({ starts_at: past, job_id: "job1" });
+    const quoted = row({ starts_at: past, inquiry_id: "inq1" });
+    const waiting = row({ starts_at: null });
+    const b = bucketInspections([proposed, withNotes, withOutcome, onAJob, quoted, waiting], new Set(["inq1"]), none, NOW);
+    expect(b.missed).toEqual([]);
+    expect(b.upcoming.map((r) => r.id).sort()).toEqual([proposed.id, waiting.id].sort());
+    expect(b.toWriteUp).toEqual([withNotes]);
+    expect(b.filed.map((r) => r.id).sort()).toEqual([withOutcome.id, onAJob.id, quoted.id].sort());
+  });
+
+  it("the day edge is the COMPANY's midnight: 11:30 PM yesterday Pacific is missed, 12:30 AM today Pacific is still upcoming", () => {
+    const tz = "America/Los_Angeles"; // NOW = 11:00 AM Jul 14 Pacific; the company's midnight is 07:00Z
+    const lastNight = row({ starts_at: "2026-07-14T06:30:00Z" });
+    const earlyToday = row({ starts_at: "2026-07-14T07:30:00Z" });
+    const b = bucketInspections([lastNight, earlyToday], none, none, NOW, none, none, tz);
+    expect(b.missed).toEqual([lastNight]);
+    expect(b.upcoming).toEqual([earlyToday]);
+    // The same two instants on a UTC clock are both today: the zone is what moved the edge.
+    const u = bucketInspections([lastNight, earlyToday], none, none, NOW);
+    expect(u.missed).toEqual([]);
+    expect(u.upcoming.length).toBe(2);
+  });
+
+  it("missed is newest first", () => {
+    const a = row({ starts_at: "2026-06-01T16:00:00Z" });
+    const b = row({ starts_at: "2026-07-01T16:00:00Z" });
+    expect(bucketInspections([a, b], none, none, NOW).missed.map((r) => r.id)).toEqual([b.id, a.id]);
   });
 
   it("completed with no estimate → to write up, even with no capture (the visit is DONE)", () => {
@@ -181,5 +219,56 @@ describe("captureQuoteId", () => {
     expect(captureQuoteId({ quote_id: 42 })).toBeNull();
     expect(captureQuoteId(null)).toBeNull();
     expect(captureQuoteId("q1")).toBeNull();
+  });
+});
+
+
+describe("isGenericInspectionTitle", () => {
+  const cases: [string | null | undefined, string, boolean][] = [
+    [null, "Inspection", true],
+    [undefined, "Inspection", true],
+    ["", "Inspection", true],
+    ["   ", "Inspection", true],
+    ["Inspection", "Inspection", true],
+    ["inspection:", "Inspection", true],
+    ["  INSPECTION :  ", "Inspection", true],
+    ["Site Inspection", "Inspection", true],
+    ["site inspection:", "Inspection", true],
+    ["Inspección", "Inspección", true],
+    ["inspeccion", "Inspección", true],
+    ["Final Inspection", "Final Inspection", true],
+    ["Inspección Final", "Inspección Final", true],
+    ["Inspection: Dana Rook", "Inspection", false],
+    ["Panel upgrade at Larkspur", "Inspection", false],
+    ["Inspection of the roof", "Inspection", false],
+    ["Final Inspection", "Inspection", false],
+  ];
+  it.each(cases)("%j (type label %j) -> %s", (title, typeLabel, want) => {
+    expect(isGenericInspectionTitle(title, typeLabel)).toBe(want);
+  });
+});
+
+describe("inspectionLabel", () => {
+  const day = "Mon, Jul 13";
+  const cases: [string, Parameters<typeof inspectionLabel>[0], { title: string; subtitle: string }][] = [
+    ["real title keeps itself; subtitle is customer · street · day", { title: "Panel upgrade", typeLabel: "Inspection", customer: "Dana Rook", street: "12 Larkspur Ln", day }, { title: "Panel upgrade", subtitle: "Dana Rook · 12 Larkspur Ln · Mon, Jul 13" }],
+    ["real title, only the day known", { title: "Panel upgrade", typeLabel: "Inspection", day }, { title: "Panel upgrade", subtitle: day }],
+    ["real title, nothing else", { title: "Panel upgrade", typeLabel: "Inspection" }, { title: "Panel upgrade", subtitle: "" }],
+    ["generic title becomes customer · street; the day moves under it", { title: "Inspection", typeLabel: "Inspection", customer: "Sam Tillery", street: "9 Snowbell Ct", day }, { title: "Sam Tillery · 9 Snowbell Ct", subtitle: day }],
+    ["generic title, customer only", { title: "", typeLabel: "Inspection", customer: "Theo Vance", day }, { title: "Theo Vance", subtitle: day }],
+    ["generic title, street only", { title: "Site inspection:", typeLabel: "Inspection", street: "4 Bayberry Rd", day }, { title: "4 Bayberry Rd", subtitle: day }],
+    ["generic title and nobody known: the type label", { title: "Inspection", typeLabel: "Inspection", day }, { title: "Inspection", subtitle: day }],
+    ["blank parts are skipped", { title: "Inspection", typeLabel: "Inspection", customer: "  ", street: "7 Thistlewood Dr", day: null }, { title: "7 Thistlewood Dr", subtitle: "" }],
+    ["Spanish type label", { title: "Inspección", typeLabel: "Inspección", customer: "Casey Loam", day: "lun, 13 jul" }, { title: "Casey Loam", subtitle: "lun, 13 jul" }],
+    // kindUnder (My Day's write-up row, which has no tag to say the KIND): the type's label leads the
+    // second line once the title gave way to who and where; it is never said twice, and a real title
+    // keeps the second line it always had.
+    ["kindUnder: the title gave way, so the kind is line two", { title: "", typeLabel: "Quote / Estimate", customer: "Sam Tillery", street: "9 Snowbell Ct", kindUnder: true }, { title: "Sam Tillery · 9 Snowbell Ct", subtitle: "Quote / Estimate" }],
+    ["kindUnder: the kind leads the day", { title: "Inspection", typeLabel: "Final Inspection", customer: "Dana Rook", day, kindUnder: true }, { title: "Dana Rook", subtitle: "Final Inspection · Mon, Jul 13" }],
+    ["kindUnder: nobody known, the title IS the kind, said once", { title: "", typeLabel: "Quote / Estimate", kindUnder: true }, { title: "Quote / Estimate", subtitle: "" }],
+    ["kindUnder: a real title is untouched", { title: "Panel upgrade", typeLabel: "Inspection", customer: "Theo Vance", kindUnder: true }, { title: "Panel upgrade", subtitle: "Theo Vance" }],
+  ];
+  it.each(cases)("%s", (_n, input, want) => {
+    expect(inspectionLabel(input)).toEqual(want);
   });
 });

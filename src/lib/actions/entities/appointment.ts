@@ -7,6 +7,7 @@ import {
   setAppointmentPlace,
   setAppointmentStatus,
   rescheduleAppointment,
+  wontHappenAppointment,
 } from "@/app/(app)/appointments/actions";
 import { createClient } from "@/lib/supabase/server";
 import { localToInstant, orgTimezone, quotedData, spokenWhen } from "@/lib/org-local-time";
@@ -252,6 +253,24 @@ export const appointmentActions: Record<string, ActionDef> = {
     auth: "staff",
     effect: "write",
     handler: (i) => setAppointmentOutcome(i.id, i.outcome),
+  },
+  /** The visit page's Won't Happen, reached from a Needs You row's ⋯ (Didn't Happen). It runs the
+   *  SAME rule (wontHappenAppointment: delete only when nothing hangs on it, else cancel), never a
+   *  second copy. A row door only: it is deliberately NOT in AGENT_WRITE_ALLOWED. */
+  "appointment.wontHappen": {
+    name: "appointment.wontHappen",
+    group: "appointment",
+    label: "Visit won't happen",
+    description: "Mark a visit as one that won't happen: removed when nothing was captured on it, otherwise cancelled and kept on file.",
+    input: z.object({ id: z.string() }),
+    auth: "staff",
+    effect: "write",
+    confirm: "destructive",
+    describe: () => "Mark this visit as one that won't happen?",
+    handler: async (i): Promise<ActionResult> => {
+      const r = await wontHappenAppointment(i.id);
+      return r.ok ? { ok: true, ...(r.note ? { speak: r.note } : {}) } : { ok: false, error: r.error };
+    },
   },
 };
 

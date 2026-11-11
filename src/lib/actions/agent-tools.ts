@@ -31,6 +31,7 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   // verb to do it). The same tier-1 weight as appointment.create, which could already set
   // customer_id at booking; the tool description makes it run only on the user's yes.
   "appointment.linkCustomer",
+  "job.setCustomer", // the owner's ask of 2026-11-09: set or change the customer on an existing job, hands-free
   // Quotes are DRAFTS (reversible, reviewable, not sent, no money moved). The agent must
   // read the whole quote back + get a spoken "yes" before calling it — that conversational
   // confirm is enforced in the tool description, and saveQuote is staff-gated + audited.

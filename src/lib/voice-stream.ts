@@ -11,7 +11,8 @@
 import type { Lang } from "@/lib/locale";
 import { reportClientError } from "@/app/report-client-error";
 import { isNativeShell } from "@/lib/native-shell";
-import { flushTrace, trace } from "@/lib/nort/trace";
+import { flushTrace, trace, traceDrop } from "@/lib/nort/trace";
+import { speakSmart, stopSpeaking } from "@/lib/tts";
 import {
   cancelTurnNative,
   listenNative,
@@ -26,6 +27,7 @@ import {
   type NativeTurn,
 } from "@/lib/native-audio";
 import {
+  closingMicLine,
   micBlockedLine,
   oncePerTurn,
   TRY_AGAIN_LINE,
@@ -145,6 +147,20 @@ function retryOrGiveUp(detail: string, branch: VoiceBranch, fact?: string) {
   // the same teardown cannotRecord does, before the line so it is not replayed into the next panel.
   if (!retrying && wantStream) {
     report(branch, line, fact); // before the teardown: the track and context are the evidence
+    if (branch === "no-speech-cap") {
+      // A driver cannot read the status line: SAY it before the session ends (the owner spoke into a
+      // closed mic, 2026-11). Only for this cause; every other give-up ends as it always did. And
+      // only while this is still a VOICE session: a person who went on by typing (the mic keeps
+      // running under the typed turn) is reading the screen, so there the mic closes quietly below,
+      // with the status line, the way it closed before the line was spoken.
+      const spoken = inVoiceSession();
+      traceDrop("mic window closed", `no-speech budget ${silentTurns}/${MAX_SILENT_RETRIES}${spoken ? "" : ", quiet (not a voice session)"}`);
+      if (spoken) {
+        status(line);
+        sayThenClose(line);
+        return;
+      }
+    }
     stopListening({ discard: true });
     status(line);
     return;
@@ -165,6 +181,77 @@ function cannotRecord(branch: VoiceBranch, err: unknown) {
   report(branch, line, errName(err)); // before the teardown: the track and context are the evidence
   stopListening({ discard: true });
   status(line);
+}
+
+/** IS THIS STILL A VOICE SESSION? The panel answers, asked at the moment it matters (its own voice
+ *  mode): the person can leave voice mode by typing while the mic keeps running, and a mic that then
+ *  spends its no-speech budget closes quietly instead of speaking to someone who is reading. With no
+ *  panel to ask (the moment between the Talk tap and the panel's mount) a Talk opened the mic, so it
+ *  is one. */
+let voiceSessionCheck: (() => boolean) | null = null;
+export function setVoiceSessionCheck(fn: (() => boolean) | null) {
+  voiceSessionCheck = fn;
+}
+function inVoiceSession(): boolean {
+  try {
+    return voiceSessionCheck ? voiceSessionCheck() !== false : true;
+  } catch {
+    return true;
+  }
+}
+
+// The closing line that is out right now (its number), and the timer that ends the session if the
+// line never does. Module-level, so whoever takes over can end both.
+const CLOSING_LINE_MAX_MS = 15000;
+let closingMic: number | null = null;
+let closingNo = 0;
+let closingTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** SOMETHING TAKES OVER FROM A CLOSING LINE THAT IS STILL OUT (its clip playing, or still being
+ *  fetched): a Talk tapped over it, a Stop. The line is CUT, not just disowned. Clearing the marker
+ *  alone left the clip to play on (or to land late) while the new turn re-armed UNMUTED, so Nort
+ *  recorded his own "I'm closing the mic" as the person's words (skeptic #60, 2026-11-10). The cut
+ *  comes first, before anything listens. */
+function cutClosingLine() {
+  if (closingMic === null) return;
+  closingMic = null;
+  if (closingTimer) clearTimeout(closingTimer);
+  closingTimer = null;
+  stopSpeaking(); // the clip that is playing, and one still on its way (tts sayEpoch), both end here
+}
+
+/** THE LINE BEFORE THE MIC CLOSES. Order: (1) setMuted(true) — the mic is muted exactly as for a
+ *  spoken reply (native: muteNative; web: no turn is active, the capture is dropped), so the line
+ *  cannot be heard as speech; (2) speakSmart — the path Nort's replies take, which plays natively
+ *  in the dark while the engine is still up (hence muted first, closed AFTER); (3) only when the line
+ *  ends (or a safety timer, which cuts the line first; a Talk or Stop meanwhile takes over and cuts
+ *  it too) the session ends as it always did: stopListening, then the status line again. No re-arm,
+ *  no second turn. */
+function sayThenClose(statusLine: string) {
+  const mine = ++closingNo;
+  closingMic = mine;
+  setMuted(true);
+  let done = false;
+  const finish = (timedOut = false) => {
+    if (done) return;
+    done = true;
+    if (closingMic !== mine) return; // Stop / a new Talk already took over (and cut the line): nothing is left to end
+    closingMic = null;
+    if (closingTimer) clearTimeout(closingTimer);
+    closingTimer = null;
+    // THE SAFETY TIMER WON, so the line is still out (a clip that never came, an end that was lost):
+    // cut it before the session ends, or it lands late and plays into the mic the next Talk opened.
+    if (timedOut) stopSpeaking();
+    stopListening({ discard: true });
+    status(statusLine);
+  };
+  if (closingTimer) clearTimeout(closingTimer);
+  closingTimer = setTimeout(() => finish(true), CLOSING_LINE_MAX_MS);
+  try {
+    speakSmart(closingMicLine(turnLang), () => finish(), undefined, turnLang ?? undefined);
+  } catch {
+    finish();
+  }
 }
 
 function errName(err: unknown): string {
@@ -302,6 +389,9 @@ export function turnLanguage(): Lang | null {
 }
 
 export function startListening(lang?: string): boolean {
+  // A Talk tapped over the closing line keeps the new conversation, and the line is CUT before the
+  // turn below re-arms unmuted: left playing (or still on its way), Nort would record his own line.
+  cutClosingLine();
   if (typeof lang === "string" && lang.trim()) turnLang = lang.trim().toLowerCase().startsWith("es") ? "es" : "en";
   if (!speechSupported()) return false;
   muted = false;
@@ -533,6 +623,7 @@ function onNativeTurn(t: NativeTurn) {
   const blob = turnBlob(t);
   if (!blob) {
     if (t.why === "manual") return; // stopped by hand before a word: nothing to send, nothing to say
+    traceDrop("turn dropped", `blob too small ${t.bytes}b`);
     retryOrGiveUp(`No audio captured (${t.bytes} bytes).`, "blob-too-small", facts);
     return;
   }
@@ -550,6 +641,7 @@ function onNativeResumed(r: NativeResumed) {
   emit();
   if (r.listening && !nativeHeard) status("Listening. Go ahead."); // a pending turn the plugin started itself
   if (r.hadTurn || (was && !r.listening)) {
+    traceDrop("turn dropped", `interrupted ${r.why}`);
     report("capture-interrupted", lastStatus, `native engine back (${r.why}); turn ${r.listening ? "already re-armed" : "re-armed"}`);
     if (!r.listening && !muted && !greetingActive) beginNativeTurn();
   }
@@ -838,6 +930,7 @@ async function shipTurn(blob: Blob, ext: string) {
   if (blob.size < 1200) {
     // Nothing usable was recorded — almost always the silent-PWA mic (stream "on" but capturing
     // nothing) or a permission gap. Say so plainly, and re-arm the mic if the stream is still wanted.
+    traceDrop("turn dropped", `blob too small ${blob.size}b`);
     retryOrGiveUp(
       `No audio captured (${blob.size} bytes). If the level meter stayed flat, the mic isn't reaching the app.`,
       "blob-too-small",
@@ -856,6 +949,7 @@ async function shipTurn(blob: Blob, ext: string) {
     trace("transcribe done", `HTTP ${r.status} ${String(j?.text ?? "").length} chars`);
     if (mine !== session) return; // Nort was closed while this was in flight: nobody is listening
     if (!r.ok) {
+      traceDrop("turn dropped", `transcribe HTTP ${r.status}`);
       retryOrGiveUp(`Transcribe error: ${j?.error ?? r.status}.`, "transcribe-error", `HTTP ${r.status}, ${blob.size} bytes`);
       return;
     }
@@ -863,7 +957,8 @@ async function shipTurn(blob: Blob, ext: string) {
     if (text && handler) {
       silentTurns = 0; // real words made it through — reset the retry budget
       handler(text);
-    } else
+    } else {
+      traceDrop("turn dropped", text ? "no handler" : "empty transcript");
       retryOrGiveUp(
         "Heard sound but no words. Try speaking a bit louder.",
         // Words with nowhere to go (the panel let go of the handler) is a different bug from
@@ -871,6 +966,7 @@ async function shipTurn(blob: Blob, ext: string) {
         text ? "no-handler" : "empty-transcript",
         text ? `${text.length} chars, ${blob.size} bytes` : `${blob.size} bytes`,
       );
+    }
   } catch (e: any) {
     if (mine !== session) return;
     trace("transcribe failed", errName(e));
@@ -888,6 +984,7 @@ async function shipTurn(blob: Blob, ext: string) {
 export function stopListening(opts?: { discard?: boolean }) {
   session++;
   greeting = null; // a stop ends an armed greeting too
+  cutClosingLine(); // a closing line still out no longer ends anything, and is not left talking after the stop
   wantStream = false;
   if (isNativeShell()) setAudioSessionType("auto"); // the conversation is over: leave the session as found
   if (nativeOn) flushTrace("stop");

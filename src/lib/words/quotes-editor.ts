@@ -39,7 +39,8 @@ export const words: WordCatalog = {
   // Subtotal and Total are the same word in Spanish (nt_subtotal, nt_total).
   sameInBoth: ["qe_subtotal", "qe_total"],
   en: {
-    // ── The ⋯ menu (quoteTree): the doors this estimate becomes, Print, Delete ──
+    // ── The ⋯ menu (quoteTree): the doors this estimate becomes, Delete. Its Print / PDF row (qe_btn_printPdf) was retired
+    //    in both languages on 2026-11-10: the PDF's one door is the header's Preview (qt_btn_preview, components/preview-button) ──
     qe_btn_viewInvoice: "View Invoice",
     qe_btn_createInvoice: "Create Invoice",
     qe_btn_viewJob: "View Job",
@@ -48,7 +49,6 @@ export const words: WordCatalog = {
     qe_btn_createWorkOrder: "Create Work Order",
     qe_btn_viewMaterialList: "View Material List",
     qe_btn_createMaterialList: "Create Material List",
-    qe_btn_printPdf: "Print / PDF",
     qe_btn_deleteQuote: "Delete Quote",
     qe_confirmDeleteQuote: "Delete quote {number}? Its line items go with it.",
     qe_thisEstimate: "this estimate",
@@ -205,7 +205,6 @@ export const words: WordCatalog = {
     qe_btn_createWorkOrder: "Crear Orden de Trabajo",
     qe_btn_viewMaterialList: "Ver Lista de Materiales",
     qe_btn_createMaterialList: "Crear Lista de Materiales",
-    qe_btn_printPdf: "Imprimir / PDF",
     qe_btn_deleteQuote: "Eliminar Cotización",
     qe_confirmDeleteQuote: "¿Eliminar la cotización {number}? Sus partidas se van con ella.",
     qe_thisEstimate: "este presupuesto",

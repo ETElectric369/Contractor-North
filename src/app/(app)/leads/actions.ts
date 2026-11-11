@@ -4,6 +4,7 @@ import { dbError } from "@/lib/db-error";
 import { placeJobOnDay, planDayTimes } from "../schedule/actions";
 
 import { customerAddressFrom } from "@/lib/inquiries/lead-address";
+import { bustDocPdf, bustLeadPdfs } from "@/lib/pdf-cache";
 import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
@@ -281,6 +282,11 @@ export async function updateInquiry(id: string, formData: FormData): Promise<Res
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadUnavailable") };
+  // ITS ESTIMATES PRINT IT (cn-v1157): the lead's address is the job site on an estimate that has no
+  // job yet, and its name is who the estimate is for until a customer is attached — so the stored
+  // copies a customer downloads go with the edit (lib/pdf-cache bustLeadPdfs). The lead is edited from
+  // its estimate's card too now; that page is asked again by the form's own refresh.
+  await bustLeadPdfs(id, ctx.orgId);
 
   // THE TYPE FOLLOWS THE COMPANY BOX, written apart, and only UPWARDS (nextLeadTypeOnEdit): the
   // stored type is read first, so an edit can add Commercial or fill in a blank without ever
@@ -478,9 +484,16 @@ export async function deleteInquiry(id: string): Promise<Result> {
   // nothing able to repair it. Files are only destroyed once the row they belonged to is gone.
   const orgId = String((inq as { org_id?: string }).org_id ?? "");
   const filePaths = intakePaths((inq as { intake?: unknown }).intake).filter((p) => isOwnIntakePath(orgId, p));
+  // ITS ESTIMATES PRINTED IT (cn-v1157). An estimate with no customer names the lead as who it is for,
+  // and one with no job prints the lead's address as its site; the delete nulls their link (0109), so
+  // a fresh render says neither — while the stored copy a customer downloads went on saying both. The
+  // ids are read NOW (after the row goes nothing points at them) and their copies dropped only once
+  // the delete has landed: a delete that fails must not cost a customer their Download.
+  const { data: itsQuotes } = await supabase.from("quotes").select("id").eq("inquiry_id", id);
   const { data: gone, error } = await supabase.from("inquiries").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!gone?.length) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadUnavailable") };
+  for (const q of (itsQuotes ?? []) as { id: string }[]) await bustDocPdf("quote", q.id, ctx.orgId);
   if (filePaths.length) {
     await createServiceClient()
       .storage.from(INTAKE_BUCKET)

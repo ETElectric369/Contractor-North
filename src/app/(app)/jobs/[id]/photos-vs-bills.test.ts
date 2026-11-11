@@ -45,7 +45,7 @@ import { JobDocuments } from "./job-documents";
 import { JobCostCapture, capturePaper, notACostSentence, NOT_A_COST_PAPERS } from "./job-cost-capture";
 import { captureReceipt, readReceiptDocument } from "@/lib/receipt-capture";
 import { BillsReceipts } from "../../bills/bills-receipts";
-import { billPapers, sortJobPapers, type PaperTie } from "@/lib/job-photos";
+import { NOT_A_COST_CATEGORY, billPapers, sortJobPapers, type PaperTie } from "@/lib/job-photos";
 import { documentsForViewer } from "@/lib/tech-documents";
 
 // React hoists a <link rel="preload"> per image to the top of the markup: not part of any screen.
@@ -180,6 +180,56 @@ describe("the Costs tab: Receipts & Papers", () => {
     expect(text(html2)).not.toContain("Not on a Bill");
     expect(text(html2)).not.toContain("Not on a bill yet");
     expect(text(html2)).toContain("supplier-inv.pdf");
+  });
+
+  /**
+   * NOT A COST (2026-11-10): Needs You's ⋯ files a paper that was a Receipt and never was one (a
+   * supplier's quote) under its own category. It must stay where the office can see it and re-file
+   * it, say what it is, and ask for nothing: no Record as Cost, no "Not on a bill yet", no fold held
+   * open, no door to the customer's page. And it stays the office's alone: the crew are handed it no
+   * more than the Receipt it was.
+   */
+  it("a paper called Not a Cost stays on the office's list under that label, asks for nothing, and never reaches the crew or the customer", () => {
+    const quotePdf = doc("supplier-quote", NOT_A_COST_CATEGORY, "pdf");
+    const quotePic = doc("supplier-quote-pic", NOT_A_COST_CATEGORY);
+    const sitePlan = doc("site-plan", "Plan", "pdf");
+    const all = [quotePdf, quotePic, sitePlan];
+    const s3 = sortJobPapers(all, [], BILLS.map((b) => b.id));
+    // Neither is a job photo or a crew paper, so both stay on the Costs tab's own list (never the
+    // Photos tab's); neither is on no bill, because neither is a cost.
+    expect(Array.from(s3.photoTabIds)).toEqual([]);
+    expect(s3.loose).toEqual([]);
+    const html3 = r(JobDocuments, { orgId: "org1", jobId: "j1", docs: all, portalPapers: {}, plansDoor: true, photoTabIds: Array.from(s3.photoTabIds), billOf: {}, looseIds: (s3.loose ?? []).map((d) => d.id) });
+    expect(html3).not.toMatch(/^<details[^>]*open=""/);
+    expect(text(html3)).not.toContain("Not on a Bill");
+    const rows3 = html3.split(/<li[ >]/).slice(1);
+    for (const name of ["supplier-quote.pdf", "supplier-quote-pic.jpg"]) {
+      const row3 = text(rows3.find((x) => x.includes(name))!);
+      // Drawn, with its label, the pencil and nothing that asks for a cost.
+      expect(row3).toContain(name);
+      expect(row3).toContain("Not a Cost");
+      expect(row3).not.toContain("Record as Cost");
+      expect(row3).not.toContain("Not on a bill yet");
+      // No door to the customer's page (the plan beside it has one: the door is drawn here).
+      expect(row3).not.toContain("Show on Portal");
+    }
+    expect(rows3.filter((x) => x.includes('title="Rename or re-categorize"'))).toHaveLength(3);
+    expect(text(rows3.find((x) => x.includes("site-plan.pdf"))!)).toContain("Show on Portal");
+    // The pencil's choices hold the word, so the office can re-file it (to Other, say, for the crew).
+    const list = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-documents.tsx"), "utf8");
+    expect(list).toContain('const CATEGORIES = ["Receipt", "Bill", "Invoice", NOT_A_COST_CATEGORY, "Photo", "Plan", "Permit", "Other"];');
+    expect(NOT_A_COST_CATEGORY).toBe("Not a Cost");
+
+    // THE CREW: handed neither (the allow-list), where the same two filed as Other would both be.
+    expect(documentsForViewer(all, false).map((d) => d.id)).toEqual(["site-plan"]);
+    expect(documentsForViewer(all.map((d) => ({ ...d, category: d.category === NOT_A_COST_CATEGORY ? "Other" : d.category })), false)).toHaveLength(3);
+    const techSort = sortJobPapers(documentsForViewer([...DOCS, ...all], false), [], []);
+    const tech = r(JobPhotos, { orgId: "org1", jobId: "j1", docs: techSort.photos, pictures: techSort.pictures, costsNote: false, viewerId: "u2", viewerIsStaff: false });
+    expect(tech).not.toContain("supplier-quote");
+    // THE OFFICE'S PHOTOS TAB: not in the grid or the fold either; it is with the papers on Costs.
+    const officeSort = sortJobPapers([...DOCS, ...all], TIES, BILLS.map((b) => b.id));
+    const officePhotos = r(JobPhotos, { orgId: "org1", jobId: "j1", docs: officeSort.photos, pictures: officeSort.pictures, costsNote: officeSort.moneyPictures > 0, viewerId: "u1", viewerIsStaff: true, sharedIds: [] });
+    expect(officePhotos).not.toContain("supplier-quote");
   });
 
   it("nothing on no bill: the fold starts closed and its line counts nothing", () => {

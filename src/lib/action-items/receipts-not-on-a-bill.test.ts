@@ -11,7 +11,7 @@ import {
   tieReadFilters,
   type ReceiptDoc,
 } from "./receipts-not-on-a-bill";
-import type { PaperTie } from "@/lib/job-photos";
+import { NOT_A_COST_CATEGORY, isCostableCategory, type PaperTie } from "@/lib/job-photos";
 
 /**
  * RECEIPTS NOT ON A BILL: a receipt or bill on a job that nothing accounts for comes to Needs You,
@@ -58,6 +58,21 @@ describe("which receipts are on no bill", () => {
   it("an Invoice never does (nothing reads one into a bill), nor a Photo, nor a paper on no job", () => {
     expect(loose([doc({ category: "Invoice" }), doc({ category: "Photo" }), doc({ job_id: null })], [])).toEqual([]);
     expect(RECEIPT_CATEGORIES).toEqual(["Receipt", "Bill"]);
+  });
+
+  it("a paper a person called Not a Cost is no row any more, whatever its ties say; nor is a Plan, a Permit or an Other paper", () => {
+    // 2026-11-10: a supplier's quote had been filed on a job as a Receipt. Not a Cost files it under
+    // that name (its own category, the office's alone), and the category takes it out of this feeder.
+    const quote = doc({ name: "supplier-quote.pdf", file_url: "org/job-1/supplier-quote.pdf", category: NOT_A_COST_CATEGORY });
+    expect(loose([quote, doc({ category: "Plan" }), doc({ category: "Permit" }), doc({ category: "Other" })], [])).toEqual([]);
+    expect(loose([quote], [tie({ document_id: quote.id, kind: "receipt" })])).toEqual([]);
+    // The same paper while it was still filed as a Receipt was a row.
+    expect(loose([{ ...quote, category: "Receipt" }], [])).toEqual([quote.id]);
+    expect(NOT_A_COST_CATEGORY).toBe("Not a Cost");
+    expect(isCostableCategory(NOT_A_COST_CATEGORY)).toBe(false);
+    // The build never reads it either: the documents read asks for the costable categories alone.
+    expect(RECEIPT_CATEGORIES as readonly string[]).not.toContain(NOT_A_COST_CATEGORY);
+    expect(RECEIPT_CATEGORIES.every((c) => isCostableCategory(c))).toBe(true);
   });
 
   it("a failed tie read claims nothing: null, never 'every receipt is loose'", () => {

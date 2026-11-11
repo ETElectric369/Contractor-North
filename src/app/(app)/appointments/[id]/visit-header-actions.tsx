@@ -6,7 +6,6 @@ import { Ban, CalendarPlus, CheckCircle2 } from "lucide-react";
 import { useToast } from "@/components/toast";
 import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
-import { hasInAppHistory } from "@/components/back-link";
 import {
   ACTIONS_DANGER_ROW_CLS,
   ACTIONS_DIVIDER_CLS,
@@ -116,6 +115,24 @@ export function PutBackRow({ id }: { id: string }) {
  * 'Won't Happen' — after a divider, in red and last. The confirm says which will happen, from the
  * page's reading of the same four facts (`deletes`); the server decides again at the write and the
  * toast repeats ITS verdict, so a capture saved in between wins.
+ *
+ * THEN THE PAGE IS LEFT, IN THE SAME BREATH, FOR WHERE THE VISIT LIVES (`afterHref`: Sales ›
+ * Inspections for an inspection, its day on the Schedule for any other booking; lib/appointments/
+ * visit-home). Erik, 2026-11-10: "i deleted a couple inspections and instead of going back to the
+ * inspection page it goes to" the app's 404. What happened: the action revalidates, so Next renders
+ * THIS page again inside the action's own answer; the visit is gone, the page answers notFound(),
+ * and with no not-found page inside the shell that is the bare 404 in place of the dock, the
+ * sub-nav and the toast. The old way out was router.back(), which is the browser's history and
+ * tells Next's router nothing, so the dead page was applied first and the Back raced it.
+ *
+ * A navigation dispatched in the tick the answer arrives is different: Next gives it priority over
+ * the action still on its queue and throws that re-render away (run on Next's own queue in
+ * tests/next-router-queue.test.ts). So the row navigates, at once, the way a job, an estimate or an
+ * invoice leaves after its own delete — and never router.back() (above) or router.refresh() (asks
+ * for the dead page again).
+ *   · DELETED: replace. The page no longer exists, so it leaves no entry for Back to land on.
+ *   · CANCELLED: push. The visit is still there (the toast's Undo, Put It Back on its page), so Back
+ *     returns to it.
  */
 export function WontHappenRow({ id, deletes, afterHref }: { id: string; deletes: boolean; afterHref: string }) {
   const router = useRouter();
@@ -136,16 +153,11 @@ export function WontHappenRow({ id, deletes, afterHref }: { id: string; deletes:
       closeMenu();
       if (res.did === "deleted") {
         toast(wontHappenToast("deleted", null, lang, t), "success");
-        // GO BACK WHERE THEY CAME FROM, not to a hardcoded parent (Erik deleted from the
-        // Inspections list and landed on /schedule). Real in-app history wins; the explicit
-        // fallback, the visit's schedule day, only covers a cold entry. The deleted page can't
-        // re-render itself.
-        if (hasInAppHistory()) router.back();
-        else router.push(afterHref);
+        router.replace(afterHref);
         return;
       }
       toast(wontHappenToast("cancelled", res.note, lang, t), "success", undo(res.previousStatus));
-      router.refresh();
+      router.push(afterHref);
     });
   }
   return (

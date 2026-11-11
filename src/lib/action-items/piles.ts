@@ -59,7 +59,7 @@ export const PILE_DEFS: Record<PileName, PileDef> = {
     listLabel: "See All on Leads",
   },
   visits_to_close_out: { label: "Visits to Close Out", verb: "Close Out", listHref: null, listLabel: null },
-  inspections_to_write_up: { label: "Inspections to Write Up", verb: "Write It Up", listHref: "/inspections", listLabel: "See All Inspections" },
+  inspections_to_write_up: { label: "Inspections to Write Up", verb: "Open Them", listHref: "/inspections", listLabel: "See All Inspections" },
   jobs_needing_a_day: { label: "Jobs Needing a Day", verb: "Pick a Day", listHref: "/schedule", listLabel: "See All on Schedule" },
   holds_back: { label: "Holds Back", verb: "Snooze", listHref: "/jobs?status=on_hold", listLabel: "See All on Jobs" },
   papers_to_sort: { label: "Papers to Sort", verb: "Sort It", listHref: "/bills#sort-these", listLabel: "See All on Bills" },

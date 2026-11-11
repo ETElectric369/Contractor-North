@@ -100,7 +100,9 @@ describe("AN UPLOAD MUST SURVIVE CONVERSION — Andrew's plan set 'disappeared' 
     ];
     for (const p of pages) {
       const src = readFileSync(p, "utf8");
-      expect(/inquir(y:inquiry_id|ies)\([^)]*intake[^)]*\)/.test(src), `${p} must select inquiry intake`).toBe(true);
+      // Named in the list, or the lead's WHOLE row: the estimate page reads `(*)` since cn-v1157,
+      // because the lead's own form opens on its card and that form's save writes every field it holds.
+      expect(/inquir(y:inquiry_id|ies)\((\*|[^)]*intake[^)]*)\)/.test(src), `${p} must select inquiry intake`).toBe(true);
       // The estimate page hands the paths to the one editor (cn-v1132), which draws them; the others draw them in place.
       expect(src.includes("IntakeFiles") || src.includes("intakePaths(q.inquiry.intake)"), `${p} must render IntakeFiles or hand its paths to the editor`).toBe(true);
     }

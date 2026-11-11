@@ -129,6 +129,29 @@ export async function bustCustomerPdfs(customerId: string): Promise<void> {
   }
 }
 
+/**
+ * Drop stored copies for every estimate made out of one LEAD (cn-v1157). An estimate with no job
+ * and no site of its own prints the lead's address as its job site, and one with no customer prints
+ * the lead as who it is for (0119) — so a lead's edit changes what those estimates render, exactly
+ * as a customer's edit does. The staff door re-fingerprints and was always right; the CUSTOMER door
+ * serves the stored copy, and kept the old address on a sent estimate until something else busted
+ * it. Org-scoped like the customer fan-out above (the id comes off a client form); a caller that
+ * already holds its org hands it in and saves the read.
+ */
+export async function bustLeadPdfs(inquiryId: string, orgId?: string | null): Promise<void> {
+  try {
+    if (!inquiryId) return;
+    const svc = createServiceClient();
+    const org = orgId ?? (await callerOrgId());
+    let quoQ = svc.from("quotes").select("id").eq("inquiry_id", inquiryId);
+    if (org) quoQ = quoQ.eq("org_id", org);
+    const { data: qs } = await quoQ;
+    for (const q of (qs ?? []) as { id: string }[]) await bustDocPdf("quote", q.id, org);
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** Same check, keyed the way the PUBLIC pages hold the doc — by token. The 0187 RPCs return
  *  no ids on purpose, so the page can't ask by id; the service client translates. */
 export async function sharePdfReady(doc: "invoice" | "quote", token: string, currentStatus: string): Promise<boolean> {

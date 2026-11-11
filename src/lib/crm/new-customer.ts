@@ -35,12 +35,16 @@ export function typedNewCustomer(formData: FormData): { name: string; phone: str
  * can't be read is a refusal, never a blind insert: the person is told, and nothing is made.
  *
  * The caller's own client (RLS scopes the book and stamps the org on insert).
+ *
+ * `name` is the customer AS THE BOOK HOLDS THEM: a match on a phone or an email can be somebody typed
+ * under another spelling ("Sam Tilery" typed, Sam Tillery on file), and a caller that says who was set
+ * must say the name on file, never the one typed (skeptic #60).
  */
 export async function matchOrCreateCustomer(
   supabase: SupabaseClient,
   userId: string | null,
   typed: { name: string; phone?: string | null; email?: string | null },
-): Promise<{ ok: true; id: string; matched: boolean } | { ok: false; error: string }> {
+): Promise<{ ok: true; id: string; matched: boolean; name: string } | { ok: false; error: string }> {
   const name = String(typed.name ?? "").trim();
   if (!name) return { ok: false, error: NEW_CUSTOMER_NEEDS_A_NAME };
   const phone = formatPhone(String(typed.phone ?? "").trim());
@@ -48,8 +52,12 @@ export async function matchOrCreateCustomer(
 
   const { data: book, error: bookErr } = await supabase.from("customers").select("id, name, company_name, email, phone");
   if (bookErr) return { ok: false, error: "Couldn't check your customer list just now, so no customer was made. Try again." };
-  const match = findMatchingCustomerId({ name, phone, email }, (book ?? []) as DupCustomer[]);
-  if (match) return { ok: true, id: match, matched: true };
+  const rows = (book ?? []) as DupCustomer[];
+  const match = findMatchingCustomerId({ name, phone, email }, rows);
+  if (match) {
+    const onFile = String(rows.find((c) => c.id === match)?.name ?? "").trim();
+    return { ok: true, id: match, matched: true, name: onFile || name };
+  }
 
   const { data, error } = await supabase
     .from("customers")
@@ -57,5 +65,5 @@ export async function matchOrCreateCustomer(
     .select("id")
     .single();
   if (error || !data) return { ok: false, error: dbError(error) };
-  return { ok: true, id: (data as { id: string }).id, matched: false };
+  return { ok: true, id: (data as { id: string }).id, matched: false, name };
 }

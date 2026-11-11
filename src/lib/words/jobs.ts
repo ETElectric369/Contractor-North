@@ -409,6 +409,10 @@ export const words: WordCatalog = {
     jb_actDocumentNotFound: "Document not found.",
     jb_actOnlyOfficeDeletes: "Only the office can delete this one. You can delete photos and receipts you added yourself.",
     jb_actReceiptIsCost: "The office recorded this receipt as a cost, so only the office can delete it now. Ask them if it should go.",
+    // ── a paper's category: the pencil's save and Not a Cost (jobs/actions.ts updateDocument, markPaperNotACost) ──
+    jb_actPaperNotThere: "That paper isn't there any more. Reload to see the list as it is.",
+    jb_actPaperChanged: "That paper changed a moment ago: it isn't waiting to be recorded any more. Reload to see it.",
+    jb_actPaperTiesUnread: "Couldn't check whether that paper is on a bill just now, so it was left as it is. Try again.",
   },
   es: {
     // ── shared ─────────────────────────────────────────────────────────────────────────────────
@@ -771,5 +775,9 @@ export const words: WordCatalog = {
     jb_actDocumentNotFound: "No se encontró el documento.",
     jb_actOnlyOfficeDeletes: "Solo la oficina puede eliminar este. Tú puedes eliminar las fotos y recibos que agregaste.",
     jb_actReceiptIsCost: "La oficina registró este recibo como costo, así que ahora solo la oficina puede eliminarlo. Pregúntales si debe irse.",
+    // ── a paper's category: the pencil's save and Not a Cost ───────────────────────────────────
+    jb_actPaperNotThere: "Ese papel ya no está. Recarga para ver la lista como está.",
+    jb_actPaperChanged: "Ese papel cambió hace un momento: ya no está pendiente de registrar. Recarga para verlo.",
+    jb_actPaperTiesUnread: "No se pudo revisar si ese papel está en una cuenta ahora, así que se dejó como está. Inténtalo de nuevo.",
   },
 };

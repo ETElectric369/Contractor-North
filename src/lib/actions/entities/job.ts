@@ -8,7 +8,7 @@ import {
   setJobHold,
   snoozeJobHold,
 } from "@/app/(app)/schedule/actions";
-import { setJobStatus, finishJob, updateJobDescription } from "@/app/(app)/jobs/actions";
+import { setJobStatus, finishJob, updateJobDescription, setJobCustomer } from "@/app/(app)/jobs/actions";
 import { linkJobContact, unlinkJobContact } from "@/app/(app)/jobs/[id]/job-contacts-actions";
 import { createClient } from "@/lib/supabase/server";
 import { orgTimezone } from "@/lib/org-local-time";
@@ -74,12 +74,51 @@ export const jobActions: Record<string, ActionDef> = {
     effect: "write",
     handler: (i) => updateJobDescription(i.job_id, i.description),
   },
+  "job.setCustomer": {
+    name: "job.setCustomer",
+    group: "job",
+    label: "Set job customer",
+    description:
+      "Put, or change, the customer on a job that ALREADY exists — 'make Sam Tillery the customer on the Larkspur job'. Pass job_id (a job name, number or street is fine) and customer_id (a customer name or id; resolve it with list_customers). Pass new_customer_name (with phone / email if given) ONLY after the person confirmed this is a new customer, never to guess. It refuses when the job already has invoices under a different customer; say so and point the person to Edit Job. Changes nothing else on the job.",
+    input: z.object({
+      job_id: z.string(),
+      customer_id: z.string().nullable().optional(),
+      new_customer_name: z.string().nullable().optional(),
+      phone: z.string().nullable().optional(),
+      email: z.string().nullable().optional(),
+    }),
+    auth: "staff",
+    effect: "write",
+    handler: async (i) => {
+      const supabase = await createClient();
+      // A name or number passed as the id is forgiven; zero or several matches ASK (never guess).
+      const job = await resolveJobId(supabase, i.job_id);
+      if ("error" in job) return { ok: false, error: job.error };
+      if (!job.id) return { ok: false, error: "Which job? Say its name, number or street." };
+      let who: { customerId: string } | { newCustomer: { name: string; phone?: string | null; email?: string | null } };
+      if (i.new_customer_name && i.new_customer_name.trim()) {
+        who = { newCustomer: { name: i.new_customer_name, phone: i.phone ?? null, email: i.email ?? null } };
+      } else {
+        const cust = await resolveCustomerId(supabase, i.customer_id ?? null);
+        if ("error" in cust) return { ok: false, error: cust.error };
+        if (!cust.id) return { ok: false, error: "Which customer? Say their name, or confirm a new one." };
+        who = { customerId: cust.id };
+      }
+      const r = await setJobCustomer(job.id, who);
+      if (!r.ok) return { ok: false, error: r.error };
+      return {
+        ok: true,
+        id: job.id,
+        recorded: `Recorded: ${r.jobLabel ?? "the job"} is now for ${r.customerName ?? "that customer"}.`,
+      };
+    },
+  },
   "job.create": {
     name: "job.create",
     group: "job",
     label: "Open a job",
     description:
-      "Open a new JOB — e.g. 'start a job for the Miller deck'. Resolve the customer first with list_customers and pass customer_id (or pass new_customer_name to create one). Optional description, address, status (to_be_scheduled, scheduled, in_progress, complete, cancelled; default in_progress — a job is put on hold after it exists, with its reason and a day, never at creation), and billing_type (tm for Time & Material or fixed for a fixed price; left out, the job bills the way most of this company's jobs already do, Time & Material when it has none yet or it's a tie). Returns the job id — then you can schedule it, assign it, add costs, or quote it.",
+      "Open a new JOB — e.g. 'start a job for the Miller deck'. If the person did not say who the customer is, ASK before creating the job. Resolve the customer first with list_customers and pass customer_id (or pass new_customer_name to create one) so the job is born with its customer. Optional description, address, status (to_be_scheduled, scheduled, in_progress, complete, cancelled; default in_progress — a job is put on hold after it exists, with its reason and a day, never at creation), and billing_type (tm for Time & Material or fixed for a fixed price; left out, the job bills the way most of this company's jobs already do, Time & Material when it has none yet or it's a tie). Returns the job id — then you can schedule it, assign it, add costs, or quote it.",
     input: z.object({
       name: z.string().min(1),
       customer_id: z.string().nullable().optional(),

@@ -20,8 +20,31 @@ import { translator } from "@/lib/i18n";
 // leave this door shut for the rest of the session.
 const newParam = createParamClaim();
 
-/** New-inquiry button, or (mode="edit") an edit trigger for an existing one. */
-export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mode?: "new" | "edit" }) {
+/**
+ * New-inquiry button, or (mode="edit") an edit trigger for an existing one.
+ *
+ * THE LEAD'S ONE FORM, OPENED WHERE THE LEAD IS READ (cn-v1157). Erik, 2026-11-10, after an estimate
+ * printed a lead's half-typed address: "because it was a lead i had to find the lead on the leads page
+ * to update the address there since it wasnt accessible from anywhere else". The estimate's card opens
+ * this same form now (quotes/[id]/customer-select) — one editor, a second door to it. Whoever mounts it
+ * hands it the WHOLE lead row: the save writes every field the form holds (leads/actions updateInquiry),
+ * so a row read with a short select list would blank what it did not carry.
+ */
+export function InquiryModal({
+  inquiry,
+  mode = "new",
+  trigger = "button",
+  noDelete = false,
+}: {
+  inquiry?: Inquiry;
+  mode?: "new" | "edit";
+  /** How the edit door is drawn: the outline button (the lead's own ⋯ panel), or "quiet" — a small
+   *  named door beside the thing it edits (the estimate's lead card). */
+  trigger?: "button" | "quiet";
+  /** True where the lead is corrected from another record's page: Delete Lead stays on the Leads
+   *  page, behind its own warning, and never sits beside an estimate. */
+  noDelete?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -78,6 +101,21 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
   function openModal() {
     setConfirmDel(false);
     if (draft.restored && dirty) toast(t("ld_draftRestored"), "info");
+    // OPENED CLEAN, IT STARTS FROM THE LEAD AS IT IS NOW (cn-v1157). The form kept the values it was
+    // mounted with, and its save writes every field it holds — fine on the Leads page, which is asked
+    // again after each change, but the estimate's card keeps this mounted for as long as the estimate
+    // is open: a lead corrected elsewhere in the meantime would have been written back whole from the
+    // old copy. Nothing typed is lost: a form with unsaved words (or a restored draft) is left alone.
+    // The fields are re-seeded BEFORE the sheet opens; the sheet itself is never remounted.
+    if (editing && !dirty) {
+      const fresh = inquiryFormValue(inquiry);
+      const snap = JSON.stringify(fresh);
+      if (snap !== initialSnap.current) {
+        initialSnap.current = snap;
+        setForm(fresh);
+        setFormKey((k) => k + 1);
+      }
+    }
     setOpen(true);
   }
 
@@ -126,7 +164,15 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
 
   return (
     <>
-      {editing ? (
+      {editing && trigger === "quiet" ? (
+        <button
+          type="button"
+          onClick={openModal}
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+        >
+          <Pencil className="h-4 w-4 shrink-0" /> {t("ld_btn_editLead")}
+        </button>
+      ) : editing ? (
         <Button variant="outline" onClick={openModal}>
           <Pencil className="h-4 w-4" /> {t("ld_btn_edit")}
         </Button>
@@ -152,7 +198,7 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
               // the action existed but had no button). Two-tap confirm so a stray tap can't
               // drop a lead; deleteInquiry revalidates /leads + /planner.
               extra={
-                editing ? (
+                editing && !noDelete ? (
                   <Button
                     type="button"
                     variant={confirmDel ? "destructive" : "outline"}

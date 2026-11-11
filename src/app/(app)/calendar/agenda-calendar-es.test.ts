@@ -48,7 +48,7 @@ import { CrewInitials } from "@/components/crew-initials";
 import { RowMoreSheet } from "@/components/row-more-sheet";
 import { actualsFrom, mergePeople } from "@/lib/schedule/plan-vs-actual";
 import { translator } from "@/lib/i18n";
-import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
+import { tzDateTimeUtc } from "@/lib/tz";
 
 const LA = "America/Los_Angeles";
 const WORK_DAY = { start: "09:00", end: "17:00" };
@@ -250,8 +250,9 @@ describe("the calendar in Spanish", () => {
   });
 
   it("the week: its span in Spanish, the day columns es-US", () => {
-    const today = todayStrInTz(LA);
-    const t = text(render("week", today));
+    // The week of the FIXED now (render's `now` is DAY), never the machine's today: read from the real
+    // clock this case passed only while the calendar week still held Nov 5 and went red on Nov 9.
+    const t = text(render("week", DAY));
     expect(t).toContain("esta semana");
     expect(t).toMatch(/\d+–\d+ de [a-z]+ de \d{4}|\d+ de [a-z]+ – \d+ de [a-z]+ de \d{4}/);
     expect(t).not.toContain("this week");

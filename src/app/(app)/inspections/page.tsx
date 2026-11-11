@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ClipboardCheck, FileText, MapPin } from "lucide-react";
+import { ClipboardCheck, FileText } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -14,8 +14,9 @@ import type { Lang } from "@/lib/locale";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ESTIMATE_VISIT_TYPES, visitTitle } from "@/lib/statuses";
-import { bucketInspections, inspectionRowTags } from "@/lib/inspections";
+import { ESTIMATE_VISIT_TYPES, appointmentTypeLabel, visitTitle } from "@/lib/statuses";
+import { bucketInspections, inspectionLabel, inspectionRowTags } from "@/lib/inspections";
+import { MissedDoors } from "./missed-doors";
 import { AppointmentButton } from "../appointments/appointment-button";
 import { NewInspectionButton } from "../appointments/new-inspection-button";
 import { featureOn } from "@/lib/features";
@@ -95,13 +96,14 @@ export default async function InspectionsPage({
     .not("job_id", "is", null)
     .not("status", "in", "(draft,void)")
     .limit(5000);
-  const { toWriteUp, upcoming, filed } = bucketInspections(
+  const { toWriteUp, upcoming, missed, filed } = bucketInspections(
     rows,
     estimateInquiryIds,
     estimateJobIds,
     new Date(),
     estimateQuoteIds,
     new Set(((billedJobs ?? []) as { job_id: string }[]).map((r) => r.job_id).filter(Boolean)),
+    tz, // "before today" is the company's midnight (the Didn't Happen? group)
   );
 
   // 44px targets, like every tap in the app (the pill still reads as a pill).
@@ -165,7 +167,7 @@ export default async function InspectionsPage({
             )}
           </>
         )
-      ) : toWriteUp.length === 0 && upcoming.length === 0 ? (
+      ) : toWriteUp.length === 0 && upcoming.length === 0 && missed.length === 0 ? (
         <EmptyState
           icon={ClipboardCheck}
           title={t("ip_noOpenInspections")}
@@ -178,6 +180,7 @@ export default async function InspectionsPage({
           {toWriteUp.length > 0 && (
             <Section title={fillSlots(t("ip_toWriteUp"), { n: toWriteUp.length })} rows={toWriteUp} tz={tz} lang={lang} t={t} writeUp estimateDoor={estimateDoor} />
           )}
+          {missed.length > 0 && <Section title={t("ip_missed")} rows={missed} tz={tz} lang={lang} t={t} missed />}
           {upcoming.length > 0 && <Section title={t("ip_upcomingProposed")} rows={upcoming} tz={tz} lang={lang} t={t} />}
         </div>
       )}
@@ -193,6 +196,7 @@ function Section({
   t,
   writeUp = false,
   estimateDoor = true,
+  missed = false,
 }: {
   title: string;
   rows: any[];
@@ -201,6 +205,7 @@ function Section({
   t: (key: string) => string;
   writeUp?: boolean;
   estimateDoor?: boolean;
+  missed?: boolean;
 }) {
   return (
     <section>
@@ -208,7 +213,7 @@ function Section({
       <Card>
         <ul className="divide-y divide-slate-100">
           {rows.map((a) => (
-            <InspectionRow key={a.id} a={a} tz={tz} lang={lang} t={t} writeUp={writeUp} estimateDoor={estimateDoor} />
+            <InspectionRow key={a.id} a={a} tz={tz} lang={lang} t={t} writeUp={writeUp} estimateDoor={estimateDoor} missed={missed} />
           ))}
         </ul>
       </Card>
@@ -223,6 +228,7 @@ function InspectionRow({
   t,
   writeUp,
   estimateDoor,
+  missed = false,
 }: {
   a: any;
   tz: string;
@@ -230,8 +236,18 @@ function InspectionRow({
   t: (key: string) => string;
   writeUp: boolean;
   estimateDoor: boolean;
+  missed?: boolean;
 }) {
   const who = a.customers?.name ?? a.inquiries?.name ?? null;
+  // EVERY ROW SAYS WHAT IT IS FOR (lib/inspections inspectionLabel): a real title stays, with who,
+  // where and when under it; a bare "Inspection" gives way to who and where, the day under it.
+  const label = inspectionLabel({
+    title: visitTitle(a.title),
+    typeLabel: appointmentTypeLabel(a.type, lang, t),
+    customer: who,
+    street: a.location ?? null,
+    day: a.starts_at ? formatDateTimeTz(a.starts_at, tz, lang) : t("ip_waitingForADay"),
+  });
   // NEXT-STEP: the capture prefills the estimator scope; the inquiry keeps the lead threading
   // (quotes/new also recovers it from the capture appointment when absent).
   const estimateHref = `/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}`;
@@ -242,7 +258,7 @@ function InspectionRow({
           <div className="flex flex-wrap items-center gap-2">
             {/* visitTitle: a row titled during the three days the visit was a Walk-Through still
                 SAYS that word, and this is the page Erik was reading when he reported the split. */}
-            <span className="truncate font-medium text-slate-900 group-hover:text-brand">{visitTitle(a.title)}</span>
+            <span className="truncate font-medium text-slate-900 group-hover:text-brand">{label.title}</span>
             {/* ONE rule for the tags (lib/inspections inspectionRowTags) — this row draws the open
                 piles AND the filed pile, and a tag written inline here rode into the wrong one: a
                 green "Done" pill on every row of "To write up" (8592392b). No tag is written here. */}
@@ -252,17 +268,12 @@ function InspectionRow({
               </Badge>
             ))}
           </div>
-          <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-sm text-slate-500">
-            {a.starts_at ? <span>{formatDateTimeTz(a.starts_at, tz, lang)}</span> : <span>{t("ip_waitingForADay")}</span>}
-            {who && <span>· {who}</span>}
-            {a.location && (
-              <span className="inline-flex items-center gap-0.5">
-                <MapPin className="h-3.5 w-3.5 shrink-0" /> {a.location}
-              </span>
-            )}
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-1 text-sm text-slate-500">
+            <span>{label.subtitle}</span>
           </div>
         </Link>
       </div>
+      {missed && <MissedDoors id={a.id} />}
       {writeUp && estimateDoor && (
         <Link href={estimateHref} className="shrink-0">
           <Button>

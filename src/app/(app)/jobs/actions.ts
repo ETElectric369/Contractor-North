@@ -23,6 +23,8 @@ import { customerMaterialMarkupForJob } from "@/lib/labor-billing";
 import { reportError } from "@/lib/observe";
 import { translator } from "@/lib/i18n";
 import { callerLang } from "@/lib/lang-of";
+import { isCostableCategory, NOT_A_COST_CATEGORY, type PaperTie } from "@/lib/job-photos";
+import { RECEIPT_TIE_COLUMNS, receiptsNotOnABill, tieReadFilters, type ReceiptDoc } from "@/lib/action-items/receipts-not-on-a-bill";
 import { escapeLike, formatCurrency, formatPhone } from "@/lib/utils";
 import { estimateIsTheContract, shouldImportActuals } from "@/lib/invoice-import-rule";
 import { revalidateMoney } from "@/lib/revalidate-money";
@@ -1231,6 +1233,96 @@ export async function deleteJob(
 }
 
 /**
+ * THE ONE RULE FOR "WHO IS THIS JOB FOR": a picked customer must be visible to the caller's own
+ * session, and a typed one goes through the one match-then-insert door (lib/crm/new-customer), so no
+ * door mints a twin of somebody already in the book. Edit Job's form and Nort's setJobCustomer both
+ * come here. Not exported: a "use server" file exports only the actions themselves.
+ */
+async function customerIdForJob(
+  supabase: SupabaseClient,
+  userId: string | null,
+  who: { customerId: string } | { newCustomer: { name: string; phone?: string | null; email?: string | null } },
+): Promise<{ ok: true; id: string; name: string | null } | { ok: false; error: string }> {
+  if ("newCustomer" in who) {
+    const made = await matchOrCreateCustomer(supabase, userId, who.newCustomer);
+    if (!made.ok) return { ok: false, error: made.error };
+    // The name ON FILE: a typed name that matched somebody already in the book under another spelling
+    // is that somebody, and whoever says "is now for …" must name the customer actually set.
+    return { ok: true, id: made.id, name: made.name || null };
+  }
+  const { data, error } = await supabase.from("customers").select("id, name").eq("id", who.customerId).maybeSingle();
+  if (error) return { ok: false, error: dbError(error) ?? "Couldn't check that customer just now. Try again." };
+  if (!data) return { ok: false, error: "That customer isn't available." };
+  return { ok: true, id: String((data as { id: string }).id), name: ((data as { name: string | null }).name ?? null) };
+}
+
+/**
+ * PUT, OR CHANGE, THE CUSTOMER ON A JOB THAT ALREADY EXISTS (Nort's job.setCustomer, the owner's ask
+ * of 2026-11-09: he had Nort open a job from one sentence and could not then name who it was for
+ * without pulling over for Manage > Edit Job). Writes customer_id and nothing else.
+ *
+ * THE ONE REFUSAL IS KEYED ON WHO THE JOB'S INVOICES ARE FOR (each invoice carries its own
+ * customer_id), never on who the job is for: a job with NO customer whose invoice was made under one
+ * customer could be set to another, unrefused, while the rule read the job's own column (skeptic #60).
+ * So: any invoice of the job that carries a customer OTHER than the one being set refuses the change
+ * in words. Setting the job to the customer its invoices already carry is allowed (that is the repair
+ * of a job that lost its customer), and an invoice with no customer on it refuses nothing. The words
+ * send the person to Edit Job, which changes the customer and checks nothing: so they say to check
+ * the invoices AFTER, which is what is true.
+ */
+export async function setJobCustomer(
+  jobId: string,
+  input: { customerId: string } | { newCustomer: { name: string; phone?: string | null; email?: string | null } },
+): Promise<{ ok: boolean; error?: string; jobLabel?: string; customerName?: string | null }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const { data: job, error: jobErr } = await supabase
+    .from("jobs")
+    .select("id, name, job_number")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (jobErr) return { ok: false, error: dbError(jobErr) ?? "Couldn't read that job just now. Try again." };
+  if (!job) return { ok: false, error: "That job isn't available." };
+  const current = job as { name: string | null; job_number: string | null };
+
+  // WHO THE JOB'S INVOICES ARE FOR, read whether or not the job itself has a customer.
+  const invoicedRefusal =
+    "That job already has invoices under another customer. Change the customer in Edit Job, then check its invoices.";
+  const { data: inv, error: invErr } = await supabase.from("invoices").select("id, customer_id").eq("job_id", jobId);
+  if (invErr) return { ok: false, error: "Couldn't check this job's invoices just now, so the customer wasn't changed. Try again." };
+  const invoicedFor = new Set(
+    ((inv ?? []) as { customer_id: string | null }[]).map((r) => r.customer_id).filter((c): c is string => !!c),
+  );
+  // THE REFUSAL COMES BEFORE ANYTHING IS MADE. A typed NEW customer is, by its own word, nobody an
+  // invoice already carries: refused here, before the match-or-create door runs, so a refusal never
+  // leaves a new customer in the book with no job.
+  if (invoicedFor.size && "newCustomer" in input) return { ok: false, error: invoicedRefusal };
+
+  const who = await customerIdForJob(supabase, ctx.userId, input);
+  if (!who.ok) return { ok: false, error: who.error };
+  // Any invoice under somebody else refuses; the customer the invoices already carry goes through.
+  if ([...invoicedFor].some((c) => c !== who.id)) return { ok: false, error: invoicedRefusal };
+
+  const { data: saved, error } = await supabase
+    .from("jobs")
+    .update({ customer_id: who.id, updated_at: new Date().toISOString() })
+    .eq("id", jobId)
+    // THE SILENT-WRITE LAW: a zero-row update is a 204, not an error.
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!saved?.length) return { ok: false, error: "That job isn't available." };
+
+  await pushCalendarItem("job", jobId);
+  revalidatePath(`/jobs/${jobId}`);
+  revalidatePath("/jobs");
+  revalidatePath("/planner");
+  revalidatePath("/schedule");
+  return { ok: true, jobLabel: jobLabelWithNumber(current), customerName: who.name };
+}
+
+/**
  * Edit a job's details: its name, customer (existing or created inline), address and unit, billing,
  * and the job-code template.
  *
@@ -1262,7 +1354,7 @@ export async function updateJob(
   // reports success while quietly keeping the old customer and dropping the typed phone.
   const typedCustomer = typedNewCustomer(formData);
   if (typedCustomer) {
-    const made = await matchOrCreateCustomer(supabase, ctx.userId, typedCustomer);
+    const made = await customerIdForJob(supabase, ctx.userId, { newCustomer: typedCustomer });
     if (!made.ok) return { ok: false, error: made.error };
     patch.customer_id = made.id;
   } else if (sent("customer_id")) {
@@ -2277,7 +2369,11 @@ export async function addDocument(input: {
 
 /** Rename / re-categorize an already-uploaded document. Staff only; partial patch.
  *  RLS scopes the update to the caller's org, so a crafted id can't reach another
- *  org's document — mirrors updateBill's pattern. */
+ *  org's document — mirrors updateBill's pattern. The write names the company too (requireStaff's
+ *  orgId), and THE SILENT-WRITE LAW holds: a zero-row update is a 204, not an error, so the id is
+ *  asked back and an empty answer is the refusal it is (until 2026-11-10 a paper deleted meanwhile
+ *  answered "saved"). A patch that asks for nothing writes nothing. Not a Cost (markPaperNotACost,
+ *  below) is this same write, never a second copy of it. */
 export async function updateDocument(
   id: string,
   patch: {
@@ -2295,10 +2391,63 @@ export async function updateDocument(
     clean.name = patch.name.trim();
   }
   if (patch.category !== undefined) clean.category = patch.category ?? null;
+  if (!Object.keys(clean).length) return { ok: true };
 
-  const { error } = await supabase.from("documents").update(clean).eq("id", id);
+  let write = supabase.from("documents").update(clean).eq("id", id);
+  if (ctx.orgId) write = write.eq("org_id", ctx.orgId);
+  const { data: saved, error } = await write.select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!saved?.length) return { ok: false, error: translator(await callerLang(supabase, ctx.userId))("jb_actPaperNotThere") };
   revalidatePath(`/jobs/${jobId}`);
+  return { ok: true };
+}
+
+/**
+ * NOT A COST (Needs You's Not on a Bill row, ⋯; the owner, 2026-11-10: "it's a quote from my supplier
+ * not a bill, everything is closed"). A paper filed on a job as a Receipt or a Bill that was never
+ * money spent had one door on its row, Record It, which leads to adding a cost nobody paid. This
+ * files it as Not a Cost (lib/job-photos NOT_A_COST_CATEGORY, one of the pencil's Category choices)
+ * through updateDocument, the pencil's own write. The paper stays with the job's papers for the
+ * office; no bill, tie or file is touched; the pencil re-files it.
+ *
+ * IT WIDENS NOBODY'S VIEW. A Receipt is the office's alone, and so is a Not a Cost paper: the crew's
+ * and the customer's lists each name what they let through, and this word is on neither. It is NOT
+ * "Other", a job paper the crew is handed: a supplier's quote carries his prices.
+ *
+ * THE ROW IS A HINT, THE WRITE READS AGAIN (Won't Happen's rule): the paper is re-filed only while it
+ * is still what its row said, a Receipt or a Bill on a job that nothing accounts for, by the feeder's
+ * own rule (receiptsNotOnABill), asked of the same columns and the same ties. One somebody recorded
+ * as a cost or re-filed since is left as it is and said; ties that can't be read claim nothing, so
+ * nothing is changed. The job comes from the ROW, never the caller.
+ */
+export async function markPaperNotACost(documentId: string): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  // A refusal is read by the person who tapped, in their language; asked only when one is said.
+  const say = async (key: string) => translator(await callerLang(supabase, ctx.userId))(key);
+
+  let read = supabase.from("documents").select("id, name, category, file_url, job_id").eq("id", documentId);
+  if (ctx.orgId) read = read.eq("org_id", ctx.orgId);
+  const { data: row, error: rowErr } = await read.maybeSingle();
+  if (rowErr) return { ok: false, error: dbError(rowErr) };
+  if (!row) return { ok: false, error: await say("jb_actPaperNotThere") };
+  const paper = row as ReceiptDoc;
+  if (!paper.job_id || !isCostableCategory(paper.category)) return { ok: false, error: await say("jb_actPaperChanged") };
+
+  const { data: ties, error: tieErr } = await supabase
+    .from("organized_items")
+    .select(RECEIPT_TIE_COLUMNS)
+    .or(tieReadFilters([paper])[0])
+    .limit(1000);
+  const loose = tieErr ? null : receiptsNotOnABill([paper], (ties ?? []) as PaperTie[]);
+  if (!loose) return { ok: false, error: await say("jb_actPaperTiesUnread") };
+  if (!loose.length) return { ok: false, error: await say("jb_actPaperChanged") };
+
+  const res = await updateDocument(paper.id, { category: NOT_A_COST_CATEGORY }, paper.job_id);
+  if (!res.ok) return res;
+  revalidatePath("/planner"); // Needs You's Not on a Bill row reads the paper's category
+  revalidatePath("/bills");
   return { ok: true };
 }
 

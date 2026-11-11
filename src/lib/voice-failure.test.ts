@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { micBlockedLine, NO_VOICE_LINE, noVoiceLine, oncePerTurn, TRY_AGAIN_LINE, tryAgainLine, voiceFailureExtra } from "@/lib/voice-failure";
-import { dict } from "@/lib/i18n";
+import { micBlockedLine, NO_VOICE_LINE, noVoiceLine, oncePerTurn, SPOKEN_SENTENCE_MIN_WORDS, spokenRequestFailure, TRY_AGAIN_LINE, tryAgainLine, voiceFailureExtra, voiceRequestRefusal } from "@/lib/voice-failure";
+import { dict, translator } from "@/lib/i18n";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 /**
  * Nort's voice loop failed on Erik's phone for a week (09-16 to 09-23) and left no trace: the
@@ -104,5 +106,94 @@ describe("one report per branch per turn", () => {
     expect(gate.first("blob-too-small")).toBe(true);
     gate.reset();
     expect(gate.first("empty-transcript")).toBe(true);
+  });
+});
+
+describe("what Nort says when a voice turn's request is refused (cn-v1157)", () => {
+  const FALLBACK = "That didn't go through. Say it again.";
+  it("speaks the route's own sentence when it sent one", () => {
+    expect(spokenRequestFailure("You've used this month's allowance. Add usage in Settings.", FALLBACK)).toBe("You've used this month's allowance. Add usage in Settings.");
+    expect(spokenRequestFailure("  Sign in again,\n then ask me once more.  ", FALLBACK)).toBe("Sign in again, then ask me once more.");
+  });
+  it("falls back when the body is not a sentence to hear: empty, markup, JSON, a wall of text", () => {
+    expect(spokenRequestFailure("", FALLBACK)).toBe(FALLBACK);
+    expect(spokenRequestFailure(null, FALLBACK)).toBe(FALLBACK);
+    expect(spokenRequestFailure("<!DOCTYPE html><html><body>504</body></html>", FALLBACK)).toBe(FALLBACK);
+    expect(spokenRequestFailure("An error <b>occurred</b>", FALLBACK)).toBe(FALLBACK);
+    expect(spokenRequestFailure('{"error":"FUNCTION_INVOCATION_TIMEOUT"}', FALLBACK)).toBe(FALLBACK);
+    expect(spokenRequestFailure("[object Object]", FALLBACK)).toBe(FALLBACK);
+    expect(spokenRequestFailure("x".repeat(221), FALLBACK)).toBe(FALLBACK);
+  });
+
+  it("a STATUS WORD is not a sentence: the route's bare labels are never said out loud (skeptic #60)", () => {
+    // What api/chat answers a programming refusal with, and what the client says when the body will not read.
+    for (const label of ["Unauthorized", "Bad request", "No messages", "Request failed.", "Forbidden", "Not Found", "Try again later."]) {
+      expect(spokenRequestFailure(label, FALLBACK), label).toBe(FALLBACK);
+    }
+    // …and those three ARE what the route sends: the labels this rule exists for.
+    const route = readFileSync(join(process.cwd(), "src/app/api/chat/route.ts"), "utf8");
+    for (const body of ['new Response("Unauthorized", { status: 401 })', 'new Response("Bad request", { status: 400 })', 'new Response("No messages", { status: 400 })']) {
+      expect(route, body).toContain(body);
+    }
+    // Four words is the line: three is a label, four is a sentence. Words are counted by their letters,
+    // so a dash or a number alone does not make a label into a sentence.
+    expect(SPOKEN_SENTENCE_MIN_WORDS).toBe(4);
+    expect(spokenRequestFailure("Nort is off today", FALLBACK)).toBe("Nort is off today");
+    expect(spokenRequestFailure("Nort is off", FALLBACK)).toBe(FALLBACK);
+    expect(spokenRequestFailure("Error 500 — 12", FALLBACK)).toBe(FALLBACK);
+    // The sentences the route really sends are all still spoken.
+    for (const sentence of [
+      "Nort is off for your company. You can turn it on in Settings, under Features.",
+      "Nort is off for your company. Ask the owner to turn it on.",
+      "Nort is catching up — give it a minute.",
+      "Your team has hit today's assistant limit. It resets tomorrow.",
+      "Nort isn't available right now. Try again later.",
+    ]) {
+      expect(route, sentence).toContain(sentence);
+      expect(spokenRequestFailure(sentence, FALLBACK), sentence).toBe(sentence);
+    }
+  });
+});
+
+describe("a refused voice turn: the line, and whether the mic listens again (cn-v1157)", () => {
+  const en = translator("en");
+  const words = { failed: en("nt_voiceRequestFailedLine"), signedOut: en("nt_voiceSignedOutLine"), closing: en("nt_closingMicLine") };
+
+  it("a refusal that passes (a limiter, a server briefly down) is said and the mic re-arms", () => {
+    expect(voiceRequestRefusal(429, "Nort is catching up — give it a minute.", words)).toEqual({ line: "Nort is catching up — give it a minute.", rearm: true });
+    expect(voiceRequestRefusal(503, "Nort isn't available right now. Try again later.", words)).toEqual({ line: "Nort isn't available right now. Try again later.", rearm: true });
+    expect(voiceRequestRefusal(400, "Bad request", words)).toEqual({ line: "That didn't go through. Say it again.", rearm: true });
+    expect(voiceRequestRefusal(500, "<html>500</html>", words)).toEqual({ line: "That didn't go through. Say it again.", rearm: true });
+  });
+
+  it("signed out (401): the signed-out line, once, and the mic is NOT re-armed", () => {
+    const r = voiceRequestRefusal(401, "Unauthorized", words);
+    expect(r).toEqual({ line: "You're signed out, so I'm closing the mic. Sign in again, then tap Talk.", rearm: false });
+    // Never "Say it again" over a mic that is about to close: the spoke-into-a-closed-mic defect.
+    expect(r.line).not.toMatch(/say it again/i);
+    expect(r.line).not.toContain("Unauthorized");
+  });
+
+  it("refused for this person (403): the route's own sentence, once, no re-arm; with no sentence, the closing line", () => {
+    const off = "Nort is off for your company. You can turn it on in Settings, under Features.";
+    expect(voiceRequestRefusal(403, off, words)).toEqual({ line: off, rearm: false });
+    expect(voiceRequestRefusal(403, "Forbidden", words)).toEqual({ line: "I'm closing the mic. Tap Talk when you need me.", rearm: false });
+    expect(voiceRequestRefusal(403, "<html><body>blocked</body></html>", words).rearm).toBe(false);
+  });
+
+  it("the signed-out line exists in both languages (tú), and says the mic is closing and what to do", () => {
+    expect(translator("es")("nt_voiceSignedOutLine")).toBe("Se cerró tu sesión, así que cierro el micrófono. Inicia sesión de nuevo y luego toca Hablar.");
+    expect(dict("en").nt_voiceSignedOutLine).toContain("tap Talk");
+    expect(dict("es").nt_voiceSignedOutLine).toContain("toca Hablar");
+    for (const lang of ["en", "es"] as const) expect(dict(lang).nt_voiceSignedOutLine).not.toContain(EM_DASH);
+  });
+
+  it("the panel asks this rule, and a shut door ENDS the voice session (the mic is let go, not left muted)", () => {
+    const chat = readFileSync(join(process.cwd(), "src/app/(app)/assistant/assistant-chat.tsx"), "utf8");
+    expect(chat).toContain('const refusal = voiceRequestRefusal(res.status, errText, { failed: t("nt_voiceRequestFailedLine"), signedOut: t("nt_voiceSignedOutLine"), closing: t("nt_closingMicLine") });');
+    expect(chat).toMatch(/say\(refusal\.line, \(\) => \{\s*if \(!refusal\.rearm\) stopVoice\(\);\s*else if \(voiceModeRef\.current\) startMic\(\);\s*\}\);/);
+    // stopVoice is the whole ending: voice mode off, the stream stopped, any speech cut.
+    expect(chat).toMatch(/function stopVoice\(\) \{\s*setVoiceMode\(false\);\s*speech\.stopListening\(\{ discard: true \}\);/);
+    expect(chat).not.toContain("spokenRequestFailure("); // one rule, asked through voiceRequestRefusal
   });
 });

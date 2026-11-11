@@ -11,7 +11,7 @@ import { quoteEditLock } from "../actions";
 import { EstimateEditor, type SavedLineRow, type SavedQuoteRow } from "../estimate-editor";
 import { extOf, intakePaths, uploadDisplayName } from "@/lib/playbook/uploads";
 import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
-import type { Customer } from "@/lib/types";
+import type { Customer, Inquiry } from "@/lib/types";
 import { featureOn } from "@/lib/features";
 import { translator } from "@/lib/i18n";
 import { currentLang } from "@/lib/current-lang";
@@ -65,10 +65,12 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
     // pricing_levels nested INSIDE customers(*) — the star stays, because CustomerSelect's
     // `customer` prop needs the full row for EditCustomerButton. The level's LABOR RATE rides too
     // (cn-v1132): the editor prices a task's hours through the one rule, on this page as on the new one.
-    // The lead's contact block rides along (PROJECTION LAW): the "Prepared for" card has to be
-    // able to show WHO an estimate with no customer is for, and a lead is a person with a name,
-    // a phone and an email — not a blank.
-    .select("*, customers(*, pricing_levels(markup_pct, labor_rate)), inquiry:inquiry_id(id, name, company_name, email, phone, intake)")
+    // The lead rides along (PROJECTION LAW): the "Prepared for" card has to be able to show WHO an
+    // estimate with no customer is for, and a lead is a person with a name, a phone and an email —
+    // not a blank. THE WHOLE ROW (cn-v1157), never a short list: the card shows the lead's address
+    // (the job site this estimate prints until there is a job) and opens the lead's own form on it,
+    // and that form's save writes EVERY field it holds — a column missing here would be saved blank.
+    .select("*, customers(*, pricing_levels(markup_pct, labor_rate)), inquiry:inquiry_id(*)")
     .eq("id", id)
     .maybeSingle();
 
@@ -76,7 +78,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   if (!quote) notFound();
   const q = quote as SavedQuoteRow & {
     customers: (Customer & { pricing_levels?: { markup_pct?: number | null; labor_rate?: number | null } | null }) | null;
-    inquiry: { id: string; name: string | null; company_name: string | null; email: string | null; phone: string | null; intake: unknown } | null;
+    inquiry: Inquiry | null;
   };
 
   // EVERY COLUMN THE EDITOR SHOWS (projection law): the words, the count, the price, the group
@@ -194,7 +196,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           items: lineItems,
           lock,
           customer: q.customers ?? null,
-          lead: q.inquiry ? { ...q.inquiry, intakePaths: intakePaths(q.inquiry.intake) } : null,
+          lead: q.inquiry ? { ...q.inquiry, intakePaths: intakePaths(q.inquiry.intake), row: q.inquiry } : null,
           customers: (customers ?? []) as { id: string; name: string; company_name: string | null }[],
           // `?? null` and never `?? 0`: effectiveMarkupPct returns immediately on ANY finite level,
           // including 0, so a 0 here would price every customer-without-a-level at net cost.

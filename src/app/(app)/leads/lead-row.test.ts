@@ -31,7 +31,8 @@ vi.mock("./actions", () => ({
 }));
 vi.mock("@/app/(app)/appointments/actions", () => ({ createInspectionNow: vi.fn(), openLeadInspection: vi.fn() }));
 
-import { InquiryRow, LeadDetails, markLeadLost, saveLeadAsContact } from "./inquiry-row";
+import { BecameDoors, InquiryRow, LeadDetails, markLeadLost, saveLeadAsContact } from "./inquiry-row";
+import { BECAME_UNREAD } from "@/lib/leads/became";
 import { InquiryFields, inquiryFormValue, moreOptionsFilled } from "./inquiry-fields";
 import type { Inquiry } from "@/lib/types";
 import { words as leadWords } from "@/lib/words/leads";
@@ -268,6 +269,117 @@ describe("F. the page's words", () => {
     // The visits read carries each visit's day (still leaving cancelled out).
     expect(page).toContain('.select("inquiry_id, status, starts_at, type")');
     expect(page).toContain('.neq("status", "cancelled")');
+  });
+});
+
+/**
+ * G. WHAT IT BECAME IS A DOOR (cn-v1157). The owner, 2026-11-10: "i had no way to get back to his
+ * estimate even though it says right on the screen Became An Estimate". A converted row used to end in
+ * a sentence; it ends in the records now.
+ */
+describe("G. a converted lead opens what it became", () => {
+  const converted = lead({ converted_at: "2026-09-20T10:00:00Z", converted_to: "quote", status: "quoted" });
+
+  it("its estimate is a door on the row, with its number and what it is called", () => {
+    const html = row(converted, { became: [{ kind: "estimate", id: "q-36", number: "E-036", title: "Panel Upgrade" }] });
+    expect(html).toContain("Became an Estimate");
+    expect(html).toMatch(/<a[^>]*href="\/quotes\/q-36"[^>]*>.*?Open Estimate E-036.*?Panel Upgrade.*?<\/a>/);
+    // 44px, like every door on the row.
+    expect(html).toMatch(/<a[^>]*class="[^"]*min-h-11[^"]*"[^>]*href="\/quotes\/q-36"|<a[^>]*href="\/quotes\/q-36"[^>]*class="[^"]*min-h-11/);
+    // The sentence it replaces is gone, and so are the three verbs (it is provenance, not a lead).
+    expect(html).not.toContain(en.ld_alreadyConverted);
+    expect(html).not.toContain(">Schedule<");
+  });
+
+  it("a job and two estimates are three doors, the job first", () => {
+    const html = row(lead({ converted_at: "2026-09-20T10:00:00Z", converted_to: "job" }), {
+      became: [
+        { kind: "job", id: "j-61", number: "J-061", title: "Panel Upgrade" },
+        { kind: "estimate", id: "q-36", number: "E-036", title: null },
+        { kind: "estimate", id: "q-31", number: "E-031", title: null },
+      ],
+    });
+    const at = (needle: string) => html.indexOf(needle);
+    expect(at('href="/jobs/j-61"')).toBeGreaterThan(-1);
+    expect(at('href="/jobs/j-61"')).toBeLessThan(at('href="/quotes/q-36"'));
+    expect(at('href="/quotes/q-36"')).toBeLessThan(at('href="/quotes/q-31"'));
+    expect(html).toContain("Open Job J-061");
+  });
+
+  it("a record with no number yet still gets its door, with no dangling space", () => {
+    const html = renderToStaticMarkup(createElement(BecameDoors, { became: [{ kind: "estimate", id: "q-1", number: null, title: null }] }));
+    expect(html).toContain(">Open Estimate<");
+  });
+
+  it("a read that failed SAYS so; it is never the quiet sentence", () => {
+    const html = row(converted, { became: BECAME_UNREAD });
+    expect(html).toContain("Couldn&#x27;t load its estimate or job. Reload to try again.");
+    expect(html).not.toContain(en.ld_alreadyConverted);
+  });
+
+  it("nothing this reader may see keeps the sentence that was there", () => {
+    expect(row(converted, { became: null })).toContain(en.ld_alreadyConverted);
+    expect(row(converted)).toContain(en.ld_alreadyConverted);
+  });
+
+  it("an open lead never draws them: it has its three verbs", () => {
+    const html = row(lead(), { became: [{ kind: "estimate", id: "q-36", number: "E-036", title: null }] });
+    expect(html).not.toContain("Open Estimate");
+    expect(html).toContain("Schedule");
+  });
+
+  it("the page reads them for the converted ?focus= row only, newest first, and keeps the reads' errors", () => {
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/leads/page.tsx"), "utf8");
+    expect(page).toContain("if (focusExtra?.converted_at) {");
+    expect(page).toMatch(/\.from\("quotes"\)\s*\.select\("id, quote_number, title"\)\s*\.eq\("inquiry_id", focusExtra\.id\)\s*\.order\("created_at", \{ ascending: false \}\)\s*\.limit\(BECAME_CAP\)/);
+    expect(page).toMatch(/\.from\("jobs"\)\s*\.select\("id, job_number, name"\)\s*\.eq\("inquiry_id", focusExtra\.id\)\s*\.order\("created_at", \{ ascending: false \}\)\s*\.limit\(BECAME_CAP\)/);
+    expect(page).toContain("error: quotesRead.error");
+    expect(page).toContain("error: jobsRead.error");
+    expect(page).toContain("became={focusExtra && i.id === focusExtra.id ? became : null}");
+  });
+
+  it("the doors are Title Case in both languages", () => {
+    expect(en.ld_btn_openEstimate).toBe("Open Estimate {number}");
+    expect(en.ld_btn_openJob).toBe("Open Job {number}");
+    expect(leadWords.es.ld_btn_openEstimate).toBe("Abrir Presupuesto {number}");
+    expect(leadWords.es.ld_btn_openJob).toBe("Abrir Trabajo {number}");
+  });
+});
+
+/**
+ * H. A LEAD'S EDIT REACHES THE ESTIMATES THAT PRINT IT (cn-v1157). The lead's address is the job site
+ * on an estimate with no job yet, so the stored copies a customer downloads go with the edit.
+ */
+describe("H. editing a lead drops its estimates' stored PDFs", () => {
+  const src = readFileSync(join(process.cwd(), "src/app/(app)/leads/actions.ts"), "utf8");
+  const upd = src.slice(src.indexOf("export async function updateInquiry("), src.indexOf("export async function markInquiryContacted("));
+
+  it("after the write landed, before either way out, scoped to the caller's company", () => {
+    const wrote = upd.indexOf("if (!data?.length)");
+    const bust = upd.indexOf("await bustLeadPdfs(id, ctx.orgId);");
+    const firstReturnOk = upd.indexOf("return { ok: true");
+    expect(wrote).toBeGreaterThan(-1);
+    expect(bust).toBeGreaterThan(wrote);
+    expect(bust).toBeLessThan(firstReturnOk);
+  });
+
+  it("deleting a lead drops them too: the ids read before the row goes, the copies dropped only after it has", () => {
+    const del = src.slice(src.indexOf("export async function deleteInquiry("), src.indexOf("export async function carryIntakeAnswers(") > -1 ? src.indexOf("export async function carryIntakeAnswers(") : undefined);
+    const read = del.indexOf('supabase.from("quotes").select("id").eq("inquiry_id", id)');
+    const gone = del.indexOf('supabase.from("inquiries").delete().eq("id", id).select("id")');
+    const refused = del.indexOf("if (!gone?.length)");
+    const bust = del.indexOf('await bustDocPdf("quote", q.id, ctx.orgId)');
+    expect(read).toBeGreaterThan(-1);
+    expect(read).toBeLessThan(gone);
+    expect(bust).toBeGreaterThan(refused);
+  });
+
+  it("the bust reads the lead's estimates inside one company and drops each", () => {
+    const cache = readFileSync(join(process.cwd(), "src/lib/pdf-cache.ts"), "utf8");
+    const fn = cache.slice(cache.indexOf("export async function bustLeadPdfs("), cache.indexOf("/** Same check, keyed the way the PUBLIC pages"));
+    expect(fn).toContain('svc.from("quotes").select("id").eq("inquiry_id", inquiryId)');
+    expect(fn).toContain('if (org) quoQ = quoQ.eq("org_id", org);');
+    expect(fn).toContain('await bustDocPdf("quote", q.id, org)');
   });
 });
 

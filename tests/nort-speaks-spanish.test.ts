@@ -167,7 +167,7 @@ describe("voice-stream remembers the turn's language", () => {
   beforeEach(() => vi.resetModules());
   it("an es-US start is Spanish, a start with no tag keeps it, en-US is English", async () => {
     vi.doMock("@/app/report-client-error", () => ({ reportClientError: vi.fn(async () => {}) }));
-    vi.doMock("@/lib/nort/trace", () => ({ trace: vi.fn(), flushTrace: vi.fn() }));
+    vi.doMock("@/lib/nort/trace", () => ({ trace: vi.fn(), flushTrace: vi.fn(), traceDrop: vi.fn() }));
     const v = await import("@/lib/voice-stream");
     expect(v.turnLanguage()).toBeNull();
     v.startListening("es-US"); // no mic here: it returns false, but the language is remembered first

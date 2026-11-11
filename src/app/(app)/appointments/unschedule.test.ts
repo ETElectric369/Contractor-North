@@ -74,7 +74,7 @@ describe("Clear the Date", () => {
     expect(search).toContain(": `/appointments/${a.id}`");
     const walks = read("src/app/(app)/inspections/page.tsx");
     expect(walks).toContain('.order("starts_at", { ascending: false, nullsFirst: false })');
-    expect(walks).toContain('<span>{t("ip_waitingForADay")}</span>');
+    expect(walks).toContain('t("ip_waitingForADay")'); // said inside the row's label (inspectionLabel day)
     expect(translator("en")("ip_waitingForADay")).toBe("Waiting for a Day");
     expect(read("src/app/(app)/appointments/[id]/page.tsx")).toContain('<span>{t("vp_waitingForADay")}</span>');
     expect(translator("en")("vp_waitingForADay")).toBe("Waiting for a Day");

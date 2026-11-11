@@ -5,6 +5,7 @@ import { SegmentedControl } from "@/components/ui/segmented";
 import { setQuoteType } from "../actions";
 import { useLang } from "@/components/lang-provider";
 import { translator } from "@/lib/i18n";
+import { useSaveInFlight } from "@/lib/saves-in-flight";
 
 /** The two types' words (qt_btn_typeQuote / qt_btn_typeEstimate), read in the person's language. */
 const LABEL_KEY: Record<"estimate" | "quote", string> = {
@@ -49,6 +50,9 @@ export function QuoteTypeToggle({
 }) {
   const [type, setType] = useState<"estimate" | "quote">(value);
   const [pending, start] = useTransition();
+  // THE TYPE IS A SAVE, SO IT IS COUNTED (cn-v1157): the printed wording follows it, and the header's
+  // Preview waits for the count. Counting only; the toggle itself is unchanged.
+  useSaveInFlight(pending);
   const [error, setError] = useState<string | null>(null);
   const t = translator(useLang());
 

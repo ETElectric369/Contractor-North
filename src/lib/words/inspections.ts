@@ -24,7 +24,7 @@ import type { WordCatalog } from "./types";
  */
 export const words: WordCatalog = {
   prefix: "ip_",
-  files: ["src/app/(app)/inspections/page.tsx"],
+  files: ["src/app/(app)/inspections/page.tsx", "src/app/(app)/inspections/missed-doors.tsx"],
   sameInBoth: [],
   en: {
     // ── lib/inspections inspectionRowTags ──
@@ -47,6 +47,10 @@ export const words: WordCatalog = {
     ip_waitingForADay: "Waiting for a Day",
     ip_btn_createEstimate: "Create Estimate",
     ip_btn_bookAnInspection: "Book an Inspection",
+    ip_missed: "Didn't Happen?",
+    ip_btn_didntHappen: "Didn't Happen",
+    ip_btn_lost: "Lost",
+    ip_didntHappenAsk: "This visit didn't happen? It is removed if nothing was captured on it, otherwise it is cancelled and kept on file.",
   },
   es: {
     ip_lib_pendingPick: "por elegir",
@@ -68,5 +72,9 @@ export const words: WordCatalog = {
     ip_waitingForADay: "Esperando un Día",
     ip_btn_createEstimate: "Crear Presupuesto",
     ip_btn_bookAnInspection: "Agendar una Inspección",
+    ip_missed: "¿No Se Hizo?",
+    ip_btn_didntHappen: "No Se Hizo",
+    ip_btn_lost: "Perdida",
+    ip_didntHappenAsk: "¿Esta visita no se hizo? Se elimina si no se capturó nada en ella; si no, se cancela y se conserva en el archivo.",
   },
 };

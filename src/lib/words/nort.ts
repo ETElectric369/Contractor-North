@@ -150,6 +150,12 @@ export const words: WordCatalog = {
     // lib/voice-failure: what the panel's status line says when a voice turn cannot start.
     nt_tryAgainLine: "Tap Talk to Nort to try again, or type below.",
     nt_noVoiceLine: "Voice isn't available here. Type below.",
+    // SPOKEN lines (lib/voice-stream + the panel): the mic closing on the no-speech budget; a voice turn's request that failed.
+    nt_closingMicLine: "I'm closing the mic. Tap Talk when you need me.",
+    nt_voiceRequestFailedLine: "That didn't go through. Say it again.",
+    // Said once, then the voice session ends (lib/voice-failure voiceRequestRefusal): nobody is signed in,
+    // so "Say it again" would be a lie told over a mic that cannot help.
+    nt_voiceSignedOutLine: "You're signed out, so I'm closing the mic. Sign in again, then tap Talk.",
     // components/tell-nort: the Just Tell Nort panel (the visit-page-in-Spanish wave). The door's default label
     // (every surface today passes its own), the Nort-off twin, the box, the hint line, its doors and what it says back.
     nt_btn_justTellNort: "Just Tell Nort",
@@ -292,6 +298,9 @@ export const words: WordCatalog = {
     nt_badUpload: "Subida inválida.",
     nt_tryAgainLine: "Toca Hablar con Nort para intentarlo de nuevo, o escribe abajo.",
     nt_noVoiceLine: "La voz no está disponible aquí. Escribe abajo.",
+    nt_closingMicLine: "Cierro el micrófono. Toca Hablar cuando me necesites.",
+    nt_voiceRequestFailedLine: "No se envió. Dilo otra vez.",
+    nt_voiceSignedOutLine: "Se cerró tu sesión, así que cierro el micrófono. Inicia sesión de nuevo y luego toca Hablar.",
     nt_btn_justTellNort: "Solo Dile a Nort",
     nt_btn_justSayIt: "Solo Dilo",
     nt_tellNortPlaceholder: "Di todo el trabajo como se lo dirías a una persona: qué quieren, dónde, cuánto y cualquier cosa que estorbe…",

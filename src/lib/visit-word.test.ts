@@ -159,19 +159,58 @@ describe("Needs You's Not Closed Out row says Inspection", () => {
  * read `a.title || "Inspection"`. It carries every ESTIMATE_VISIT_TYPE, so that literal printed
  * "Inspection" over an untitled QUOTE visit and over the city's Final Inspection — two rows calling
  * themselves something they are not, on the first screen he opens.
+ *
+ * RE-PINNED 2026-11-10 (cn-v1157), ON PURPOSE. The intent has not moved: an untitled row says WHAT
+ * KIND of visit it is, by the type's own label. WHERE it says it moved. Since cn-v1157 a title that
+ * names nothing (empty, or only the bare word) gives way to who and where (lib/inspections
+ * inspectionLabel), so a row reads as what the visit is FOR; and the type's label, which used to be
+ * that title, is the row's second line instead (`kindUnder`). A row with nobody and no street on it
+ * has nothing to give way to, so its title is still the type's label, said once. What this test
+ * guards is the hole in between: the title became the customer and the second line stayed empty, so
+ * a Quote / Estimate and the city's Final Inspection said their kind nowhere on the row.
  */
 describe("Needs You's To Write Up row reads the type by its label too", () => {
   it("an untitled quote visit is a Quote / Estimate, and the city's stays Final Inspection", async () => {
     // Completed, nothing settling it (no job, no inquiry, no outcome) — the write-up shape.
     const done = (id: string, type: string, title: string | null) => ({ ...visit(id, type, title, "Marla Finch"), status: "completed" });
-    state.visits = [done("w1", "inspection", null), done("w2", "quote", null), done("w3", "final_inspection", null), done("w4", "inspection", "Kitchen hood outlet")];
+    // The same shape with nobody on it: no customer, no lead, no street.
+    const nobody = (id: string, type: string) => ({ ...done(id, type, null), customers: null });
+    state.visits = [
+      done("w1", "inspection", null),
+      done("w2", "quote", null),
+      done("w3", "final_inspection", null),
+      done("w4", "inspection", "Kitchen hood outlet"),
+      nobody("w5", "quote"),
+      nobody("w6", "final_inspection"),
+      // A STOCK title is no title: the bare word, typed in or stamped by the booking form.
+      done("w7", "quote", "Site Inspection"),
+    ];
     const rows = await rowsInPile("inspections_to_write_up");
 
-    expect(rows["w1"].title).toBe(appointmentTypeLabel("inspection"));
-    expect(rows["w1"].title).toBe("Inspection");
-    expect(rows["w2"].title).toBe("Quote / Estimate");
-    expect(rows["w3"].title).toBe("Final Inspection");
+    // WHO is the title now, and the KIND rides under it, read from the one function that words it.
+    for (const [id, type] of [["w1", "inspection"], ["w2", "quote"], ["w3", "final_inspection"], ["w7", "quote"]] as const) {
+      expect(rows[id].title, id).toBe("Marla Finch");
+      expect(rows[id].subtitle, id).toBe(appointmentTypeLabel(type));
+    }
+    expect(rows["w1"].subtitle).toBe("Inspection");
+    expect(rows["w2"].subtitle).toBe("Quote / Estimate");
+    expect(rows["w3"].subtitle).toBe("Final Inspection"); // the CITY'S, its own type, its own name
+    // A title a person typed is his; who it is for rides under it, as before this wave.
     expect(rows["w4"].title).toBe("Kitchen hood outlet");
+    expect(rows["w4"].subtitle).toBe("Marla Finch");
+    // Nobody to give way to: the title is still the type's label, and it is not said a second time.
+    expect(rows["w5"].title).toBe(appointmentTypeLabel("quote"));
+    expect(rows["w5"].title).toBe("Quote / Estimate");
+    expect(rows["w5"].subtitle ?? null).toBeNull();
+    expect(rows["w6"].title).toBe("Final Inspection");
+    expect(rows["w6"].subtitle ?? null).toBeNull();
+
+    // THE RULE, for every row: an untitled visit says its kind somewhere a person reads, exactly once.
+    for (const id of ["w1", "w2", "w3", "w5", "w6", "w7"]) {
+      const type = state.visits.find((v) => v.id === id)!.type;
+      const said = [rows[id].title, rows[id].subtitle ?? ""].filter((line) => line === appointmentTypeLabel(type));
+      expect(said, id).toHaveLength(1);
+    }
     for (const row of Object.values(rows)) {
       expect(`${row.title} ${row.subtitle ?? ""}`, row.id).not.toMatch(OLD_WORD);
     }

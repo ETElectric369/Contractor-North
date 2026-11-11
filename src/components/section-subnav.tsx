@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
-import { activeRowHref, activeSection, visibleDock } from "@/lib/dock";
+import { activeNav, visibleDock } from "@/lib/dock";
+import { useNavAt } from "@/components/app-shell/use-nav-at";
 import { dockLabel } from "@/lib/dock-words";
 import { useLang } from "@/components/lang-provider";
 import type { FeatureMap } from "@/lib/features";
@@ -25,9 +25,6 @@ import { SectionSheet } from "./section-sheet";
  *  sibling nav, so it stays — and it persists on detail/sub-routes too (/quotes/[id],
  *  /forms/[id], /purchasing/[id]…), not just on a section's exact landing pages. */
 export function SectionSubnav({ isStaff, features, lapsed = false }: { isStaff?: boolean; features?: FeatureMap; lapsed?: boolean }) {
-  const pathname = usePathname();
-  const search = useSearchParams();
-  const current = pathname + (search.toString() ? `?${search.toString()}` : "");
   // The rows' words in the person's language (lib/dock-words; the dock's data stays English).
   const lang = useLang();
 
@@ -36,20 +33,22 @@ export function SectionSubnav({ isStaff, features, lapsed = false }: { isStaff?:
   const sections = visibleDock({ isStaff: !!isStaff, features, lapsed });
   // THE shared matcher — the same section the dock tiles light, so the strip can never
   // vanish-by-accident on detail routes again (it did on /quotes/[id] but not /billing/[id]).
-  const group = activeSection(pathname, sections);
+  // And the same LOCATION the dock reads (use-nav-at): the router's, plus the home a page declared
+  // when its URL cannot say — a visit's page is Sales › Inspections or the Schedule, and it vanished
+  // here too (Erik, 2026-11-10). The dock's own rule lights the row (lib/dock activeNav): exact, then
+  // the query-less row, then the one row on this page — so a tech's bare /settings lights Your
+  // Settings in the You strip — then the one row that owns the route, else the declared home.
+  const at = useNavAt(sections);
+  const { section: group, rowHref: activeHref } = activeNav(at, sections);
   if (!group) return null;
   // The Jobs strip IS the mobile status filter on /jobs itself (the page's own pill copy is
   // gone) — but on a job's page (/jobs/[id]) it must NOT stack a second look-alike pill row
   // above the hub's own tabs, where tapping "In progress" silently ejected you off the job.
   // Scoped to the jobs group only so /billing/[id], /quotes/[id] etc. keep their strips.
   // (/work-orders/[id] has no strip at all now — work orders left the dock, hub-only.)
-  if (group.key === "jobs" && pathname.startsWith("/jobs/")) return null;
+  if (group.key === "jobs" && at.pathname.startsWith("/jobs/")) return null;
   const tabs = group.children.filter((c) => c.href);
   if (tabs.length < 2) return null;
-
-  // The dock's own rule (lib/dock activeRowHref): exact, then the query-less row, then the one row
-  // on this page — so a tech's bare /settings lights Your Settings in the You strip.
-  const activeHref = activeRowHref(tabs, pathname, current);
 
   // The ADHD principle, doubled down responsively: past 4 pages the strip stops fitting a
   // phone width, so the long sections swap it for the left-edge handle + vertical sheet

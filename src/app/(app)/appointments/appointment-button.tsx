@@ -238,7 +238,9 @@ export function AppointmentButton({
   editLabel?: string;
   /** Where to go after a successful delete. Set this when the button is mounted on
    *  the appointment's OWN page — the default router.refresh() would re-render a
-   *  just-deleted record into a 404. */
+   *  just-deleted record into a 404. The page is left with this sheet still open (see `remove`):
+   *  the page that goes takes the sheet along, and `onSaved` is not told — a holder that closed its
+   *  own sheet on it would step history back under the navigation. */
   afterDeleteHref?: string;
 }) {
   const router = useRouter();
@@ -256,6 +258,10 @@ export function AppointmentButton({
   const urlSeed = useRef<{ type?: string; time?: string }>({});
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
+  /** A door of this sheet has asked for another page (the visit was deleted from its own page, or
+   *  became a job) and that page is on its way. The sheet stays as it is until the page that goes
+   *  takes it along: its buttons wait and nothing but Back closes it (see `leave`). */
+  const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // "Propose times" mode: offer the customer up to 3 date+time slots to pick.
   const [mode, setMode] = useState<"set" | "propose">("set");
@@ -466,6 +472,7 @@ export function AppointmentButton({
 
   function openModal() {
     if (draft.restored && dirty) toast(t("vp_draftRestored"), "info");
+    setLeaving(false); // a leave that never landed (Back cut it short) must not leave the doors waiting
     setOpen(true);
     // Open FIRST, then correct: waiting on a query before the modal appears reads as a dropped
     // tap. It is cached after the first open on the page, so in practice it is already here.
@@ -484,14 +491,32 @@ export function AppointmentButton({
     setSlots(defaultSlots());
   }
 
+  /**
+   * LEAVE FOR ANOTHER PAGE WITH THE SHEET STILL OPEN. Never close-then-navigate: closing takes this
+   * Modal's history entry off with a history step (components/ui/modal), that popstate reaches
+   * Next's router as a Back, and a Back takes priority over a navigation still in flight — the
+   * navigation is dropped (the Add to Schedule sheet met it first; tests/field-1015-features pins it
+   * there). On a visit's own page it was worse than a tap that did nothing. Delete's push had
+   * already taken the server action's place on the router's queue, so Next owed the page a refresh;
+   * with the push dropped, the refresh asked for the visit that had just been deleted, the page
+   * answered notFound(), and the app's 404 replaced the whole shell (Erik, 2026-11-10: "instead of
+   * going back to the inspection page it goes to this"). So the navigation goes out in the tick the
+   * server answers and the sheet is left alone: the page that goes takes it along, and by then the
+   * history entry on top is the new page's, so nothing steps back. (Both sequences are run on Next's
+   * own queue in tests/next-router-queue.test.ts.)
+   */
+  function leave(how: "push" | "replace", href: string) {
+    setLeaving(true);
+    router[how](href);
+  }
+
   function convertToJob() {
     if (!appointment) return;
     setError(null);
     start(async () => {
       const res = await createJobFromAppointment(appointment.id);
       if (!res.ok || !res.id) return setError(res.error ?? t("vp_couldNotCreateJob"));
-      setOpen(false);
-      router.push(`/jobs/${res.id}`);
+      leave("push", `/jobs/${res.id}`);
     });
   }
 
@@ -591,9 +616,20 @@ export function AppointmentButton({
       if (!res?.ok) { toast(res?.error ?? t("vp_couldntDeleteAppointment"), "error"); return; }
       draft.clear();
       toast(t("vp_appointmentDeleted"), "success");
+      // ON THE VISIT'S OWN PAGE the page is gone with the visit, so the person is sent to where the
+      // visit lived (the caller's afterDeleteHref), in this same tick and with the sheet still open
+      // (`leave`, above): a navigation sent now takes the place of the action's own re-render of the
+      // dead page. Replace, not push, so the list does not sit on top of one more entry.
+      // WHAT THE REPLACE REPLACES IS THE SHEET'S ENTRY, NOT THE VISIT'S. The open Modal pushed a
+      // history entry of its own (components/ui/modal), and that is the one on top when this runs.
+      // The visit page's own entry is still underneath it, so ONE BACK FROM THE LIST ASKS FOR THE
+      // DELETED VISIT. That Back is answered, not prevented: the visit's page has its own not-found
+      // boundary ([id]/not-found.tsx), which says the visit is gone INSIDE the app's shell, with the
+      // doors to Inspections and the Schedule, where it used to be the root 404 with no shell.
+      if (afterDeleteHref) return leave("replace", afterDeleteHref);
+      // ON A LIST the row simply leaves and the person stays where they are.
       setOpen(false);
-      if (afterDeleteHref) router.push(afterDeleteHref);
-      else router.refresh();
+      router.refresh();
       onSaved?.();
     });
   }
@@ -637,6 +673,9 @@ export function AppointmentButton({
         portal={!!rowLabel}
         title={words.title}
         dirty={dirty}
+        // On the way to another page (`leave`): the X, a tap outside and Escape wait, because closing
+        // now would step history back under that navigation and drop it.
+        holdOpen={leaving}
         footer={
           linkToken ? (
             <ModalActions onCancel={closeAll} onSave={closeAll} saveLabel={t("vp_btn_done")} hideCancel />
@@ -645,11 +684,11 @@ export function AppointmentButton({
               onCancel={closeAll}
               submit
               formId="appt-form"
-              saving={pending}
+              saving={pending || leaving}
               saveLabel={words.saveLabel}
               extra={
                 editing ? (
-                  <Button type="button" variant="outline" onClick={remove} disabled={pending} className="text-red-600">
+                  <Button type="button" variant="outline" onClick={remove} disabled={pending || leaving} className="text-red-600">
                     {t("vp_btn_delete")}
                   </Button>
                 ) : undefined
@@ -884,7 +923,7 @@ export function AppointmentButton({
           </div>
 
           {editing && appointment && !appointment.job_id && (
-            <Button type="button" variant="outline" onClick={convertToJob} disabled={pending} className="w-full">
+            <Button type="button" variant="outline" onClick={convertToJob} disabled={pending || leaving} className="w-full">
               {t("vp_btn_convertToJob")} →
             </Button>
           )}

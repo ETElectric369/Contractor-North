@@ -9,6 +9,7 @@ import { Trash2, Pencil, Check, X, ArrowUpDown, ChevronUp, ChevronDown, Chevrons
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { DayField } from "@/components/day-field";
+import { useSaveInFlight } from "@/lib/saves-in-flight";
 import { NumberInput } from "@/components/ui/number-input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Card, CardContent } from "@/components/ui/card";
@@ -242,6 +243,10 @@ export function InvoiceDetail({
   const [descr, setDescr] = useState((invoice as any).description ?? "");
   const descrSavedText = useRef<string>((invoice as any).description ?? "");
   const [descrState, setDescrState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  // The header's Preview shows what is SAVED (components/preview-button), so it waits while a box on
+  // this page is still saving: the title, the due day and the lines ride `pending`; the description
+  // keeps its own flag. One count for the window (lib/saves-in-flight).
+  useSaveInFlight(pending || descrState === "saving");
   const descrTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const descrBusy = useRef(false);
   const descrLatest = useRef<string>(descr);

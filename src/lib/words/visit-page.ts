@@ -82,12 +82,20 @@ export const words: WordCatalog = {
     "src/app/(app)/appointments/unschedule-button.tsx",
     "src/app/(app)/appointments/start-job-actions.ts",
     "src/app/(app)/leads/intake-files.tsx",
+    // cn-v1157: the page when there is no visit to show, drawn inside the app's shell.
+    "src/app/(app)/appointments/[id]/not-found.tsx",
   ],
   sameInBoth: [],
   en: {
     // ── The page (page.tsx): the back link, the badges, the header's main button and ⋯, the lines ──
     vp_btn_backToSchedule: "Back to Schedule",
     vp_btn_backToMyDay: "Back to My Day",
+    // ── The page when there is no visit to show (not-found.tsx), inside the app's shell (cn-v1157):
+    // the office sees every visit of the company, so for them it is gone; a tech sees only the visits
+    // assigned to them (0227), so for a tech it may simply not be theirs. Each gets its own way out. ──
+    vp_visitGone: "This visit is no longer on file: it was deleted, or it never existed.",
+    vp_visitGoneTech: "You can't open this visit: it was deleted, or it is not assigned to you.",
+    vp_btn_backToInspections: "Back to Inspections",
     vp_btn_actions: "Actions",
     vp_pendingPick: "pending pick",
     vp_doneBadge: "done",
@@ -285,6 +293,12 @@ export const words: WordCatalog = {
     vp_assignedTo: "Assigned to",
     vp_title: "Title",
     vp_titlePlaceholder: "e.g. Inspection at the Smiths', follow-up visit",
+    // WHAT IS THIS FOR? — the one field above the sheet while a visit's title is only the bare word.
+    vp_whatIsThisFor: "What Is This For?",
+    vp_whatIsThisForHint: "e.g. Panel upgrade, kitchen remodel, rental turnover",
+    vp_titleSaving: "Saving…",
+    vp_titleSaved: "Saved",
+    vp_titleNotSaved: "Couldn't save that. Try again.",
     vp_date: "Date",
     vp_start: "Start",
     vp_end: "End",
@@ -404,6 +418,9 @@ export const words: WordCatalog = {
   es: {
     vp_btn_backToSchedule: "Volver a la Agenda",
     vp_btn_backToMyDay: "Volver a Mi Día",
+    vp_visitGone: "Esta visita ya no está en el archivo: se eliminó o nunca existió.",
+    vp_visitGoneTech: "No puedes abrir esta visita: se eliminó o no está asignada a ti.",
+    vp_btn_backToInspections: "Volver a Inspecciones",
     vp_btn_actions: "Acciones",
     vp_pendingPick: "esperando elección",
     vp_doneBadge: "hecha",
@@ -586,6 +603,11 @@ export const words: WordCatalog = {
     vp_assignedTo: "Asignado a",
     vp_title: "Título",
     vp_titlePlaceholder: "p. ej. Inspección en casa de los Smith, visita de seguimiento",
+    vp_whatIsThisFor: "¿Para Qué Es?",
+    vp_whatIsThisForHint: "p. ej. Cambio de panel, remodelación de cocina, limpieza de alquiler",
+    vp_titleSaving: "Guardando…",
+    vp_titleSaved: "Guardado",
+    vp_titleNotSaved: "No se pudo guardar. Intenta de nuevo.",
     vp_date: "Fecha",
     vp_start: "Inicio",
     vp_end: "Fin",

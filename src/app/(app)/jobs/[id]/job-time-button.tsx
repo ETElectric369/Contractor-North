@@ -9,6 +9,8 @@ import { Label, Select } from "@/components/ui/input";
 import { DayField } from "@/components/day-field";
 import { NumberInput } from "@/components/ui/number-input";
 import { todayStrInTz } from "@/lib/tz";
+import { formatTime } from "@/lib/utils";
+import { localeOf } from "@/lib/locale";
 import { LONG_SHIFT_HOURS, isLongOpenShift } from "@/lib/long-shift";
 import { getPosition } from "@/lib/geo";
 import { useLang } from "@/components/lang-provider";
@@ -48,8 +50,10 @@ async function gpsBestEffort(): Promise<GeoPoint | null> {
   }
 }
 
-const fmtTime = (iso: string) =>
-  new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+// ONE CLOCK FACE FOR SERVER AND BROWSER (React #418): the company's timezone, spelled out. The old
+// machine-locale call read the machine's zone, so the server (UTC) and the phone (Pacific)
+// printed different text for anyone clocked in on this job.
+const fmtTime = (iso: string, tz: string, lang: string) => formatTime(iso, tz, lang);
 
 const fmtHm = (ms: number) => {
   const m = Math.max(0, Math.floor(ms / 60_000));
@@ -85,12 +89,15 @@ export function JobTimeButton({
 }) {
   const router = useRouter();
   const toast = useToast();
-  const t = translator(useLang());
+  const lang = useLang();
+  const t = translator(lang);
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [startAt, setStartAt] = useState(""); // "" = now; otherwise a chosen ISO
-  const [now, setNow] = useState(() => Date.now());
+  // 0 until mounted: the server and the first client render both print the stable placeholder (0:00),
+  // and the tick below fills in the real figure after mount (never Date.now() in the first render).
+  const [now, setNow] = useState(0);
 
   // Staff "or log hours" section (duration shape — "6 hours Tuesday", any crew member).
   const [workDate, setWorkDate] = useState(() => todayStrInTz(tz));
@@ -120,7 +127,7 @@ export function JobTimeButton({
   // entry right now and opens a new one here (0288 switch_job), so the confirm can honestly say what
   // the closed part will read. ONE CLOCK for both, the ticking `now`: the hours in the cut sentence
   // and the fork that chooses between the two sentences can never come off two different moments.
-  const elapsedMs = openEntry ? Math.max(0, now - new Date(openEntry.clock_in).getTime()) : 0;
+  const elapsedMs = openEntry && now > 0 ? Math.max(0, now - new Date(openEntry.clock_in).getTime()) : 0;
   const segmentHours = Math.round((elapsedMs / 3_600_000) * 100) / 100;
 
   function openModal() {
@@ -195,7 +202,7 @@ export function JobTimeButton({
   /** The running clock has gone LONG_SHIFT_HOURS: the out door goes to Timeclock's stop picker. So
    *  does a Switch that would CUT it (a running entry with a job or a code): 0288 closes the old
    *  part at now, the same one-tap mistake, and switchJob refuses it. A re-point closes nothing. */
-  const longRunning = !!openEntry && isLongOpenShift(new Date(openEntry.shift_start ?? openEntry.clock_in).getTime(), now);
+  const longRunning = !!openEntry && now > 0 && isLongOpenShift(new Date(openEntry.shift_start ?? openEntry.clock_in).getTime(), now);
   const longShift =
     longRunning && (state === "here" || (state === "switch" && (!!openEntry?.job_id || !!openEntry?.job_code)));
 
@@ -368,14 +375,14 @@ export function JobTimeButton({
             switchMovesWholeNow(!!openEntry.job_id || !!openEntry.job_code, Date.parse(openEntry.clock_in), now) ? (
               <p className="text-sm text-slate-600">
                 {!openEntry.job_id && !openEntry.job_code
-                  ? fillText(t("jb_switchWholeNoJob"), { since: fmtTime(openEntry.clock_in), job: jobNumber })
-                  : fillText(t("jb_switchWholeFrom"), { since: fmtTime(openEntry.clock_in), from: openEntry.jobLabel ?? openEntry.job_code ?? t("jb_anotherJob"), job: jobNumber })}
+                  ? fillText(t("jb_switchWholeNoJob"), { since: fmtTime(openEntry.clock_in, tz, lang), job: jobNumber })
+                  : fillText(t("jb_switchWholeFrom"), { since: fmtTime(openEntry.clock_in, tz, lang), from: openEntry.jobLabel ?? openEntry.job_code ?? t("jb_anotherJob"), job: jobNumber })}
               </p>
             ) : longShift ? (
               <p className="text-sm text-amber-800">
                 {fillText(t("jb_stillOnClockLong"), {
                   from: openEntry.jobLabel ?? openEntry.job_code ?? t("jb_anotherJob"),
-                  since: new Date(openEntry.clock_in).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }),
+                  since: new Date(openEntry.clock_in).toLocaleString(localeOf(lang), { timeZone: tz, weekday: "short", hour: "numeric", minute: "2-digit" }),
                   // The same figure lib/long-shift's LONG_SHIFT_PHRASE quotes, in the viewer's words.
                   phrase: fillText(t("jb_moreThanHours"), { n: String(LONG_SHIFT_HOURS) }),
                 })}
@@ -384,7 +391,7 @@ export function JobTimeButton({
               <p className="text-sm text-slate-600">
                 {fillText(t("jb_switchCutBody"), {
                   from: openEntry.jobLabel ?? openEntry.job_code ?? t("jb_anotherJob"),
-                  since: fmtTime(openEntry.clock_in),
+                  since: fmtTime(openEntry.clock_in, tz, lang),
                   hours: String(segmentHours),
                   job: jobNumber,
                 })}
@@ -395,7 +402,7 @@ export function JobTimeButton({
           {state === "here" && openEntry && (
             <>
               <p className="text-sm text-slate-600">
-                {fillText(t("jb_onClockHereBody"), { since: fmtTime(openEntry.clock_in), elapsed: fmtHm(elapsedMs) })}
+                {fillText(t("jb_onClockHereBody"), { since: fmtTime(openEntry.clock_in, tz, lang), elapsed: fmtHm(elapsedMs) })}
                 {!isStaff && ` ${t("jb_clockOutOnTimeclockNote")}`}
               </p>
               {logHoursSection}

@@ -1435,6 +1435,33 @@ export async function updateAppointment(id: string, formData: FormData): Promise
 }
 
 /**
+ * WHAT IS THIS FOR? — the visit page's one field for a visit whose title is still only the bare word.
+ * It writes the SAME column Edit Details writes (appointments.title), under the same rule (a title is
+ * required, trimmed), and nothing else: a visit with no day or no customer can name itself without
+ * opening the whole form. A zero-row write is said in words, never a quiet success.
+ */
+export async function setAppointmentTitle(id: string, title: string): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
+  const clean = String(title ?? "").trim().slice(0, 200);
+  if (!clean) return { ok: false, error: await ws.say("ag_srv_titleRequired") };
+  const { data, error } = await ctx.supabase
+    .from("appointments")
+    .update({ title: clean, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: await ws.say("ag_srv_apptGone") };
+  await pushCalendarItem("appointment", id); // the Google event carries the title (fire-safe)
+  revalidatePath("/schedule");
+  revalidatePath("/planner");
+  revalidatePath("/inspections");
+  revalidatePath(`/appointments/${id}`);
+  return { ok: true, id };
+}
+
+/**
  * HOW THE INSPECTION ENDED (0205) — the missing exit.
  *
  * Erik lost the Donner Pass bid and had nowhere to say so: that visit has no customer, no

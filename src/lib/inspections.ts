@@ -7,8 +7,9 @@
  *     is past AND field capture exists — capture is what makes an unmarked visit "done")
  *     but no estimate exists yet on its inquiry or job. Each row's next step is one
  *     button: Create estimate.
- *   • "Upcoming & proposed" — scheduled/proposed visits, including a past-dated one with
- *     NO capture (it may not have happened; hiding it would lie).
+ *   • "Upcoming & proposed" — scheduled/proposed visits that are still ahead (or today).
+ *   • "Didn't Happen?" (missed) — a visit still 'scheduled' on a day before today with NO capture and
+ *     nothing written from it: it may never have happened, so it asks, one tap from Didn't Happen.
  *   • Filed — completed-and-written-up + cancelled, behind the ?view=completed toggle.
  *
  * The tags a row wears live here too (inspectionRowTags), for the same reason: one rule, one place.
@@ -16,6 +17,7 @@
 import { appointmentTypeLabel } from "@/lib/statuses";
 import type { Lang } from "@/lib/locale";
 import { say, type Words } from "@/lib/lang-words";
+import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 
 export interface InspectionBucketRow {
   id: string;
@@ -89,11 +91,54 @@ export function inspectionRowTags(
   return tags;
 }
 
+/** The words an inspection's title says when the person never named what it is FOR: the bare word,
+ *  in either language. The type's own label (said in the caller's language) joins them. */
+const GENERIC_INSPECTION_WORDS = new Set(["inspection", "site inspection", "inspección", "inspeccion", "inspección del sitio", "inspeccion del sitio", "inspección de sitio"]);
+
+/** True when a visit's title tells nobody what the visit is for: empty, or only the word inspection /
+ *  site inspection / the type's own label (either language), ignoring case, a trailing colon and spaces. */
+export function isGenericInspectionTitle(title: string | null | undefined, typeLabel?: string | null): boolean {
+  const norm = (v: string) => v.trim().replace(/[:\s]+$/u, "").replace(/\s+/g, " ").toLowerCase();
+  const t = norm(title ?? "");
+  if (!t) return true;
+  if (GENERIC_INSPECTION_WORDS.has(t)) return true;
+  const label = typeLabel ? norm(typeLabel) : "";
+  return !!label && t === label;
+}
+
+/** What a row says, so every inspection reads as WHAT IT IS FOR: a real title stays and its subtitle
+ *  carries the known parts of customer, street and day; a generic title gives way to the customer and
+ *  street (else the type label), and the subtitle carries the day. Pure: the caller passes the type
+ *  label and the day already said in the reader's language.
+ *
+ *  `kindUnder` is for a row that has no tag and no heading of its own to say the visit's KIND (My
+ *  Day's write-up row): when the generic title gave way to who and where, the type's label leads the
+ *  second line, so a Quote / Estimate or the city's Final Inspection still says which one it is. A
+ *  row whose title IS the type's label already says it, so the label is never said twice. */
+export function inspectionLabel(p: {
+  title?: string | null;
+  typeLabel: string;
+  customer?: string | null;
+  street?: string | null;
+  day?: string | null;
+  kindUnder?: boolean;
+}): { title: string; subtitle: string } {
+  const join = (parts: (string | null | undefined)[]) => parts.map((x) => (x ?? "").trim()).filter(Boolean).join(" · ");
+  if (isGenericInspectionTitle(p.title, p.typeLabel)) {
+    const whoWhere = join([p.customer, p.street]);
+    return { title: whoWhere || p.typeLabel, subtitle: join([p.kindUnder && whoWhere ? p.typeLabel : null, p.day]) };
+  }
+  return { title: (p.title ?? "").trim(), subtitle: join([p.customer, p.street, p.day]) };
+}
+
 export interface InspectionBuckets<T> {
   /** Visit happened, no estimate yet — oldest first (longest-waiting write-up on top). */
   toWriteUp: T[];
   /** Scheduled/proposed — soonest first. */
   upcoming: T[];
+  /** A visit still 'scheduled' on a day BEFORE today with nothing captured and nothing written from
+   *  it: it may never have happened. Newest first. Never joins My Day's pile. */
+  missed: T[];
   /** Completed-and-written-up + cancelled — newest first (the ?view=completed pile). */
   filed: T[];
 }
@@ -110,8 +155,11 @@ export function bucketInspections<T extends InspectionBucketRow>(
    *  estimate or no estimate (0205). Empty set keeps the old behaviour for callers that
    *  don't care (e.g. a pure calendar view). */
   billedJobIds: ReadonlySet<string> = new Set(),
+  /** The company's timezone: "before today" is the company's midnight, not UTC's. */
+  tz: string = "UTC",
 ): InspectionBuckets<T> {
-  const out: InspectionBuckets<T> = { toWriteUp: [], upcoming: [], filed: [] };
+  const out: InspectionBuckets<T> = { toWriteUp: [], upcoming: [], missed: [], filed: [] };
+  const todayStart = tzDayStartUtc(todayStrInTz(tz, now), tz).getTime();
   const time = (r: T) => (r.starts_at ? new Date(r.starts_at).getTime() : 0);
 
   for (const r of rows) {
@@ -147,11 +195,15 @@ export function bucketInspections<T extends InspectionBucketRow>(
     // past visit whose estimate exists files even when the capture text was left blank.
     else if (past && (hasCaptureData(r.capture) || writtenUp))
       (writtenUp ? out.filed : out.toWriteUp).push(r);
+    // A past DAY, still scheduled, nothing captured, nothing written from it: it may never have
+    // happened, so it asks instead of posing as upcoming.
+    else if (r.status === "scheduled" && !!r.starts_at && new Date(r.starts_at).getTime() < todayStart) out.missed.push(r);
     else out.upcoming.push(r);
   }
 
   out.toWriteUp.sort((a, b) => time(a) - time(b));
   out.upcoming.sort((a, b) => time(a) - time(b));
+  out.missed.sort((a, b) => time(b) - time(a));
   out.filed.sort((a, b) => time(b) - time(a));
   return out;
 }

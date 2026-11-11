@@ -25,6 +25,7 @@ import { viewerSwitches } from "@/lib/viewer-switches";
 import { InvoiceJobButton } from "./invoice-job-button";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
+import { newestInvoiceFirst } from "@/lib/invoice-order";
 import { paymentMethodLabel } from "@/lib/payment-method";
 import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { smsReadiness } from "@/lib/sms";
@@ -109,7 +110,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
       // Bounded (audit v921): PostgREST silently truncates at its max-rows cap, so an unbounded
       // list quietly stops showing older rows with nothing on screen saying so. An explicit high
       // limit fails visibly at a known number instead of invisibly at the server's.
-      supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, customers(name)").order("created_at", { ascending: false }).limit(2000),
+      supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, created_at, customers(name)").order("created_at", { ascending: false }).limit(2000),
       // THE QUESTION 0269 BUILT AN INDEX FOR, AND NOBODY EVER ASKED (audit v966).
       //
       // 0269 says it in its own words: the "needs re-sending" question "is asked per org on the
@@ -161,7 +162,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
     customer_name: (Array.isArray(j.customers) ? j.customers[0] : j.customers)?.name ?? null,
   }));
 
-  const list = (allInv ?? []) as any[];
+  const list = [...((allInv ?? []) as any[])].sort(newestInvoiceFirst); // newest first, ties by number
 
   const { doneNotInvoiced, drafts, unpaid } = pipeline;
   // Built from EVERY revised invoice, not from `unpaid`. A change that LOWERS a paid bill's total

@@ -153,6 +153,8 @@ export type Affordance =
   | "assign" // give to a person
   | "snooze" // defer to a later date
   | "dismiss" // remove from my list (delete / cancel / archive)
+  | "wontHappen" // the visit page's Won't Happen, from a row's ⋯ (added per row, only while the visit is not completed)
+  | "notACost" // a receipt row's ⋯ Not a Cost: the paper is filed under that name (the job's paper list's own category edit)
   | "open"; // drill into the detail page
 
 export interface ActionItem {
@@ -326,7 +328,7 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   job_to_schedule: { label: "Needs a Day", tone: "amber" },
   inquiry: { label: "Lead", tone: "green" },
   appointment: { label: "Not Closed Out", tone: "blue" },
-  inspection_writeup: { label: "Needs an Estimate", tone: "green" },
+  inspection_writeup: { label: "To Write Up", tone: "green" },
   // Row override: "Billed, Not Paid" when an open invoice anchors the visit (query.ts).
   visit_unbilled: { label: "Done, Not Billed", tone: "green" },
   quote_draft: { label: "Not Sent", tone: "green" },
@@ -383,7 +385,9 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   inquiry: ["do", "snooze", "dismiss", "open"],
   // Close Out (do), ⋯ Didn't Happen (dismiss). A tech's row only opens (appointmentAffordances).
   appointment: ["do", "dismiss", "open"],
-  // The href opens the estimate builder prefilled with the inspection — still the main road.
+  // The href opens THE INSPECTION, the visit's own page (/appointments/<id>), never the estimate
+  // builder (cn-v1157: a tap reads or changes the report first; the estimate and the job are chosen
+  // from that page). "open" is the row's one button, Open the Inspection.
   // "dismiss" is the OTHER honest ending (0205): most bids lose, and until this verb existed
   // a lost inspection could never leave the inbox at all (Erik's Donner Pass). It writes a real
   // field — appointments.outcome — never a hidden "I clicked this away" flag.
@@ -434,8 +438,11 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // Open-only: the door is the Record a Payment sheet on /bills (?pay=<account>). Nothing to
   // dismiss: it is derived from the supplier's documents and goes when the discount does.
   supplier_pay: ["open"],
-  // Record It opens the job's Costs tab, where Record as Cost is: the one answer it has.
-  receipt_unbilled: ["open"],
+  // Record It opens the job's Costs tab, where Record as Cost is. ⋯ Not a Cost (notACost) is the other
+  // honest answer: the paper never was a cost (a supplier's quote filed as a Receipt), so it is filed
+  // as Not a Cost and stays with the job's papers, the office's alone as the Receipt was. The
+  // Couldn't Check line carries only "open" (query.ts).
+  receipt_unbilled: ["notACost", "open"],
   // Open-only: every answer is on the permit's own card (book it, move it, say how it went), and each
   // one is a different authority and a different day — no generic verb here could name which. Nothing
   // to dismiss either: the row is derived from the permit's visits and goes when the last one passes.

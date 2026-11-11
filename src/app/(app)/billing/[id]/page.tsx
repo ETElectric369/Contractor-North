@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { User, FileText, Printer, Briefcase } from "lucide-react";
+import { User, FileText, Briefcase } from "lucide-react";
 import { BackLink } from "@/components/back-link";
 import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { GetPaidButton } from "@/components/settle-up-button";
@@ -16,6 +16,7 @@ import { CreditButton } from "./credit-button";
 import { RecordRefundButton } from "./record-refund-button";
 import { ShareIconButton } from "@/components/share-icon-button";
 import { SendButton } from "@/components/send-sheet";
+import { PreviewButton } from "@/components/preview-button";
 import { SentMessagesList } from "@/components/sent-messages-list";
 import { ACTIONS_ROW_CLS, SectionActionsMenu } from "@/components/section-actions-menu";
 import { invoiceSectionTree } from "@/lib/nav-tree";
@@ -462,13 +463,18 @@ export default async function InvoicePage({
           )}
         </div>
         </div>
-        {/* ONE PRIMARY BUTTON THAT FOLLOWS THE STATUS (W1-26), then ⋯. A draft: Send $<total> (the
-            Send sheet), with a small "Getting Paid Now?" under it - running drafts like INV-078
-            take payments before they go out. Sent, partial or overdue with money owed: Get Paid
-            $<balance> (the one sheet: card first, then every other way). Paid in full or void:
-            nothing to press. Everything rarer is in the ⋯, in this order: Preview / Print, Send
-            Again, Get Paid (a draft), Job, Credit / Refund, QuickBooks, Set Aside Until…, the status
-            deeds, then Delete or the sentence why it can't be. */}
+        {/* ONE PRIMARY BUTTON THAT FOLLOWS THE STATUS (W1-26), then Preview, then ⋯. A draft: Send
+            $<total> (the Send sheet), with a small "Getting Paid Now?" under it - running drafts like
+            INV-078 take payments before they go out. Sent, partial or overdue with money owed: Get
+            Paid $<balance> (the one sheet: card first, then every other way). Paid in full or void:
+            no primary. PREVIEW STANDS BESIDE IT AT EVERY STATUS (Erik, 2026-11-10: "a preview button
+            on the top bar next to send … so i dont have to search for it"): the bill as its real PDF,
+            a draft most of all, which is the one he checks before it goes. It is the door the ⋯'s
+            "Preview / Print" row was, at the same address, and that row is gone: one door, not two.
+            The row wraps on a phone, and Send stays first so nothing can push it off the screen.
+            Everything rarer is in the ⋯, in this order: Send Again, Get Paid (a draft), Job,
+            Credit / Refund, QuickBooks, Set Aside Until…, the status deeds, then Delete or the
+            sentence why it can't be. */}
         <div className="flex flex-wrap items-start gap-2 self-start">
           {isDraft ? (
             <div className="flex flex-col items-end">
@@ -487,6 +493,7 @@ export default async function InvoicePage({
           ) : inv.status !== "void" && inv.status !== "paid" && balance > 0.005 ? (
             <GetPaidButton {...payDoor} label={`Get Paid ${formatCurrency(balance)}`} />
           ) : null}
+          <PreviewButton doc="invoice" id={inv.id} />
           <SectionActionsMenu
             tree={invoiceSectionTree(
               inv.invoice_number,
@@ -507,9 +514,6 @@ export default async function InvoicePage({
               { jobNode: false },
             )}
           >
-            <Link href={`/print/pdf-preview?doc=invoice&id=${inv.id}&back=/billing/${inv.id}`} className={ACTIONS_ROW_CLS}>
-              <Printer className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Preview / Print
-            </Link>
             {!isDraft && inv.status !== "void" && (
               <SendButton
                 variant="menuItem"

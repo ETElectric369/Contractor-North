@@ -34,6 +34,7 @@ const built = (kind: ActionKind, o: Partial<ActionItem> = {}): ActionItem => {
     job_on_hold: "onhold-job-1",
     job_unbilled_work: "nocosts-job-1",
     materials_needed: "materials-job-1",
+    receipt_unbilled: "receipt-doc-1",
   };
   return row(kind, { id: ids[kind] ?? `${kind}-rec-1`, ...o });
 };
@@ -42,7 +43,7 @@ const PAYLOAD = { date: "2026-10-03", assignee: "person-1", reason: "Waiting on 
 describe("every (kind, verb) the row table can send maps to a registry action", () => {
   const rows: ActionItem[] = (Object.keys(AFFORDANCES) as ActionKind[]).flatMap((k) => [
     built(k, { phone: "555-0100", holdReason: null, targetId: "job-9", openToBuy: 3, payee: "Metro Supply" }),
-    built(k, { affordances: [...new Set([...AFFORDANCES[k], "snooze", "schedule"])] as Affordance[], waitKey: `${k}:job-1`, targetId: "job-9" }),
+    built(k, { affordances: [...new Set([...AFFORDANCES[k], "snooze", "schedule", ...(k === "inspection_writeup" ? ["wontHappen"] : [])])] as Affordance[], waitKey: `${k}:job-1`, targetId: "job-9" }),
   ]);
   const sent: [ActionKind, Affordance, string][] = [];
   for (const item of rows)
@@ -64,6 +65,7 @@ describe("every (kind, verb) the row table can send maps to a registry action", 
       "appointment:do",
       "appointment:dismiss",
       "inspection_writeup:dismiss",
+      "inspection_writeup:wontHappen",
       "organize:dismiss",
       "quote_awaiting:snooze",
       "quote_awaiting:dismiss",
@@ -79,6 +81,7 @@ describe("every (kind, verb) the row table can send maps to a registry action", 
       "job_on_hold:do",
       "job_unbilled_work:snooze",
       "materials_needed:snooze",
+      "receipt_unbilled:notACost",
     ])
       expect(pairs, want).toContain(want);
   });
@@ -90,7 +93,7 @@ describe("every (kind, verb) the row table can send maps to a registry action", 
       expect(m, `${kind} ${verb}`).not.toBeNull();
       expect(REGISTRY[m!.name], `${kind} ${verb} → ${m!.name}`).toBeDefined();
       expect(REGISTRY[m!.name].effect).toBe("write");
-      expect(String(m!.input.id), `${kind} ${verb}`).not.toMatch(/^(unbilled|jdone|qdraft|onhold|nocosts|materials)-/);
+      expect(String(m!.input.id), `${kind} ${verb}`).not.toMatch(/^(unbilled|jdone|qdraft|onhold|nocosts|materials|receipt)-/);
       // The registry's own schema takes what the map hands it.
       expect(REGISTRY[m!.name].input.safeParse(m!.input).success, `${kind} ${verb} → ${m!.name} ${JSON.stringify(m!.input)}`).toBe(true);
     }
@@ -107,6 +110,14 @@ describe("the mappings that matter", () => {
     expect(dispatch).not.toContain("inquiry.delete");
     expect(dispatch).not.toContain('"convert"');
     expect(dispatch).not.toContain("job_needs_return");
+  });
+
+  it("Didn't Happen on an inspection row is the visit page's Won't Happen, by its own registry door, and Nort cannot reach it", () => {
+    expect(map("inspection_writeup", "wontHappen", "appt-1")).toEqual({ name: "appointment.wontHappen", input: { id: "appt-1" } });
+    expect(map("inspection_writeup", "dismiss", "appt-1")).toEqual({ name: "appointment.setOutcome", input: { id: "appt-1", outcome: "lost" } });
+    expect(map("inquiry", "wontHappen", "lead-1")).toBeNull();
+    const agent = readFileSync(join(process.cwd(), "src/lib/actions/agent-tools.ts"), "utf8");
+    expect(agent).not.toContain("appointment.wontHappen");
   });
 
   it("job.snoozeHold and invoice.setAside resolve (with the reason when one is given)", () => {
@@ -151,8 +162,27 @@ describe("the mappings that matter", () => {
   });
 
   it("an open-only kind sends nothing", () => {
-    for (const kind of ["invoice_overdue", "lien_deadline", "time_stray", "stock_short", "supplier_paper", "supplier_pay", "receipt_unbilled"] as ActionKind[])
+    for (const kind of ["invoice_overdue", "lien_deadline", "time_stray", "stock_short", "supplier_paper", "supplier_pay"] as ActionKind[])
       for (const verb of ["do", "dismiss", "assign"] as Affordance[]) expect(map(kind, verb, "x"), `${kind} ${verb}`).toBeNull();
+  });
+
+  it("Not a Cost on a receipt row is the job's own paper list rule, by its own registry door, and Nort cannot reach it", () => {
+    // The row is receipt-<document>: the prefix comes off, so the write names the paper itself.
+    expect(map("receipt_unbilled", "notACost", "receipt-doc-1")).toEqual({ name: "document.notACost", input: { id: "doc-1" } });
+    // The Couldn't Check line, a bare id and an empty one map to nothing (never a guess at the record).
+    for (const id of ["receipts-unread", "doc-1", "receipt-"]) expect(map("receipt_unbilled", "notACost", id), id).toBeNull();
+    // It is the row's ONLY verb: nothing else a receipt row could be sent maps anywhere.
+    for (const verb of ["do", "dismiss", "assign", "snooze", "schedule", "wontHappen"] as Affordance[]) expect(map("receipt_unbilled", verb, "receipt-doc-1"), verb).toBeNull();
+    // And no other kind of row reaches the door, whatever its id looks like.
+    for (const kind of (Object.keys(AFFORDANCES) as ActionKind[]).filter((k) => k !== "receipt_unbilled")) expect(map(kind, "notACost", "receipt-doc-1"), kind).toBeNull();
+    // A staff write the registry has, taking the paper's id and nothing else.
+    const def = REGISTRY["document.notACost"];
+    expect(def).toMatchObject({ name: "document.notACost", group: "document", auth: "staff", effect: "write" });
+    expect(def.input.safeParse({ id: "doc-1" }).success).toBe(true);
+    expect(def.input.safeParse({}).success).toBe(false);
+    // The assistant is not offered it (the same pin as appointment.wontHappen).
+    const agent = readFileSync(join(process.cwd(), "src/lib/actions/agent-tools.ts"), "utf8");
+    expect(agent).not.toContain("document.notACost");
   });
 });
 

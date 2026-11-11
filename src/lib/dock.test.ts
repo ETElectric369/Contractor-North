@@ -1,5 +1,20 @@
 import { describe, it, expect } from "vitest";
-import { DOCK, activeRowHref, activeSection, basePath, dockTiles, menuSections, visibleDock } from "@/lib/dock";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  DECLARES_HOME,
+  DOCK,
+  activeNav,
+  activeRowHref,
+  activeSection,
+  awaitsHome,
+  basePath,
+  dockTiles,
+  menuSections,
+  navDrawnAt,
+  visibleDock,
+  type NavAt,
+} from "@/lib/dock";
 import { ALL_ON, FEATURE_KEYS, normalizeFeatures, type FeatureKey, type FeatureMap } from "@/lib/features";
 import { JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
 
@@ -630,5 +645,187 @@ describe("the Jobs status rows are Title Case (cn-v1128, Erik's law for every cl
     expect(rows.length).toBeGreaterThan(3);
     for (const r of rows) expect(r.label, r.label).toMatch(/^([A-Z][a-z]*)( [A-Z][a-z]*)*$/);
     expect(rows.map((r) => r.label)).toEqual(expect.arrayContaining(["To Be Scheduled", "In Progress", "On Hold"]));
+  });
+});
+
+/**
+ * A PAGE DECLARES ITS HOME (activeNav): the matcher's one new rule.
+ *
+ * Erik, 2026-11-10: "the sub-nav disappears when an inspection is clicked." /appointments/<id> is a
+ * real page no cluster owns by its URL (the Schedule tile's note had the whole family down as a
+ * redirect), and the URL cannot say whether the visit is an inspection (Sales › Inspections) or a
+ * booking on the Schedule. The page has read the row, so it names the dock row it lives under
+ * (components/nav-home), and the one matcher uses that ONLY when the pathname matches no cluster.
+ */
+describe("activeNav — the pathname first, then the home the page declared, else nothing", () => {
+  const staff = visibleDock({ isStaff: true });
+  const tech = visibleDock({ isStaff: false });
+  const at = (pathname: string, home?: string | null, current = pathname): NavAt => ({ pathname, current, home });
+  const lit = (a: NavAt, sections = staff) => {
+    const { section, rowHref } = activeNav(a, sections);
+    return `${section?.key ?? "-"}>${rowHref ?? "-"}`;
+  };
+
+  it("a visit's own page matches no cluster by its URL (the mechanism of the report)", () => {
+    for (const sections of [staff, tech, DOCK]) expect(activeSection("/appointments/abc123", sections)).toBeUndefined();
+    expect(lit(at("/appointments/abc123"))).toBe("->-");
+  });
+
+  it("an unmatched pathname with a declared home lights that cluster and that row", () => {
+    expect(lit(at("/appointments/abc123", "sl-inspections"))).toBe("sales>/inspections");
+    expect(lit(at("/appointments/abc123", "s-week"))).toBe("schedule>/schedule");
+    // Sales' sub-nav is its four rows with Inspections lit; the Schedule has one row, so no sub-nav.
+    const sales = activeNav(at("/appointments/abc123", "sl-inspections"), staff).section!;
+    expect(sales.children.filter((c) => c.href).map((c) => c.id)).toEqual(["sl-leads", "sl-inspections", "sl-quotes", "sl-customers"]);
+    expect(activeNav(at("/appointments/abc123", "s-week"), staff).section!.children.filter((c) => c.href)).toHaveLength(1);
+    // A tech's visit lives on My Day.
+    expect(lit(at("/appointments/abc123", "t-day"), tech)).toBe("today>/planner");
+  });
+
+  it("a pathname that matches a cluster IGNORES the declared home", () => {
+    for (const home of ["sl-inspections", "s-week", "t-day", "m-inv", "no-such-row"]) {
+      expect(lit(at("/billing/abc123", home)), home).toBe("invoices>-");
+      expect(lit(at("/billing", home)), home).toBe("invoices>/billing");
+      expect(lit(at("/jobs", home, "/jobs?status=in_progress")), home).toBe("jobs>/jobs?status=in_progress");
+      expect(lit(at("/inspections", home)), home).toBe("sales>/inspections");
+    }
+    // The estimate a visit opens keeps Sales by its own URL, whatever is or is not declared.
+    for (const home of [undefined, null, "s-week"]) {
+      expect(activeNav(at("/quotes/new", home, "/quotes/new?capture=abc123"), staff).section?.key).toBe("sales");
+      expect(activeNav(at("/quotes/abc123", home), staff).section?.key).toBe("sales");
+    }
+  });
+
+  it("no declared home, no sub-nav: every route answers exactly as activeSection and activeRowHref did", () => {
+    const routes = [
+      ...DOCK.flatMap((s) => s.children).flatMap((c) => (c.href ? [c.href] : [])),
+      "/quotes/abc123", "/quotes/new?capture=abc123", "/jobs/abc123", "/billing/abc123", "/billing/ar", "/crm/abc123",
+      "/purchasing/abc123", "/forms/abc123", "/tasks/site-prep", "/timeclock/abc123", "/settings", "/settings?tab=you",
+      "/work-orders/abc123", "/materials/abc123", "/appointments/abc123", "/definitely-not-a-route",
+    ];
+    for (const sections of [staff, tech, visibleDock({ isStaff: true, features: off("leads", "estimates") })]) {
+      for (const current of routes) {
+        const pathname = basePath(current);
+        const section = activeSection(pathname, sections);
+        const before = { section, rowHref: section ? activeRowHref(section.children, pathname, current) : undefined };
+        for (const home of [undefined, null]) expect(activeNav({ pathname, current, home }, sections), current).toEqual(before);
+        // And on a route a cluster owns, a declared home changes nothing either.
+        if (section) expect(activeNav({ pathname, current, home: "sl-inspections" }, sections), current).toEqual(before);
+      }
+    }
+  });
+
+  it("a home this person's dock does not draw lights nothing, as its own page does", () => {
+    // A tech has no Sales and no Schedule.
+    expect(lit(at("/appointments/abc123", "sl-inspections"), tech)).toBe("->-");
+    expect(lit(at("/appointments/abc123", "s-week"), tech)).toBe("->-");
+    // Leads off puts the Inspections row away, and /inspections itself lights nothing then.
+    const leadsOff = visibleDock({ isStaff: true, features: off("leads") });
+    expect(lit(at("/appointments/abc123", "sl-inspections"), leadsOff)).toBe("->-");
+    expect(activeSection("/inspections", leadsOff)).toBeUndefined();
+    // A lapsed company's dock is the Plan tile alone.
+    expect(lit(at("/appointments/abc123", "sl-inspections"), visibleDock({ isStaff: true, lapsed: true }))).toBe("->-");
+    // A heading is not a page, and an id nothing has is not a home.
+    expect(lit(at("/appointments/abc123", "m-billing-h"))).toBe("->-");
+    expect(lit(at("/appointments/abc123", "no-such-row"))).toBe("->-");
+  });
+
+  it("the rail and the strip read ONE location and ONE matcher, never the router on their own", () => {
+    for (const file of ["src/components/app-shell/dock.tsx", "src/components/section-subnav.tsx"]) {
+      const src = readFileSync(join(process.cwd(), file), "utf8");
+      expect(src, file).toContain("const at = useNavAt(sections);");
+      expect(src, file).toMatch(/= activeNav\(at, sections\);/);
+      expect(src, file).not.toContain('from "next/navigation"');
+      expect(src, file).not.toMatch(/import \{[^}]*\b(activeSection|activeRowHref)\b[^}]*\} from "@\/lib\/dock"/);
+    }
+  });
+});
+
+/**
+ * NOTHING IN THE NAV MOVES WHILE A DECLARING PAGE IS ON ITS WAY (awaitsHome, navDrawnAt).
+ *
+ * The declaration arrives WITH the page. Between the tap and the page there is the loading
+ * spinner, already on the new URL, with nobody yet to say where it lives: without the hold, opening
+ * an inspection from its own list would still blink the sub-nav out and back. So for a route whose
+ * page declares, the nav stays on the last location that had settled until the page speaks.
+ */
+describe("awaitsHome and navDrawnAt — the last settled location holds until the page says where it lives", () => {
+  const staff = visibleDock({ isStaff: true });
+  const tech = visibleDock({ isStaff: false });
+  const at = (pathname: string, home?: string | null, current = pathname): NavAt => ({ pathname, current, home });
+  const shown = (a: NavAt, sections = staff) => {
+    const { section, rowHref } = activeNav(a, sections);
+    return `${section?.key ?? "-"}>${rowHref ?? "-"}`;
+  };
+  const spinner = at("/appointments/abc123");
+  const inspection = at("/appointments/abc123", "sl-inspections");
+
+  it("waits only on a route whose page declares, only until it has, and never where a cluster owns the URL", () => {
+    expect(awaitsHome(spinner, staff)).toBe(true);
+    expect(awaitsHome(at("/appointments/abc123", null), staff)).toBe(true);
+    expect(awaitsHome(inspection, staff)).toBe(false);
+    // A home this person's dock does not draw is still an answer: the wait is over.
+    expect(awaitsHome(inspection, tech)).toBe(false);
+    for (const p of ["/inspections", "/quotes/abc123", "/jobs/abc123", "/work-orders/abc123", "/settings", "/appointments", "/appointments-old/abc123"]) {
+      expect(awaitsHome(at(p), staff), p).toBe(false);
+    }
+  });
+
+  it("opening an inspection from its list: Sales › Inspections through the spinner, and the page says the same", () => {
+    const list = at("/inspections");
+    expect(shown(navDrawnAt(list, null, staff))).toBe("sales>/inspections");
+    expect(navDrawnAt(spinner, list, staff)).toBe(list);
+    expect(shown(navDrawnAt(spinner, list, staff))).toBe("sales>/inspections");
+    expect(navDrawnAt(inspection, list, staff)).toBe(inspection);
+    expect(shown(navDrawnAt(inspection, list, staff))).toBe("sales>/inspections");
+  });
+
+  it("from My Day or the Schedule the lit tile stays lit until the page speaks, then the visit's own lights", () => {
+    for (const from of [at("/planner"), at("/schedule", null, "/schedule?view=day&date=2026-11-12")]) {
+      const held = navDrawnAt(spinner, from, staff);
+      expect(held).toBe(from);
+      expect(shown(navDrawnAt(inspection, from, staff))).toBe("sales>/inspections");
+      expect(shown(navDrawnAt(at("/appointments/abc123", "s-week"), from, staff))).toBe("schedule>/schedule");
+    }
+    expect(shown(navDrawnAt(spinner, at("/planner"), staff))).toBe("today>/planner");
+  });
+
+  it("the whole location is held, so a rule that reads the pathname answers as it did (no Jobs strip on a job's page)", () => {
+    const job = at("/jobs/abc123");
+    expect(navDrawnAt(spinner, job, staff)).toBe(job);
+    expect(navDrawnAt(spinner, job, staff).pathname.startsWith("/jobs/")).toBe(true);
+    const strip = readFileSync(join(process.cwd(), "src/components/section-subnav.tsx"), "utf8");
+    expect(strip).toContain('if (group.key === "jobs" && at.pathname.startsWith("/jobs/")) return null;');
+  });
+
+  it("a hard load straight onto a visit: nothing settled, so nothing lit until the page speaks", () => {
+    expect(navDrawnAt(spinner, null, staff)).toBe(spinner);
+    expect(shown(navDrawnAt(spinner, null, staff))).toBe("->-");
+  });
+
+  it("lets go at once on a page that declares nothing, and from one visit to the next holds the last one's", () => {
+    const workOrder = at("/work-orders/abc123");
+    expect(navDrawnAt(workOrder, inspection, staff)).toBe(workOrder);
+    expect(shown(navDrawnAt(workOrder, inspection, staff))).toBe("->-");
+    const next = at("/appointments/def456");
+    expect(navDrawnAt(next, inspection, staff)).toBe(inspection);
+  });
+
+  it("the hook settles a location only in an effect, only while it is not itself waiting, and draws navDrawnAt", () => {
+    const hook = readFileSync(join(process.cwd(), "src/components/app-shell/use-nav-at.ts"), "utf8");
+    expect(hook).toMatch(/useEffect\(\(\) => \{\s*if \(!waiting\) settled = now;\s*\}\);/);
+    expect(hook).toContain("return navDrawnAt(now, settled, sections);");
+    // A declaration counts only on the pathname it was made on: the next page never wears the last one's.
+    expect(hook).toContain("home: declared && declared.pathname === pathname ? declared.id : null,");
+  });
+
+  it("every route family that declares has a page that does, first thing it draws, on a prefix no cluster owns", () => {
+    expect(DECLARES_HOME).toEqual(["/appointments"]);
+    for (const base of DECLARES_HOME) {
+      for (const sections of [DOCK, staff, tech]) expect(activeSection(`${base}/abc123`, sections), base).toBeUndefined();
+      const file = join(process.cwd(), `src/app/(app)${base}/[id]/page.tsx`);
+      expect(existsSync(file), file).toBe(true);
+      expect(readFileSync(file, "utf8"), file).toMatch(/<div className="mx-auto max-w-2xl">\s*<NavHome id=\{home\.nav\} \/>/);
+    }
   });
 });

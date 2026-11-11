@@ -23,7 +23,7 @@ import type { WordCatalog } from "./types";
  * schedule); Vendor = Proveedor (jb_noVendor); Default = Predeterminado; Quote (Fixed) = Cotización
  * (Precio Fijo) and Estimate (T&M) = Presupuesto (Tiempo Y Material) (nv_page_quotes, ag_rail_billingTm);
  * Revise = Crear Revisión; Not Yet = Aún No (mt_notYetTick); Size To Job = Calcular Para El Trabajo.
- * Shared pieces (Add Line Items, the share and email buttons) read the language themselves, so a Spanish
+ * Shared pieces (Add Line Items, the share and email buttons, the header's Preview) read the language themselves, so a Spanish
  * office seat sees them in Spanish on billing too. The Text chip's not-set-up refusal is lib/sms-readiness's
  * own constant and stays English with it.
  *
@@ -49,6 +49,7 @@ export const words: WordCatalog = {
     "src/app/(app)/quotes/paper-format-switch.tsx",
     "src/components/add-line-items.tsx",
     "src/components/share-icon-button.tsx",
+    "src/components/preview-button.tsx",
     "src/app/(app)/appointments/new-inspection-button.tsx",
   ],
   sameInBoth: ["qt_colTotal", "qt_breakerExample"],
@@ -130,6 +131,7 @@ export const words: WordCatalog = {
     qt_btn_regenerate: "Regenerate",
     qt_btn_generateFromLineItems: "Generate from Line Items",
     qt_btn_saving: "Saving…",
+    qt_btn_saved: "Saved",
     qt_btn_save: "Save",
     qt_proposalNotJobList: "This Is the Proposal. The Job Keeps Its Own List On the Panel Tab.",
     qt_openJobPanel: "Open {job}'s Panel",
@@ -156,10 +158,10 @@ export const words: WordCatalog = {
     qt_restFromContact: "Phone, email and the rest can go in from the contact afterwards.",
     qt_noCustomerLeaveWithLead: "— No customer — leave it with the lead {name} —",
     qt_noCustomer: "— No customer —",
-    qt_saveCustomer: "Save customer",
     qt_btn_newCustomer: "+ New Customer",
     qt_startedFromLead: "Started from the lead {name}.",
     qt_leadNotCustomerYet: "Lead — not a customer yet",
+    qt_leadNoAddress: "No address on this lead yet.",
     qt_madeOutToLead: "This estimate is made out to them. They become a customer when you win the work — there's nothing to do here now.",
     qt_preparedFor: "Prepared for",
     qt_nobodyAttachedYet: "Nobody attached yet — it prints without a name until you pick someone.",
@@ -236,6 +238,9 @@ export const words: WordCatalog = {
     qt_confirmText: "Text?",
     qt_btn_sendInvoice: "Send Invoice",
     qt_btn_send: "Send",
+    // The header's Preview, beside Send on an estimate and on an invoice (components/preview-button, 2026-11-10): the real PDF, with Print and Download PDF inside it
+    qt_btn_preview: "Preview",
+    qt_previewStillSaving: "That change is still saving, so the preview would be missing it. Try Preview again in a moment.",
     qt_btn_email: "Email",
     qt_btn_text: "Text",
     qt_invoiceEmailed: "Invoice emailed",
@@ -325,6 +330,7 @@ export const words: WordCatalog = {
     qt_btn_regenerate: "Regenerar",
     qt_btn_generateFromLineItems: "Generar desde las Partidas",
     qt_btn_saving: "Guardando…",
+    qt_btn_saved: "Guardado",
     qt_btn_save: "Guardar",
     qt_proposalNotJobList: "Esta Es la Propuesta. El Trabajo Lleva Su Propia Lista en la Pestaña Panel.",
     qt_openJobPanel: "Abrir el Panel de {job}",
@@ -351,10 +357,10 @@ export const words: WordCatalog = {
     qt_restFromContact: "El teléfono, el correo y lo demás se agregan después desde el contacto.",
     qt_noCustomerLeaveWithLead: "— Sin cliente — dejarlo con el prospecto {name} —",
     qt_noCustomer: "— Sin cliente —",
-    qt_saveCustomer: "Guardar cliente",
     qt_btn_newCustomer: "+ Nuevo Cliente",
     qt_startedFromLead: "Empezó con el prospecto {name}.",
     qt_leadNotCustomerYet: "Prospecto — aún no es cliente",
+    qt_leadNoAddress: "Este prospecto aún no tiene dirección.",
     qt_madeOutToLead: "Este presupuesto está a su nombre. Se vuelve cliente cuando ganas el trabajo — no hay nada que hacer aquí por ahora.",
     qt_preparedFor: "Preparado para",
     qt_nobodyAttachedYet: "Nadie adjunto todavía — se imprime sin nombre hasta que elijas a alguien.",
@@ -428,6 +434,8 @@ export const words: WordCatalog = {
     qt_confirmText: "¿Enviar por mensaje?",
     qt_btn_sendInvoice: "Enviar Factura",
     qt_btn_send: "Enviar",
+    qt_btn_preview: "Vista Previa",
+    qt_previewStillSaving: "Ese cambio aún se está guardando, así que la vista previa no lo tendría. Intenta de nuevo en un momento.",
     qt_btn_email: "Correo",
     qt_btn_text: "Mensaje",
     qt_invoiceEmailed: "Factura enviada por correo",

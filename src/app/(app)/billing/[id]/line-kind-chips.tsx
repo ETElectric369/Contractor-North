@@ -5,6 +5,7 @@ import { useToast } from "@/components/toast";
 import { canBeDiscount, DISCOUNT_KIND, groupInvoiceLines, LINE_KIND_LABEL, PICKABLE_LINE_KINDS, storedLineKind, type PickableLineKind } from "@/lib/invoice-math";
 import { countsAsWorkCompleted } from "@/lib/portal/line-kind";
 import type { InvoiceItem } from "@/lib/types";
+import { useSaveInFlight } from "@/lib/saves-in-flight";
 import { setInvoiceItemKind } from "../actions";
 
 /** Where the customer's Cost Breakdown files this line today: the one reading every document makes. */
@@ -42,6 +43,9 @@ export function LineKindChips({
 }) {
   const toast = useToast();
   const [pending, start] = useTransition();
+  // THE CHIP IS A SAVE, SO IT IS COUNTED (cn-v1157): the customer's Cost Breakdown files the line by
+  // it, and the header's Preview waits for the count. A hook, so it stands above the early return.
+  useSaveInFlight(pending);
   const src = item.import_source ?? null;
   // The draw's own credit and milestone lines are locked, like every other write to them.
   if (src === "draw_credit" || src === "milestone") return null;

@@ -59,6 +59,12 @@ export function analyserRms(): number | null {
 export function usingStreamBackend(): boolean {
   return streamBackend.speechSupported();
 }
+/** Is this still a VOICE session? The panel answers when the mic asks (the stream backend, as it
+ *  gives up on silence): its closing line is spoken only to someone still talking, never to a person
+ *  who went on by typing. The webkit fallback speaks no closing line, so there is nobody to tell. */
+export function setVoiceSessionCheck(fn: (() => boolean) | null) {
+  (streamBackend as any).setVoiceSessionCheck?.(fn);
+}
 /** Nort speaks first (0394): only the stream backend greets — the webkit fallback has no live
  *  stream to greet over, and starts recording at once as it always did. */
 export function setGreeting(g: { text: string; play: () => Promise<void> } | null) {

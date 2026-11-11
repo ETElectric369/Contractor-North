@@ -9,7 +9,7 @@ import type { ActionItem, Affordance, AlreadyInvoicedTarget } from "./types";
  * 20px box: five guesses per row, none of them saying what it did. Now each row has ONE button that
  * says its verb ("Send It", "Pick a Day", "Close Out"), and behind lane 1a's ⋯ (RowMoreSheet) only
  * what is real for that row: a Snooze that picks a day, Assign on a job needing a day, and the row's
- * honest ending behind a confirm (Lost, Not Needed, Didn't Happen, Cancel, Set Aside). Tapping the
+ * honest ending behind a confirm (Lost, Not Needed, Didn't Happen, Cancel, Set Aside, Not a Cost). Tapping the
  * row still opens it. The words Dismiss and Delete never appear.
  *
  * ONE TABLE, read by the list and by anything else that names what a row can do (Nort next wave), so
@@ -196,13 +196,19 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
       };
     case "inspection_writeup":
       return {
-        primary: open("Write It Up", item.href),
+        // OPEN THE INSPECTION, never an estimate: a tap reads or changes the report first; the estimate
+        // and the job are chosen from the visit page itself. item.href is /appointments/<id>.
+        primary: open("Open the Inspection", item.href),
         also: null,
-        // Open the Visit (cn-v1071): the row's id IS the visit. Every door here used to lead to a
-        // NEW estimate, so a visit that had already become a job by another road (one customer's: written up
-        // without the backlink) could only be called Lost; its page has the attach door (won).
+        // NO "Open the Visit" UNDER ⋯ (zero duplicate doors). cn-v1071 put it here when every door on
+        // this row led to a NEW estimate, so a visit that had already become a job by another road
+        // (written up without the backlink) could reach its own page, where the attach door (won) is.
+        // Since cn-v1157 the row's one button IS that page (item.href is /appointments/<id>, and the
+        // row's id is the visit), so the ⋯ row was the same door twice under a second name.
         more: [
-          open("Open the Visit", `/appointments/${item.id}`),
+          ...(has(item, "wontHappen")
+            ? [ending("wontHappen", "Didn't Happen", "Didn't Happen?", `Marks ${what} as a visit that didn't happen. It is removed if nothing was captured on it, otherwise cancelled and kept on file.`, "Didn't Happen")]
+            : []),
           ...(has(item, "dismiss")
             ? [ending("dismiss", "Lost", "Didn't Win It?", `Records ${what} as lost, so it stops asking. The inspection is marked lost; you can change it back on its own page.`, "Mark It Lost")]
             : []),
@@ -254,7 +260,29 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
         more: has(item, "snooze") ? [{ label: "Set Aside Until…", act: { type: "comeBack", verb: "snooze", askWhy: true, button: "Set Aside" } }] : [],
       };
     case "receipt_unbilled":
-      return { ...none, primary: open("Record It", item.href) };
+      return {
+        primary: open("Record It", item.href),
+        also: null,
+        // NOT A COST (the owner, 2026-11-10: "it's a quote from my supplier not a bill, everything is
+        // closed"). The paper was filed as a Receipt and never was one; Record It would add a cost
+        // nobody paid. The same two words as a tray paper's Not a Cost, and the category it is filed
+        // under (document.notACost, the job's own paper list rule). Saying what a paper is NOT leaves
+        // its audience as it was: the office's alone, like the Receipt, never the crew's (a supplier's
+        // quote carries his prices). The office's door (the action is staff-only), so a tech is never
+        // handed one that only refuses.
+        more:
+          ctx.isStaff && has(item, "notACost")
+            ? [
+                ending(
+                  "notACost",
+                  "Not a Cost",
+                  "Not a Cost?",
+                  `Files ${what} as Not a Cost, so it stops asking to be recorded. It stays with the job's papers for the office, and the crew does not see it. No cost is recorded or removed. To change it back, use the pencil under Receipts & Papers on the job's Costs tab.`,
+                  "Not a Cost",
+                ),
+              ]
+            : [],
+      };
     // THE ROW'S OWN STATE PICKS THE WORDS: Book It, Record Inspection Status, or Book Another Visit. The chip
     // and the door are declared together (permit-inspection-items INSPECTION_DOOR) so they cannot
     // drift. Every one of them opens the permit's card, which is where all three are answered.

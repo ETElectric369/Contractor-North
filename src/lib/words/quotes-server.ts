@@ -157,6 +157,7 @@ export const words: WordCatalog = {
     qs_taskRenamed: "The job's task is renamed too.",
     qs_estimateNotHere: "That estimate isn't here to update.",
     qs_customerUnavailable: "That customer isn't available.",
+    qs_estimateUnavailable: "That estimate isn't available.",
     qs_jobUnavailable: "That job isn't available.",
     qs_workOrderNotMoved: "The estimate's work order could not be moved to this job ({why}).",
     qs_materialsListNotMoved: "The estimate's materials list could not be moved to this job ({why}).",
@@ -197,6 +198,9 @@ export const words: WordCatalog = {
     qs_walkedBack: "{quote} was replaced by this estimate and now stands replaced by nothing — set it back to Accepted if that work goes ahead.",
     qs_jobNotCreated: "The job wasn't created.",
     qs_acceptedJobAttention: "Estimate accepted, but the job needs attention: {why}",
+    // What is TRUE when the stamp did not land, and what NOT to do: the old line sent the person back
+    // through Start the Estimate, which finds nothing standing on a visit with no lead and births a twin.
+    qs_stampNotLinked: "The estimate is saved, but it could not be tied to its inspection, so the inspection can still show as waiting to be written up. Do not start another estimate from that inspection. When this estimate is settled, mark the inspection Won or Lost on its own page.",
 
     // ── quotes/actions: the estimator and the circuit schedule (pass 2) ──
     qs_takeoffTooLongTrim: "That take-off ran longer than one pass — trim the scope and try again.",
@@ -355,6 +359,7 @@ export const words: WordCatalog = {
     qs_taskRenamed: "La tarea del trabajo también se renombró.",
     qs_estimateNotHere: "Ese presupuesto no está aquí para actualizarlo.",
     qs_customerUnavailable: "Ese cliente no está disponible.",
+    qs_estimateUnavailable: "Ese presupuesto no está disponible.",
     qs_jobUnavailable: "Ese trabajo no está disponible.",
     qs_workOrderNotMoved: "La orden de trabajo del presupuesto no se pudo mover a este trabajo ({why}).",
     qs_materialsListNotMoved: "La lista de materiales del presupuesto no se pudo mover a este trabajo ({why}).",
@@ -394,6 +399,7 @@ export const words: WordCatalog = {
     qs_walkedBack: "{quote} fue reemplazado por este presupuesto y ahora no lo reemplaza nada — vuelve a ponerlo como aceptado si ese trabajo sigue.",
     qs_jobNotCreated: "No se creó el trabajo.",
     qs_acceptedJobAttention: "Presupuesto aceptado, pero el trabajo necesita atención: {why}",
+    qs_stampNotLinked: "El presupuesto se guardó, pero no se pudo enlazar con su inspección, así que la inspección puede seguir apareciendo como pendiente de redactar. No empieces otro presupuesto desde esa inspección. Cuando este presupuesto se resuelva, marca la inspección como Ganada o Perdida en su propia página.",
 
     qs_takeoffTooLongTrim: "Esa cuantificación fue más larga que una pasada — recorta el alcance e inténtalo de nuevo.",
     qs_takeoffTooLongSplit: "Esa cuantificación fue más larga que una pasada — divide el plano, o recorta el alcance e inténtalo de nuevo.",

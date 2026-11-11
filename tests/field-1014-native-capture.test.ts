@@ -127,7 +127,7 @@ describe("the page's door (native-audio.ts)", () => {
     // The trace reaches the ops sink on its own when the screen comes back (a reopened app detaches the cable).
     const tr = read("src/lib/nort/trace.ts");
     expect(tr).toContain('if (visible) flushTrace("screen back");');
-    expect(tr).toContain("if (!wasHidden || !isNativeShell()) return;");
+    expect(tr).toContain("if (!(wasHidden || wasDrop) || !isNativeShell()) return;"); // hidden OR a drop (traceDrop): a foreground turn alone still ships nothing
     expect(tr).toContain('void reportClientError("nort-voice", `trace turn ${turnNo} (load ${loadId}, flush ${++flushNo})`, { why, at: clock(), lines: mine.join("\\n") }, "trace")'); // every row its own title (carried-1123-voice.test.ts); level trace since cn-v1136 (the sink retires it after 14 days)
     expect(read("src/lib/voice-stream.ts")).toContain('if (nativeOn) flushTrace("stop");');
     // The unlock-stop hunt: the panel's unmount, the assistant's mount/unmount and the screen's state are in the trace.
@@ -215,5 +215,73 @@ describe("the mic source switch (voice-stream.ts)", () => {
     const plist = read("ios/App/App/Info.plist");
     expect(plist).toContain("<key>NSMicrophoneUsageDescription</key>");
     expect(plist).toMatch(/<key>UIBackgroundModes<\/key>\s*<array>\s*<string>audio<\/string>/);
+  });
+});
+
+describe("nothing silent: the mic says it is closing, a failed voice request is said, drops leave evidence", () => {
+  const chat = read("src/app/(app)/assistant/assistant-chat.tsx");
+  it("both spoken lines exist in both languages (tú), from the catalog", async () => {
+    const { closingMicLine, voiceRequestFailedLine } = await import("@/lib/voice-failure");
+    expect(closingMicLine("en")).toBe("I'm closing the mic. Tap Talk when you need me.");
+    expect(closingMicLine("es")).toBe("Cierro el micrófono. Toca Hablar cuando me necesites.");
+    expect(voiceRequestFailedLine("en")).toBe("That didn't go through. Say it again.");
+    expect(voiceRequestFailedLine("es")).toBe("No se envió. Dilo otra vez.");
+  });
+  it("the closing line: muted first, spoken through speakSmart, the session ends when it ends, only for no-speech", () => {
+    const say = page.slice(page.indexOf("function sayThenClose("), page.indexOf("function errName("));
+    expect(say.indexOf("setMuted(true);")).toBeLessThan(say.indexOf("speakSmart("));
+    expect(say.match(/stopListening\(/g)?.length).toBe(1); // only inside finish(), run by the line's end or the safety timer
+    expect(say).toContain("speakSmart(closingMicLine(turnLang), () => finish()");
+    expect(say).not.toContain("beginNativeTurn");
+    expect(say).not.toContain("nextTurn");
+    expect(page.match(/sayThenClose\(/g)?.length).toBe(2); // the definition and the one call
+    expect(page).toContain('if (branch === "no-speech-cap") {');
+  });
+  it("whoever takes over a closing line CUTS it: the Talk, a Stop, the safety timer (skeptic #60)", () => {
+    // Clearing the marker alone left the clip playing while the new turn re-armed unmuted. The
+    // driven proof is field-1014-native-capture-drive; these hold the three call sites.
+    const cut = page.slice(page.indexOf("function cutClosingLine("), page.indexOf("function sayThenClose("));
+    expect(cut).toMatch(/if \(closingMic === null\) return;\s*closingMic = null;[\s\S]*clearTimeout\(closingTimer\);[\s\S]*stopSpeaking\(\);/);
+    const start = page.slice(page.indexOf("export function startListening("), page.indexOf("function micReady("));
+    expect(start.indexOf("cutClosingLine();")).toBeGreaterThan(-1);
+    expect(start.indexOf("cutClosingLine();")).toBeLessThan(start.indexOf("muted = false;")); // the cut first, the unmute after
+    expect(start.indexOf("cutClosingLine();")).toBeLessThan(start.indexOf("nextTurn();"));
+    expect(page).toMatch(/export function stopListening\([^)]*\) \{\s*session\+\+;\s*greeting = null;[^\n]*\n\s*cutClosingLine\(\);/);
+    const say = page.slice(page.indexOf("function sayThenClose("), page.indexOf("function errName("));
+    expect(say).toContain("closingTimer = setTimeout(() => finish(true), CLOSING_LINE_MAX_MS);");
+    expect(say.indexOf("if (timedOut) stopSpeaking();")).toBeGreaterThan(-1);
+    expect(say.indexOf("if (timedOut) stopSpeaking();")).toBeLessThan(say.indexOf("stopListening({ discard: true });"));
+    expect(page).not.toMatch(/^\s*closingMic = null; \/\/ a Talk tapped/m); // the old line, which cleared the marker and left the speech
+  });
+  it("the closing line is spoken only to a VOICE session: the panel answers when the mic asks", () => {
+    // Typing leaves voice mode with the mic still running; that mic closes quietly, by the ordinary give-up.
+    const give = page.slice(page.indexOf("function retryOrGiveUp("), page.indexOf("function cannotRecord("));
+    expect(give).toMatch(/const spoken = inVoiceSession\(\);[\s\S]*if \(spoken\) \{\s*status\(line\);\s*sayThenClose\(line\);\s*return;\s*\}\s*\}\s*stopListening\(\{ discard: true \}\);\s*status\(line\);/);
+    expect(page).toContain("return voiceSessionCheck ? voiceSessionCheck() !== false : true;"); // no panel to ask: a Talk opened the mic
+    expect(read("src/lib/voice.ts")).toContain("export function setVoiceSessionCheck(");
+    expect(chat).toContain("speech.setVoiceSessionCheck?.(() => voiceModeRef.current);");
+    expect(chat).toContain("speech.setVoiceSessionCheck?.(null);");
+    expect(chat).toContain("if (!viaVoice) setVoiceMode(false); // typing leaves voice mode");
+  });
+  it("a failed voice request is said and the mic re-armed, unless the door is shut (401 / 403): then once, and the session ends; a typed turn is unchanged", () => {
+    // RE-PINNED 2026-11-10 (skeptic #60): the line and the re-arm are one rule now (lib/voice-failure
+    // voiceRequestRefusal, driven in src/lib/voice-failure.test.ts). It no longer says the route's bare
+    // label ("Unauthorized"), and it no longer re-arms into a door that refuses every turn.
+    const i = chat.indexOf("const refusal = voiceRequestRefusal(res.status, errText, {");
+    expect(i).toBeGreaterThan(-1);
+    const branch = chat.slice(chat.lastIndexOf("if (viaVoice) {", i), chat.indexOf("return;", i));
+    expect(branch).toContain('failed: t("nt_voiceRequestFailedLine")');
+    expect(branch).toContain("say(refusal.line, () => {");
+    expect(branch).toContain("if (!refusal.rearm) stopVoice();");
+    expect(branch).toContain("else if (voiceModeRef.current) startMic();");
+    // The words still land on the screen first, for a typed turn exactly as before.
+    const before = chat.slice(chat.lastIndexOf("if (!res.ok || !res.body) {", i), i);
+    expect(before).toContain("setMessages((m) => [...m, { role: \"assistant\", content: errText }]);");
+    expect(before).toContain("setStreaming(false);");
+  });
+  it("the drops are traced (in-flight guard, small blob, transcription, interruption, the budget)", () => {
+    expect(chat).toContain('traceDrop("transcript discarded"');
+    expect(chat).toContain("if (!content) return;\n    if (streaming || inFlightRef.current) {");
+    for (const f of ["blob too small", "transcribe HTTP", "empty transcript", "interrupted ", "mic window closed"]) expect(page).toContain(f);
   });
 });

@@ -92,7 +92,13 @@ describe("class 4: the native voice session lives exactly as long as the convers
     expect(v).toContain("if (!retrying && wantStream) {");
     const give = v.slice(v.indexOf("function retryOrGiveUp("), v.indexOf("function cannotRecord("));
     expect(give.indexOf("report(branch, line, fact); // before the teardown")).toBeLessThan(give.indexOf("stopListening({ discard: true })"));
-    expect(give.indexOf("stopListening({ discard: true })")).toBeLessThan(give.indexOf("status(line);"));
+    const gen = give.indexOf("stopListening({ discard: true })"); // the ordinary give-up (every cause but no-speech)
+    expect(gen).toBeGreaterThan(-1);
+    expect(gen).toBeLessThan(give.indexOf("status(line);", gen));
+    // The no-speech cause SAYS it first: the line is spoken with the mic muted, the session ends when it ends.
+    expect(give).toContain('if (branch === "no-speech-cap") {');
+    expect(give).toContain("sayThenClose(line);");
+    expect(give.indexOf("sayThenClose(line);")).toBeLessThan(gen);
     expect(drop).toContain("nativeDrop = true;");
     expect(v).toContain("  nativeDrop = false; // this turn is wanted");
   });

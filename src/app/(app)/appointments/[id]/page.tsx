@@ -16,7 +16,9 @@ import { translator } from "@/lib/i18n";
 import { currentLangFor } from "@/lib/current-lang";
 import { Badge } from "@/components/ui/badge";
 import { NavLink } from "@/components/nav-link";
-import { appointmentTypeLabel, isInspectionType } from "@/lib/statuses";
+import { appointmentTypeLabel, isInspectionType, visitTitle } from "@/lib/statuses";
+import { inspectionLabel, isGenericInspectionTitle } from "@/lib/inspections";
+import { VisitTitleField } from "./visit-title-field";
 import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import { AppointmentButton, type ApptValue } from "../appointment-button";
 import { tolerateMissingColumns } from "@/lib/inspection/schema";
@@ -27,6 +29,8 @@ import { MarkDoneRow, PutBackRow, WontHappenRow } from "./visit-header-actions";
 import { ACTIONS_ROW_CLS, SectionActionsMenu } from "@/components/section-actions-menu";
 import type { NavTree } from "@/lib/nav-tree";
 import { wontHappenVerdict } from "@/lib/appointments/wont-happen";
+import { visitHome } from "@/lib/appointments/visit-home";
+import { NavHome } from "@/components/nav-home";
 import { captureQuoteId, hasCaptureData } from "@/lib/inspections";
 import { isLiveQuote } from "@/lib/invoice-import-rule";
 import { isDecidableVisitType } from "@/lib/statuses";
@@ -340,7 +344,18 @@ export default async function AppointmentCapturePage({
       invoiceCount: invoicesOnIt && !invoicesOnIt.error ? (invoicesOnIt.count ?? 0) : null,
       pendingLinks: linksWaiting && !linksWaiting.error ? (linksWaiting.count ?? 0) : null,
     }) === "delete";
-  const scheduleDayHref = dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule";
+  // EVERY INSPECTION SAYS WHAT IT IS FOR (lib/inspections inspectionLabel): a bare "Inspection" title
+  // gives way to who and where; a real title stays as the person wrote it.
+  const titleIsGeneric = isInspection && isGenericInspectionTitle(visitTitle(a.title), appointmentTypeLabel(a.type, lang, t));
+  const headingTitle = isInspection
+    ? inspectionLabel({ title: visitTitle(a.title), typeLabel: appointmentTypeLabel(a.type, lang, t), customer: who, street: a.location ?? null }).title
+    : a.title;
+  /* WHERE THIS VISIT LIVES (lib/appointments/visit-home), read off the row this page already holds:
+     Sales › Inspections for an inspection, its day on the Schedule for any other booking, My Day for a
+     tech. The shell is told (NavHome below), so the dock lights that cluster and its sub-nav stays;
+     and it is where Won't Happen and Edit Details' Delete land once the visit is gone from under
+     this page (Erik, 2026-11-10: deleting an inspection ended on the 404). */
+  const home = visitHome(a.type, { day: dayStr, staff: viewerIsStaff });
 
   /* THE NAME START THE JOB WILL GIVE, resolved the way createJobFromAppointment resolves it (the
      visit's card, else the lead's card, else the lead; the lead's own spelling still only-who), so
@@ -431,6 +446,7 @@ export default async function AppointmentCapturePage({
 
   return (
     <div className="mx-auto max-w-2xl">
+      <NavHome id={home.nav} />
       {viewerIsStaff ? (
         <BackLink fallback={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"} fallbackLabel={t("vp_btn_backToSchedule")} backLabel={t("sh_back")} />
       ) : (
@@ -487,17 +503,17 @@ export default async function AppointmentCapturePage({
                 appointment={apptValue}
                 rowLabel={t("vp_btn_editDetails")}
                 triggerClassName={ACTIONS_ROW_CLS}
-                afterDeleteHref={scheduleDayHref}
+                afterDeleteHref={home.href}
               />
               {/* Postponed-indefinitely is a real answer: back to the waiting board, date cleared,
                   everything else kept. Only while a date exists to clear. */}
               {booked && a.starts_at && <UnscheduleButton id={a.id} menuItem />}
               {a.status === "cancelled" && <PutBackRow id={a.id} />}
-              {booked && <WontHappenRow id={a.id} deletes={wontHappenDeletes} afterHref={scheduleDayHref} />}
+              {booked && <WontHappenRow id={a.id} deletes={wontHappenDeletes} afterHref={home.href} />}
             </SectionActionsMenu>
           )}
         </div>
-        <h1 className="mt-2 text-xl font-bold text-slate-900">{a.title}</h1>
+        <h1 className="mt-2 text-xl font-bold text-slate-900">{headingTitle}</h1>
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-sm text-slate-500">
           {/* A visit with its date cleared waits on the schedule's rail (0368): said, never blank. */}
           {a.starts_at ? <span>{formatDateTime(a.starts_at, tz, lang)}</span> : <span>{t("vp_waitingForADay")}</span>}
@@ -612,6 +628,9 @@ export default async function AppointmentCapturePage({
           visit that already holds one (under the Off line); Estimates off drops Start the Estimate. */}
       {showInspector && (
         <>
+          {/* WHAT IS THIS FOR? — asked once, above the sheet, while the title is still the bare word.
+              Nothing is blocked: the sheet and Mark Inspection Done work with or without it. */}
+          {viewerIsStaff && titleIsGeneric && a.status !== "cancelled" && <VisitTitleField appointmentId={a.id} />}
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{viewerIsStaff && estimatesOn ? t("vp_inspectionOrEstimate") : t("vp_inspection")}</h2>
           {isInspection && (
             <FeatureOffLine feature="leads" features={orgSettings.features} isOwner={(meRow as { role?: string } | null)?.role === "owner"} />

@@ -395,3 +395,44 @@ describe("the when line: overdue for a deadline, ago for a day that happened", (
     expect(html).not.toContain("overdue");
   });
 });
+
+/**
+ * A RECEIPT THAT NEVER WAS A COST (2026-11-10: a supplier's quote filed on a job as a Receipt). The
+ * row keeps its one button, Record It, and gains a ⋯ holding Not a Cost (row-buttons.ts). It is a
+ * confirm door, so the list's own sheet asks first, the row leaves once the server has answered and
+ * a refusal is said in that sheet: nothing here is new machinery.
+ */
+describe("ActionList — a receipt row's Not a Cost", () => {
+  const receipt = (o: Partial<ActionItem> = {}) =>
+    item({ id: "receipt-doc-1", kind: "receipt_unbilled", title: "Receipt · Jun 18", subtitle: "Larkspur · J-014", href: "/jobs/job-1?tab=costs", affordances: AFFORDANCES.receipt_unbilled, ...o });
+  const draw = (items: ActionItem[], isStaff = true) => renderToStaticMarkup(createElement(ActionList, { items, todayStr: "2026-11-10", isStaff }));
+
+  it("Record It stays the row's one button, and the row has a 44px ⋯", () => {
+    const html = draw([receipt()]);
+    expect(html).toMatch(/<a [^>]*href="\/jobs\/job-1\?tab=costs"[^>]*>Record It<\/a>/);
+    expect(html).toContain('aria-label="More for Receipt · Jun 18"');
+    // The Couldn't Check line, a row built without the verb, and a tech's view have no ⋯.
+    expect(draw([receipt({ id: "receipts-unread", title: "Receipts · Couldn't Check", affordances: ["open"] })])).not.toContain("More for");
+    expect(draw([receipt({ affordances: ["open"] })])).not.toContain("More for");
+    expect(draw([receipt()], false)).not.toContain("More for");
+  });
+
+  it("the row leaves once the server answers (never before): its sheet stays to say a refusal, and a pile counts down in place", () => {
+    expect(verbLanding({ kind: "receipt_unbilled" }, "notACost", { sheet: true })).toEqual({ hides: "remove", optimistic: false });
+    expect(verbLanding({ kind: "receipt_unbilled" }, "notACost", { sheet: true, child: true })).toEqual({ hides: "remove", optimistic: false });
+    const list = readFileSync(join(process.cwd(), "src/components/action-items/action-list.tsx"), "utf8");
+    // A confirm door sends from DoorForm with sheet: true, then the list asks the server for its rows again.
+    expect(list).toContain('<Button type="button" variant="destructive" onClick={() => send(a.verb)} disabled={pending}>');
+    expect(list).toMatch(/if \(!landing\.optimistic\) hide\(\);[\s\S]{0,260}router\.refresh\(\);/);
+    // Never the browser's own confirm.
+    expect(list).not.toMatch(/window\.confirm|[^.\w]confirm\(/);
+  });
+
+  it("in a pile, each receipt carries its own ⋯ under the pile's one verb", () => {
+    const rows = [1, 2, 3].map((i) => receipt({ id: `receipt-doc-${i}`, title: `Receipt · Jun ${17 + i}`, since: `2026-06-${17 + i}` }));
+    const html = draw(rollUpPiles(rows, { todayStr: "2026-11-10", isStaff: true, counts: {} }));
+    expect(html).toContain("Receipts Not on a Bill · 3");
+    expect(html).toContain('aria-label="More for Receipt · Jun 18"');
+    expect(html).toMatch(/<button[^>]*>Record It<\/button>/);
+  });
+});

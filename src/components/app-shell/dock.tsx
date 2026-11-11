@@ -2,8 +2,8 @@
 
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
-import { activeRowHref, activeSection, dockTiles, visibleDock } from "@/lib/dock";
+import { activeNav, dockTiles, visibleDock } from "@/lib/dock";
+import { useNavAt } from "@/components/app-shell/use-nav-at";
 import { dockLabel, dockTileLabel } from "@/lib/dock-words";
 import { translator } from "@/lib/i18n";
 import { useLang } from "@/components/lang-provider";
@@ -81,8 +81,9 @@ export function plainBadges(v: unknown): Badges {
  * the active look kept drifting between them (the bottom bar lagged the desktop dock a
  * whole release). Now the tile lives once; change it and both surfaces move together.
  *
- * useSearchParams (the rail's exact active-match needs the ?status= query) requires a
- * Suspense boundary at prerender — it lives HERE so the layout call-site stays <Dock />.
+ * useSearchParams (the rail's exact active-match needs the ?status= query; read inside
+ * useNavAt) requires a Suspense boundary at prerender — it lives HERE so the layout
+ * call-site stays <Dock />.
  */
 export function Dock(props: DockProps) {
   return (
@@ -94,9 +95,6 @@ export function Dock(props: DockProps) {
 
 function DockInner({ branding, role, badges: badgesProp, features, lapsed = false }: DockProps) {
   const badges = useBadges(badgesProp);
-  const pathname = usePathname();
-  const search = useSearchParams();
-  const current = pathname + (search.toString() ? `?${search.toString()}` : "");
   // THE WORDS IN THE PERSON'S LANGUAGE (cn-v1138): the rows and tiles through lib/dock-words (the
   // dock's data stays English), the chrome through the shell's catalog.
   const lang = useLang();
@@ -117,10 +115,13 @@ function DockInner({ branding, role, badges: badgesProp, features, lapsed = fals
   // /purchasing/[id]…) light their owning section. No match → NOTHING lit and no rail: the
   // old `?? sections[0]` fallback lit "Today" (and railed My day/Tasks/Organize) on every
   // orphan route — an actively wrong map, never a lie again.
-  const active = activeSection(pathname, sections);
+  // WHERE WE ARE is the router's pathname and query, plus the home a page declared when its URL
+  // cannot say (a visit's page: Sales › Inspections or the Schedule; components/nav-home). One hook,
+  // shared with the section strip, so the two never light different places (use-nav-at).
+  const at = useNavAt(sections);
+  // Exactly ONE rail row lights — the one rule the strip and the sheet use too (lib/dock activeNav).
+  const { section: active, rowHref: activeHref } = activeNav(at, sections);
   const items = active?.children ?? [];
-  // Exactly ONE rail row lights — the one rule the strip and the sheet use too (lib/dock).
-  const activeHref = activeRowHref(items, pathname, current);
 
   return (
     <>

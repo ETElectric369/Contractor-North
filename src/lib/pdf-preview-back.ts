@@ -38,3 +38,17 @@ export function pdfPreviewBackHref(doc: string, id: string, back: string): strin
   if (page && /^[0-9a-f-]{1,64}$/i.test(id)) return page(id);
   return "/planner";
 }
+
+/** The two papers opened from a page of their own, whose header draws Preview (components/preview-button). */
+export type PreviewedDoc = "invoice" | "quote";
+
+/**
+ * THE WAY IN, FROM A DOCUMENT'S OWN PAGE (2026-11-10): the address of an invoice's or an estimate's
+ * PDF preview, with `back=` naming that page. It is byte for byte what the two ⋯ rows wrote out by
+ * hand before the header's Preview replaced them, and it reads the same table Back falls back to, so
+ * the door in and the way home cannot come to name two different pages. The other papers are opened
+ * from a job's tab and say their own `back=`.
+ */
+export function pdfPreviewHref(doc: PreviewedDoc, id: string): string {
+  return `/print/pdf-preview?doc=${doc}&id=${id}&back=${DOC_PAGE[doc](id)}`;
+}

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { REGISTRY, listActions } from "./registry";
 import { AGENT_WRITE_ALLOWED, agentWriteToolsForRole } from "./agent-tools";
-import { needsConsent } from "./risk";
+import { needsConsent, actionRisk } from "./risk";
 import { DATA_TOOLS } from "@/lib/assistant-tools";
 
 // Structural invariants over the WHOLE registry — so a malformed new entity (wrong
@@ -424,5 +424,38 @@ describe("descriptions name doors that exist", () => {
     expect(read("src/app/(app)/jobs/[id]/page.tsx")).toContain("<ProposeDatesButton");
     expect(read("src/app/(app)/jobs/[id]/job-manage-menu.tsx")).not.toContain("ProposeDatesButton");
     expect(read("src/app/(app)/jobs/[id]/job-action-dock.tsx")).not.toContain("<ProposeDatesButton");
+  });
+});
+
+// THE OWNER'S ASK OF 2026-11-09: set or change the customer on a job that already exists, by voice.
+// The write list grew by exactly this one name.
+describe("action registry — job.setCustomer", () => {
+  const offered = (role: string) => agentWriteToolsForRole(role).tools.map((t) => t.name);
+
+  it("is allow-listed, staff-only, a tier-1 write; a tech is not offered it", () => {
+    expect(AGENT_WRITE_ALLOWED.has("job.setCustomer")).toBe(true);
+    expect(REGISTRY["job.setCustomer"].auth).toBe("staff");
+    expect(REGISTRY["job.setCustomer"].effect).toBe("write");
+    expect(needsConsent(REGISTRY["job.setCustomer"], "agent", false)).toBe(false);
+    expect(actionRisk(REGISTRY["job.setCustomer"])).toBeLessThan(2);
+    expect(offered("owner")).toContain("job__setCustomer");
+    expect(offered("tech")).not.toContain("job__setCustomer");
+  });
+
+  it("EXACTLY this one name: the list's SIZE is pinned (74 before cn-v1157, 75 with it)", () => {
+    // Membership cannot hold "exactly one": a second name let in beside it would pass every line above.
+    // The count is the pin. A new agent write is a decision (the freeze on agent-write expansion), so
+    // whoever lets one in moves this number on purpose, in the same change, and says why.
+    expect(AGENT_WRITE_ALLOWED.size).toBe(75);
+    // The count is of real doors: a name on the list that is no action in the registry would hold
+    // the number steady while a real one came or went.
+    for (const name of AGENT_WRITE_ALLOWED) expect(REGISTRY[name], name).toBeTruthy();
+  });
+
+  it("names no 'under Manage' and tells the model to ask before a new customer", () => {
+    expect(REGISTRY["job.setCustomer"].description).not.toMatch(/under Manage/);
+    expect(REGISTRY["job.create"].description).not.toMatch(/under Manage/);
+    expect(REGISTRY["job.create"].description).toMatch(/ASK before creating the job/);
+    expect(REGISTRY["job.setCustomer"].description).toMatch(/new_customer_name/);
   });
 });

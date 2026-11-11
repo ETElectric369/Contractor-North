@@ -107,6 +107,7 @@ import { computeJobLaborBilling, customerLaborRateForJob, fetchJobLaborRows, lab
 import { isOwnerShift } from "@/lib/build-time-cost";
 import { ownerRegister } from "@/lib/owner-draw";
 import { formatDateTz, todayStrInTz } from "@/lib/tz";
+import { newestInvoiceFirst } from "@/lib/invoice-order";
 import { dayWords, hmWords, readJobBlock } from "@/lib/schedule/job-block";
 import { ownHoursByJobDay, segmentCols, withDayHours, type SegmentRow } from "@/lib/schedule/segment-hours";
 import { datesOnly, type DayHours } from "@/lib/schedule-math";
@@ -184,7 +185,7 @@ export default async function JobDetailPage({
     supabase.from("quotes").select("id, quote_number, status, total, doc_type, created_at").eq("job_id", id),
     supabase.from("work_orders").select("id, wo_number, title, status").eq("job_id", id),
     supabase.from("change_orders").select("*").eq("job_id", id).order("created_at", { ascending: false }),
-    supabase.from("invoices").select("id, invoice_number, status, total, amount_paid, invoice_kind").eq("job_id", id),
+    supabase.from("invoices").select("id, invoice_number, status, total, amount_paid, invoice_kind, created_at").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("payment_milestones").select("id, sort_order, label, percent, amount, status, invoice_id, billed_amount").eq("job_id", id).order("sort_order"),
     supabase.from("contracts").select("id, status, contract_number, title, body, public_token, signed_name, signed_at").eq("job_id", id).neq("status", "void").order("created_at", { ascending: false }).limit(1),
     supabase.from("lien_records").select("*").eq("job_id", id).maybeSingle(),
@@ -2092,7 +2093,7 @@ export default async function JobDetailPage({
           )}
           <Card className="overflow-hidden">
           <ul className="divide-y divide-slate-100">
-            {(invoices ?? []).map((iv: any) => (
+            {[...((invoices ?? []) as any[])].sort(newestInvoiceFirst).map((iv: any) => (
               <li key={iv.id}>
                 {/* The billing board's amount (components/invoice-amount): "$D due of $T" with what
                     is paid beneath. This row used to print the bare TOTAL, so a bill with $6,000
@@ -2100,7 +2101,7 @@ export default async function JobDetailPage({
                     than the same invoice on /billing. */}
                 <Link href={`/billing/${iv.id}`} className="flex items-center justify-between gap-3 px-5 py-3 text-sm hover:bg-slate-50">
                   <span className="min-w-0">
-                    <span className="block truncate font-medium text-slate-900">{iv.invoice_number}</span>
+                    <span className="block truncate font-medium text-slate-900">{iv.invoice_number}{iv.created_at && <span className="ml-2 text-xs font-normal text-slate-500">{formatDateTz(iv.created_at, tz)}</span>}</span>
                     <InvoiceAmountDetail total={iv.total} paid={iv.amount_paid} status={iv.status} />
                   </span>
                   <span className="flex shrink-0 items-center gap-3"><InvoiceAmount total={iv.total} paid={iv.amount_paid} status={iv.status} /><Badge tone={statusTone(iv.status)}>{iv.status}</Badge></span>

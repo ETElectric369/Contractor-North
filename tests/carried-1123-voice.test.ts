@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // ── shared mocks ─────────────────────────────────────────────────────────────────────────────
 vi.mock("@/app/report-client-error", () => ({ reportClientError: vi.fn(async () => {}) }));
 // Every suite below except the trace's own wants the trace quiet; that one loads the real file with importActual.
-vi.mock("@/lib/nort/trace", () => ({ trace: vi.fn(), flushTrace: vi.fn() }));
+vi.mock("@/lib/nort/trace", () => ({ trace: vi.fn(), flushTrace: vi.fn(), traceDrop: vi.fn() }));
 
 // ── the Bell's hook runtime (one render, effects run by hand) ───────────────────────────────
 const rt = vi.hoisted(() => ({
@@ -356,6 +356,22 @@ describe("A later page-load's turn N overwrites an earlier unread 'trace turn N'
     t.trace("clip wait");
     t.flushTrace("screen back");
     expect(sent).toEqual([]);
+  });
+
+  it("a DROPPED turn ships its trace even in the light; an ordinary foreground turn still ships nothing", async () => {
+    const sent: Sent[] = [];
+    const t = await pageLoad(sent, 5_000_000);
+    vi.stubGlobal("document", { visibilityState: "visible", addEventListener() {} });
+    t.trace("turn", "pause 1300b 3s");
+    t.traceDrop("turn dropped", "blob too small 100b");
+    t.flushTrace("stop");
+    expect(sent).toHaveLength(1);
+    expect(sent[0].title).toMatch(/^trace turn 1 /);
+    // The flag is spent by the flush: the next ordinary turn is quiet again.
+    t.trace("turn", "pause 1300b 3s");
+    t.trace("clip wait");
+    t.flushTrace("stop");
+    expect(sent).toHaveLength(1);
   });
 });
 
