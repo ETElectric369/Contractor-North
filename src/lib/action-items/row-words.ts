@@ -66,6 +66,7 @@ export const NY_EN: Readonly<Record<string, string>> = {
   ny_lbl_hoursNoJob: "Hours on No Job",
   ny_w_invoice: "Invoice {ref}",
   ny_w_invoiceNotSent: "Invoice {ref} · not sent",
+  ny_w_invoiceBackFromSetAside: "Invoice {ref} · not sent · set aside until {day}",
   ny_w_jobFinishedSend: "Job finished · send {ref}",
   ny_w_jobCancelledSend: "Job cancelled · send {ref}",
   ny_w_visitNotBilled: "{text} · done, not billed",

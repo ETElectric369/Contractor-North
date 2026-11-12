@@ -57,6 +57,8 @@ describe("inquiryActionItem — a request on Needs You", () => {
       who: "Dana Reyes",
       what: { key: "ny_w_leadNew" },
       when: null,
+      // No day it came in on the row: no clock (the build's read always carries created_at).
+      clock: null,
       urgency: 2,
       done: false,
       href: "/leads?focus=i1",
@@ -65,6 +67,21 @@ describe("inquiryActionItem — a request on Needs You", () => {
     });
     // No number: no phone on the row, so no Call anywhere.
     expect(inquiryActionItem({ ...row, phone: null }, "2026-09-26", true).phone).toBeUndefined();
+  });
+
+  it("its clock (cn-v1162): the follow-up day somebody set, else a new lead's day in, else none", () => {
+    const at = "2026-09-24T17:00:00Z";
+    // A new lead: the day it came in, whatever leads are called.
+    expect(inquiryActionItem({ ...row, created_at: at }, "2026-09-26", true).clock).toBe(at);
+    expect(inquiryActionItem({ ...row, created_at: at }, "2026-09-26", false).clock).toBe(at);
+    // A follow-up day wins over the day it came in.
+    expect(inquiryActionItem({ ...row, created_at: at, next_follow_up_at: "2026-09-25" }, "2026-09-26", true).clock).toBe("2026-09-25");
+    // A contacted lead with no day has no clock: its day in is the office's to answer, not a deadline.
+    expect(inquiryActionItem({ ...row, status: "contacted", created_at: at }, "2026-09-26", true).clock).toBeNull();
+    expect(inquiryActionItem({ ...row, status: "contacted", created_at: at, next_follow_up_at: "2026-09-20" }, "2026-09-26", true).clock).toBe("2026-09-20");
+    // when, urgency and the words do not move with it.
+    const a = inquiryActionItem({ ...row, created_at: at }, "2026-09-26", true);
+    expect([a.when, a.urgency]).toEqual([null, 2]);
   });
 
   it("Leads off: Call Back still shows, as the row's own button (row-buttons.ts)", async () => {

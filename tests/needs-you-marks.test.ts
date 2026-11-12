@@ -91,21 +91,24 @@ const OWNER_ROWS: Raw[] = [
   raw("invoice_draft", "invd-1047", { who: "Dana Rook", what: { key: "ny_w_invoiceNotSent", vars: { ref: "INV-1047" }, tail: "Bayberry Service · J-066" }, amount: 1000, when: ago(2), urgency: 0 }),
   raw("invoice_draft", "invd-1048", { who: "Sam Tillery", what: { key: "ny_w_invoiceNotSent", vars: { ref: "INV-1048" }, tail: "Larkspur Panel · J-061" }, amount: 1340, when: ago(9), urgency: 0 }),
   raw("visit_unbilled", "unbilled-v88", { who: "Theo Vance", what: { key: "ny_w_visitNotBilled", vars: { text: "Service call" } }, when: ago(9) }),
-  // Win Work: an offer about to end, three estimates not sent (a pile), a new lead, a contract.
+  // Sales: an offer about to end, three estimates not sent (a pile), a new lead, a contract.
   raw("quote_awaiting", "qa-1037", {
     who: "Casey Loam",
     what: { key: "ny_w_docOfferEnds", vars: { docKey: "ny_docEstimate", ref: "E-1037", day: ahead(3) } },
     amount: 6480,
     when: ahead(3),
     since: ago(11),
+    // Its clock, as the feeder sets it (cn-v1162): the offer's last day, inside five days.
+    clock: ahead(3),
     dated: "Sent",
   }),
   raw("quote_draft", "qdraft-1041", { who: "Dana Rook", what: { key: "ny_w_docNotSent", vars: { docKey: "ny_docEstimate", ref: "E-1041" } }, amount: 2150, when: ago(15), dated: "Started", urgency: 0 }),
   raw("quote_draft", "qdraft-1042", { who: "Theo Vance", what: { key: "ny_w_docNotSent", vars: { docKey: "ny_docEstimate", ref: "E-1042" } }, amount: 980, when: ago(10), dated: "Started", urgency: 0 }),
   raw("quote_draft", "qdraft-1043", { who: "Sam Tillery", what: { key: "ny_w_docNotSent", vars: { docKey: "ny_docEstimate", ref: "E-1043" } }, amount: 3400, when: ago(3), dated: "Started", urgency: 0 }),
-  raw("inquiry", "lead-77", { who: "Casey Loam", what: { key: "ny_w_leadNew" }, since: ago(1), urgency: 2, phone: "(530) 555-0100" }),
+  // A new lead's clock is the day it came in (cn-v1162): Due for its first week.
+  raw("inquiry", "lead-77", { who: "Casey Loam", what: { key: "ny_w_leadNew" }, since: ago(1), clock: ago(1), urgency: 2, phone: "(530) 555-0100" }),
   raw("contract_unsigned", "contract-12", { who: "Sam Tillery", what: { key: "ny_w_contractNotSigned", vars: { ref: "C-012" }, tail: "Larkspur Panel · J-061" }, when: ago(3) }),
-  // Run the Jobs: two jobs with no day (a pile), a visit not closed out, materials, a hold back.
+  // Operations: two jobs with no day (a pile), a visit not closed out, materials, a hold back.
   raw("job_to_schedule", "jneed-j58", { who: "Snowbell Remodel · J-058", what: { key: "ny_w_quietSince", vars: { day: ago(12) }, tail: "Dana Rook" }, since: ago(12) }),
   raw("job_to_schedule", "jneed-j63", { who: "Thistlewood Repair · J-063", what: { key: "ny_w_neverHadADay", tail: "Theo Vance" }, since: ago(4) }),
   raw("appointment", "appt-501", { who: "Dana Rook", what: { key: "ny_w_visitNotClosed", vars: { type: "inspection" } }, when: `${ago(2)}T17:00:00Z` }),
@@ -113,15 +116,17 @@ const OWNER_ROWS: Raw[] = [
     who: "Larkspur Panel · J-061",
     what: { key: "ny_w_toBuy", vars: { n: 3, text: "200A panel, 4 breakers, 30 ft 2/0", andKey: "ny_w_plusMore", andN: 2 } },
     when: TODAY,
+    clock: TODAY, // the crew's day (cn-v1162)
     openToBuy: 5,
   }),
   raw("job_on_hold", "onhold-j49", {
     who: "Thistlewood Addition · J-049",
     what: { key: "ny_w_holdBack", vars: { text: "Waiting on the utility" }, tail: "Casey Loam" },
     since: ago(3),
+    clock: ago(3), // its come-back day came three days ago (cn-v1162)
     holdReason: "Waiting on the utility",
   }),
-  // Keep the Books: a failed read, supplier bills, a discount date, stock taken short, a receipt.
+  // Bookkeeping: a failed read, supplier bills, a discount date, stock taken short, a receipt.
   raw("receipt_unbilled", "receipts-unread", {
     title: "Receipts · Couldn't Check",
     whoSay: { key: "ny_who_unread", vars: { labelKey: "ny_lbl_receipts" } },
@@ -142,7 +147,7 @@ const OWNER_ROWS: Raw[] = [
 ];
 const OWNER = build(OWNER_ROWS, true);
 
-/** Nothing NOW, and Get Paid and Keep the Books empty. */
+/** Nothing NOW, and Get Paid and Bookkeeping empty. */
 const CALM = build(
   OWNER_ROWS.filter((r) => KIND_GROUP[r.kind] === "win_work" || (KIND_GROUP[r.kind] === "run_jobs" && r.kind !== "quote_accepted" && r.kind !== "time_stray")),
   true,
@@ -320,7 +325,7 @@ describe("red and amber mean urgency, and live only in the mark", () => {
           continue;
         }
         expect(m.attrs.role).toBe("img");
-        expect(m.attrs["aria-label"]).toBe(t(level === "now" ? "ny_markNow" : "ny_markSoon"));
+        expect(m.attrs["aria-label"]).toBe(t(level === "now" ? "ny_markNow" : "ny_markDue"));
         expect(m.attrs["aria-label"]!.length).toBeGreaterThan(0);
       }
     }
@@ -354,6 +359,8 @@ describe("the header", () => {
     for (const [name, items] of Object.entries(LISTS)) {
       const renders = GROUP_ORDER.map((g) => parse(draw(items, { open: g })));
       const h = headerCounts(renders[0]);
+      // Each list keeps a Due row of a clock kind (cn-v1162), so the triangle sums below still bite.
+      expect(h.soon, name).toBeGreaterThan(0);
       const strip = topRows(stripOf(renders[0]));
       // Every render draws the same header and the same tiles: the open tile changes nothing it counts.
       for (const r of renders) {
@@ -403,6 +410,14 @@ describe("Act Today and the tiles", () => {
     }
     // Nothing NOW: no strip at all.
     for (const g of GROUP_ORDER) expect(draw(CALM, { open: g })).not.toContain("data-strip");
+  });
+
+  it("amber is a real clock (cn-v1162): rows that only sat a while are plain, rows on a clock are Due", () => {
+    const levelOfRow = (id: string) => [...OWNER, ...OWNER.flatMap((i) => i.children ?? [])].find((i) => i.id === id)?.level;
+    for (const id of ["invd-1048", "unbilled-v88", "qdraft-1041", "qdraft-1042", "jneed-j58", "short-3", "appt-501"]) expect(levelOfRow(id), id).toBe("none");
+    for (const id of ["inv-1045", "qa-1037", "lead-77", "mat-j61", "onhold-j49", "supplierpay-a1"]) expect(levelOfRow(id), id).toBe("soon");
+    // A tech's visits nobody closed out are plain at every age.
+    expect([...TECH, ...TECH.flatMap((i) => i.children ?? [])].every((i) => i.level === "none")).toBe(true);
   });
 
   it("four tiles in the fixed order, exactly one pressed (the one opened), all naming the same rows region", () => {
@@ -482,8 +497,8 @@ describe("a tech", () => {
 describe("Spanish, through the real catalog", () => {
   it("the four tile names are Spanish, and differ from the English", () => {
     const tiles = tilesOf(parse(draw(OWNER, { lang: "es", open: "get_paid" })));
-    expect(tiles.map((x) => x.name)).toEqual(["Cobrar", "Ganar Trabajo", "Sacar los Trabajos", "Llevar las Cuentas"]);
-    expect(tiles.map((x) => x.name)).toEqual(["ny_btn_tileGetPaid", "ny_btn_tileWinWork", "ny_btn_tileRunJobs", "ny_btn_tileKeepBooks"].map((k) => es(k)));
+    expect(tiles.map((x) => x.name)).toEqual(["Cobrar", "Ventas", "Operaciones", "Contabilidad"]);
+    expect(tiles.map((x) => x.name)).toEqual(["ny_btn_tileGetPaid", "ny_btn_tileSales", "ny_btn_tileOperations", "ny_btn_tileBookkeeping"].map((k) => es(k)));
     const english = tilesOf(parse(draw(OWNER, { open: "get_paid" }))).map((x) => x.name);
     tiles.forEach((x, i) => expect(x.name).not.toBe(english[i]));
   });

@@ -24,6 +24,7 @@ import { rollUpPiles } from "@/lib/action-items/piles";
 import { GROUP_ORDER } from "@/lib/action-items/needs-you-rule";
 import { translator } from "@/lib/i18n";
 import { fillSlots } from "@/lib/lang-words";
+import { LangProvider } from "@/components/lang-provider";
 
 /** The catalog's English, so a pin reads the words the box reads (lib/words/needs-you). */
 const t = translator("en");
@@ -100,7 +101,7 @@ const everyTile = (items: ActionItem[], extra: Record<string, unknown> = {}) =>
   GROUP_ORDER.map((g) => renderToStaticMarkup(createElement(ActionList, { items, todayStr: "2026-09-26", isStaff: true, defaultOpen: g, ...extra }))).join("\n");
 
 describe("ActionList — the board: Act Today, four tiles, the open tile's rows, in the server's order", () => {
-  // As the build stamps them (query.ts): a NOW row, three Win Work rows, one Run the Jobs row.
+  // As the build stamps them (query.ts): a NOW row, three Sales rows, one Operations row.
   const given = [
     item({ id: "row-now", kind: "quote_accepted", level: "now" }),
     item({ id: "row-other", kind: "contract_unsigned" }),
@@ -111,7 +112,7 @@ describe("ActionList — the board: Act Today, four tiles, the open tile's rows,
 
   it("draws the four tile names in order and no section headers (no Money, Leads, Today)", () => {
     const w = words(given);
-    const names = ["ny_btn_tileGetPaid", "ny_btn_tileWinWork", "ny_btn_tileRunJobs", "ny_btn_tileKeepBooks"].map(t);
+    const names = ["ny_btn_tileGetPaid", "ny_btn_tileSales", "ny_btn_tileOperations", "ny_btn_tileBookkeeping"].map(t);
     for (const n of names) expect(w, n).toContain(n);
     for (let i = 1; i < names.length; i++) expect(w.indexOf(names[i - 1])).toBeLessThan(w.indexOf(names[i]));
     for (const header of ["Money", "Leads", "Today", "Waiting", "Requests"]) expect(w, header).not.toContain(header);
@@ -122,7 +123,7 @@ describe("ActionList — the board: Act Today, four tiles, the open tile's rows,
     const at = (id: string) => w.indexOf(id);
     expect(at(t("ny_stripTitle"))).toBeLessThan(at("row-now"));
     expect(at("row-now")).toBeLessThan(at(t("ny_btn_tileGetPaid")));
-    expect(at(t("ny_btn_tileKeepBooks"))).toBeLessThan(at("row-other"));
+    expect(at(t("ny_btn_tileBookkeeping"))).toBeLessThan(at("row-other"));
     expect(at("row-other")).toBeLessThan(at("row-lead"));
     expect(at("row-lead")).toBeLessThan(at("row-draft"));
     // Another tile's rows wait behind their tile.
@@ -145,7 +146,7 @@ describe("ActionList — the board: Act Today, four tiles, the open tile's rows,
     expect(calm).not.toContain(t("ny_stripTitle"));
   });
 
-  it("the tile that opens first is the first with a SOON row (Win Work here); one tile is pressed; a closed board draws no rows under the tiles", () => {
+  it("the tile that opens first is the first with a SOON row (Sales here); one tile is pressed; a closed board draws no rows under the tiles", () => {
     const html = renderToStaticMarkup(createElement(ActionList, { items: given, todayStr: "2026-09-26", isStaff: true }));
     expect(html.match(/aria-pressed="true"/g)).toHaveLength(1);
     expect(html).toMatch(/data-tile="win_work"[^>]*aria-pressed="true"/);
@@ -160,7 +161,7 @@ describe("ActionList — the board: Act Today, four tiles, the open tile's rows,
     expect(counts).toContain('data-shape="octagon"');
     expect(counts).toContain('data-shape="triangle"');
     expect(counts).toContain(say("ny_countMore", { n: 3 }));
-    // Get Paid and Keep the Books hold nothing: drawn, disabled, no number.
+    // Get Paid and Bookkeeping hold nothing: drawn, disabled, no number.
     expect(html).toMatch(/<button[^>]*data-tile="get_paid"[^>]*disabled=""/);
     expect(html).toMatch(/<button[^>]*data-tile="keep_books"[^>]*disabled=""/);
     // An open tile left with nothing says so.
@@ -194,7 +195,8 @@ describe("ActionList — the board: Act Today, four tiles, the open tile's rows,
   it("a tech sees no tiles and no strip: the title, the counts and his rows flat, with no button, no ⋯ and no money", () => {
     const html = renderToStaticMarkup(
       createElement(ActionList, {
-        items: [item({ id: "visit", kind: "appointment", level: "soon", amount: 120, affordances: ["open"] }), item({ id: "visit2", kind: "appointment" })],
+        // A visit nobody closed out is never Due (cn-v1162): the tech's rows are plain.
+        items: [item({ id: "visit", kind: "appointment", amount: 120, affordances: ["open"] }), item({ id: "visit2", kind: "appointment" })],
         todayStr: "2026-09-26",
         isStaff: false,
         title: "My Board",
@@ -289,7 +291,7 @@ describe("ActionList — one named button per row, and ⋯ (W1-13)", () => {
 
 describe("ActionList — piles (W1-14)", () => {
   const drafts = [1, 2, 3].map((i) =>
-    item({ id: `qdraft-q${i}`, kind: "quote_draft", level: "soon", title: `Estimate E-0${i} started, never sent`, when: `2026-09-0${i}`, affordances: AFFORDANCES.quote_draft }),
+    item({ id: `qdraft-q${i}`, kind: "quote_draft", title: `Estimate E-0${i} started, never sent`, when: `2026-09-0${i}`, affordances: AFFORDANCES.quote_draft }),
   );
   const pile = (o: Parameters<typeof rollUpPiles>[1]["counts"] = {}) => rollUpPiles(drafts, { todayStr: "2026-09-26", isStaff: true, counts: o });
 
@@ -301,13 +303,27 @@ describe("ActionList — piles (W1-14)", () => {
     expect(html).not.toContain("Estimate E-02 started, never sent");
     const seeAll = Array.from(html.matchAll(/<button[^>]*aria-expanded="false"[^>]*>([^<]*)<\/button>/g)).find((m) => m[1] === say("ny_btn_seeAll", { n: 3 }))![0];
     expect(seeAll).toMatch(/\bmin-h-11\b/);
-    // The pile wears its children's mark (a triangle: they sat a week) and says how many are soon; no pips.
+    // An estimate not sent has no clock, so it is never Due (cn-v1162): the pile is plain, its picture
+    // grey (the one for sending), and it says no due count; no pips.
     const pileHead = html.slice(html.indexOf('data-pile="estimates_not_sent"'));
-    expect(pileHead).toMatch(/data-mark="soon"[^>]*data-shape="triangle"/);
-    expect(pileHead).toContain('data-soon-count="3"');
+    expect(pileHead).not.toContain("data-mark=");
+    expect(pileHead).not.toContain("data-soon-count");
+    expect(pileHead).toMatch(/data-picture="send" class="[^"]*text-slate-500"/);
+    expect(pileHead.slice(0, pileHead.indexOf("data-row="))).not.toContain("data-tint");
     expect(html).not.toContain("data-pip");
     // Its verb is its pile's.
     expect(html).toMatch(/<button[^>]*>Send It<\/button>/);
+  });
+
+  it("a pile of rows that are Due wears its children's mark, says how many, and its picture is coloured in with its tile", () => {
+    const due = [1, 2].map((i) =>
+      item({ id: `invd-${i}`, kind: "invoice_draft", level: "soon", title: `Invoice INV-0${i} not sent`, when: `2026-09-0${i}`, affordances: AFFORDANCES.invoice_draft }),
+    );
+    const html = renderToStaticMarkup(createElement(ActionList, { items: rollUpPiles(due, { todayStr: "2026-09-26", isStaff: true, counts: {} }), todayStr: "2026-09-26", isStaff: true, defaultOpen: "get_paid" }));
+    const head = html.slice(html.indexOf('data-pile="invoices_not_sent"'));
+    expect(head).toMatch(/data-mark="soon"[^>]*data-shape="triangle"/);
+    expect(head).toContain('data-soon-count="2"');
+    expect(head).toMatch(/data-picture="send" data-tint="get_paid" class="[^"]*bg-lime-100 text-lime-800"/);
   });
 
   it("when not every one is here, See All opens the list page instead", () => {
@@ -562,5 +578,81 @@ describe("ActionList — a receipt row's Not a Cost", () => {
     expect(html).toContain("Receipts Not on a Bill · 3");
     expect(html).toContain('aria-label="More for Receipt · Jun 18"');
     expect(html).toMatch(/<button[^>]*>Record It<\/button>/);
+  });
+});
+
+/**
+ * A NAME'S LAST SHORT TAG STAYS WITH ITS WORD, AND ONE LONG WORD STILL WRAPS (cn-v1162 fixer). A
+ * name may run to two lines on a phone (one from sm up), clamped there, never `truncate`d; Tagged
+ * keeps " · J-061" or " · 3" with the word before it; and since a clamp draws no ellipsis for one
+ * unbreakable word (a file name), the name wraps anywhere, so the clamp ends it.
+ */
+describe("ActionList — the name's tag and its clamp", () => {
+  const rowHtml = (who: string) =>
+    renderToStaticMarkup(createElement(ActionList, { items: [item({ id: "r-tag", kind: "job_to_schedule", who })], todayStr: "2026-09-26", isStaff: true, defaultOpen: "run_jobs" }));
+  const CLAMP = ["line-clamp-2", "sm:line-clamp-1", "[overflow-wrap:anywhere]"];
+
+  it("a WHO ending in a short tag keeps the tag in one nowrap span, the words unchanged", () => {
+    const html = rowHtml("Larkspur Panel · J-061");
+    expect(html).toContain('Larkspur Panel<span class="whitespace-nowrap"> · J-061</span>');
+    expect(html.replace(/<[^>]+>/g, "")).toContain("Larkspur Panel · J-061");
+  });
+
+  it("a WHO with no tag, or whose last part has a space, draws no nowrap span", () => {
+    for (const who of ["Theo Vance", "Receipts · Couldn't Check"]) {
+      const html = rowHtml(who);
+      expect(html).toContain(who.replace("'", "&#x27;"));
+      expect(html).not.toContain('class="whitespace-nowrap"');
+    }
+  });
+
+  it("the WHO is clamped (two lines, one from sm), wraps anywhere, and is never truncate", () => {
+    const html = rowHtml("PXL_20261104_171233456.jpg");
+    const span = /<span class="([^"]*)">PXL_20261104_171233456\.jpg<\/span>/.exec(html)![1].split(" ");
+    for (const c of CLAMP) expect(span).toContain(c);
+    expect(span).not.toContain("truncate");
+  });
+
+  it("a pile's title keeps ' · 3' and ' · 3+' in a nowrap span, and is clamped the same way", () => {
+    const drafts = [1, 2, 3].map((i) =>
+      item({ id: `qdraft-t${i}`, kind: "quote_draft", title: `Estimate E-0${i} started, never sent`, when: `2026-09-0${i}`, affordances: AFFORDANCES.quote_draft }),
+    );
+    for (const capped of [false, true]) {
+      const html = renderToStaticMarkup(
+        createElement(ActionList, { items: rollUpPiles(drafts, { todayStr: "2026-09-26", isStaff: true, counts: capped ? { estimates_not_sent: { capped: true } } : {} }), todayStr: "2026-09-26", isStaff: true }),
+      );
+      const tag = capped ? " · 3+" : " · 3";
+      const m = new RegExp(`<span class="([^"]*)">Estimates Not Sent<span class="whitespace-nowrap">${tag.replace("+", "\\+")}</span></span>`).exec(html);
+      expect(m, tag).not.toBeNull();
+      const cls = m![1].split(" ");
+      for (const c of CLAMP) expect(cls).toContain(c);
+      expect(cls).not.toContain("truncate");
+    }
+  });
+});
+
+/**
+ * ONE DUE VERSUS SEVERAL ON A PILE'S HEADER (cn-v1162 fixer): the visible count under a pile's name
+ * says "1 due" / "3 due", and in Spanish "1 vence" / "3 vencen", built here from the real catalog.
+ */
+describe("ActionList — a pile's due count, one versus several", () => {
+  const due = (lang: "en" | "es", n: number) => fillSlots(translator(lang)(n === 1 ? "ny_countDueOne" : "ny_countDue"), { n });
+  const pileOf = (soon: number) =>
+    rollUpPiles(
+      [1, 2, 3].map((i) =>
+        item({ id: `invd-s${i}`, kind: "invoice_draft", level: i <= soon ? "soon" : "none", title: `Invoice INV-0${i} not sent`, when: `2026-09-0${i}`, affordances: AFFORDANCES.invoice_draft }),
+      ),
+      { todayStr: "2026-09-26", isStaff: true, counts: {} },
+    );
+
+  it("says the catalog's words in both languages", () => {
+    expect([due("en", 1), due("en", 3), due("es", 1), due("es", 3)]).toEqual(["1 due", "3 due", "1 vence", "3 vencen"]);
+    for (const lang of ["en", "es"] as const)
+      for (const n of [1, 3]) {
+        const html = renderToStaticMarkup(
+          createElement(LangProvider, { lang, children: createElement(ActionList, { items: pileOf(n), todayStr: "2026-09-26", isStaff: true, defaultOpen: "get_paid" }) }),
+        );
+        expect(html, `${lang} ${n}`).toContain(`<span data-soon-count="${n}">${due(lang, n)}</span>`);
+      }
   });
 });

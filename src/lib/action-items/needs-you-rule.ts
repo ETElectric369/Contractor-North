@@ -8,12 +8,21 @@ import { companyDay } from "./jobs-needing-a-day";
  * after an optimistic removal, so the header, the tiles and the strip can never disagree.
  *
  * A MARK IS RARE ON PURPOSE. NOW (the red octagon) is a thing that costs money or a legal right if it
- * waits past today, and only five kinds can ever be it. SOON (the amber triangle) is a thing that has
- * sat a week, or whose day is close. Everything else is drawn plain. `urgency` stays the feeders'
- * input; this file is the only reader that turns it into a mark.
+ * waits past today, and only five kinds can ever be it. SOON (the amber triangle, said "Due") is a
+ * row whose own CLOCK is close or just went by: a day somebody picked (a follow-up day, a set-aside
+ * day, a come-back day), a day an outside party set (a due day, an offer's last day, a discount's
+ * last day, a legal deadline, the authority's booked inspection), the day the crew stands on the job,
+ * or the day an outside party did something that needs an answer (a lead came in, an inspection
+ * failed). The day the office's own paper was born (made, sent, worked, photographed, taken, visited)
+ * is never a clock, so age alone marks nothing (cn-v1162: the owner found the box blended together
+ * when every row that had waited a while wore a triangle). Age is the ORDER's job (types.ts
+ * sortActionItems, oldest first), never the mark's. Everything else is drawn plain. `urgency` stays
+ * the feeders' input; this file is the only reader that turns it into a mark.
  */
 
-/** The four tiles, in the order they are drawn and sorted. */
+/** The four tiles, in the order they are drawn and sorted. On screen they are Get Paid, Sales,
+ *  Operations and Bookkeeping (the owner's names, 2026-11-11; the words live in the catalog). These
+ *  ids are never shown, so they did not follow the rename. */
 export const GROUP_ORDER: Group[] = ["get_paid", "win_work", "run_jobs", "keep_books"];
 
 /**
@@ -49,8 +58,17 @@ export const KIND_GROUP: Record<ActionKind, Group> = {
   permit_inspection: "run_jobs",
 };
 
-/** A row that has sat this many company days, counted from `since ?? when`, is SOON. */
-export const SOON_AFTER_DAYS = 7;
+/**
+ * A clock that went by this many company days ago, or fewer, still marks its row. Older, the row is
+ * simply old, and old is the order's job, not the mark's (cn-v1162, the owner's to reverse). A late
+ * invoice keeps its own rule (it is listed only while late, and turns NOW at thirty days).
+ */
+export const DUE_PASSED_DAYS = 7;
+/**
+ * An estimate's offer this close to its last day is Due. The build's read uses the same number to
+ * list it (query.ts imports it from here: the rule cannot import the build, which imports the rule).
+ */
+export const QUOTE_EXPIRY_SOON_DAYS = 5;
 /** An invoice this many days past its due day is NOW. */
 export const NOW_INVOICE_LATE_DAYS = 30;
 /** A lien deadline this close, or past, is NOW: lien-math's own prelim window. */
@@ -62,6 +80,28 @@ export const SOON_DISCOUNT_DAYS = 7;
 
 /** The only kinds that can ever be NOW. Anything else that feels urgent is SOON until the owner says. */
 export const NOW_KINDS: readonly ActionKind[] = ["quote_accepted", "time_stray", "lien_deadline", "supplier_pay", "invoice_overdue"];
+
+/**
+ * How many company days AHEAD of its clock a kind is already Due. Absent is 0: the day itself. An
+ * offer ramps up over its last days; materials' 1 is its read's own bound (today's and tomorrow's crews).
+ */
+export const DUE_AHEAD_DAYS: Partial<Record<ActionKind, number>> = { quote_awaiting: QUOTE_EXPIRY_SOON_DAYS, materials_needed: 1 };
+
+/**
+ * The only kinds that can ever be Due (SOON): each has a real clock. Three are read on `when` (the
+ * NOW kinds that ramp up); the rest on the row's `clock`, which only their feeders set.
+ */
+export const DUE_KINDS: readonly ActionKind[] = [
+  "invoice_overdue",
+  "lien_deadline",
+  "supplier_pay",
+  "materials_needed",
+  "inquiry",
+  "quote_awaiting",
+  "invoice_draft",
+  "job_on_hold",
+  "permit_inspection",
+];
 
 /** The money a tile adds up, staff only: the figures the app can stand behind for that tile. */
 export const GROUP_MONEY_KINDS: Record<Group, readonly ActionKind[]> = {
@@ -87,20 +127,40 @@ function daysPast(value: string | null | undefined, ctx: LevelContext): number |
 }
 
 /**
- * THE MARK A ROW CARRIES. It reads only kind, id, urgency, when and since, so a feeder's words can
- * change without moving a mark. Days are the company's days, never UTC's.
+ * IS THIS CLOCK DUE: no more than `ahead` company days away, or gone by no more than DUE_PASSED_DAYS.
+ * No day is never due.
  */
-export function levelOf(item: Pick<ActionItem, "kind" | "id" | "urgency" | "when" | "since">, ctx: LevelContext): Level {
+export function isDue(day: string | null | undefined, ctx: LevelContext, ahead = 0): boolean {
+  const p = daysPast(day, ctx);
+  return p !== null && p >= -ahead && p <= DUE_PASSED_DAYS;
+}
+
+/**
+ * A ROW HAS ONE CLOCK. When its paper carries two (an estimate's follow-up day and its offer's last
+ * day), the row's clock is the first that is due for its kind, else the first that is set, else null.
+ * The feeders call this; the rule reads only what they stamped.
+ */
+export function dueClock(kind: ActionKind, days: readonly (string | null | undefined)[], ctx: LevelContext): string | null {
+  const ahead = DUE_AHEAD_DAYS[kind] ?? 0;
+  const set = days.filter((d): d is string => !!d && !!String(d).trim());
+  return set.find((d) => isDue(d, ctx, ahead)) ?? set[0] ?? null;
+}
+
+/**
+ * THE MARK A ROW CARRIES. It reads only kind, id, urgency, when and clock, so a feeder's words can
+ * change without moving a mark. `since` (the row's age) is not read: age is the order, never a mark
+ * (cn-v1162). Days are the company's days, never UTC's.
+ */
+export function levelOf(item: Pick<ActionItem, "kind" | "id" | "urgency" | "when" | "clock">, ctx: LevelContext): Level {
   if (isUnreadLine(item)) return "none";
-  const age = daysPast(item.since ?? item.when, ctx);
-  const sat = age !== null && age >= SOON_AFTER_DAYS;
   const past = daysPast(item.when, ctx); // past the row's own day (negative: days still to go)
   switch (item.kind) {
     case "quote_accepted":
       return "now"; // a yes nobody has acted on: the customer is waiting for a day
     case "time_stray":
       // urgency 2 is a clock still running from a past day: every hour on it is wrong pay.
-      return item.urgency === 2 ? "now" : sat ? "soon" : "none";
+      // A closed shift on no job, or the rollup of them, has no clock: plain.
+      return item.urgency === 2 ? "now" : "none";
     case "lien_deadline":
       // The feeder emits only inside lien-math's windows; a legal clock is never left unmarked.
       return past !== null && -past <= NOW_LIEN_DAYS ? "now" : "soon";
@@ -110,30 +170,25 @@ export function levelOf(item: Pick<ActionItem, "kind" | "id" | "urgency" | "when
     case "invoice_overdue":
       // Only late invoices are emitted, so every one is at least SOON.
       return past !== null && past >= NOW_INVOICE_LATE_DAYS ? "now" : "soon";
-    case "invoice_draft":
-    case "inquiry":
-      return item.urgency >= 1 || sat ? "soon" : "none";
-    case "quote_awaiting":
-    case "job_on_hold":
-      // Listed only once its day came (or it went quiet a week): being here is the reason to look.
-      return "soon";
-    case "materials_needed":
-      return item.when ? "soon" : "none"; // the crew's day is set: buy before the truck rolls
-    case "permit_inspection":
-      return item.urgency === 2 || !!item.when || sat ? "soon" : "none";
-    case "supplier_paper":
-      return "none"; // a rollup of papers that carry their own dates: undated on purpose
+    case "materials_needed": // the crew's day, today or tomorrow: buy before the truck rolls
+    case "inquiry": // a follow-up day that came, or the day a new lead came in
+    case "quote_awaiting": // a follow-up day that came, or an offer ending inside five days
+    case "invoice_draft": // the day it was set aside until has come
+    case "job_on_hold": // its come-back day has come
+    case "permit_inspection": // the booked day went by unwritten, or the day it failed
+      return isDue(item.clock, ctx, DUE_AHEAD_DAYS[item.kind] ?? 0) ? "soon" : "none";
+    case "supplier_paper": // a rollup of papers that carry their own dates: undated on purpose
     case "visit_unbilled":
     case "job_unbilled_work":
     case "inspection_writeup":
     case "quote_draft":
     case "contract_unsigned":
     case "job_to_schedule":
-    case "appointment":
+    case "appointment": // a visit nobody closed out is not amber (the owner, 2026-11-11)
     case "receipt_unbilled":
     case "stock_short":
     case "organize":
-      return sat ? "soon" : "none";
+      return "none"; // no clock: each day these hold is the day the office's own paper was born
   }
 }
 

@@ -31,7 +31,7 @@ describe("LevelMark", () => {
     expect(html).toContain('data-mark="soon"');
     expect(html).toContain('data-shape="triangle"');
     expect(html).toContain('role="img"');
-    expect(html).toContain(`aria-label="${translator("en")("ny_markSoon")}"`);
+    expect(html).toContain(`aria-label="${translator("en")("ny_markDue")}"`);
     expect(html).toContain("fill-amber-400");
     expect(html).toContain("stroke-amber-700");
     expect(html).toContain("fill-slate-900");
@@ -56,7 +56,7 @@ describe("LevelMark", () => {
 
   it("speaks the reader's language", () => {
     expect(draw("now", "es")).toContain(`aria-label="${translator("es")("ny_markNow")}"`);
-    expect(draw("soon", "es")).toContain(`aria-label="${translator("es")("ny_markSoon")}"`);
+    expect(draw("soon", "es")).toContain(`aria-label="${translator("es")("ny_markDue")}"`);
   });
 
   // The list's own surface holds no red but the marks. A sheet sits above the box and takes the app's

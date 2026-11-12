@@ -208,6 +208,10 @@ export function permitInspectionItems(input: {
       // what 0178 was written to stop.
       when: stand.state === "overdue" ? stand.day : null,
       since: stand.day,
+      // ITS CLOCK (cn-v1162): the authority's booked day that went by unwritten, or the day a visit
+      // failed or was called off (the authority did something that needs an answer). One still to
+      // phone has no day, so no clock: plain.
+      clock: stand.state === "overdue" || stand.state === "needs_another" ? stand.day : null,
       // A failed final needs somebody most of all (isOpenPermit says the same about the permit).
       urgency: stand.state === "needs_another" ? 2 : 1,
       done: false,

@@ -9,7 +9,8 @@ import type { Level } from "@/lib/action-items/types";
  * this is the ONLY file in the box allowed to hold a red or an amber class: a test scans the folder.
  *
  *   NOW   a red octagon with a white "!": it costs money or a legal right if it waits past today.
- *   SOON  an amber triangle with a dark "!": it has sat a week, or its day is close.
+ *   SOON  an amber triangle with a dark "!", said "Due": a real day is close or has just passed (a
+ *         follow-up day, an offer's last day, a come-back day). Never "it has sat a while".
  *
  * Colour is never the only signal. Each mark is a shape a colour-blind reader tells apart at a
  * glance, and it carries its own words for a screen reader (role="img" and a label from the
@@ -41,7 +42,7 @@ export function LevelMark({
   }
   if (level === "soon") {
     return (
-      <svg viewBox="0 0 16 16" {...a11y(t("ny_markSoon"))} data-mark="soon" data-shape="triangle" className={`shrink-0 ${className}`}>
+      <svg viewBox="0 0 16 16" {...a11y(t("ny_markDue"))} data-mark="soon" data-shape="triangle" className={`shrink-0 ${className}`}>
         <polygon points="8,1.2 15.2,14.6 0.8,14.6" strokeWidth="1.3" strokeLinejoin="round" className="fill-amber-400 stroke-amber-700" />
         <rect x="7.1" y="5.4" width="1.8" height="5" rx="0.9" className="fill-slate-900" />
         <circle cx="8" cy="12.4" r="1" className="fill-slate-900" />

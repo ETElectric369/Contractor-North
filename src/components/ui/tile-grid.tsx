@@ -8,7 +8,7 @@ export type GridTile = {
   id: string;
   /** Its name, drawn first (Title Case: a tile is a button). */
   name: string;
-  /** The accessible label, said whole ("Get Paid: 5 open, 2 soon"): the caller writes it in the reader's language. */
+  /** The accessible label, said whole ("Get Paid: 5 open, 2 due"): the caller writes it in the reader's language. */
   label: string;
   /** The big number. Above zero: drawn. Zero: the tile is drawn dimmed and disabled, with no number.
    *  Absent: no number, and the tile stays live. */
@@ -17,6 +17,9 @@ export type GridTile = {
   lines?: readonly (string | null | undefined)[];
   /** A small node beside the number (a mark and its count). */
   mark?: ReactNode;
+  /** A picture drawn left of the name, on the name's line (Needs You's tile pictures, cn-v1162). The
+   *  caller draws it whole, colour and all: the grid holds no colour of its own. */
+  icon?: ReactNode;
 };
 
 export type TileGridProps = {
@@ -43,6 +46,10 @@ export type TileGridProps = {
  * pressable even at zero, so it can always be closed. The open tile's outline is slate-900, never the
  * brand colour (a company's brand may be red or amber, and those mean urgency here), and the focus
  * ring is its own visible ring.
+ *
+ * A tile may carry a picture (`icon`, cn-v1162): it sits left of the name and the two wrap, so on a very
+ * narrow phone a long name drops under its picture instead of being cut. The grid still has no colour
+ * and no words of its own: the picture comes whole from the caller, and a dimmed tile dims it too.
  */
 export function TileGrid({ tiles, openId, onToggle, controlsId, label, className = "" }: TileGridProps) {
   return (
@@ -66,7 +73,14 @@ export function TileGrid({ tiles, openId, onToggle, controlsId, label, className
               open ? "border-slate-900 ring-1 ring-slate-900" : "border-slate-200 hover:bg-slate-50"
             } ${disabled ? "cursor-default opacity-50 hover:bg-white" : ""}`}
           >
-            <span className="text-sm font-semibold leading-tight text-slate-900">{tile.name}</span>
+            {tile.icon ? (
+              <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                {tile.icon}
+                <span className="text-sm font-semibold leading-tight text-slate-900">{tile.name}</span>
+              </span>
+            ) : (
+              <span className="text-sm font-semibold leading-tight text-slate-900">{tile.name}</span>
+            )}
             {(tile.count || tile.mark) && (
               <span className="flex items-center gap-1.5">
                 {!!tile.count && <span className="text-xl font-semibold tabular-nums leading-tight text-slate-900">{tile.count}</span>}

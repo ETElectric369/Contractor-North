@@ -51,6 +51,8 @@ export type InquiryRow = {
   status: string;
   next_follow_up_at: string | null;
   phone?: string | null;
+  /** The day it came in: a new lead's clock (cn-v1162). The build's read always carries it. */
+  created_at?: string | null;
 };
 
 /**
@@ -76,8 +78,12 @@ export function inquiryActionItem(q: InquiryRow, todayStr: string, leadsOn: bool
     ...(named ? {} : { whoSay: { key: "ny_who_someone" } }),
     what: { key: leadsOn ? (fresh ? "ny_w_leadNew" : "ny_w_leadFollowUp") : fresh ? "ny_w_requestNew" : "ny_w_requestFollowUp" },
     when: q.next_follow_up_at,
-    // A brand-new, uncontacted lead is the hottest thing on the board (speed-to-lead wins
-    // the job) → top urgency, which the one rule (needs-you-rule) reads as a Win Work row to act on soon.
+    // ITS CLOCK (cn-v1162): the follow-up day somebody set, else, for a lead nobody has reached yet,
+    // the day it came in: an outside party asked for work and is waiting for an answer, so a new lead
+    // is Due for its first week (the one rule's window). A contacted lead with no day has no clock.
+    clock: q.next_follow_up_at ?? (fresh ? (q.created_at ?? null) : null),
+    // A brand-new, uncontacted lead is the hottest thing on the board (speed-to-lead wins the job):
+    // top urgency. The one rule no longer reads a lead's urgency: its mark is its clock's (cn-v1162).
     // An overdue follow-up is next; a contacted, on-schedule lead is normal.
     urgency: fresh ? 2 : overdue ? 1 : 0,
     done: false,

@@ -7,7 +7,8 @@ import { titleCaseIn } from "../../../tests/title-case-words";
 
 /**
  * SAME-KIND PILES ROLL UP (Wave 1, W1-14): two or more open rows of a pile are one row that counts 1
- * on the badge; a lone row stays a plain row; the pile sits where its most pressing child would.
+ * on the badge; a lone row stays a plain row; the pile sits by its mark, its tile, then its oldest
+ * child's own day (cn-v1162).
  */
 const TODAY = "2026-09-27";
 let seq = 0;
@@ -76,20 +77,37 @@ describe("grouping", () => {
 });
 
 describe("the sort position", () => {
-  it("a pile sits where its most pressing child sat: its mark, its tile, its earliest when", () => {
+  it("a pile sits by its mark, its tile, then its oldest child's own day", () => {
     const lead = row("inquiry", { urgency: 2, when: "2026-09-01" });
     const quiet = row("quote_awaiting", { urgency: 1, level: "soon", when: "2026-09-20" });
     const dying = row("quote_awaiting", { urgency: 2, level: "soon", when: "2026-09-05" });
     const books = row("organize");
     const paid = row("invoice_draft");
     const out = roll([lead, quiet, dying, books, paid]);
-    // Get Paid first; in Win Work the SOON pile above the plain lead; Keep the Books last.
+    // Get Paid first; in Sales the SOON pile above the plain lead; Bookkeeping last.
     expect(out.map((i) => i.id)).toEqual([paid.id, "pile:no_answer_yet", lead.id, books.id]);
     expect(out[1].urgency).toBe(2);
     expect(out[1].level).toBe("soon");
     expect(out[1].when).toBe("2026-09-05");
-    // The first child is the most pressing one (the unfold's first row).
+    // The first child is the first in the one order (the unfold's first row): Due, then oldest.
     expect(out[1].children?.[0].id).toBe(dying.id);
+  });
+
+  it("a pile carries its oldest child's own day (since ?? when) as its since, and sits by it (cn-v1162)", () => {
+    // Two holds with no day (their last touch is their since) and a job needing a day between them.
+    const holdNew = row("job_on_hold", { since: "2026-09-20" });
+    const needDay = row("job_to_schedule", { since: "2026-09-01" });
+    const holdOld = row("job_on_hold", { since: "2026-08-01" });
+    const out = roll([holdNew, needDay, holdOld]);
+    expect(out.map((i) => i.id)).toEqual(["pile:holds_back", needDay.id]);
+    expect(out[0].since).toBe("2026-08-01");
+    expect(out[0].when).toBeNull();
+    expect(out[0].children?.map((c) => c.id)).toEqual([holdOld.id, holdNew.id]);
+    // A child with only a `when` counts by it; a pile whose children have no day carries none.
+    const dated = roll([row("quote_draft", { when: "2026-09-10" }), row("quote_draft", { since: "2026-09-15" })]);
+    expect(dated[0].since).toBe("2026-09-10");
+    const undated = roll([row("organize"), row("organize")]);
+    expect(undated[0].since).toBeUndefined();
   });
 });
 
@@ -129,7 +147,8 @@ describe("a pile never hides a NOW row", () => {
   });
 
   it("a pile wears its most urgent child's mark: SOON if any child is, none if none is", () => {
-    const mixed = roll([row("quote_draft"), row("quote_draft", { level: "soon" }), row("quote_draft")]);
+    // Holds: a hold back on its day is Due (a quote_draft can no longer be: it has no clock).
+    const mixed = roll([row("job_on_hold"), row("job_on_hold", { level: "soon" }), row("job_on_hold")]);
     expect(mixed[0].level).toBe("soon");
     const plain = roll([row("quote_draft"), row("quote_draft")]);
     expect(plain[0].level).toBe("none");

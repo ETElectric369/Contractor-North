@@ -486,7 +486,7 @@ describe("one reading of 'is this paper already in his books?'", () => {
 });
 
 describe("the supplier bills badge as ONE line (the BADGE INVARIANT)", () => {
-  it("any number of cards is one item, in Keep the Books, open-only", () => {
+  it("any number of cards is one item, in Bookkeeping, open-only", () => {
     const f = feedTonight();
     const item = supplierPaperActionItem(f)!;
     expect(item.id).toBe(SUPPLIER_PAPERS_ITEM_ID);

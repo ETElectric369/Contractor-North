@@ -3,7 +3,7 @@ import { viewerSortsBank } from "@/lib/bank-viewer";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, NeedsYou, PileName, WaitingItem } from "./types";
 import { AFFORDANCES, KIND_GROUP, appointmentAffordances, sortActionItems, waitingForViewer, waitingRow } from "./types";
-import { levelOf, withoutMoneyForTech } from "./needs-you-rule";
+import { QUOTE_EXPIRY_SOON_DAYS, dueClock, levelOf, withoutMoneyForTech } from "./needs-you-rule";
 import { bucketInspections, inspectionLabel } from "@/lib/inspections";
 import { leadRidesItsWriteUp, lessRidden } from "./lead-rides-its-writeup";
 import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES, visitTitle } from "@/lib/statuses";
@@ -100,9 +100,9 @@ const INVOICE_STALE_DAYS = 30;
 // A sent quote/estimate with no reply for this many days has gone quiet — time to
 // nudge the customer before the lead cools off entirely.
 const QUOTE_QUIET_DAYS = 7;
-// ...and one whose valid-until window closes within this many days (or already
-// passed) is urgent regardless of age — the offer is about to die on the vine.
-const QUOTE_EXPIRY_SOON_DAYS = 5;
+// ...and one whose valid-until window closes within this many days (or already passed) is listed
+// whatever its age: QUOTE_EXPIRY_SOON_DAYS, which lives in the one rule since cn-v1162 (the rule
+// marks the same window Due, and it cannot import this build).
 
 /** How many jobs the Jobs Needing a Day read looks at (newest first); more says "N+". */
 const JOBS_DAY_READ_CAP = 200;
@@ -1125,6 +1125,9 @@ async function buildActionItems(ctx: {
         // that matters); fall back to created so undated offers still sort by age.
         when: (followUp === "due" ? q.follow_up_at : null) ?? q.valid_until ?? q.created_at ?? null,
         since: q.created_at ?? null,
+        // ITS CLOCK (cn-v1162): the follow-up day he picked, once it came, or the offer's last day.
+        // Quiet a week is why it is listed, never a clock: the sent day is the office's own.
+        clock: dueClock("quote_awaiting", [followUp === "due" ? q.follow_up_at : null, q.valid_until], { todayStr, tz }),
         // Past its valid-until the offer is dying — bump it above the routine chase.
         urgency: daysToExpiry != null && daysToExpiry < 0 ? 2 : 1,
         done: false,
@@ -1172,13 +1175,24 @@ async function buildActionItems(ctx: {
       subtitle: [who, back ? a.due : null, a.detail].filter(Boolean).join(" · ") || null,
       // The customer in bold, else the job, else the number; the job as the tail beside a customer.
       who: who || (job ? jobWords(job) : null) || d.invoice_number || null,
-      what: {
-        key: back && job ? (job.status === "complete" ? "ny_w_jobFinishedSend" : "ny_w_jobCancelledSend") : "ny_w_invoiceNotSent",
-        vars: { ref: d.invoice_number ?? null },
-        tail: who && job ? jobWords(job) : null,
-      },
+      // A draft back because the day it was set aside until came says that day (cn-v1162 fixer): every
+      // other row with a clock names its day, and this one is amber for its first week; the words stay
+      // true after the week, so they do not change with the mark.
+      what:
+        !back && until && until <= todayStr
+          ? { key: "ny_w_invoiceBackFromSetAside", vars: { ref: d.invoice_number ?? null, day: until }, tail: who && job ? jobWords(job) : null }
+          : {
+              key: back && job ? (job.status === "complete" ? "ny_w_jobFinishedSend" : "ny_w_jobCancelledSend") : "ny_w_invoiceNotSent",
+              vars: { ref: d.invoice_number ?? null },
+              tail: who && job ? jobWords(job) : null,
+            },
       when: d.created_at ?? null,
-      // The day it was set aside for came early: it is back on top.
+      // ITS CLOCK (cn-v1162): the day it was set aside until, once that day has come. A draft back
+      // early because its job finished has no clock of its own (the job's end is an event), and a
+      // fresh draft's made day is the office's own: plain.
+      clock: until && until <= todayStr ? until : null,
+      // The day it was set aside for came early (its job finished): urgency 1. The one order no longer
+      // reads urgency (cn-v1162): such a draft is drawn plain and sorts by the day it was made.
       urgency: back ? 1 : 0,
       done: false,
       href: `/billing/${d.id}`,
@@ -1650,6 +1664,9 @@ async function buildActionItems(ctx: {
       who: jobWords(cand.job),
       what: { key: "ny_w_toBuy", vars: { n: need.length, text: preview, ...(more > 0 ? { andKey: "ny_w_plusMore", andN: more } : {}) } },
       when: cand.when,
+      // ITS CLOCK (cn-v1162): the day the crew stands on the job (today or tomorrow, the read's bound).
+      // A job worked lately with no day ahead has none: plain.
+      clock: cand.when,
       urgency: 1,
       done: false,
       href: `/jobs/${jobId}?tab=materials`,
@@ -1711,9 +1728,12 @@ async function buildActionItems(ctx: {
           tail: one(j.customers as any)?.name ?? null,
         },
         when: null,
-        // The pip's age. A hold with no day (held before 0366, so among the oldest) ages from its last
-        // touch, the proxy for "held since": age 0 would draw every old hold grey. Words stay "No Day Set".
+        // Its age, for the order (oldest first). A hold with no day (held before 0366, so among the
+        // oldest) ages from its last touch, the proxy for "held since". Words stay "No Day Set".
         since: until ?? dayOf(j.updated_at),
+        // ITS CLOCK (cn-v1162): the come-back day somebody picked, once it has come. A hold with no
+        // day has no clock (its last touch is not one): plain.
+        clock: withDay && state === "back" ? until : null,
         urgency: 1,
         done: false,
         href: `/jobs/${j.id}`,
@@ -1807,12 +1827,15 @@ async function buildActionItems(ctx: {
     counts.stock_to_settle = sqlCount(shortsR);
   }
 
-  // THE SUPPLIER BILLS, AS ONE ROLLED-UP LINE (badge +1, however many papers). FIRST, because the
-  // point of the card is that the paper comes to him, not the reverse.
+  // THE SUPPLIER BILLS, AS ONE ROLLED-UP LINE (badge +1, however many papers). FIRST among its
+  // tile's unmarked rows, because the point of the card is that the paper comes to him, not the
+  // reverse: the one order holds it there by a key of its own (types.ts sortActionItems, cn-v1162),
+  // since the card has no day and the order is the rows' own days.
   const desk = await supplierDeskP;
   const paperItem = supplierPaperActionItem(await supplierPapersP);
   // PAY CED BY THE TENTH (supplier-pay-due.ts): one dated line per account whose discount runs out
-  // within two weeks, right under the papers. Staff only (the same read); gone once the deadline is.
+  // within two weeks; the one order places it by that day. Staff only (the same read); gone once the
+  // deadline is.
   items.unshift(...withPayees(supplierPayActionItems((await supplierDeskP)?.payDue), desk?.payDue));
   if (paperItem) items.unshift(paperItem);
   // A read the desk needed failed: said in one undated line, never a quiet "nothing waiting".
@@ -1838,9 +1861,10 @@ async function buildActionItems(ctx: {
 
   // STAMPED AND SORTED ONCE, HERE: each row's tile and its mark (needs-you-rule.ts, in the company's
   // days), then NOW first, the tiles in order, a Couldn't Check line leading its tile, SOON before no
-  // mark, oldest first with an undated row counting as today; ties keep the order built above
-  // (types.ts sortActionItems). Then the same-kind piles roll up (piles.ts): a pile sits where its most
-  // pressing child sat, its NOW children in a pile of their own, and each counts one on the badge.
+  // mark, the Supplier Bills card first among its tile's unmarked rows, then oldest first with an
+  // undated row counting as today; ties keep the order built above (types.ts sortActionItems). Then the
+  // same-kind piles roll up (piles.ts): a pile sits by its mark, its tile, then its OLDEST child's own
+  // day, its NOW children in a pile of their own, and each counts one on the badge.
   const sorted = sortActionItems(
     folded.now.map((it) => ({ ...it, group: KIND_GROUP[it.kind], level: levelOf(it, { todayStr, tz }) })),
     todayStr,

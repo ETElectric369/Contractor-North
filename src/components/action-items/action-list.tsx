@@ -29,6 +29,7 @@ import { DEFAULT_TIMEZONE, formatCurrency } from "@/lib/utils";
 import { SupplierPaperCards, SUPPLIER_PAPERS_SCOPE } from "@/components/supplier-paper-cards";
 import { AlreadyBilledButton, AlreadyInvoicedSheet } from "@/components/already-billed-sheet";
 import { LevelMark } from "./level-mark";
+import { KindPicture } from "./kind-picture";
 import { NeedsYouCounts, NeedsYouTiles, TILE_NAME_KEY } from "./needs-you-tiles";
 
 /** English, for a caller that hands in no translator (a test, a pure helper). */
@@ -121,7 +122,7 @@ export function keepInFlight(hidden: Set<string>, inFlight: Set<string>): Set<st
  *      triangle), and the rest. Each count is drawn only above zero.
  *   2. Act Today: the NOW rows, the few that cost money or a legal right if they wait. Not drawn
  *      when there are none.
- *   3. Four tiles (staff only): Get Paid, Win Work, Run the Jobs, Keep the Books. One is open at a
+ *   3. Four tiles (staff only): Get Paid, Sales, Operations, Bookkeeping. One is open at a
  *      time; a second tap on the open one closes it.
  *   4. The open tile's rows: that group's rows that are not NOW.
  *   (5. The Waiting fold, drawn by the page under this.)
@@ -374,17 +375,34 @@ type RowProps = {
   nested?: boolean;
 };
 
+/**
+ * A NAME WHOSE LAST WORD IS A SHORT TAG (" · 3", " · 3+", " · J-061") keeps that tag with the word
+ * before it (cn-v1162). A name may run to a second line on a phone now, and left to itself the line
+ * broke at the last space: "Cuentas de Proveedores ·" over a lone "3". The words are not changed, only
+ * where the line may break.
+ */
+function Tagged({ text }: { text: string }) {
+  const m = /^(.*\S)( · \S{1,8})$/.exec(text);
+  if (!m) return <>{text}</>;
+  return (
+    <>
+      {m[1]}
+      <span className="whitespace-nowrap">{m[2]}</span>
+    </>
+  );
+}
+
 /** The fixed-width slot a mark sits in, empty when there is none: every row's words start at one x. */
 function MarkSlot({ level }: { level: ActionItem["level"] }) {
   return (
-    <span className="flex w-4 shrink-0 justify-center pt-0.5" data-mark-slot="">
+    <span className="flex w-4 shrink-0 items-center justify-center" data-mark-slot="">
       <LevelMark level={level} />
     </span>
   );
 }
 
 /**
- * One row: the mark slot · WHO in bold · the right edge (the money for staff, else the age), then
+ * One row: the mark slot · the picture slot · WHO in bold · the right edge (the money for staff, else the age), then
  * WHAT in plain weight under it, the ONE named button, and ⋯. A failed read is a row with no mark and
  * no button whose sentence is never cut; it opens the page that can say what it could not.
  */
@@ -407,11 +425,25 @@ function Row(p: RowProps) {
           under its words; its named buttons and ⋯ sit on top of it. */}
       <button type="button" onClick={open} aria-label={fillSlots(p.t("ny_openRow"), { title: item.title })} className="absolute inset-0 rounded-xl" />
       <div className="pointer-events-none relative min-w-0 flex-1">
-        <div className="flex min-w-0 gap-2">
+        {/* THE TWO SLOTS, THEN THE WORDS (cn-v1162, the owner's mock): [mark 16px] [picture 24px]
+            [who / what]. The picture says what there is to do, grey until the row carries a mark, then
+            coloured in with its TILE's chip (kind-picture.tsx), so in Act Today it says which tile the
+            row is from. Both are centred on the row, and gap-1.5 holds the pair to 28px more than the
+            mark alone cost: a 375px phone keeps its words. A failed read (isUnreadLine) asks for no
+            action, so its picture slot stays empty, the way its mark slot does.
+            WHO MAY RUN TO A SECOND LINE ON A PHONE (seen at 375px in Spanish): cut at one line, the
+            28px the picture took turned "Cuentas de Proveedores · 3" into "Cuentas de Proveedore…",
+            and what a cut loses is the end, which on a rollup is its count. So a name wraps there and
+            is never cut short of its count; the amount stays on the first line (the pair is aligned
+            on their baselines). From sm up there is room, and it is one line, as before. */}
+        <div className="flex min-w-0 items-center gap-1.5">
           <MarkSlot level={unread ? "none" : item.level} />
+          <KindPicture kind={unread ? null : item.kind} group={item.group ?? KIND_GROUP[item.kind]} level={item.level} done={item.done} />
           <div className="min-w-0 flex-1">
             <div className="flex w-full min-w-0 items-baseline gap-2">
-              <span className={`min-w-0 flex-1 truncate text-sm font-semibold ${item.done ? "text-slate-600 line-through" : "text-slate-900"}`}>{w.who}</span>
+              <span className={`line-clamp-2 min-w-0 flex-1 text-sm font-semibold [overflow-wrap:anywhere] sm:line-clamp-1 ${item.done ? "text-slate-600 line-through" : "text-slate-900"}`}>
+                <Tagged text={w.who} />
+              </span>
               {w.right && (
                 <span className={`shrink-0 text-xs tabular-nums ${w.rightKind === "money" ? "font-semibold text-slate-900" : "text-slate-600"}`} data-right={w.rightKind ?? undefined}>
                   {w.right}
@@ -469,7 +501,7 @@ function Row(p: RowProps) {
   );
 }
 
-/** A pile: its mark, "Label · N", how many are soon, its sum, its verb (opens it), the first child in full, then See All. */
+/** A pile: its mark, its picture, "Label · N", how many are soon, its sum, its verb (opens it), the first child in full, then See All. */
 function PileRow(p: RowProps & { kids: ActionItem[]; count: number; open: boolean; onToggle: () => void }) {
   const { item, kids, count, open, t } = p;
   const pile = item.pile!;
@@ -503,11 +535,15 @@ function PileRow(p: RowProps & { kids: ActionItem[]; count: number; open: boolea
         {/* The whole header opens the pile: one target the size of the header, under its words. */}
         <button type="button" onClick={unfold} aria-label={title} aria-expanded={here ? open : undefined} className="absolute inset-0 rounded-t-xl" />
         <div className="pointer-events-none relative min-w-0 flex-1">
-          <div className="flex min-w-0 gap-2">
+          {/* Its kind's picture (every pile's kinds share one), coloured in by the pile's own mark. */}
+          <div className="flex min-w-0 items-center gap-1.5">
             <MarkSlot level={level} />
+            <KindPicture kind={item.kind} group={item.group ?? KIND_GROUP[item.kind]} level={level} />
             <div className="min-w-0 flex-1">
               <div className="flex w-full min-w-0 items-baseline gap-2">
-                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">{title}</span>
+                <span className="line-clamp-2 min-w-0 flex-1 text-sm font-semibold text-slate-900 [overflow-wrap:anywhere] sm:line-clamp-1">
+                  <Tagged text={title} />
+                </span>
                 {sum && (
                   <span className="shrink-0 text-xs font-semibold tabular-nums text-slate-900" data-right="money">
                     {sum}
@@ -516,7 +552,7 @@ function PileRow(p: RowProps & { kids: ActionItem[]; count: number; open: boolea
               </div>
               <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
                 <div className="min-w-0 flex-[1_1_9rem] truncate text-xs text-slate-600">
-                  {soon > 0 && level !== "now" && <span data-soon-count={soon}>{fillSlots(t("ny_countSoon"), { n: soon })}</span>}
+                  {soon > 0 && level !== "now" && <span data-soon-count={soon}>{fillSlots(t(soon === 1 ? "ny_countDueOne" : "ny_countDue"), { n: soon })}</span>}
                 </div>
                 {verb && (
                   <button type="button" onClick={unfold} className={`${ROW_BUTTON} pointer-events-auto ml-auto`}>

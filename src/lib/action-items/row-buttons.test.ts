@@ -107,7 +107,7 @@ describe("the table", () => {
 
   it("a draft whose job is finished ('Honeysuckle · J-011 Finished · Send INV-078') has no Set Aside Until…: it waits on nothing", () => {
     // The build leaves snooze off a draft whose job is complete or cancelled (draftInvoiceState):
-    // a day written there would put it straight back on top, so the door would be a dead end.
+    // a day written there would put it straight back on the list, so the door would be a dead end.
     const finished = rowButtons(row("invoice_draft", { title: "Honeysuckle · J-011 Finished · Send INV-078", affordances: AFFORDANCES.invoice_draft.filter((v) => v !== "snooze") }), staff);
     expect(finished.primary?.label).toBe("Send It");
     expect(labels(finished.more)).toEqual([]);

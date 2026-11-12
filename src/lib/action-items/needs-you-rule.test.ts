@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
+  DUE_AHEAD_DAYS,
+  DUE_KINDS,
+  DUE_PASSED_DAYS,
   GROUP_MONEY_KINDS,
   GROUP_ORDER,
   KIND_GROUP,
@@ -7,8 +10,10 @@ import {
   NOW_INVOICE_LATE_DAYS,
   NOW_KINDS,
   NOW_LIEN_DAYS,
-  SOON_AFTER_DAYS,
+  QUOTE_EXPIRY_SOON_DAYS,
   SOON_DISCOUNT_DAYS,
+  dueClock,
+  isDue,
   isUnreadLine,
   levelOf,
   maxLevel,
@@ -21,18 +26,21 @@ import { pileOf } from "./piles";
 import { daysAgoStr } from "./leak-detectors";
 
 /**
- * NEEDS YOU'S ONE RULE: the tile each kind sits in and the mark a row carries, table A1 row by row,
- * each threshold at one under, at and one over. Days are the company's: today is passed in, never
- * read from the clock.
+ * NEEDS YOU'S ONE RULE: the tile each kind sits in and the mark a row carries, the plan's table arm
+ * by arm, each window at its edges. Days are the company's: today is passed in, never read from the
+ * clock. Since cn-v1162 amber (SOON, said "Due") is a real CLOCK that is close or just went by; age
+ * alone marks nothing, so every test below also hands the rule an old `since` and proves it unread.
  */
 const TODAY = "2026-10-20";
 const TZ = "America/Los_Angeles";
 const ctx = { todayStr: TODAY, tz: TZ };
 const ago = (n: number) => daysAgoStr(TODAY, n); // n days before today (negative: ahead)
 const KINDS = Object.keys(AFFORDANCES) as ActionKind[];
+const CLOCK_KINDS: ActionKind[] = ["materials_needed", "inquiry", "quote_awaiting", "invoice_draft", "job_on_hold", "permit_inspection"];
 
-type LevelIn = Pick<ActionItem, "kind" | "id" | "urgency" | "when" | "since">;
-const it0 = (kind: ActionKind, o: Partial<LevelIn> = {}): LevelIn => ({ kind, id: `${kind}-1`, urgency: 1, when: null, since: null, ...o });
+// `since` rides along on purpose: the rule must not read it.
+type LevelIn = Pick<ActionItem, "kind" | "id" | "urgency" | "when" | "clock"> & { since?: string | null };
+const it0 = (kind: ActionKind, o: Partial<LevelIn> = {}): LevelIn => ({ kind, id: `${kind}-1`, urgency: 1, when: null, clock: null, since: null, ...o });
 const lv = (kind: ActionKind, o: Partial<LevelIn> = {}) => levelOf(it0(kind, o), ctx);
 
 describe("the four tiles", () => {
@@ -63,33 +71,67 @@ describe("the four tiles", () => {
     for (const [p, groups] of byPile) expect(groups.size, p).toBe(1);
   });
 
-  it("each tile's money kinds sit in that tile, and Run the Jobs adds up no money", () => {
+  it("each tile's money kinds sit in that tile, and Operations adds up no money", () => {
     for (const g of GROUP_ORDER) for (const k of GROUP_MONEY_KINDS[g]) expect(KIND_GROUP[k], k).toBe(g);
     expect(GROUP_MONEY_KINDS.run_jobs).toEqual([]);
   });
 });
 
-describe("the level table (A1)", () => {
-  it("the thresholds", () => {
-    expect([SOON_AFTER_DAYS, NOW_INVOICE_LATE_DAYS, NOW_LIEN_DAYS, NOW_DISCOUNT_DAYS, SOON_DISCOUNT_DAYS]).toEqual([7, 30, 7, 3, 7]);
+describe("the clock (cn-v1162)", () => {
+  it("the thresholds: the passed window, the offer's, the discount's, the lien's and the invoice's", () => {
+    expect([DUE_PASSED_DAYS, QUOTE_EXPIRY_SOON_DAYS, NOW_INVOICE_LATE_DAYS, NOW_LIEN_DAYS, NOW_DISCOUNT_DAYS, SOON_DISCOUNT_DAYS]).toEqual([7, 5, 30, 7, 3, 7]);
+    expect(DUE_AHEAD_DAYS).toEqual({ quote_awaiting: QUOTE_EXPIRY_SOON_DAYS, materials_needed: 1 });
+    expect([...DUE_KINDS].sort()).toEqual(
+      ["inquiry", "invoice_draft", "invoice_overdue", "job_on_hold", "lien_deadline", "materials_needed", "permit_inspection", "quote_awaiting", "supplier_pay"],
+    );
   });
 
+  it("isDue: the window's edges, ahead -ahead-1 / -ahead, then 0, +7 and +8", () => {
+    for (const ahead of [0, 1, 5]) {
+      expect(isDue(ago(-ahead - 1), ctx, ahead), `${ahead} early`).toBe(false);
+      expect(isDue(ago(-ahead), ctx, ahead), `${ahead} first day`).toBe(true);
+      expect(isDue(ago(0), ctx, ahead), `${ahead} today`).toBe(true);
+      expect(isDue(ago(DUE_PASSED_DAYS), ctx, ahead), `${ahead} last day`).toBe(true);
+      expect(isDue(ago(DUE_PASSED_DAYS + 1), ctx, ahead), `${ahead} old`).toBe(false);
+    }
+    expect(isDue(ago(-1), ctx)).toBe(false); // ahead defaults to 0: the day itself
+    expect(isDue(null, ctx)).toBe(false);
+    expect(isDue(undefined, ctx, 5)).toBe(false);
+    expect(isDue("not a day", ctx)).toBe(false);
+  });
+
+  it("dueClock: the first that is due, else the first that is set, else null", () => {
+    // A follow-up day long gone and an offer ending in three days: the offer is the clock.
+    expect(dueClock("quote_awaiting", [ago(20), ago(-3)], ctx)).toBe(ago(-3));
+    // Both due: the first wins.
+    expect(dueClock("quote_awaiting", [ago(1), ago(-3)], ctx)).toBe(ago(1));
+    // Neither due: the first that is set, so the row still knows its day (and stays plain).
+    expect(dueClock("quote_awaiting", [null, ago(-30)], ctx)).toBe(ago(-30));
+    expect(dueClock("quote_awaiting", [ago(40), ago(-30)], ctx)).toBe(ago(40));
+    // The kind's own window decides: five days ahead is due for an offer, not for a draft.
+    expect(dueClock("quote_awaiting", [ago(-30), ago(-5)], ctx)).toBe(ago(-5));
+    expect(dueClock("invoice_draft", [ago(-30), ago(-5)], ctx)).toBe(ago(-30));
+    expect(dueClock("quote_awaiting", [null, undefined, ""], ctx)).toBeNull();
+    expect(dueClock("quote_awaiting", [], ctx)).toBeNull();
+  });
+});
+
+describe("the level table", () => {
   it("1 quote_accepted: always NOW", () => {
     expect(lv("quote_accepted", { urgency: 2, when: ago(0) })).toBe("now");
     expect(lv("quote_accepted", { urgency: 0 })).toBe("now");
   });
 
-  it("2 time_stray: a clock running from a past day is NOW; one sat a week is SOON", () => {
+  it("2 time_stray: a clock running from a past day is NOW; anything else is plain at every age", () => {
     expect(lv("time_stray", { urgency: 2, when: ago(1) })).toBe("now");
-    expect(lv("time_stray", { when: ago(6) })).toBe("none");
-    expect(lv("time_stray", { when: ago(7) })).toBe("soon");
-    expect(lv("time_stray", { when: ago(8) })).toBe("soon");
-    // The rollup is undated: it ages from `since`, its oldest shift day.
-    expect(lv("time_stray", { id: "stray-no-job", since: ago(7) })).toBe("soon");
-    expect(lv("time_stray", { id: "stray-no-job", since: ago(6) })).toBe("none");
+    for (const n of [0, 6, 7, 8, 90]) {
+      expect(lv("time_stray", { when: ago(n), since: ago(n) }), `${n}`).toBe("none");
+      // The rollup of hours on no job: its `since` is its age, never a mark.
+      expect(lv("time_stray", { id: "stray-no-job", since: ago(n), clock: ago(0) }), `rollup ${n}`).toBe("none");
+    }
   });
 
-  it("3 lien_deadline: NOW within seven days, past included; otherwise SOON", () => {
+  it("3 lien_deadline: NOW within seven days, past included; otherwise SOON (on `when`, unchanged)", () => {
     expect(lv("lien_deadline", { when: ago(-8) })).toBe("soon");
     expect(lv("lien_deadline", { when: ago(-7) })).toBe("now");
     expect(lv("lien_deadline", { when: ago(-6) })).toBe("now");
@@ -97,7 +139,7 @@ describe("the level table (A1)", () => {
     expect(lv("lien_deadline", { when: ago(-14) })).toBe("soon");
   });
 
-  it("4 supplier_pay: NOW within three days, SOON within seven, no mark beyond", () => {
+  it("4 supplier_pay: NOW within three days, SOON within seven, no mark beyond (on `when`, unchanged)", () => {
     expect(lv("supplier_pay", { when: ago(-2) })).toBe("now");
     expect(lv("supplier_pay", { when: ago(-3) })).toBe("now");
     expect(lv("supplier_pay", { when: ago(-4) })).toBe("soon");
@@ -107,70 +149,84 @@ describe("the level table (A1)", () => {
     expect(lv("supplier_pay", { when: null })).toBe("none");
   });
 
-  it("5 invoice_overdue: NOW thirty days past its day, SOON before", () => {
+  it("5 invoice_overdue: NOW thirty days past its day, SOON before (its own rule, no seven-day cut)", () => {
+    expect(lv("invoice_overdue", { when: ago(8) })).toBe("soon");
     expect(lv("invoice_overdue", { when: ago(29) })).toBe("soon");
     expect(lv("invoice_overdue", { when: ago(30) })).toBe("now");
     expect(lv("invoice_overdue", { when: ago(31) })).toBe("now");
     expect(lv("invoice_overdue", { when: null })).toBe("soon");
   });
 
-  it("6 invoice_draft: SOON once flagged, or sat a week", () => {
-    expect(lv("invoice_draft", { urgency: 0, when: ago(6) })).toBe("none");
-    expect(lv("invoice_draft", { urgency: 0, when: ago(7) })).toBe("soon");
-    expect(lv("invoice_draft", { urgency: 0, when: ago(8) })).toBe("soon");
-    expect(lv("invoice_draft", { urgency: 1, when: ago(0) })).toBe("soon");
-  });
-
-  it("9 inquiry: SOON once its day came (urgency 1 or 2), or sat a week from when it came in", () => {
-    expect(lv("inquiry", { urgency: 0, since: ago(6) })).toBe("none");
-    expect(lv("inquiry", { urgency: 0, since: ago(7) })).toBe("soon");
-    expect(lv("inquiry", { urgency: 0, since: ago(8) })).toBe("soon");
-    expect(lv("inquiry", { urgency: 2, since: ago(0) })).toBe("soon");
-    // `since` is read before `when`: a follow-up day long gone does not age a fresh lead.
-    expect(lv("inquiry", { urgency: 0, since: ago(1), when: ago(20) })).toBe("none");
-  });
-
-  it("12 quote_awaiting and 15 job_on_hold: always SOON (listed only once their day came)", () => {
-    for (const k of ["quote_awaiting", "job_on_hold"] as const) {
-      expect(lv(k, { urgency: 0 }), k).toBe("soon");
-      expect(lv(k, { urgency: 2, when: ago(-30) }), k).toBe("soon");
-    }
-  });
-
-  it("17 materials_needed: SOON when the crew's day is set, no mark undated", () => {
-    expect(lv("materials_needed", { when: ago(0) })).toBe("soon");
-    expect(lv("materials_needed", { when: ago(-1) })).toBe("soon");
-    expect(lv("materials_needed", { when: null })).toBe("none");
-  });
-
-  it("18 permit_inspection: SOON when failed or cancelled, when its booked day went by, or sat a week", () => {
-    expect(lv("permit_inspection", { urgency: 2 })).toBe("soon");
-    expect(lv("permit_inspection", { when: ago(1) })).toBe("soon");
-    expect(lv("permit_inspection", { since: ago(6) })).toBe("none");
-    expect(lv("permit_inspection", { since: ago(7) })).toBe("soon");
-    expect(lv("permit_inspection", { since: ago(8) })).toBe("soon");
-  });
-
-  it("20 supplier_paper: never marked", () => {
-    expect(lv("supplier_paper", { urgency: 2, since: ago(90), when: ago(90) })).toBe("none");
-  });
-
-  it("the week rule (rows 7, 8, 10, 11, 13, 14, 16, 19, 21, 22): SOON at seven days, from since ?? when", () => {
-    const weekly: ActionKind[] = ["visit_unbilled", "job_unbilled_work", "inspection_writeup", "quote_draft", "contract_unsigned", "job_to_schedule", "appointment", "receipt_unbilled", "stock_short", "organize"];
-    for (const k of weekly) {
-      for (const field of ["when", "since"] as const) {
-        expect(lv(k, { urgency: 2, [field]: ago(6) }), `${k} ${field} 6`).toBe("none");
-        expect(lv(k, { urgency: 2, [field]: ago(7) }), `${k} ${field} 7`).toBe("soon");
-        expect(lv(k, { urgency: 2, [field]: ago(8) }), `${k} ${field} 8`).toBe("soon");
+  it("the six clock kinds: Due from their window's first day through seven days past, read on `clock` alone", () => {
+    for (const k of CLOCK_KINDS) {
+      const ahead = DUE_AHEAD_DAYS[k] ?? 0;
+      expect(lv(k, { clock: ago(-ahead - 1) }), `${k} early`).toBe("none");
+      expect(lv(k, { clock: ago(-ahead) }), `${k} first day`).toBe("soon");
+      expect(lv(k, { clock: ago(0) }), `${k} today`).toBe("soon");
+      expect(lv(k, { clock: ago(7) }), `${k} +7`).toBe("soon");
+      expect(lv(k, { clock: ago(8) }), `${k} +8`).toBe("none");
+      // No clock is plain, whatever `when`, `since` or `urgency` say.
+      for (const urgency of [0, 1, 2] as const) {
+        expect(lv(k, { urgency, clock: null, when: ago(0), since: ago(30) }), `${k} ${urgency} no clock`).toBe("none");
       }
-      expect(lv(k, { urgency: 2 }), `${k} undated`).toBe("none");
+      // An ISO clock reads as the company's day.
+      expect(lv(k, { clock: `${ago(1)}T18:00:00Z` }), `${k} iso`).toBe("soon");
     }
   });
 
-  it("days are the company's: an evening timestamp is that evening's day, not UTC's next", () => {
-    // 2026-10-13 at 9 PM in Los Angeles is 04:00 UTC on the 14th: seven company days ago, six UTC days.
-    expect(lv("quote_draft", { when: "2026-10-14T04:00:00Z" })).toBe("soon");
-    expect(levelOf(it0("quote_draft", { when: "2026-10-14T04:00:00Z" }), { todayStr: TODAY, tz: "UTC" })).toBe("none");
+  it("each clock kind's own story", () => {
+    // materials_needed: the crew's day, today or tomorrow.
+    expect(lv("materials_needed", { when: ago(-1), clock: ago(-1) })).toBe("soon");
+    expect(lv("materials_needed", { when: null, clock: null })).toBe("none");
+    // inquiry: a follow-up day that came, or a new lead's first week (its clock is the day it came in).
+    expect(lv("inquiry", { urgency: 2, clock: ago(3), since: ago(3) })).toBe("soon");
+    expect(lv("inquiry", { urgency: 2, clock: ago(8), since: ago(8) })).toBe("none");
+    expect(lv("inquiry", { urgency: 0, clock: null, since: ago(30) })).toBe("none");
+    // quote_awaiting: an offer ending inside five days is Due; quiet a week alone is not.
+    expect(lv("quote_awaiting", { clock: ago(-5), since: ago(20), when: ago(-5) })).toBe("soon");
+    expect(lv("quote_awaiting", { clock: ago(-6), since: ago(20), when: ago(-6) })).toBe("none");
+    expect(lv("quote_awaiting", { clock: null, since: ago(20), when: ago(20) })).toBe("none");
+    // invoice_draft: a set-aside day that came. A draft back because its job finished has none.
+    expect(lv("invoice_draft", { urgency: 0, clock: ago(2), when: ago(40) })).toBe("soon");
+    expect(lv("invoice_draft", { urgency: 1, clock: null, when: ago(0) })).toBe("none");
+    // job_on_hold: a come-back day that came; a hold with no day is plain.
+    expect(lv("job_on_hold", { clock: ago(0), since: ago(0) })).toBe("soon");
+    expect(lv("job_on_hold", { clock: null, since: ago(60) })).toBe("none");
+    // permit_inspection: a booked day gone by unwritten, or the day a visit failed. To book: plain.
+    expect(lv("permit_inspection", { clock: ago(1), when: ago(1) })).toBe("soon");
+    expect(lv("permit_inspection", { urgency: 2, clock: ago(2), since: ago(2) })).toBe("soon");
+    expect(lv("permit_inspection", { urgency: 2, clock: null })).toBe("none");
+  });
+
+  it("a kind with no clock is plain at every age, whatever it is handed", () => {
+    const plain: ActionKind[] = [
+      "supplier_paper",
+      "visit_unbilled",
+      "job_unbilled_work",
+      "inspection_writeup",
+      "quote_draft",
+      "contract_unsigned",
+      "job_to_schedule",
+      "appointment",
+      "receipt_unbilled",
+      "stock_short",
+      "organize",
+    ];
+    for (const k of plain) {
+      expect(DUE_KINDS, k).not.toContain(k);
+      for (const n of [-3, 0, 6, 7, 8, 90])
+        for (const urgency of [0, 1, 2] as const) expect(lv(k, { urgency, when: ago(n), since: ago(n), clock: ago(n) }), `${k} ${n} ${urgency}`).toBe("none");
+    }
+    // A visit nobody closed out is not amber (the owner, 2026-11-11), not even on its booked day.
+    expect(lv("appointment", { when: ago(1), clock: ago(1) })).toBe("none");
+  });
+
+  it("days are the company's: an evening timestamp on a clock is that evening's day, not UTC's next", () => {
+    // 2026-10-12 at 9 PM in Los Angeles is 04:00 UTC on the 13th: eight company days ago (past the
+    // window), seven UTC days (inside it).
+    const clock = "2026-10-13T04:00:00Z";
+    expect(lv("inquiry", { clock })).toBe("none");
+    expect(levelOf(it0("inquiry", { clock }), { todayStr: TODAY, tz: "UTC" })).toBe("soon");
   });
 
   it("every kind has a row in the table: the level is defined for all 22", () => {
@@ -178,21 +234,34 @@ describe("the level table (A1)", () => {
   });
 });
 
+const DAYS = [null, ago(-30), ago(-8), ago(-7), ago(-6), ago(-5), ago(-3), ago(-1), ago(0), ago(6), ago(7), ago(8), ago(29), ago(30), ago(400), "2026-10-14T04:00:00Z"];
+
 describe("only five kinds can ever be NOW", () => {
-  it("over every combination of urgency, when and since", () => {
+  it("over every combination of urgency, when, since and clock", () => {
     expect([...NOW_KINDS].sort()).toEqual(["invoice_overdue", "lien_deadline", "quote_accepted", "supplier_pay", "time_stray"]);
-    const days = [null, ago(-30), ago(-8), ago(-7), ago(-3), ago(0), ago(6), ago(7), ago(29), ago(30), ago(400), "2026-10-14T04:00:00Z"];
     for (const kind of KINDS) {
       if (NOW_KINDS.includes(kind)) continue;
       for (const urgency of [0, 1, 2] as const)
-        for (const when of days) for (const since of days) expect(lv(kind, { urgency, when, since }), `${kind} ${urgency} ${when} ${since}`).not.toBe("now");
+        for (const when of DAYS)
+          for (const clock of DAYS) {
+            expect(lv(kind, { urgency, when, since: when, clock }), `${kind} ${urgency} ${when} ${clock}`).not.toBe("now");
+            expect(lv(kind, { urgency, when: clock, since: ago(400), clock: when }), `${kind} ${urgency} ${clock} ${when}`).not.toBe("now");
+          }
+    }
+  });
+
+  it("only DUE_KINDS can ever be amber, whatever the age, the urgency or the days", () => {
+    for (const kind of KINDS) {
+      if (DUE_KINDS.includes(kind)) continue;
+      for (const urgency of [0, 1, 2] as const)
+        for (const when of DAYS) for (const clock of DAYS) expect(lv(kind, { urgency, when, since: when, clock }), `${kind} ${urgency} ${when} ${clock}`).not.toBe("soon");
     }
   });
 
   it("a Couldn't Check line is never marked, whatever its kind and dates", () => {
     for (const kind of KINDS) {
       for (const urgency of [0, 1, 2] as const) {
-        expect(levelOf(it0(kind, { id: "receipts-unread", urgency, when: ago(60), since: ago(60) }), ctx), kind).toBe("none");
+        expect(levelOf(it0(kind, { id: "receipts-unread", urgency, when: ago(0), since: ago(60), clock: ago(0) }), ctx), kind).toBe("none");
       }
     }
     expect(isUnreadLine({ id: "needday-unread" })).toBe(true);

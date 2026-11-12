@@ -14,8 +14,8 @@ export { isUnreadLine };
  *
  * A pile row is an ActionItem with the synthetic id `pile:<name>`. It only opens: no verb is ever
  * sent against it (the list unfolds it, and each child keeps its own button and ⋯). It takes the
- * highest urgency and the earliest `when` of its children, so the sort puts it where its most
- * pressing child would have sat.
+ * highest urgency, the earliest `when` and the oldest own day (`since`) of its children, so the sort
+ * puts it where its oldest child would have sat (cn-v1162: the order's day is `since ?? when`).
  *
  * ITS COUNT IS A REAL COUNT (the badge law: a capped read never prints a short count):
  *   · `total`: the read's exact count, for a feeder that filters only in SQL (a lead, a visit, a
@@ -200,7 +200,7 @@ const whenMs = (w: string | null | undefined, todayStr: string) => {
 
 /**
  * Roll the build's sorted rows into piles. `counts` are the feeders' read facts by pile. The result
- * is sorted again (a pile sits where its most pressing child sat).
+ * is sorted again (a pile sits by its mark, its tile, then its OLDEST child's own day, cn-v1162).
  */
 export function rollUpPiles(
   items: ActionItem[],
@@ -256,6 +256,11 @@ export function rollUpPiles(
     };
     // The earliest `when` of its children (an undated one counting as today) and the highest urgency.
     const earliest = [...children].sort((a, b) => whenMs(a.when, opts.todayStr) - whenMs(b.when, opts.todayStr))[0];
+    // ITS PLACE IN THE ORDER (cn-v1162): the order's day is a row's own day, `since ?? when`, so the
+    // pile carries its OLDEST child's own day as its `since` and sits where that child would have.
+    // Its `when` stays the earliest `when` (nothing draws a pile's days; the order reads since first).
+    const ownDay = (c: ActionItem) => c.since ?? c.when ?? null;
+    const oldestDay = ownDay([...children].sort((a, b) => whenMs(ownDay(a), opts.todayStr) - whenMs(ownDay(b), opts.todayStr))[0]);
     const urgency = Math.max(...children.map((c) => c.urgency)) as 0 | 1 | 2;
     const amounts = children.map((c) => c.amount).filter((a): a is number => typeof a === "number" && Number.isFinite(a));
     const whole = opts.isStaff && !capped && count === children.length && amounts.length === children.length && amounts.length > 0;
@@ -270,6 +275,7 @@ export function rollUpPiles(
       subtitle: null,
       who: null,
       when: earliest?.when ?? null,
+      ...(oldestDay ? { since: oldestDay } : {}),
       urgency,
       done: false,
       href: def.listHref ?? children[0].href,

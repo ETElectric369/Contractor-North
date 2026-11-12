@@ -90,6 +90,8 @@ describe("the gate decides what may nag", () => {
       subtitle: "Town of Truckee was booked Oct 15 — say how it went · Permit E-1234 · Snowbell Holdings",
       chip: "Not Written Up",
       when: THU,
+      // Its clock (cn-v1162): the authority's booked day that went by unwritten.
+      clock: THU,
       urgency: 1,
       href: "/jobs/j1?tab=permits",
       affordances: ["open"],
@@ -99,6 +101,8 @@ describe("the gate decides what may nag", () => {
   it("nobody has phoned them: his, and undated — there is no day to invent", () => {
     const f = feed([visit({ position: 1, authority: TOWN })], THU);
     expect(f.now[0]).toMatchObject({ chip: "To Book", when: null, subtitle: "Town of Truckee inspection to book · Permit E-1234 · Snowbell Holdings" });
+    // No day, no clock: one still to phone is plain (cn-v1162).
+    expect(f.now[0].clock).toBeNull();
   });
 
   it("A BLOCKED INSPECTION IS IN NEITHER LIST, even with its booked day long gone", () => {
@@ -185,6 +189,9 @@ describe("what a permit's row never is", () => {
     const failed = feed([{ ...visit({ position: 1, authority: "Nevada County", result: "failed", result_on: WED }), permit_id: "p9" }], THU, p);
     expect(failed.now).toHaveLength(1);
     expect([...failed.awaitingJobIds]).toEqual(["j9"]);
+    // Its clock (cn-v1162): the day it failed, an answer the authority is waiting on; still undated.
+    expect(failed.now[0]).toMatchObject({ clock: WED, when: null, urgency: 2 });
+    expect(missed.now[0].clock).toBe(WED);
   });
 
   it("a cancelled job's permit is nobody's business", () => {

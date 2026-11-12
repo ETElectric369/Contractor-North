@@ -101,8 +101,8 @@ export function noJobHoursActionItem(summary: NoJobHours | null | undefined, opt
       vars: days[0] === days[days.length - 1] ? { hours, day: days[0] } : { hours, day: days[0], day2: days[days.length - 1] },
       tail: people.length <= 3 ? people.join(", ") : null,
     },
-    // Still undated (no deadline), but it has an age: the oldest shift's day, so the week rule can
-    // mark a rollup that has sat a week (needs-you-rule levelOf reads since before when).
+    // Still undated (no deadline), but it has an age: the oldest shift's day, for its age words and
+    // its place in the order (oldest first). It marks nothing: hours on no job have no clock (cn-v1162).
     since: days[0] ?? null,
     who: null,
     // Undated on purpose, like the supplier bills: the oldest shift is weeks old, and a red

@@ -100,6 +100,9 @@ describe("a Say, said", () => {
   it("days, money, a visit's type and another key, each by its slot's name; the tail after", () => {
     expect(sayIt({ key: "ny_w_docOfferEnds", vars: { docKey: "ny_docEstimate", ref: "E-036", day: "2026-11-20" } }, en)).toBe("Estimate E-036 · offer ends Nov 20");
     expect(sayIt({ key: "ny_w_docOfferEnds", vars: { docKey: "ny_docEstimate", ref: "E-036", day: "2026-11-20" } }, es)).toBe("Presupuesto E-036 · la oferta termina el 20 nov");
+    // A draft back from being set aside names the day it waited for (cn-v1162 fixer).
+    expect(sayIt({ key: "ny_w_invoiceBackFromSetAside", vars: { ref: "INV-112", day: "2026-11-05" } }, en)).toBe("Invoice INV-112 · not sent · set aside until Nov 5");
+    expect(sayIt({ key: "ny_w_invoiceBackFromSetAside", vars: { ref: "INV-112", day: "2026-11-05" } }, es)).toBe("Factura INV-112 · sin enviar · apartada hasta el 5 nov");
     expect(sayIt({ key: "ny_w_payBySavesOne", vars: { day: "2026-12-10", money: 35.5, n: 1 } }, en)).toBe("Pay by Dec 10 · saves $35.50 on 1 invoice");
     expect(sayIt({ key: "ny_w_toWriteUp", vars: { type: "estimate" } }, en)).toMatch(/ · to write up$/);
     expect(sayIt({ key: "ny_w_toWriteUp", vars: { type: "estimate" } }, es)).toMatch(/ · por redactar$/);

@@ -8,16 +8,17 @@ import { formatCurrency } from "@/lib/utils";
 import type { Group } from "@/lib/action-items/types";
 import type { NeedsYouSummary, TileSummary } from "@/lib/action-items/needs-you-rule";
 import { LevelMark } from "./level-mark";
+import { GroupPicture } from "./kind-picture";
 
 /** Each tile's name, by its group. */
 export const TILE_NAME_KEY: Record<Group, string> = {
   get_paid: "ny_btn_tileGetPaid",
-  win_work: "ny_btn_tileWinWork",
-  run_jobs: "ny_btn_tileRunJobs",
-  keep_books: "ny_btn_tileKeepBooks",
+  win_work: "ny_btn_tileSales",
+  run_jobs: "ny_btn_tileOperations",
+  keep_books: "ny_btn_tileBookkeeping",
 };
 
-/** What a tile's money means, by its group. Run the Jobs adds up no figure the app can stand behind. */
+/** What a tile's money means, by its group. Operations adds up no figure the app can stand behind. */
 const MONEY_KEY: Record<Group, string | null> = {
   get_paid: "ny_tileToCollect",
   win_work: "ny_tileInEstimates",
@@ -26,7 +27,7 @@ const MONEY_KEY: Record<Group, string | null> = {
 };
 
 /**
- * THE HEADER'S COUNTS: an octagon and how many to act on today, a triangle and how many soon, then
+ * THE HEADER'S COUNTS: an octagon and how many to act on today, a triangle and how many are due, then
  * the rest. Each is drawn only above zero. With no mark at all the last one says "N open" (there is
  * nothing to be "more" than). The number is drawn once for the eye; a screen reader hears it said
  * whole ("3 to act on today"), so it never hears a bare digit.
@@ -53,7 +54,7 @@ export function NeedsYouCounts({ summary }: { summary: Pick<NeedsYouSummary, "no
           <span aria-hidden="true" className="tabular-nums">
             {soon}
           </span>
-          <span className="sr-only">{fillSlots(t("ny_countSoon"), { n: soon })}</span>
+          <span className="sr-only">{fillSlots(t(soon === 1 ? "ny_countDueOne" : "ny_countDue"), { n: soon })}</span>
         </span>
       )}
       {more > 0 && (
@@ -66,9 +67,9 @@ export function NeedsYouCounts({ summary }: { summary: Pick<NeedsYouSummary, "no
 }
 
 /**
- * THE FOUR TILES (staff only): Get Paid, Win Work, Run the Jobs, Keep the Books, in that order. Each
- * says its name, how many are open in it (the strip's NOW rows are not counted twice), the money it
- * holds (staff only, "+" when a pile's read was cut short), a triangle with its SOON count, and how
+ * THE FOUR TILES (staff only): Get Paid, Sales, Operations, Bookkeeping, in that order. Each
+ * says its name beside its picture, how many are open in it (the strip's NOW rows are not counted twice), the money it
+ * holds (staff only, "+" when a pile's read was cut short), a triangle with its DUE count, and how
  * many of its reads failed, so a closed tile never hides a failed read. Built on the one generic
  * TileGrid; the summary is lib/action-items/needs-you-rule summarize(), over the live rows.
  */
@@ -95,11 +96,13 @@ export function NeedsYouTiles({
         ? fillSlots(t(moneyKey), { money: `${formatCurrency(tile.money, lang)}${tile.moneyCapped ? "+" : ""}` })
         : null;
     const unread = tile.unread > 0 ? fillSlots(t("ny_tileUnread"), { n: tile.unread }) : null;
-    const soon = tile.soon > 0 ? fillSlots(t("ny_countSoon"), { n: tile.soon }) : null;
+    const soon = tile.soon > 0 ? fillSlots(t(tile.soon === 1 ? "ny_countDueOne" : "ny_countDue"), { n: tile.soon }) : null;
     const head = tile.count > 0 ? fillSlots(t(tile.count === 1 ? "ny_tileOpenOne" : "ny_tileOpen"), { name, n: tile.count }) : fillSlots(t("ny_tileNothing"), { name });
     return {
       id: tile.group,
       name,
+      // Its picture, in its own colour (cn-v1162): the one place a tile's colour lives is kind-picture.tsx.
+      icon: <GroupPicture group={tile.group} />,
       label: [head, soon, money, unread].filter(Boolean).join(", "),
       count: tile.count,
       lines: [money, unread],

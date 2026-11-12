@@ -50,6 +50,7 @@ export const FEEDER_SAY_KEYS = [
   "ny_w_alreadySent",
   "ny_w_invoice",
   "ny_w_invoiceNotSent",
+  "ny_w_invoiceBackFromSetAside",
   "ny_w_jobFinishedSend",
   "ny_w_jobCancelledSend",
   "ny_w_visitNotBilled",

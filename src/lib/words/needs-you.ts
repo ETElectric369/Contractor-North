@@ -2,8 +2,8 @@ import type { WordCatalog } from "./types";
 
 /**
  * THE NEEDS YOU BOX'S WORDS (ny_, the redraw, cn-v1161): the box on My Day that says what is open,
- * with its two marks (Act today, Soon), its header counts, its four tiles (Get Paid, Win Work, Run the
- * Jobs, Keep the Books), each row's WHO and WHAT, the age at its right edge, its one named button and
+ * with its two marks (Act today, Due), its header counts, its four tiles (Get Paid, Sales,
+ * Operations, Bookkeeping), each row's WHO and WHAT, the age at its right edge, its one named button and
  * what its ⋯ holds, and each pile's name.
  *
  * The server never writes a sentence for a row: a feeder hands over one of these keys and its slots
@@ -34,18 +34,19 @@ export const words: WordCatalog = {
   en: {
     // The marks and the header's counts.
     ny_markNow: "Act today",
-    ny_markSoon: "Soon",
+    ny_markDue: "Due",
     ny_countNow: "{n} to act on today",
-    ny_countSoon: "{n} soon",
+    ny_countDue: "{n} due",
+    ny_countDueOne: "{n} due",
     ny_countMore: "{n} more",
     ny_countOpen: "{n} open",
     ny_countOpenOne: "{n} open",
     ny_stripTitle: "Act Today",
     // The four tiles.
     ny_btn_tileGetPaid: "Get Paid",
-    ny_btn_tileWinWork: "Win Work",
-    ny_btn_tileRunJobs: "Run the Jobs",
-    ny_btn_tileKeepBooks: "Keep the Books",
+    ny_btn_tileSales: "Sales",
+    ny_btn_tileOperations: "Operations",
+    ny_btn_tileBookkeeping: "Bookkeeping",
     ny_tileToCollect: "{money} to collect",
     ny_tileInEstimates: "{money} in estimates",
     ny_tileToFile: "{money} to file",
@@ -73,6 +74,7 @@ export const words: WordCatalog = {
     // WHAT: the plain phrase under WHO.
     ny_w_invoice: "Invoice {ref}",
     ny_w_invoiceNotSent: "Invoice {ref} · not sent",
+    ny_w_invoiceBackFromSetAside: "Invoice {ref} · not sent · set aside until {day}",
     ny_w_jobFinishedSend: "Job finished · send {ref}",
     ny_w_jobCancelledSend: "Job cancelled · send {ref}",
     ny_w_visitNotBilled: "{text} · done, not billed",
@@ -254,17 +256,18 @@ export const words: WordCatalog = {
   },
   es: {
     ny_markNow: "Atender hoy",
-    ny_markSoon: "Pronto",
+    ny_markDue: "Vence",
     ny_countNow: "{n} para atender hoy",
-    ny_countSoon: "{n} pronto",
+    ny_countDue: "{n} vencen",
+    ny_countDueOne: "{n} vence",
     ny_countMore: "{n} más",
     ny_countOpen: "{n} abiertos",
     ny_countOpenOne: "{n} abierto",
     ny_stripTitle: "Atender Hoy",
     ny_btn_tileGetPaid: "Cobrar",
-    ny_btn_tileWinWork: "Ganar Trabajo",
-    ny_btn_tileRunJobs: "Sacar los Trabajos",
-    ny_btn_tileKeepBooks: "Llevar las Cuentas",
+    ny_btn_tileSales: "Ventas",
+    ny_btn_tileOperations: "Operaciones",
+    ny_btn_tileBookkeeping: "Contabilidad",
     ny_tileToCollect: "{money} por cobrar",
     ny_tileInEstimates: "{money} en presupuestos",
     ny_tileToFile: "{money} por archivar",
@@ -290,6 +293,7 @@ export const words: WordCatalog = {
     ny_lbl_hoursNoJob: "Horas sin Trabajo",
     ny_w_invoice: "Factura {ref}",
     ny_w_invoiceNotSent: "Factura {ref} · sin enviar",
+    ny_w_invoiceBackFromSetAside: "Factura {ref} · sin enviar · apartada hasta el {day}",
     ny_w_jobFinishedSend: "Trabajo terminado · envía {ref}",
     ny_w_jobCancelledSend: "Trabajo cancelado · envía {ref}",
     ny_w_visitNotBilled: "{text} · se hizo, sin facturar",

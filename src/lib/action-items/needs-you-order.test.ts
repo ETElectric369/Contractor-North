@@ -6,8 +6,9 @@ import { GROUP_ORDER, KIND_GROUP, sortActionItems, type ActionItem, type ActionK
 /**
  * NEEDS YOU'S ONE ORDER: sorted ONCE, inside the build, so every reader reads one order. Not done
  * first; then NOW; then the four tiles in order; a Couldn't Check line leading its tile; SOON before
- * no mark; then when, oldest first, with an undated row counting as today; ties keep the build's own
- * order. The piles roll up after it (piles.ts), each in its most pressing child's place.
+ * no mark; the Supplier Bills card first among its tile's unmarked rows; then the row's own day, `since ?? when`, oldest first, with a row that has neither counting
+ * as today (cn-v1162: age stopped being a mark, so the order must truly be age); ties keep the build's
+ * own order. The piles roll up after it (piles.ts), each in its oldest child's place.
  */
 const TODAY = "2026-09-27";
 let seq = 0;
@@ -32,7 +33,7 @@ describe("the one order", () => {
     expect(ids([soonPaid, nowBooks])).toEqual([nowBooks.id, soonPaid.id]);
   });
 
-  it("then the four tiles: Get Paid, Win Work, Run the Jobs, Keep the Books", () => {
+  it("then the four tiles: Get Paid, Sales, Operations, Bookkeeping", () => {
     expect(GROUP_ORDER).toEqual(["get_paid", "win_work", "run_jobs", "keep_books"]);
     const books = row("organize");
     const jobs = row("appointment");
@@ -48,7 +49,8 @@ describe("the one order", () => {
   });
 
   it("a Couldn't Check line leads its tile, above its SOON rows", () => {
-    const soon = row("receipt_unbilled", { level: "soon", when: "2026-08-01" });
+    // A discount Due in the same tile (a receipt can no longer be amber: it has no clock).
+    const soon = row("supplier_pay", { level: "soon", when: "2026-09-30" });
     const unread = row("receipt_unbilled", { id: "receipts-unread" });
     const paid = row("invoice_draft");
     expect(ids([soon, unread, paid])).toEqual([paid.id, unread.id, soon.id]);
@@ -68,17 +70,56 @@ describe("the one order", () => {
   });
 
   it("an undated row counts as today: after yesterday's, before tomorrow's", () => {
+    // Not the Supplier Bills card: it leads its tile by a key of its own (the next tests).
     const tomorrow = row("supplier_pay", { when: "2026-09-28" });
-    const undated = row("supplier_paper", { when: null });
+    const undated = row("organize", { when: null });
     const yesterday = row("stock_short", { when: "2026-09-26T18:00:00Z" });
     expect(ids([tomorrow, undated, yesterday])).toEqual([yesterday.id, undated.id, tomorrow.id]);
   });
 
-  it("ties keep the build's own order (Supplier Bills, then Pay <Supplier>, where the build put them)", () => {
+  it("the Supplier Bills card leads Bookkeeping's unmarked rows, then the rest oldest first (cn-v1162)", () => {
+    const receipt = row("receipt_unbilled", { since: "2026-09-26" });
+    const papers = row("organize", { id: "pile-papers", since: "2026-09-24" });
+    const card = row("supplier_paper", { when: null });
+    expect(ids([receipt, papers, card])).toEqual([card.id, papers.id, receipt.id]);
+  });
+
+  it("a marked Bookkeeping row still sits above the Supplier Bills card", () => {
+    const card = row("supplier_paper", { when: null });
+    const pay = row("supplier_pay", { level: "soon", when: "2026-10-02" });
+    expect(ids([card, pay])).toEqual([pay.id, card.id]);
+  });
+
+  it("the day is the row's own, since before when: a sent estimate sorts by its sent day, not its offer's end", () => {
+    // Sent a month ago, its offer ends next week; sent last week, its offer ended yesterday.
+    const sentLongAgo = row("quote_awaiting", { since: "2026-08-27", when: "2026-10-03" });
+    const sentLately = row("quote_awaiting", { since: "2026-09-20", when: "2026-09-26" });
+    expect(ids([sentLately, sentLongAgo])).toEqual([sentLongAgo.id, sentLately.id]);
+  });
+
+  it("rows with no `when` are ordered by their `since`, oldest first, no longer tied at today", () => {
+    const holdNew = row("job_on_hold", { since: "2026-09-25" });
+    const needDayOld = row("job_to_schedule", { since: "2026-07-01" });
+    const holdOld = row("job_on_hold", { since: "2026-08-15" });
+    const hours = row("time_stray", { id: "stray-no-job", since: "2026-09-10" });
+    expect(ids([holdNew, needDayOld, holdOld, hours])).toEqual([needDayOld.id, holdOld.id, hours.id, holdNew.id]);
+    // The Supplier Bills card, which has no day, still leads its tile's unmarked rows (its own key).
+    const papers = row("organize", { since: "2026-09-26" });
+    const rollup = row("supplier_paper");
+    const ahead = row("supplier_pay", { when: "2026-09-29" });
+    expect(ids([ahead, rollup, papers])).toEqual([rollup.id, papers.id, ahead.id]);
+  });
+
+  it("ties keep the build's own order; the Supplier Bills card leads Pay <Supplier> by its own key", () => {
+    // Pay <Supplier> always carries its discount day (the feeder sets it): today's, here.
     const bills = row("supplier_paper", { when: null });
-    const pay = row("supplier_pay", { when: null });
+    const pay = row("supplier_pay", { when: TODAY });
     expect(ids([bills, pay])).toEqual([bills.id, pay.id]);
-    expect(ids([pay, bills])).toEqual([pay.id, bills.id]);
+    expect(ids([pay, bills])).toEqual([bills.id, pay.id]);
+    // Two rows on the same day, neither the card: the build's order stands, either way round.
+    const payToo = row("supplier_pay", { when: TODAY });
+    expect(ids([pay, payToo])).toEqual([pay.id, payToo.id]);
+    expect(ids([payToo, pay])).toEqual([payToo.id, pay.id]);
     const hours = row("time_stray", { when: null });
     const visit = row("appointment", { urgency: 0, when: null });
     expect(ids([hours, visit])).toEqual([hours.id, visit.id]);

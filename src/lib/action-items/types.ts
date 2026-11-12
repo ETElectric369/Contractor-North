@@ -64,12 +64,13 @@ export type ActionKind =
   // front of it is in no pile at all (permit-inspection-items has the gate's whole story).
   | "permit_inspection";
 
-/** THE FOUR TILES of Needs You (the redraw, 2026-11): Get Paid, Win Work, Run the Jobs, Keep the
- *  Books. Each kind sits in exactly one (needs-you-rule.ts KIND_GROUP), and the build stamps it once.
+/** THE FOUR TILES of Needs You (the redraw, 2026-11): Get Paid, Sales, Operations, Bookkeeping.
+ *  Each kind sits in exactly one (needs-you-rule.ts KIND_GROUP), and the build stamps it once.
  *  It is not the Waiting fold: the fold is a second list, not a tile. */
 export type Group = "get_paid" | "win_work" | "run_jobs" | "keep_books";
 
-/** A row's mark: NOW (act today, the strip), SOON (sat a week, or its day is close), or none. */
+/** A row's mark: NOW (act today, the strip), SOON (a real day is close or has just passed), or none.
+ *  On screen SOON is said "Due" (the owner's word, 2026-11-11); the id is never shown and did not follow. */
 export type Level = "now" | "soon" | "none";
 
 /**
@@ -141,6 +142,11 @@ export interface ActionItem {
   /** The plain phrase under the lead. Absent: the subtitle. */
   what?: Say;
   when?: string | null; // ISO or yyyy-mm-dd (due/follow-up/starts/null)
+  /** THE ROW'S REAL CLOCK (cn-v1162): a day by which its own action is due, one somebody set or an
+   *  outside party set (a follow-up day, an offer's last day, a come-back day, the crew's day, the day
+   *  a new lead came in), never the day the office's own paper was born. ISO or yyyy-mm-dd. Null or absent: it has none, and it is never marked
+   *  amber. Read only by the one rule (needs-you-rule levelOf); never sorted on, never said. */
+  clock?: string | null;
   urgency: 0 | 1 | 2; // 0 normal · 1 soon/overdue · 2 urgent
   done: boolean; // drives the universal "sinks to the bottom" rule
   href: string; // deep link for Open
@@ -167,8 +173,8 @@ export interface ActionItem {
    */
   pile?: PileInfo;
   children?: ActionItem[];
-  /** When this began waiting (yyyy-mm-dd or ISO): the week arm of its SOON mark and its age words,
-   *  never drawn as a deadline. */
+  /** When this began waiting (yyyy-mm-dd or ISO): its age words and its place in the order
+   *  (sortActionItems), never drawn as a deadline and never a mark (cn-v1162). */
   since?: string | null;
   /** Staff only: the money on the row, or on a pile the sum of its children's (only when every child
    *  has one, the read was not capped and every child is here). Never set on a tech's row. */
@@ -288,7 +294,7 @@ export function waitingRow(w: Omit<WaitingItem, "backOn"> & { backOn: string | n
 
 /**
  * WHAT A TECH'S WAITING LIST MAY HOLD. Every money feeder is staff-only, so a tech's fold is empty
- * today; this is the belt to that: only Run the Jobs, and no dollar figure in any title, ever reaches
+ * today; this is the belt to that: only Operations, and no dollar figure in any title, ever reaches
  * a tech's page ("techs never see prices").
  */
 export function waitingForViewer(rows: WaitingItem[], isStaff: boolean): WaitingItem[] {
@@ -428,20 +434,25 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
 /**
  * NEEDS YOU'S ONE ORDER, applied ONCE, inside the build, before the list leaves the server: every
  * surface reading the list reads it in the same order, the client never sorts, and a pile (piles.ts)
- * takes the place its most pressing row would have had.
+ * sits by its mark, its tile, then its OLDEST child's own day (cn-v1162).
  *   1. not done before done ("checked boxes go to the bottom");
  *   2. NOW rows first: the strip is the top of the list;
- *   3. the tile: Get Paid, Win Work, Run the Jobs, Keep the Books (GROUP_ORDER);
+ *   3. the tile: Get Paid, Sales, Operations, Bookkeeping (GROUP_ORDER);
  *   4. a "Couldn't Check" line leads its tile, so a failed read is never under the rows it hid;
  *   5. SOON before no mark;
- *   6. when, oldest first. A row with no date counts as TODAY (not as last): a rollup like Supplier
- *      Bills or Hours on No Job is today's business, never pushed below a row dated tomorrow.
- * Ties keep the build's own order (a stable sort), so the rows the build places on purpose (Supplier
- * Bills, Pay <Supplier>, Hours on No Job) stay where it put them among their equals. `todayStr` is the
- * company's today (YYYY-MM-DD). The mark is read as stamped (absent: none); the tile, as stamped or
- * from its kind.
+ *   6. the Supplier Bills card (supplier_paper) leads its tile's unmarked rows, by its own key: the
+ *      papers come to him there ("bring it to me"), and it is a rollup with no day of its own, so the
+ *      day key below would put it after any Bookkeeping row a day old (cn-v1162 chose this key once
+ *      the order became age; before, every undated row tied at today and the build's order won). A
+ *      marked row still sits above it, and a Couldn't Check line still leads the tile (key 4);
+ *   7. THE ROW'S OWN DAY, oldest first: `since ?? when` (since cn-v1162, when the mark stopped reading
+ *      age: age is the order now, so the order must truly be age). A row with neither counts as TODAY
+ *      (not as last), never pushed below a row dated tomorrow. Pay <Supplier> sorts by its discount
+ *      day, and Hours on No Job by its oldest shift (its `since`), like any other row.
+ * Ties keep the build's own order (a stable sort). `todayStr` is the company's today (YYYY-MM-DD).
+ * The mark is read as stamped (absent: none); the tile, as stamped or from its kind.
  */
-export function sortActionItems<T extends Pick<ActionItem, "done" | "when" | "kind" | "id"> & { group?: Group; level?: Level }>(
+export function sortActionItems<T extends Pick<ActionItem, "done" | "when" | "since" | "kind" | "id"> & { group?: Group; level?: Level }>(
   items: T[],
   todayStr: string,
 ): T[] {
@@ -456,7 +467,8 @@ export function sortActionItems<T extends Pick<ActionItem, "done" | "when" | "ki
     GROUP_ORDER.indexOf(it.group ?? KIND_GROUP[it.kind]),
     isUnreadLine(it) ? 0 : 1,
     it.level === "soon" ? 0 : 1,
-    whenMs(it.when),
+    it.kind === "supplier_paper" ? 0 : 1,
+    whenMs(it.since ?? it.when),
   ];
   return items
     .map((it, i) => ({ it, i, k: key(it) }))

@@ -114,10 +114,10 @@ describe("a line about the read is Couldn't Check, never the rollup", () => {
     expect(noJobHoursActionItem({ shifts, hours: 8.43, capped: false, companyCode: "SHOP" })?.id).toBe(NO_JOB_HOURS_ITEM_ID);
   });
 
-  it("the box gives it no button and no mark, and counts it in Run the Jobs' couldn't-be-checked", () => {
+  it("the box gives it no button and no mark, and counts it in Operations' couldn't-be-checked", () => {
     const lines = [noJobHoursActionItem(null, { failed: true })!, noJobHoursActionItem({ shifts: [], hours: 0, capped: true, companyCode: "SHOP" })!];
     for (const line of lines) {
-      expect(levelOf({ ...line, since: "2026-01-01" }, { todayStr: "2026-11-11", tz: "America/Los_Angeles" })).toBe("none");
+      expect(levelOf({ ...line, when: "2026-11-11", clock: "2026-11-11" }, { todayStr: "2026-11-11", tz: "America/Los_Angeles" })).toBe("none");
       expect(rowButtons(line, { leadsOn: true, isStaff: true })).toEqual({ primary: null, also: null, more: [] });
       const tile = summarize([{ ...line, level: "none" }], { isStaff: true }).tiles.find((t) => t.group === line.group)!;
       expect(tile.group).toBe("run_jobs");

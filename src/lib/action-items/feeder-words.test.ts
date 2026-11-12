@@ -30,10 +30,14 @@ function pick(table: string, cols: string): any {
   if (table === "quotes" && cols.includes("quote_line_items")) return state.rows.estimateDrafts ?? [];
   if (table === "organized_items" && cols.includes("summary")) return state.rows.papers ?? [];
   if (table === "contracts") return state.rows.contracts ?? [];
+  if (table === "inquiries" && cols.includes("converted_at")) return state.rows.leads ?? [];
   if (table === "lien_records") return state.rows.liens ?? [];
   if (table === "jobs" && cols.includes("job_schedule_segments(")) return state.rows.needDay ?? [];
   if (table === "jobs" && cols.includes("hold_reason")) return state.rows.holds ?? [];
   if (table === "appointments" && cols.includes("assigned_to")) return state.rows.visits ?? [];
+  // The crew's day ahead (materials): the jobs starting today or tomorrow, and their lists.
+  if (table === "jobs" && cols === "id, job_number, name, status, scheduled_start") return state.rows.matJobs ?? [];
+  if (table === "material_lists") return state.rows.lists ?? [];
   return [];
 }
 
@@ -91,7 +95,7 @@ const PLAN_KEYS = new Set([
   "ny_who_document", "ny_who_paper", "ny_who_unread", "ny_who_hoursNotAllListed",
   "ny_lbl_holds", "ny_lbl_receipts", "ny_lbl_supplierBills", "ny_lbl_hoursNoJob",
   // D2, the phrases.
-  "ny_w_invoice", "ny_w_invoiceNotSent", "ny_w_jobFinishedSend", "ny_w_jobCancelledSend", "ny_w_visitNotBilled",
+  "ny_w_invoice", "ny_w_invoiceNotSent", "ny_w_invoiceBackFromSetAside", "ny_w_jobFinishedSend", "ny_w_jobCancelledSend", "ny_w_visitNotBilled",
   "ny_w_workNotBilled", "ny_w_visitBilledNotPaid", "ny_w_workBilledNotPaid", "ny_w_jobNotBilled", "ny_w_noCostsYet",
   "ny_w_lienPrelim", "ny_w_lienPrelimPast", "ny_w_lienRecord", "ny_w_lienRecordPast", "ny_w_leadNew", "ny_w_leadFollowUp",
   "ny_w_requestNew", "ny_w_requestFollowUp", "ny_w_toWriteUp", "ny_w_toWriteUpTitled", "ny_docEstimate", "ny_docQuote",
@@ -299,6 +303,27 @@ describe("the build: each row's who, what and amount (table A2)", () => {
     const quiet = byId(rows, "q3");
     expect(quiet.what).toEqual({ key: "ny_w_docNoAnswer", vars: { docKey: "ny_docQuote", ref: "Q-007" } });
     expect(quiet.since).toBe(daysAgo(12));
+    // THE CLOCK (cn-v1162): the offer ending in three days is Due; quiet twelve days alone is no clock.
+    expect([ends.clock, ends.level]).toEqual([dayAgo(-3), "soon"]);
+    expect([quiet.clock ?? null, quiet.level]).toEqual([null, "none"]);
+  });
+
+  it("no answer yet, its clock: the follow-up day once it came, else the offer's end; when and since do not move", async () => {
+    state.rows.awaiting = [
+      // A follow-up day that came two days ago, an offer far off: the follow-up day is the clock.
+      { id: "q4", quote_number: "E-042", doc_type: "estimate", status: "sent", total: 700, valid_until: dayAgo(-30), created_at: daysAgo(9), job_id: null, follow_up_at: dayAgo(2), customers: { name: "Casey Loam" }, jobs: null },
+      // A follow-up day missed ten days ago and an offer ending in two days: the offer is the clock.
+      { id: "q5", quote_number: "E-043", doc_type: "estimate", status: "sent", total: 600, valid_until: dayAgo(-2), created_at: daysAgo(20), job_id: null, follow_up_at: dayAgo(10), customers: { name: "Dana Rook" }, jobs: null },
+      // An offer thirty days off and no follow-up day: a clock, but not yet Due.
+      { id: "q6", quote_number: "E-044", doc_type: "estimate", status: "sent", total: 500, valid_until: dayAgo(-30), created_at: daysAgo(15), job_id: null, follow_up_at: null, customers: { name: "Theo Vance" }, jobs: null },
+    ];
+    const rows = await build();
+    const q4 = byId(rows, "q4");
+    expect(q4).toMatchObject({ clock: dayAgo(2), level: "soon", when: dayAgo(2), since: daysAgo(9) });
+    const q5 = byId(rows, "q5");
+    expect(q5).toMatchObject({ clock: dayAgo(-2), level: "soon", when: dayAgo(10), since: daysAgo(20) });
+    const q6 = byId(rows, "q6");
+    expect(q6).toMatchObject({ clock: dayAgo(-30), level: "none", when: dayAgo(-30), since: daysAgo(15) });
   });
 
   it("a draft invoice (one set aside whose job finished, too) and a contract say who, what and the amount", async () => {
@@ -312,6 +337,48 @@ describe("the build: each row's who, what and amount (table A2)", () => {
     expect(byId(rows, "d2")).toMatchObject({ who: "Thistlewood Gate · J-061", what: { key: "ny_w_jobFinishedSend", vars: { ref: "INV-111" }, tail: null } });
     expect(byId(rows, "c1")).toMatchObject({ who: "Theo Vance", what: { key: "ny_w_contractNotSigned", vars: { ref: "C-005" }, tail: "Bayberry Shed · J-062" } });
     expect(byId(rows, "c1").amount ?? null).toBeNull();
+    // THE CLOCK (cn-v1162): a fresh draft has none; one back early because its job finished has none
+    // either (its set-aside day is still ahead). Both plain.
+    expect([byId(rows, "d1").clock ?? null, byId(rows, "d1").level]).toEqual([null, "none"]);
+    expect([byId(rows, "d2").clock ?? null, byId(rows, "d2").level]).toEqual([null, "none"]);
+  });
+
+  it("a draft set aside until a day that came: that day is its clock, and it is Due", async () => {
+    state.rows.drafts = [
+      { id: "d3", invoice_number: "INV-112", total: 300, amount_paid: 0, status: "draft", created_at: daysAgo(40), hold_until: dayAgo(2), hold_reason: "Waiting on the deposit", job_id: "j8", customers: { name: "Sam Tillery" }, jobs: { job_number: "J-063", name: "Catbird Shop", status: "in_progress" } },
+      { id: "d4", invoice_number: "INV-113", total: 300, amount_paid: 0, status: "draft", created_at: daysAgo(40), hold_until: dayAgo(12), hold_reason: null, job_id: "j9", customers: { name: "Dana Rook" }, jobs: { job_number: "J-064", name: "Larkspur Fence", status: "in_progress" } },
+    ];
+    const rows = await build();
+    expect(byId(rows, "d3")).toMatchObject({ clock: dayAgo(2), level: "soon", when: daysAgo(40), urgency: 0 });
+    // Twelve days past its day: still its clock, past the window, so plain (old is the order's job).
+    expect(byId(rows, "d4")).toMatchObject({ clock: dayAgo(12), level: "none" });
+    // ITS WORDS name the day it was set aside until, in the week and after it (cn-v1162 fixer).
+    expect(byId(rows, "d3").what).toEqual({ key: "ny_w_invoiceBackFromSetAside", vars: { ref: "INV-112", day: dayAgo(2) }, tail: "Catbird Shop · J-063" });
+    expect(byId(rows, "d4").what).toEqual({ key: "ny_w_invoiceBackFromSetAside", vars: { ref: "INV-113", day: dayAgo(12) }, tail: "Larkspur Fence · J-064" });
+  });
+
+  it("a lead's clock: a new lead with no follow-up day is Due from the day it came in, for a week; a contacted one has none", async () => {
+    state.rows.leads = [
+      { id: "lead-1", name: "Sam Tillery", phone: null, status: "new", next_follow_up_at: null, converted_at: null, created_at: daysAgo(1) },
+      { id: "lead-9", name: "Dana Rook", phone: null, status: "new", next_follow_up_at: null, converted_at: null, created_at: daysAgo(9) },
+      { id: "lead-c", name: "Theo Vance", phone: null, status: "contacted", next_follow_up_at: null, converted_at: null, created_at: daysAgo(1) },
+    ];
+    const rows = await build();
+    expect(byId(rows, "lead-1")).toMatchObject({ clock: daysAgo(1), level: "soon" });
+    expect(byId(rows, "lead-9")).toMatchObject({ clock: daysAgo(9), level: "none" });
+    expect([byId(rows, "lead-c").clock ?? null, byId(rows, "lead-c").level]).toEqual([null, "none"]);
+  });
+
+  it("the lead read selects created_at: without it every new lead would silently go plain", () => {
+    const src = readFileSync(join(__dirname, "query.ts"), "utf8");
+    expect(src).toMatch(/\.from\("inquiries"\)\s*\.select\("[^"]*\bcreated_at\b[^"]*", \{ count: "exact" \}\)/);
+  });
+
+  it("materials: the crew's day is the clock, today or tomorrow", async () => {
+    state.rows.matJobs = [{ id: "j10", job_number: "J-065", name: "Bayberry Service", status: "scheduled", scheduled_start: dayAgo(-1) }];
+    state.rows.lists = [{ id: "ml1", job_id: "j10", created_at: daysAgo(3), material_list_items: [{ description: "200A panel", quantity: 1, purchased: false, is_tool: false }] }];
+    const r = byId(await build(), "materials-j10");
+    expect(r).toMatchObject({ kind: "materials_needed", when: dayAgo(-1), clock: dayAgo(-1), level: "soon" });
   });
 
   it("papers: the title in bold, else its kind in words; a bank download in words; the phrase says where it is sorted", async () => {
@@ -339,6 +406,11 @@ describe("the build: each row's who, what and amount (table A2)", () => {
     expect(byId(rows, "j5")).toMatchObject({ who: "Larkspur Remodel · J-070", what: { key: "ny_w_neverHadADay", tail: "Casey Loam" } });
     expect(byId(rows, "onhold-j6")).toMatchObject({ who: "Snowbell Barn · J-071", what: { key: "ny_w_holdBack", vars: { text: "Waiting on the owner" }, tail: "Theo Vance" } });
     expect(byId(rows, "onhold-j7").what).toEqual({ key: "ny_w_holdNoDay", vars: { textKey: "ny_w_noReason" }, tail: null });
+    // THE CLOCK (cn-v1162): a hold back since yesterday is Due on that day; a hold with no day has none.
+    expect(byId(rows, "onhold-j6")).toMatchObject({ clock: dayAgo(1), level: "soon" });
+    expect([byId(rows, "onhold-j7").clock ?? null, byId(rows, "onhold-j7").level]).toEqual([null, "none"]);
+    // A job needing a day has no clock at all: every day it holds is a day the office's paper was born.
+    expect([byId(rows, "j5").clock ?? null, byId(rows, "j5").level]).toEqual([null, "none"]);
   });
 
   it("a visit nobody closed out: the customer in bold, the type always in the phrase, a typed title beside it", async () => {

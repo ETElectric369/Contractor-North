@@ -209,7 +209,7 @@ describe("a pile's count is the count of its rows, not the whole population (the
 });
 
 describe("a draft invoice's place, and whether Set Aside Until… is a door on it", () => {
-  it("set aside with its job going: the fold; set aside with its job over: back on top; neither: a plain row", () => {
+  it("set aside with its job going: the fold; set aside with its job over: back on the list; neither: a plain row", () => {
     expect(draftInvoiceState("2026-10-17", "in_progress", TODAY)).toEqual({ place: "waiting", canSetAside: true });
     expect(draftInvoiceState("2026-10-17", "complete", TODAY)).toEqual({ place: "finished", canSetAside: false });
     expect(draftInvoiceState("2026-10-17", "cancelled", TODAY)).toEqual({ place: "finished", canSetAside: false });
