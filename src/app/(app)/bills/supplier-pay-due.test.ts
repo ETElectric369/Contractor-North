@@ -92,7 +92,7 @@ describe("Pay CED By Oct 10: the line on his real documents", () => {
     expect(item.href).toBe(`/bills?pay=${CED}`);
     expect(item.href).toBe(supplierPayHref(CED));
     expect(item.kind).toBe("supplier_pay");
-    expect(item.stream).toBe("money");
+    expect(item.group).toBe("keep_books");
     expect(item.affordances).toEqual(["open"]);
     expect(item.urgency).toBe(1);
   });

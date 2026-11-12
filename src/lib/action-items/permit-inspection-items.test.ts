@@ -13,7 +13,7 @@ import {
 } from "./permit-inspection-items";
 import { PILE_DEFS, isUnreadLine, pileOf, rollUpPiles } from "./piles";
 import { rowButtons } from "./row-buttons";
-import { AFFORDANCES, KIND_META, KIND_STREAM, chipOf, sortActionItems } from "./types";
+import { AFFORDANCES, KIND_META, KIND_GROUP, sortActionItems } from "./types";
 
 /**
  * WHAT NEEDS YOU SAYS ABOUT A PERMIT STILL WAITING ON AN INSPECTION (0378).
@@ -209,7 +209,7 @@ describe("the badge stays honest", () => {
     const inspections = permits.map((p) => ({ ...visit({ position: 1 }), id: `i-${p.id}`, permit_id: p.id }));
     const f = permitInspectionItems({ permits, inspections, todayStr: THU });
     expect(f.now).toHaveLength(4);
-    const rolled = rollUpPiles(sortActionItems(f.now.map((it) => ({ ...it, stream: KIND_STREAM[it.kind] })), THU), { todayStr: THU, isStaff: true });
+    const rolled = rollUpPiles(sortActionItems(f.now.map((it) => ({ ...it, group: KIND_GROUP[it.kind] })), THU), { todayStr: THU, isStaff: true });
     const piles = rolled.filter((r) => r.pile);
     expect(rolled).toHaveLength(1);
     expect(piles[0].title).toBe("Permit Inspections · 4");
@@ -219,7 +219,7 @@ describe("the badge stays honest", () => {
 
   it("a lone one stays a plain row (never \"· 1\"), and the pile has no dead list page", () => {
     const f = feed(bothBooked(), FRI);
-    const rolled = rollUpPiles(f.now.map((it) => ({ ...it, stream: KIND_STREAM[it.kind] })), { todayStr: FRI, isStaff: true });
+    const rolled = rollUpPiles(f.now.map((it) => ({ ...it, group: KIND_GROUP[it.kind] })), { todayStr: FRI, isStaff: true });
     expect(rolled[0].pile).toBeUndefined();
     expect(rolled[0].title).toBe("Meter Base Swap · J-052");
     // /permits is a redirect to Jobs: a See All onto it would be a dead door.
@@ -242,8 +242,9 @@ describe("the row's one button says what to do with it", () => {
       [[visit({ position: 1, result: "cancelled" as const, result_on: THU })], FRI],
     ] as const) {
       const item = feed([...rows], today).now[0];
-      const b = rowButtons({ ...item, stream: KIND_STREAM[item.kind] }, { isStaff: true });
-      words[chipOf(item)] = b.primary!.label;
+      const b = rowButtons({ ...item, group: KIND_GROUP[item.kind] }, { isStaff: true });
+      // The row's state words: its own chip, else its kind's (chipOf retired with the drawn chip, cn-v1161).
+      words[item.chip ?? KIND_META[item.kind].label] = b.primary!.label;
       expect(b.primary!.act).toEqual({ type: "open", href: "/jobs/j1?tab=permits" });
       expect(b.also).toBeNull();
       expect(b.more).toEqual([]);
@@ -259,7 +260,7 @@ describe("the row's one button says what to do with it", () => {
   });
 
   it("the kind is today's work, open-only, and its chip has plain words", () => {
-    expect(KIND_STREAM.permit_inspection).toBe("today");
+    expect(KIND_GROUP.permit_inspection).toBe("run_jobs");
     expect(AFFORDANCES.permit_inspection).toEqual(["open"]);
     expect(KIND_META.permit_inspection.label).toBe("Permit Inspection");
   });
@@ -291,7 +292,7 @@ describe("a job waiting on an authority is not asked for a day", () => {
     expect(PERMIT_INSPECTIONS_UNREAD_ITEM.affordances).toEqual(["open"]);
     expect(PERMIT_INSPECTIONS_UNREAD_ITEM.when).toBeNull(); // a read has no date to invent
     // No "Book It" on a line about a read: it opens the page that can say what it couldn't, nothing more.
-    const b = rowButtons({ ...PERMIT_INSPECTIONS_UNREAD_ITEM, stream: KIND_STREAM.permit_inspection }, { isStaff: true });
+    const b = rowButtons({ ...PERMIT_INSPECTIONS_UNREAD_ITEM, group: KIND_GROUP.permit_inspection }, { isStaff: true });
     expect(b.primary).toBeNull();
 
     // The build pushes it on a lost read, and tells the ops sink — except while 0378 is not applied,

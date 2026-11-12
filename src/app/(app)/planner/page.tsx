@@ -1203,26 +1203,19 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       <SupplierPaperDoneTrail scope={SUPPLIER_PAPERS_SCOPE} />
       {(needsYou.now.length > 0 || needsYou.waiting.length > 0) && (
         <Card className="mb-4 overflow-hidden" data-tour="needs-you">
-          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-            <h2 className="text-sm font-semibold text-slate-900">{t("md_needsYou")}</h2>
-            {/* The open count (a pile counts one), the same number as the dock's badge. Nothing to
-                act on now: no pill (zero shows no badge). */}
-            {needsYou.now.length > 0 && (
-              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">{needsYou.now.length}</span>
-            )}
-          </div>
-          <div className="p-3">
-            <ActionList
-              items={needsYou.now}
-              people={people}
-              todayStr={todayStr}
-              tz={tz}
-              leadsOn={leadsOn}
-              isStaff={isStaff}
-              textReady={textReady}
-              emptyLabel={t("md_nothingNeedsYou")}
-            />
-          </div>
+          {/* THE BOARD (cn-v1161): the title and its counts, Act Today, the four tiles and the open
+              tile's rows are all the list's own; the page hands it the title and its words. */}
+          <ActionList
+            items={needsYou.now}
+            people={people}
+            todayStr={todayStr}
+            tz={tz}
+            leadsOn={leadsOn}
+            isStaff={isStaff}
+            textReady={textReady}
+            title={t("md_needsYou")}
+            emptyLabel={t("md_nothingNeedsYou")}
+          />
           {/* WAITING (N): each thing waiting, why, and the day it comes back. Grey, never a badge. */}
           <WaitingFold items={needsYou.waiting} />
         </Card>

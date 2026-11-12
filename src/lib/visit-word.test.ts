@@ -83,6 +83,8 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fakeClient()
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
 
 import { getActionItems } from "@/lib/action-items/query";
+import { rowWords } from "@/lib/action-items/row-words";
+import { translator } from "@/lib/i18n";
 import { runDataTool } from "@/lib/assistant-tools";
 
 /** A past, still-scheduled visit with no field data and nothing settling it: the Not Closed Out shape. */
@@ -214,6 +216,77 @@ describe("Needs You's To Write Up row reads the type by its label too", () => {
     for (const row of Object.values(rows)) {
       expect(`${row.title} ${row.subtitle ?? ""}`, row.id).not.toMatch(OLD_WORD);
     }
+  });
+});
+
+/**
+ * THE REDRAW SAYS THE KIND IN THE PHRASE (cn-v1161). The box draws WHO in bold and WHAT under it, and
+ * WHAT is a key with slots, said in the reader's language. The cn-v1157 hole (a row that says its kind
+ * nowhere) must not reopen there: every write-up row's phrase carries the visit's STORED type in its
+ * `type` slot, which the box says by the type's own label, whatever the title, the customer or the
+ * street did to the bold line.
+ */
+describe("Needs You's To Write Up row carries its type in what it says", () => {
+  it("every write-up row's what has the type slot; a typed title rides beside it as data", async () => {
+    const done = (id: string, type: string, title: string | null, who: string | null = "Marla Finch") => ({
+      ...visit(id, type, title, who ?? ""),
+      status: "completed",
+      customers: who ? { name: who } : null,
+      location: "12 Larkspur Ln",
+    });
+    state.visits = [
+      done("t1", "inspection", null),
+      done("t2", "quote", "Site Inspection"),
+      done("t3", "final_inspection", "Kitchen hood outlet"),
+      done("t4", "quote", null, null),
+      done("t5", "inspection", "Kitchen hood outlet", null),
+    ];
+    const rows = await rowsInPile("inspections_to_write_up");
+    for (const v of state.visits) {
+      const what = rows[v.id].what;
+      expect(what, v.id).toBeTruthy();
+      expect(what!.vars?.type, v.id).toBe(v.type);
+      expect(["ny_w_toWriteUp", "ny_w_toWriteUpTitled"], v.id).toContain(what!.key);
+      // The slot is said by the ONE function that words a type, so it can never be the old word.
+      expect(appointmentTypeLabel(String(what!.vars?.type)), v.id).not.toMatch(OLD_WORD);
+    }
+    expect(rows["t1"]).toMatchObject({ who: "Marla Finch", what: { key: "ny_w_toWriteUp", tail: "12 Larkspur Ln" } });
+    // A stock title is no title: the phrase is the kind alone.
+    expect(rows["t2"].what?.key).toBe("ny_w_toWriteUp");
+    expect(rows["t3"].what).toEqual({ key: "ny_w_toWriteUpTitled", vars: { text: "Kitchen hood outlet", type: "final_inspection" }, tail: "12 Larkspur Ln" });
+    // Nobody named: the bold line is the street (inspectionLabel), so the street is not the tail too.
+    expect(rows["t4"]).toMatchObject({ who: null, what: { key: "ny_w_toWriteUp", tail: null } });
+    // Nobody named and a typed title: the bold line is the title, so the phrase is the kind alone.
+    expect(rows["t5"].what).toEqual({ key: "ny_w_toWriteUp", vars: { type: "inspection" }, tail: "12 Larkspur Ln" });
+  });
+});
+
+/**
+ * A TITLE THE BOOKING DOOR STAMPED IS NOT SAID TWICE (cn-v1161). "Inspection: Sam Tillery" was
+ * written by the app, not typed, so with Sam Tillery in bold it would say the name again and, in
+ * Spanish, leave an English tag in the middle of the row. A title a person typed still rides.
+ */
+describe("A stock booking title is no title on the box", () => {
+  it("the write-up and the not-closed rows say the kind alone for a stamp, and a typed title as data", async () => {
+    const done = (id: string, type: string, title: string | null) => ({
+      ...visit(id, type, title, "Sam Tillery"),
+      status: "completed",
+      location: "12 Larkspur Ln",
+    });
+    state.visits = [done("s1", "inspection", "Inspection: Sam Tillery"), done("s2", "inspection", "Inspection: check the subpanel")];
+    const rows = await rowsInPile("inspections_to_write_up");
+    expect(rows["s1"]).toMatchObject({ who: "Sam Tillery", what: { key: "ny_w_toWriteUp", vars: { type: "inspection" }, tail: "12 Larkspur Ln" } });
+    expect(rows["s1"].what?.vars?.text).toBeUndefined();
+    expect(rows["s2"].what).toEqual({ key: "ny_w_toWriteUpTitled", vars: { text: "Inspection: check the subpanel", type: "inspection" }, tail: "12 Larkspur Ln" });
+    const es = rowWords(rows["s1"], { lang: "es", words: translator("es"), isStaff: true, todayStr: TODAY, tz: "America/Los_Angeles" });
+    expect(es.who).toBe("Sam Tillery");
+    expect(es.what).not.toMatch(/Inspection:/);
+    expect(es.what).not.toMatch(/Sam Tillery/);
+
+    state.visits = [visit("n1", "service_call", "Service call: Sam Tillery", "Sam Tillery"), visit("n2", "meeting", "Meeting about the deck", "Sam Tillery")];
+    const open = await closeOutRows();
+    expect(open["n1"].what).toEqual({ key: "ny_w_visitNotClosed", vars: { type: "service_call" } });
+    expect(open["n2"].what?.key).toBe("ny_w_visitNotClosedTitled");
   });
 });
 

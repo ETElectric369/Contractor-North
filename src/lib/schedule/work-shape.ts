@@ -286,6 +286,28 @@ export function bookingTitle(kind: WorkKind, name: string): string {
 }
 
 /**
+ * IS THIS A TITLE THE APP WROTE ITSELF? (cn-v1161)
+ *
+ * The booking doors stamp a title nobody typed ("Inspection: Sam Tillery"). A screen that says the
+ * person in bold must not say that stamp again as if somebody had written it. True when the title is
+ * what bookingTitle writes, for ANY kind, for one of `names` or for its "Visit" stand-in, or the
+ * older "Site inspection: <name>". It is built from bookingTitle over the kinds, so the two cannot
+ * drift. A title a person typed ("Inspection: check the subpanel", "Hot tub hookup") is false.
+ */
+export function isStockBookingTitle(title: string | null | undefined, names: readonly (string | null | undefined)[]): boolean {
+  const t = String(title ?? "").trim().toLowerCase();
+  if (!t) return false;
+  const whos = [...names.map((n) => String(n ?? "").trim()).filter(Boolean), ""];
+  for (const who of whos) {
+    for (const kind of [...WORK_KINDS, "other"] as WorkKind[]) {
+      if (bookingTitle(kind, who).toLowerCase() === t) return true;
+    }
+    if (`Site inspection: ${who || "Visit"}`.toLowerCase() === t) return true;
+  }
+  return false;
+}
+
+/**
  * THE TITLE THE NEW-VISIT FORM SUGGESTS, following its Type (W2-06): an inspection is
  * "Inspection: <customer or place>" (lib/statuses); a job is the job's own name (lib/job-name's street,
  * never "Inspection — J-012"); every other kind is bookingTitle's. Nothing to name it by, nothing

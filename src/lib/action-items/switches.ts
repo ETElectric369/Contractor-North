@@ -60,19 +60,24 @@ export type InquiryRow = {
  * work is not. The card still opens the request itself (/leads?focus=, which renders with the Off
  * line). The row table (row-buttons.ts) decides which button says what.
  */
-export function inquiryActionItem(q: InquiryRow, todayStr: string, leadsOn: boolean): Omit<ActionItem, "stream"> {
+export function inquiryActionItem(q: InquiryRow, todayStr: string, leadsOn: boolean): Omit<ActionItem, "group"> {
   const overdue = q.next_follow_up_at != null && q.next_follow_up_at <= todayStr;
   const fresh = q.status === "new";
   const phone = (q.phone ?? "").trim() || null;
-  const item: Omit<ActionItem, "stream"> = {
+  // WHO AND WHAT, for the box (cn-v1161): the person's name in bold, else the word for nobody named,
+  // and the phrase as a key. Leads off says it as a request, the way its title does.
+  const named = (q.name ?? "").trim() || null;
+  const item: Omit<ActionItem, "group"> = {
     id: q.id,
     kind: "inquiry",
     title: q.name as string,
     subtitle: fresh ? "New lead — reach out" : "Follow up",
-    who: null,
+    who: named,
+    ...(named ? {} : { whoSay: { key: "ny_who_someone" } }),
+    what: { key: leadsOn ? (fresh ? "ny_w_leadNew" : "ny_w_leadFollowUp") : fresh ? "ny_w_requestNew" : "ny_w_requestFollowUp" },
     when: q.next_follow_up_at,
     // A brand-new, uncontacted lead is the hottest thing on the board (speed-to-lead wins
-    // the job) → top urgency so it sorts to the top of the Leads stream with the red flag.
+    // the job) → top urgency, which the one rule (needs-you-rule) reads as a Win Work row to act on soon.
     // An overdue follow-up is next; a contacted, on-schedule lead is normal.
     urgency: fresh ? 2 : overdue ? 1 : 0,
     done: false,

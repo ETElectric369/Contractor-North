@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { NO_JOB_READ_CAP, companyTimeCode, noJobShiftsFrom, notCompanyTimeFilter, readNoJobHours, type NoJobRow } from "@/lib/no-job-hours";
-import { noJobAdvice, noJobHoursActionItem, NO_JOB_HOURS_HREF } from "@/lib/action-items/no-job-hours-item";
+import { noJobAdvice, noJobHoursActionItem, NO_JOB_HOURS_HREF, NO_JOB_HOURS_ITEM_ID, NO_JOB_HOURS_UNREAD_ID } from "@/lib/action-items/no-job-hours-item";
+import { levelOf, summarize } from "@/lib/action-items/needs-you-rule";
+import { rowButtons } from "@/lib/action-items/row-buttons";
 
 /**
  * HOURS ON NO JOB (the duplicate punches, 2026-09-26): a shift nobody put on a job stays findable
@@ -88,7 +90,7 @@ describe("the Needs You line: one rollup, never one row per shift, never gone af
   it("says 'couldn't check' when the read failed, and nothing when there is nothing", () => {
     expect(noJobHoursActionItem({ shifts: [], hours: 0, capped: false, companyCode: "SHOP" })).toBeNull();
     expect(noJobHoursActionItem(null)).toBeNull();
-    expect(noJobHoursActionItem(null, { failed: true })?.title).toBe("Hours on No Job · Couldn't Check");
+    expect(noJobHoursActionItem(null, { failed: true })).toMatchObject({ id: "stray-no-job-unread", title: "Hours on No Job · Couldn't Check" });
   });
 
   it("a capped read says there may be more", () => {
@@ -98,8 +100,29 @@ describe("the Needs You line: one rollup, never one row per shift, never gone af
 
   it("a full cap with nothing listable in it is its own line, never null", () => {
     const item = noJobHoursActionItem({ shifts: [], hours: 0, capped: true, companyCode: "SHOP" });
-    expect(item).toMatchObject({ id: "stray-no-job", title: "Hours on No Job · Couldn't List Them All", href: NO_JOB_HOURS_HREF });
+    // A line about the read, not the shifts: its own "-unread" id, so it is treated as Couldn't Check.
+    expect(item).toMatchObject({ id: "stray-no-job-unread", title: "Hours on No Job · Couldn't List Them All", href: NO_JOB_HOURS_HREF });
     expect(item?.subtitle).toContain(`newest ${NO_JOB_READ_CAP}`);
+  });
+});
+
+describe("a line about the read is Couldn't Check, never the rollup", () => {
+  it("both read lines carry the -unread id; the real rollup keeps its own", () => {
+    expect(NO_JOB_HOURS_UNREAD_ID).toBe("stray-no-job-unread");
+    expect(NO_JOB_HOURS_ITEM_ID).toBe("stray-no-job");
+    const shifts = noJobShiftsFrom([row()], opts());
+    expect(noJobHoursActionItem({ shifts, hours: 8.43, capped: false, companyCode: "SHOP" })?.id).toBe(NO_JOB_HOURS_ITEM_ID);
+  });
+
+  it("the box gives it no button and no mark, and counts it in Run the Jobs' couldn't-be-checked", () => {
+    const lines = [noJobHoursActionItem(null, { failed: true })!, noJobHoursActionItem({ shifts: [], hours: 0, capped: true, companyCode: "SHOP" })!];
+    for (const line of lines) {
+      expect(levelOf({ ...line, since: "2026-01-01" }, { todayStr: "2026-11-11", tz: "America/Los_Angeles" })).toBe("none");
+      expect(rowButtons(line, { leadsOn: true, isStaff: true })).toEqual({ primary: null, also: null, more: [] });
+      const tile = summarize([{ ...line, level: "none" }], { isStaff: true }).tiles.find((t) => t.group === line.group)!;
+      expect(tile.group).toBe("run_jobs");
+      expect(tile.unread).toBe(1);
+    }
   });
 });
 

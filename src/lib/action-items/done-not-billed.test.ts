@@ -83,7 +83,8 @@ describe("the function's rows as Needs You rows: the same ids, chips, hrefs and 
         kind: "visit_unbilled",
         title: "13897 Honeysuckle · J-011",
         subtitle: "Andrew Crake",
-        who: null,
+        who: "13897 Honeysuckle · J-011",
+        what: { key: "ny_w_jobNotBilled", tail: "Andrew Crake" },
         when: "2026-09-20T16:00:00+00:00",
         urgency: 1,
         done: false,
@@ -125,6 +126,25 @@ describe("the function's rows as Needs You rows: the same ids, chips, hrefs and 
     const byId = (xs: { id: string }[]) => [...xs].sort((a, b) => a.id.localeCompare(b.id));
     expect(byId(doneRowItems(rows, none))).toEqual(byId(old));
     expect(old.map((i) => i.id).sort()).toEqual(["jdone-j11", "unbilled-a1", "unbilled-a2"]);
+  });
+});
+
+describe("a done visit's title is said once (cn-v1161)", () => {
+  it("a title a person typed rides as data beside the customer in bold", () => {
+    const [r] = doneRowItems([visit({ title: "Hot tub hookup", customer_name: "Theo Vance" })], none);
+    expect(r).toMatchObject({ who: "Theo Vance", what: { key: "ny_w_visitNotBilled", vars: { text: "Hot tub hookup" } } });
+  });
+  it("a stamp the booking door wrote is not said again under the name", () => {
+    const [r] = doneRowItems([visit({ title: "Service call: Theo Vance", customer_name: "Theo Vance" })], none);
+    expect(r.what).toEqual({ key: "ny_w_workNotBilled" });
+    const [b] = doneRowItems([visit({ title: "Inspection: Theo Vance", customer_name: "Theo Vance", open_invoice_id: "inv-9" })], none);
+    expect(b.what).toEqual({ key: "ny_w_workBilledNotPaid" });
+  });
+  it("with nobody named the bold line is the title, so the phrase carries no title", () => {
+    const [r] = doneRowItems([visit({ title: "Hot tub hookup", customer_name: null })], none);
+    expect(r.who).toBeNull();
+    expect(r.title).toBe("Hot tub hookup");
+    expect(r.what).toEqual({ key: "ny_w_workNotBilled" });
   });
 });
 

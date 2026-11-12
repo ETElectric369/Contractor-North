@@ -5,7 +5,7 @@ import {
   type InspectionStandState,
   type PermitInspection,
 } from "@/lib/permit-inspections";
-import { AFFORDANCES, waitingRow, type ActionItem, type WaitingItem } from "./types";
+import { AFFORDANCES, waitingRow, type ActionItem, type Say, type WaitingItem } from "./types";
 import { jobWords } from "./words";
 
 /**
@@ -85,11 +85,13 @@ export const UNSTARTED_JOB_STATUS = "to_be_scheduled";
  * awaiting an inspection, so every job waiting on the town or the utility is asked to pick a day
  * again, with nothing on the screen saying anything failed.
  */
-export const PERMIT_INSPECTIONS_UNREAD_ITEM: Omit<ActionItem, "stream"> = {
+export const PERMIT_INSPECTIONS_UNREAD_ITEM: Omit<ActionItem, "group"> = {
   id: "permitinsp-unread",
   kind: "permit_inspection",
   title: "Permit Inspections · Couldn't Check",
   subtitle: "Couldn't read which permits are still waiting on an inspection just now. Open a job's Permits tab to see them.",
+  whoSay: { key: "ny_who_unread", vars: { labelKey: "ny_btn_pile_permitInspections" } },
+  what: { key: "ny_w_unreadPermits" },
   who: null,
   when: null,
   urgency: 1,
@@ -125,7 +127,7 @@ const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ?
 
 export interface PermitInspectionFeed {
   /** Rows for Needs You's NOW list (before the pile rolls them up). */
-  now: Omit<ActionItem, "stream">[];
+  now: Omit<ActionItem, "group">[];
   /** Rows for the Waiting fold, each with the day it comes back. */
   waiting: WaitingItem[];
   /** Every job whose permit still wants an inspection: Jobs Needing a Day asks it for no date. */
@@ -145,7 +147,7 @@ export function permitInspectionItems(input: {
     byPermit.set(k, [...(byPermit.get(k) ?? []), r]);
   }
 
-  const now: Omit<ActionItem, "stream">[] = [];
+  const now: Omit<ActionItem, "group">[] = [];
   const waiting: WaitingItem[] = [];
   const awaitingJobIds = new Set<string>();
 
@@ -197,7 +199,10 @@ export function permitInspectionItems(input: {
         .filter(Boolean)
         .join(" · ")
         .slice(0, 140),
-      who: null,
+      // The box's words (cn-v1161): the job in bold, the customer as the tail (data), and what is
+      // owed as a key with the authority and its day as slots (permitInspectionWhat).
+      who: title,
+      what: permitInspectionWhat(stand.state, stand.authority, stand.day, stand.row?.result ?? null, one(job?.customers ?? null)?.name ?? null),
       // A missed write-up is DATED by the day it was booked for, so it sorts oldest first and reads
       // honestly. One nobody has phoned carries no date: there is none to carry, and inventing one is
       // what 0178 was written to stop.
@@ -213,6 +218,34 @@ export function permitInspectionItems(input: {
   }
 
   return { now, waiting, awaitingJobIds };
+}
+
+/**
+ * WHAT A PERMIT ROW SAYS, AS A KEY (cn-v1161): the same states as standLine, never its English. The
+ * authority is data (`name`), the day a day (`day`), the customer the tail.
+ */
+export function permitInspectionWhat(
+  state: InspectionStandState,
+  authority: string | null,
+  day: string | null,
+  result: string | null,
+  customer: string | null,
+): Say {
+  // A visit that did not pass may have no result day on file: then the phrase names no day, never
+  // "failed on ·" with a hole where the day was. An overdue one always has its booked day
+  // (permit-inspections: overdue is a booked day already past).
+  const noDay = !day;
+  const key =
+    state === "overdue"
+      ? "ny_w_permitNotWrittenUp"
+      : state === "needs_another"
+        ? result === "cancelled"
+          ? noDay ? "ny_w_permitCancelledNoDay" : "ny_w_permitCancelled"
+          : noDay ? "ny_w_permitFailedNoDay" : "ny_w_permitFailed"
+        : "ny_w_permitToBook";
+  const vars: Record<string, string | number | null> = { name: authority };
+  if (key === "ny_w_permitNotWrittenUp" || key === "ny_w_permitCancelled" || key === "ny_w_permitFailed") vars.day = day;
+  return { key, vars, tail: customer };
 }
 
 /** The chip's words: the state, and for a visit that did not pass, which way it did not. */

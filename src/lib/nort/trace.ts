@@ -26,6 +26,15 @@ const lines: string[] = [];
  * visible", twenty-three in one evening of the app simply being in a pocket. Only a stage of a
  * turn (or the fence) that ran dark makes the batch worth a row. */
 const SCREEN_LINES = new Set(["screen hidden", "screen visible"]);
+/* A PAGE THAT LOADS IN THE DARK IS NOT NEWS EITHER (sweep 2026-11-11). The shell is woken in the
+ * background (a fence, a push, the system's own refresh) and the page mounts hidden: "assistant
+ * mounted" and "fence watch armed" are written once, at mount, carry the (hidden) mark, and the next
+ * time the phone was picked up a "trace turn 0" row went to the ops sink holding those two lines and
+ * "screen visible" — no turn, no fence reading, nothing that ran. Two in one afternoon of the phone
+ * in a pocket. A mount line still rides in a batch that something else made worth a row; alone it
+ * makes none. Leaving is different: "assistant unmounted" while dark is a page torn down under a
+ * turn (the unlock-stop hunt), and stays news. */
+const MOUNT_LINES = new Set(["assistant mounted", "fence watch"]);
 let hiddenSeen = false;
 // A DROP is news even in the foreground: a turn thrown away (a too-small blob, a failed or empty
 // transcription, a transcript the in-flight guard discarded, a live turn cut, the no-speech budget
@@ -60,7 +69,7 @@ export function trace(stage: string, extra?: string) {
     turnNo++;
   }
   const line = `${clock()} ${stage}${extra ? ` ${extra}` : ""}${hidden ? " (hidden)" : ""}`;
-  if (hidden && !SCREEN_LINES.has(stage)) hiddenSeen = true;
+  if (hidden && !SCREEN_LINES.has(stage) && !MOUNT_LINES.has(stage)) hiddenSeen = true;
   lines.push(line);
   if (lines.length > 40) lines.shift();
   try {

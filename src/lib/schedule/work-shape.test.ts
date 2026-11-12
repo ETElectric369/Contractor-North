@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dayLoad, durationLabel, fillsTheDay, KIND_LABEL, workKind } from "./work-shape";
+import { bookingTitle, dayLoad, durationLabel, fillsTheDay, isStockBookingTitle, KIND_LABEL, WORK_KINDS, workKind } from "./work-shape";
 
 /**
  * Erik: "what i need to know is how much time they are going to take hours or days and a tag
@@ -85,5 +85,23 @@ describe("dayLoad — what a day already holds", () => {
 
   it("an empty day is empty", () => {
     expect(dayLoad([])).toMatchObject({ minutes: 0, unsized: 0, label: "" });
+  });
+});
+
+describe("isStockBookingTitle — a title the app stamped is not a title a person typed", () => {
+  it("is true for what bookingTitle writes for any kind, any case, and the Visit stand-in", () => {
+    for (const k of WORK_KINDS) expect(isStockBookingTitle(bookingTitle(k, "Sam Tillery"), ["Sam Tillery"]), k).toBe(true);
+    expect(isStockBookingTitle("  inspection: sam tillery ", ["Sam Tillery"])).toBe(true);
+    expect(isStockBookingTitle("Call Dana Rook", [null, "Dana Rook"])).toBe(true);
+    expect(isStockBookingTitle("Inspection: Visit", [])).toBe(true);
+    expect(isStockBookingTitle("Site inspection: Theo Vance", ["Theo Vance"])).toBe(true);
+    expect(isStockBookingTitle("Quote: 12 Larkspur Ln", ["Sam Tillery", "12 Larkspur Ln"])).toBe(true);
+  });
+  it("is false for a title a person typed, or another person's stamp", () => {
+    expect(isStockBookingTitle("Inspection: check the subpanel", ["Sam Tillery"])).toBe(false);
+    expect(isStockBookingTitle("Hot tub hookup", ["Sam Tillery"])).toBe(false);
+    expect(isStockBookingTitle("Inspection: Dana Rook", ["Sam Tillery"])).toBe(false);
+    expect(isStockBookingTitle("", ["Sam Tillery"])).toBe(false);
+    expect(isStockBookingTitle(null, ["Sam Tillery"])).toBe(false);
   });
 });

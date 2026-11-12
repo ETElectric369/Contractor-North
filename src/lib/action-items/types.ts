@@ -24,14 +24,9 @@
 // is its length, a pile counting one), and WAITING, everything waiting on someone else or on a day,
 // each with why and the day it comes back (the grey "Waiting (N)" fold, never a badge). Nothing
 // waits without a day (waitingRow), and a hold never hides money or a legal clock.
-//
-// ── TWO LISTS, ONE BUILD (Wave 1, NY-list) ──
-// Erik: Needs You is "stockpiled with things i cant act on or already have on hold". So the build
-// hands back two lists from one read: NOW (what he can act on today; the badge is its length) and
-// WAITING (everything waiting on someone else or on a day, each with the day it comes back: the
-// "Waiting (N)" fold under the card, never a badge). Nothing waits without a day (waitingRow).
 
 import type { SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
+import { GROUP_ORDER, KIND_GROUP, isUnreadLine } from "./needs-you-rule";
 
 export type ActionKind =
   | "job_to_schedule" // a job with nothing ahead of it: no day, no segment, no visit, nobody on it (Jobs Needing a Day)
@@ -69,17 +64,23 @@ export type ActionKind =
   // front of it is in no pile at all (permit-inspection-items has the gate's whole story).
   | "permit_inspection";
 
-/** The four urgency streams, in the order Needs You is sorted: money first (chase the dollars), then
- *  fresh leads, then today's work, then everything else. No headers are drawn for them any more
- *  (Wave 1, W1-15: one flat list of plain chips); the rank is the sort's first key after "done".
- *  The last is `other`, and it sorts last. It is not the Waiting fold: the fold is a second list (the
- *  things waiting on someone else, each with the day it comes back), not a rank of this one. */
-export type Stream = "money" | "leads" | "today" | "other";
+/** THE FOUR TILES of Needs You (the redraw, 2026-11): Get Paid, Win Work, Run the Jobs, Keep the
+ *  Books. Each kind sits in exactly one (needs-you-rule.ts KIND_GROUP), and the build stamps it once.
+ *  It is not the Waiting fold: the fold is a second list, not a tile. */
+export type Group = "get_paid" | "win_work" | "run_jobs" | "keep_books";
 
-export const STREAM_ORDER: Stream[] = ["money", "leads", "today", "other"];
+/** A row's mark: NOW (act today, the strip), SOON (sat a week, or its day is close), or none. */
+export type Level = "now" | "soon" | "none";
 
-/** Which stream each kind belongs to — assigned per-kind in ONE place so the
- *  inbox and any digest/summary surface can never disagree. */
+/**
+ * WORDS THE SERVER NAMES AND NEVER WRITES: a catalog key and its slots, said in the viewer's language
+ * by the list. Slots: `day` and `day2` are said as days, `money` and `money2` as currency, `type` as
+ * the visit type's label, a slot ending in `Key` is another key; `tail` is data only, drawn after it.
+ */
+export type Say = { key: string; vars?: Record<string, string | number | null>; tail?: string | null };
+
+export { GROUP_ORDER, KIND_GROUP } from "./needs-you-rule";
+
 /**
  * WHAT A ROW'S `when` IS (cn-v1069 follow-up; Erik on an inspection he finished the day before:
  * "1d overdue"?). Two different facts ride the one field: a DEADLINE (a follow-up day, a due date, a
@@ -113,39 +114,6 @@ export const WHEN_IS_A_DEADLINE: Record<ActionKind, boolean> = {
   permit_inspection: true, // the booked day
 };
 
-export const KIND_STREAM: Record<ActionKind, Stream> = {
-  job_to_schedule: "today",
-  inquiry: "leads",
-  appointment: "today",
-  // Erik: "all the inspections i've completed ... already happened and need to be actioned for
-  // estimates." Same species as invoice_draft — the work is done and nobody has asked for the
-  // money yet — so it belongs in the money stream, not on the calendar it already left.
-  inspection_writeup: "money",
-  organize: "other",
-  invoice_overdue: "money",
-  quote_awaiting: "money",
-  quote_accepted: "money", // a won deal is the freshest money event — renders at the very top
-  invoice_draft: "money",
-  visit_unbilled: "money",
-  quote_draft: "money",
-  lien_deadline: "other", // compliance clock — legal, not A/R
-  contract_unsigned: "other",
-  time_stray: "today", // a running/orphaned clock is today's cleanup, not tomorrow's
-  job_unbilled_work: "money", // uncosted work = dollars leaking off the invoice
-  materials_needed: "today", // the shopping run happens before the truck rolls — today's prep
-  job_on_hold: "other", // paused, waiting on something (material/task/customer) — the "did we forget this?" clock
-  // A short costs the job $0 and bills nothing until the office files the roll and settles it:
-  // dollars leaking off the invoice, the same species as job_unbilled_work.
-  stock_short: "money",
-  supplier_paper: "money", // a supplier bill on no job is a cost no job is carrying: money
-  supplier_pay: "money", // a discount that expires unless he pays: money
-  receipt_unbilled: "money", // a cost on a job nobody recorded: the invoice can't bill what isn't on the books
-  // A phone call to the town, or a visit to write up: today's work on a job that is otherwise done.
-  // NOT money — nothing is billed by it — and never "other": the utility will not set the meter until
-  // it happens, so it is the thing standing between a finished job and a customer with power.
-  permit_inspection: "today",
-};
-
 /** The canonical verbs. Each (kind, verb) a row can send maps to a registry action (dispatch-map.ts). */
 export type Affordance =
   | "do" // mark complete / contacted
@@ -160,10 +128,18 @@ export type Affordance =
 export interface ActionItem {
   id: string;
   kind: ActionKind;
-  stream: Stream; // urgency stream (money/leads/today/other) — derived from kind via KIND_STREAM
+  /** Its tile, stamped once by the build from KIND_GROUP (needs-you-rule.ts). */
+  group: Group;
+  /** Its mark, stamped once by the build (needs-you-rule.ts levelOf). Absent reads as none. */
+  level?: Level;
   title: string;
   subtitle?: string | null; // customer / job / vendor line
-  who?: string | null; // assignee name
+  /** Who or which job the row is about, drawn first in bold. Absent: the title. */
+  who?: string | null;
+  /** The lead as words, when there is no name to draw: a rollup, a Couldn't Check line, a bank download. */
+  whoSay?: Say;
+  /** The plain phrase under the lead. Absent: the subtitle. */
+  what?: Say;
   when?: string | null; // ISO or yyyy-mm-dd (due/follow-up/starts/null)
   urgency: 0 | 1 | 2; // 0 normal · 1 soon/overdue · 2 urgent
   done: boolean; // drives the universal "sinks to the bottom" rule
@@ -186,14 +162,16 @@ export interface ActionItem {
   noJobHours?: { entryIds: string[] } | null;
   /**
    * A PILE (Wave 1, W1-14): two or more open rows of one kind, rolled into this one row (piles.ts
-   * rollUpPiles). Its id is `pile:<name>`, it only opens (no verb is ever sent against it), and it
+   * rollUpPiles). Its id is `pile:<name>` (its NOW half `pile:<name>:now`), it only opens (no verb is ever sent against it), and it
    * counts 1 on the badge. `children` are the rows it holds, in the build's order.
    */
   pile?: PileInfo;
   children?: ActionItem[];
-  /** When this began waiting (yyyy-mm-dd or ISO), for a pile's pips: never drawn as a deadline. */
+  /** When this began waiting (yyyy-mm-dd or ISO): the week arm of its SOON mark and its age words,
+   *  never drawn as a deadline. */
   since?: string | null;
-  /** Staff only: the money on the row, for a pile's "$2,340 across 4". Never set on a tech's row. */
+  /** Staff only: the money on the row, or on a pile the sum of its children's (only when every child
+   *  has one, the read was not capped and every child is here). Never set on a tech's row. */
   amount?: number | null;
   /** quote_draft only (staff): what the Send sheet names before it sends (lane 4's SendSheet). */
   send?: SendFacts | null;
@@ -310,56 +288,54 @@ export function waitingRow(w: Omit<WaitingItem, "backOn"> & { backOn: string | n
 
 /**
  * WHAT A TECH'S WAITING LIST MAY HOLD. Every money feeder is staff-only, so a tech's fold is empty
- * today; this is the belt to that: no money kind, and no dollar figure in any title, ever reaches a
- * tech's page ("techs never see prices").
+ * today; this is the belt to that: only Run the Jobs, and no dollar figure in any title, ever reaches
+ * a tech's page ("techs never see prices").
  */
 export function waitingForViewer(rows: WaitingItem[], isStaff: boolean): WaitingItem[] {
   if (isStaff) return rows;
-  return rows.filter((w) => KIND_STREAM[w.kind] !== "money" && !/\$/.test(w.title) && !/\$/.test(w.why));
+  return rows.filter((w) => KIND_GROUP[w.kind] === "run_jobs" && !/\$/.test(w.title) && !/\$/.test(w.why));
 }
 
 /**
  * THE CHIP ON EACH ROW (Wave 1, W1-15): plain words, Title Case, saying the STATE the thing is in,
  * never the verb (the row's own button or the page it opens is the verb). One flat list, no section
  * headers, so the chip is what tells a lead from a bill at a glance. A row whose state has words of
- * its own says them instead (ActionItem.chip). The tones are the ones each kind always had.
+ * its own says them instead (ActionItem.chip). The redraw (cn-v1161) draws no chip and no tone (red
+ * and amber now mean urgency only, inside the box's one mark). The labels stay: a row's `chip` is a
+ * STATE KEY row-buttons.ts and piles.ts branch on, these are its words when it has none of its own,
+ * and the follow-up that says them in the reader's language starts here (plan D4).
  */
-export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blue" | "amber" | "green" }> = {
-  job_to_schedule: { label: "Needs a Day", tone: "amber" },
-  inquiry: { label: "Lead", tone: "green" },
-  appointment: { label: "Not Closed Out", tone: "blue" },
-  inspection_writeup: { label: "To Write Up", tone: "green" },
+export const KIND_META: Record<ActionKind, { label: string }> = {
+  job_to_schedule: { label: "Needs a Day" },
+  inquiry: { label: "Lead" },
+  appointment: { label: "Not Closed Out" },
+  inspection_writeup: { label: "To Write Up" },
   // Row override: "Billed, Not Paid" when an open invoice anchors the visit (query.ts).
-  visit_unbilled: { label: "Done, Not Billed", tone: "green" },
-  quote_draft: { label: "Not Sent", tone: "green" },
+  visit_unbilled: { label: "Done, Not Billed" },
+  quote_draft: { label: "Not Sent" },
   // Row overrides: "Note to Review" for a note, "Bank Download" for a bank download (query.ts).
-  organize: { label: "Paper to Sort", tone: "slate" },
-  invoice_overdue: { label: "Past Due", tone: "amber" },
-  quote_awaiting: { label: "No Reply Yet", tone: "green" },
-  quote_accepted: { label: "Won", tone: "green" },
-  invoice_draft: { label: "Not Sent", tone: "slate" },
-  lien_deadline: { label: "Lien Deadline", tone: "amber" },
-  contract_unsigned: { label: "Not Signed", tone: "blue" },
+  organize: { label: "Paper to Sort" },
+  invoice_overdue: { label: "Past Due" },
+  quote_awaiting: { label: "No Reply Yet" },
+  quote_accepted: { label: "Won" },
+  invoice_draft: { label: "Not Sent" },
+  lien_deadline: { label: "Lien Deadline" },
+  contract_unsigned: { label: "Not Signed" },
   // Hours on No Job and a closed shift on no job; a clock still running says "Clock Left Running".
-  time_stray: { label: "On No Job", tone: "amber" },
-  job_unbilled_work: { label: "No Costs Yet", tone: "amber" },
+  time_stray: { label: "On No Job" },
+  job_unbilled_work: { label: "No Costs Yet" },
   // Deliberately NOT "No Costs Yet" (job_unbilled_work = nothing captured yet);
   // this one means items ARE on the take-off and still need buying.
-  materials_needed: { label: "To Buy", tone: "blue" },
+  materials_needed: { label: "To Buy" },
   // Only a hold whose day has come is a Now row (a later one waits in the fold): it is a reminder.
-  job_on_hold: { label: "Reminder", tone: "amber" },
-  stock_short: { label: "To Settle", tone: "amber" },
-  supplier_paper: { label: "To File", tone: "amber" },
-  supplier_pay: { label: "Discount Ends", tone: "green" },
-  receipt_unbilled: { label: "Not on a Bill", tone: "amber" },
+  job_on_hold: { label: "Reminder" },
+  stock_short: { label: "To Settle" },
+  supplier_paper: { label: "To File" },
+  supplier_pay: { label: "Discount Ends" },
+  receipt_unbilled: { label: "Not on a Bill" },
   // Row overrides say which: To Book, Not Written Up, Failed, Cancelled (permit-inspection-items).
-  permit_inspection: { label: "Permit Inspection", tone: "amber" },
+  permit_inspection: { label: "Permit Inspection" },
 };
-
-/** The words on a row's chip: its own, else its kind's. */
-export function chipOf(item: Pick<ActionItem, "kind" | "chip">): string {
-  return item.chip ?? KIND_META[item.kind].label;
-}
 
 /** A TECH'S APPOINTMENT ROW OPENS, NOTHING MORE (Wave 0). Done and Delete dispatch to
  *  appointment.setStatus, which is staff-only, so on a tech's row they were doors that only
@@ -450,20 +426,22 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
 };
 
 /**
- * NEEDS YOU'S ONE ORDER (Wave 1, NY-list), applied ONCE, inside the build, before the list leaves the
- * server: every surface reading the list reads it in the same order, and a pile (piles.ts) takes the
- * place its most pressing row would have had.
+ * NEEDS YOU'S ONE ORDER, applied ONCE, inside the build, before the list leaves the server: every
+ * surface reading the list reads it in the same order, the client never sorts, and a pile (piles.ts)
+ * takes the place its most pressing row would have had.
  *   1. not done before done ("checked boxes go to the bottom");
- *   2. the stream: money, then leads, then today, then other (a money row with urgency 0 is above a
- *      today row with urgency 2: the dollars come first);
- *   3. urgency, high first;
- *   4. when, oldest first. A row with no date counts as TODAY (not as last): a rollup like Supplier
+ *   2. NOW rows first: the strip is the top of the list;
+ *   3. the tile: Get Paid, Win Work, Run the Jobs, Keep the Books (GROUP_ORDER);
+ *   4. a "Couldn't Check" line leads its tile, so a failed read is never under the rows it hid;
+ *   5. SOON before no mark;
+ *   6. when, oldest first. A row with no date counts as TODAY (not as last): a rollup like Supplier
  *      Bills or Hours on No Job is today's business, never pushed below a row dated tomorrow.
  * Ties keep the build's own order (a stable sort), so the rows the build places on purpose (Supplier
  * Bills, Pay <Supplier>, Hours on No Job) stay where it put them among their equals. `todayStr` is the
- * company's today (YYYY-MM-DD).
+ * company's today (YYYY-MM-DD). The mark is read as stamped (absent: none); the tile, as stamped or
+ * from its kind.
  */
-export function sortActionItems<T extends Pick<ActionItem, "done" | "urgency" | "when" | "kind"> & { stream?: Stream }>(
+export function sortActionItems<T extends Pick<ActionItem, "done" | "when" | "kind" | "id"> & { group?: Group; level?: Level }>(
   items: T[],
   todayStr: string,
 ): T[] {
@@ -472,18 +450,18 @@ export function sortActionItems<T extends Pick<ActionItem, "done" | "urgency" | 
     const t = w ? Date.parse(w) : NaN;
     return Number.isFinite(t) ? t : today;
   };
-  const rank = (it: T) => STREAM_ORDER.indexOf(it.stream ?? KIND_STREAM[it.kind]);
+  const key = (it: T): number[] => [
+    it.done ? 1 : 0,
+    it.level === "now" ? 0 : 1,
+    GROUP_ORDER.indexOf(it.group ?? KIND_GROUP[it.kind]),
+    isUnreadLine(it) ? 0 : 1,
+    it.level === "soon" ? 0 : 1,
+    whenMs(it.when),
+  ];
   return items
-    .map((it, i) => ({ it, i }))
+    .map((it, i) => ({ it, i, k: key(it) }))
     .sort((a, b) => {
-      if (a.it.done !== b.it.done) return a.it.done ? 1 : -1;
-      const ra = rank(a.it);
-      const rb = rank(b.it);
-      if (ra !== rb) return ra - rb;
-      if (a.it.urgency !== b.it.urgency) return b.it.urgency - a.it.urgency;
-      const wa = whenMs(a.it.when);
-      const wb = whenMs(b.it.when);
-      if (wa !== wb) return wa - wb;
+      for (let j = 0; j < a.k.length; j++) if (a.k[j] !== b.k[j]) return a.k[j] - b.k[j];
       return a.i - b.i; // stable: the build's own order
     })
     .map(({ it }) => it);

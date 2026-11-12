@@ -16,7 +16,7 @@ vi.mock("@/lib/supabase/server", () => ({
   },
 }));
 
-import { recordAppError, reportError, reportErrorAwaited } from "./observe";
+import { errorMessage, pageBody, pageToWords, recordAppError, reportError, reportErrorAwaited } from "./observe";
 
 const ORG = "6f1c2a3e-9b4d-4c5e-8f6a-1b2c3d4e5f60";
 const answer = { id: "row-1", inserted: true, reopened: false, event_count: 1, level: "error" };
@@ -142,5 +142,58 @@ describe("reportError / reportErrorAwaited", () => {
     await p;
     expect(done).toBe(true);
     expect(sent()).toMatchObject({ p_where: "stripe:webhook:refused", p_level: "error" });
+  });
+});
+/**
+ * Sweep 2026-11-11: one row in the sink was titled with a whole HTML page — the database's edge had
+ * answered 502 and the client handed the page back as the error's message. A page is cut down to
+ * what it says, and every such page at one call site is one row.
+ */
+describe("a gateway's page is not a message", () => {
+  const PAGE = "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>cloudflare</center>\r\n</body>\r\n</html>\r\n";
+
+  it("a page is said by its title, else its first heading, else its text; anything else comes back as it was", () => {
+    expect(pageToWords(PAGE)).toBe("502 Bad Gateway (an HTML page, not an answer)");
+    expect(pageToWords("<!DOCTYPE html><html><body><h1>  Service\n Unavailable </h1></body></html>")).toBe("Service Unavailable (an HTML page, not an answer)");
+    expect(pageToWords("<html><body><p>try  again</p><p>later</p></body></html>")).toBe("try again later (an HTML page, not an answer)");
+    expect(pageToWords("<html><head><title> </title></head><body><h1>Bad Gateway</h1></body></html>")).toBe("Bad Gateway (an HTML page, not an answer)");
+    expect(pageToWords("<html><body></body></html>")).toBe("An HTML page with no words, not an answer");
+    for (const plain of ["", "duplicate key value violates unique constraint", "a < b and <html> said inside a sentence", "<htmlish>not a page</htmlish>", '{"message":"<html>"}']) {
+      expect(pageToWords(plain)).toBe(plain);
+    }
+  });
+
+  it("errorMessage cuts the page out of a thrown Error and out of a plain-object error, and keeps the code beside it", () => {
+    expect(errorMessage(new Error(PAGE))).toBe("502 Bad Gateway (an HTML page, not an answer)");
+    expect(errorMessage({ message: PAGE, code: "502" })).toBe("502 Bad Gateway (an HTML page, not an answer) · 502");
+    expect(errorMessage({ message: "relation does not exist", code: "42P01" })).toBe("relation does not exist · 42P01");
+  });
+
+  it("the sink's row is titled with the words, and two pages that differ only in their own request id are ONE key", async () => {
+    await recordAppError("nort:holding", { message: PAGE }, { userId: "u-1" }, "error");
+    await recordAppError("nort:holding", { message: PAGE.replace("cloudflare", "cloudflare ray 8f3a") }, { userId: "u-1" }, "error");
+    const a = rpc.fn.mock.calls[0][1] as Record<string, unknown>;
+    const b = rpc.fn.mock.calls[1][1] as Record<string, unknown>;
+    expect(a.p_title).toBe("502 Bad Gateway (an HTML page, not an answer)");
+    expect(String(a.p_title)).not.toContain("<");
+    expect((a.p_payload as { message: string }).message).toBe("502 Bad Gateway (an HTML page, not an answer)");
+    expect(b.p_key).toBe(a.p_key);
+    // The page's own words ride on the payload, so the provider's request id is not lost with the markup.
+    expect((a.p_payload as { page?: string }).page).toBe("502 Bad Gateway 502 Bad Gateway cloudflare");
+    expect((b.p_payload as { page?: string }).page).toBe("502 Bad Gateway 502 Bad Gateway cloudflare ray 8f3a");
+  });
+
+  it("the body is the page's words only: scripts and styles go whole, 300 characters at most, and nothing that is not a page has one", () => {
+    expect(pageBody(new Error("<html><head><style>body{color:red}</style><title>Down</title></head><body><script>var a = 1;</script><p>Ray ID: 8f3a</p></body></html>"))).toBe("Down Ray ID: 8f3a");
+    expect(pageBody({ message: `<html><body>${"x".repeat(900)}</body></html>` })).toHaveLength(300);
+    expect(pageBody("<!doctype html><html><body>plain</body></html>")).toBe("plain");
+    for (const not of [new Error("relation does not exist"), { message: "permission denied", code: "42501" }, "a < b", null, undefined, 42, { code: "502" }]) {
+      expect(pageBody(not)).toBeNull();
+    }
+  });
+
+  it("an error that is not a page carries no page on its payload", async () => {
+    await recordAppError("db", { message: "permission denied", code: "42501" }, undefined, "error");
+    expect(rpc.fn.mock.calls[0][1].p_payload).toEqual({ where: "db", message: "permission denied · 42501", extra: null });
   });
 });

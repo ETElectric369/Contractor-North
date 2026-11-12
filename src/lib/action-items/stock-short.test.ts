@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { AFFORDANCES, KIND_META, KIND_STREAM } from "./types";
+import { AFFORDANCES, KIND_META, KIND_GROUP } from "./types";
 
 /**
  * SETTLE (Shop Stock, Phase 3). A take past what the shelf showed saves as a short ($0, billing
@@ -10,7 +10,7 @@ import { AFFORDANCES, KIND_META, KIND_STREAM } from "./types";
  */
 describe("the Settle item", () => {
   it("is a money decision with one door", () => {
-    expect(KIND_STREAM.stock_short).toBe("money");
+    expect(KIND_GROUP.stock_short).toBe("keep_books");
     // Named for the fix that works: a count can't settle a short (audit v1018).
     // Its chip says the state it is in (Wave 1, W1-15): To Settle, never the verb.
     expect(KIND_META.stock_short.label).toBe("To Settle");

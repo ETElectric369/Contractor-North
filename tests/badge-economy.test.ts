@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { isPinned, pinArm, PUSH_SIX, rankPoolCut, rankSix, type SixRankTask } from "@/lib/six-rank";
-import { KIND_STREAM, AFFORDANCES, type ActionItem, type PileName } from "@/lib/action-items/types";
+import { KIND_GROUP, AFFORDANCES, type ActionItem, type PileName } from "@/lib/action-items/types";
 import { supplierPaperActionItem } from "@/lib/action-items/supplier-paper-item";
 import { supplierPayActionItems } from "@/lib/action-items/supplier-pay-item";
 import { PAY_CARD_WINDOW_DAYS } from "@/app/(app)/bills/supplier-pay-due";
@@ -44,9 +44,9 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     // A job's tasks live on its Tasks chip and a person's Reminders on Tasks & Reminders (0358): no task or
     // work_order kind, no stream for one, and no Convert sheet on any row. (The registry keeps
     // task.* and inquiry.convert for Nort; Needs You reaches neither.)
-    expect(Object.keys(KIND_STREAM)).not.toContain("task");
-    expect(Object.keys(KIND_STREAM)).not.toContain("work_order");
-    expect(Object.keys(AFFORDANCES)).toEqual(Object.keys(KIND_STREAM));
+    expect(Object.keys(KIND_GROUP)).not.toContain("task");
+    expect(Object.keys(KIND_GROUP)).not.toContain("work_order");
+    expect(Object.keys(AFFORDANCES)).toEqual(Object.keys(KIND_GROUP));
     for (const [kind, verbs] of Object.entries(AFFORDANCES)) expect(verbs as string[], kind).not.toContain("convert");
     const dispatchSrc = src("lib/action-items/dispatch.ts");
     expect(dispatchSrc).not.toContain('"convert"');
@@ -62,7 +62,7 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     // paper set aside waiting on a credit (the fold, never the badge).
     expect(querySrc.match(/kind: "supplier_paper"/g)).toHaveLength(1);
     expect(querySrc).toMatch(/const row = waitingRow\(\{\s*id: `credit-\$\{c\.invoiceId\}`,\s*kind: "supplier_paper",/);
-    expect(KIND_STREAM.supplier_paper).toBe("money");
+    expect(KIND_GROUP.supplier_paper).toBe("keep_books");
     expect(AFFORDANCES.supplier_paper).toEqual(["open"]);
     const card = { invoiceId: "x", invoiceNumber: "8802-1", supplier: "CED", date: "2026-09-04", total: 1, closed: false, said: null, state: "needs_job" as const, verdict: "blank" as const, suggestion: null, candidates: [], onJob: null, because: "", samePurchase: [] };
     const cards = Array.from({ length: 11 }, (_, i) => ({ ...card, invoiceId: `p${i}` }));
@@ -76,7 +76,7 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     // per supplier account (never one per invoice), and supplierPayDue drops it the day after.
     expect(querySrc).toContain("withPayees(supplierPayActionItems((await supplierDeskP)?.payDue), desk?.payDue)");
     expect(querySrc).not.toContain('kind: "supplier_pay"');
-    expect(KIND_STREAM.supplier_pay).toBe("money");
+    expect(KIND_GROUP.supplier_pay).toBe("keep_books");
     expect(AFFORDANCES.supplier_pay).toEqual(["open"]);
     const due = (accountId: string, payBy: string) => ({ accountId, accountName: "X", supplier: "CED", owed: 100, saves: 1, invoices: 7, sent: 0, payBy, daysLeft: 5 });
     const items = supplierPayActionItems([due("a", "2026-10-10"), due("b", "2026-10-12")]);
@@ -101,7 +101,7 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(querySrc.indexOf("const noJobReachP")).toBeLessThan(querySrc.indexOf("await Promise.all(["));
     expect(querySrc.match(/readNoJobHoursReach\(supabase, orgId, \[\]\)/g)).toHaveLength(1);
     expect(querySrc).not.toContain('kind: "time_stray",\n      title: `Hours on No Job');
-    expect(KIND_STREAM.time_stray).toBe("today");
+    expect(KIND_GROUP.time_stray).toBe("run_jobs");
     expect(AFFORDANCES.time_stray).toEqual(["open"]);
   });
 
@@ -109,7 +109,7 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     const draft = (i: number): ActionItem => ({
       id: `qdraft-q${i}`,
       kind: "quote_draft",
-      stream: KIND_STREAM.quote_draft,
+      group: KIND_GROUP.quote_draft,
       title: `Estimate E-0${i} started, never sent`,
       when: `2026-09-${String(10 + i).padStart(2, "0")}`,
       urgency: 0,
@@ -132,7 +132,7 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     const rows: ActionItem[] = Array.from({ length: LIMIT }, (_, i) => ({
       id: `r${i}`,
       kind: "inquiry",
-      stream: KIND_STREAM.inquiry,
+      group: KIND_GROUP.inquiry,
       title: `Lead ${i}`,
       urgency: 1,
       done: false,

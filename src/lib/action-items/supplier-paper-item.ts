@@ -1,7 +1,7 @@
 import type { SupplierDesk, SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
 import { supplierPaperTotals } from "@/app/(app)/bills/supplier-reconcile";
 import { formatCurrency } from "@/lib/utils";
-import { AFFORDANCES, KIND_STREAM, type ActionItem } from "./types";
+import { AFFORDANCES, KIND_GROUP, type ActionItem } from "./types";
 
 /** The rollup's id. Synthetic: open-only, never dispatched (types.ts AFFORDANCES). */
 export const SUPPLIER_PAPERS_ITEM_ID = "supplier-papers";
@@ -25,9 +25,14 @@ export function supplierPaperActionItem(feed: SupplierPaperFeed | null | undefin
   return {
     id: SUPPLIER_PAPERS_ITEM_ID,
     kind: "supplier_paper",
-    stream: KIND_STREAM.supplier_paper,
+    group: KIND_GROUP.supplier_paper,
     title: `Supplier Bills · ${count}`,
     subtitle: `${formatCurrency(total)} from ${from.length === 1 ? from[0] : "your suppliers"}, not in your books yet`,
+    // The box's words (cn-v1161): the rollup leads with its count in words, the phrase names the one
+    // supplier when there is one, and the money is the papers' own total (its right edge).
+    whoSay: { key: "ny_who_supplierBills", vars: { n: count } },
+    what: from.length === 1 ? { key: "ny_w_fromSupplier", vars: { name: from[0] } } : { key: "ny_w_fromSuppliers" },
+    amount: total,
     who: null,
     // Undated on purpose: the oldest paper is months old, and "98d overdue" in red would be a
     // deadline nobody set. The cards say their own dates.
@@ -53,11 +58,13 @@ export function supplierDeskFailedItem(desk: Pick<SupplierDesk, "failed"> | null
   return {
     id: SUPPLIER_DESK_UNREAD_ITEM_ID,
     kind: "supplier_paper",
-    stream: KIND_STREAM.supplier_paper,
+    group: KIND_GROUP.supplier_paper,
     title: "Supplier Bills · Couldn't Check",
     subtitle: failed.papers
       ? "Couldn't read your supplier papers just now, so any bill or discount waiting on you isn't here. Open Bills to see them."
       : "Couldn't check what's due to your suppliers just now, so a discount deadline may be missing here. Open Bills to see it.",
+    whoSay: { key: "ny_who_unread", vars: { labelKey: "ny_lbl_supplierBills" } },
+    what: { key: failed.papers ? "ny_w_unreadSupplierPapers" : "ny_w_unreadSupplierPay" },
     who: null,
     // Undated on purpose: it is not a deadline, and it must never read as one.
     when: null,

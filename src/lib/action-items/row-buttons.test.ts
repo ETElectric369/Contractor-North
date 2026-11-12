@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { AFFORDANCES, KIND_STREAM, type ActionItem, type ActionKind } from "./types";
+import { AFFORDANCES, KIND_GROUP, type ActionItem, type ActionKind } from "./types";
 import { allDoors, doorVerb, rowButtons, type RowDoor } from "./row-buttons";
 import { NOT_A_COST_CATEGORY, isCostableCategory, sortJobPapers } from "@/lib/job-photos";
 import { TECH_DOCUMENT_CATEGORIES, documentsForViewer, isTechDocument } from "@/lib/tech-documents";
 import { categoryIsShowable } from "@/lib/portal/doc-kinds";
-import { dict } from "@/lib/i18n";
+import { dict, translator } from "@/lib/i18n";
 import { titleCaseIn } from "../../../tests/title-case-words";
 
 /**
@@ -18,7 +18,7 @@ let seq = 0;
 const row = (kind: ActionKind, o: Partial<ActionItem> = {}): ActionItem => ({
   id: `r${++seq}`,
   kind,
-  stream: KIND_STREAM[kind],
+  group: KIND_GROUP[kind],
   title: `Row ${seq}`,
   when: null,
   urgency: 1,
@@ -46,6 +46,7 @@ describe("the table", () => {
       [row("inspection_writeup"), "Open the Inspection"],
       [row("job_to_schedule"), "Pick a Day"],
       [row("materials_needed", { openToBuy: 6 }), "Buy Materials · 6 Open"],
+      [row("materials_needed", { openToBuy: 1 }), "Buy Materials · 1 Open"],
       [row("job_unbilled_work"), "Add Costs"],
       [row("job_on_hold"), "Snooze"],
       [row("invoice_overdue"), "Get Paid"],
@@ -334,5 +335,111 @@ describe("a receipt row's Not a Cost", () => {
     });
     expect(rowButtons(pile, staff)).toEqual({ primary: { label: "Record It", act: { type: "unfold" } }, also: null, more: [] });
     expect(labels(rowButtons(pile.children![1], staff).more)).toEqual(["Not a Cost"]);
+  });
+});
+
+/**
+ * THE DOORS IN THE READER'S LANGUAGE (the Needs You redraw, cn-v1161). Every label goes through the
+ * caller's translator (lib/words/needs-you, ny_btn_…); with no language handed in, the English is
+ * byte for byte what the tests above pin. The confirm sheets' own titles and sentences stay English
+ * for now (a later wave: they embed the row's server-built title).
+ */
+describe("the doors in Spanish", () => {
+  const es = { leadsOn: true, isStaff: true, lang: "es", words: translator("es") };
+  const esOff = { ...es, leadsOn: false };
+  const every = (): ActionItem[] =>
+    (Object.keys(AFFORDANCES) as ActionKind[]).flatMap((k) => [
+      row(k, { phone: "555-0100", waitKey: `${k}:x`, holdReason: "Why", payee: "Bayberry Supply", openToBuy: 2, targetId: "job-1", alreadyInvoiced: { kind: "job", id: "j1" } }),
+      row(k, { affordances: [...AFFORDANCES[k], "snooze", "schedule", "wontHappen"] as ActionItem["affordances"], waitKey: `${k}:y`, chip: "Billed, Not Paid" }),
+      row(k, { chip: "Clock Left Running", paper: "organize", send: { kind: "quote", id: "q1", number: "E-012", customerName: "Dana", amount: 1200, lineCount: 4, openHref: "/quotes/q1" } }),
+    ]);
+
+  it("every label is Title Case in Spanish too, read through the translator, and never a raw key", () => {
+    let judged = 0;
+    for (const item of every())
+      for (const ctx of [es, esOff])
+        for (const d of allDoors(rowButtons(item, ctx))) {
+          judged++;
+          expect(d.label, d.label).not.toMatch(/ny_|ld_btn|\{\w+\}/);
+          expect(titleCaseIn(d.label.replace(/…/g, "").trim(), "es"), d.label).toBe(true);
+          if (d.act.type === "comeBack") expect(titleCaseIn(d.act.button, "es"), d.act.button).toBe(true);
+        }
+    expect(judged).toBeGreaterThan(60);
+  });
+
+  it("every label differs from its English: nothing on a Spanish reader's row stays English", () => {
+    for (const item of every()) {
+      const eng = allDoors(rowButtons(item, staff)).map((d) => d.label);
+      const spa = allDoors(rowButtons(item, es)).map((d) => d.label);
+      expect(spa.length, item.kind).toBe(eng.length);
+      spa.forEach((l, i) => expect(l, `${item.kind} ${eng[i]}`).not.toBe(eng[i]));
+    }
+  });
+
+  it("each kind's one named button, in Spanish", () => {
+    const cases: [ActionItem, string | null][] = [
+      [row("supplier_pay", { payee: "Bayberry Supply" }), "Pagar a Bayberry Supply"],
+      [row("supplier_pay"), "Pagar al Proveedor"],
+      [row("time_stray", { chip: "Clock Left Running" }), "Corregir el Reloj"],
+      [row("time_stray", { chip: "On No Job" }), "Poner en un Trabajo"],
+      [row("visit_unbilled"), "Facturarlo"],
+      [row("visit_unbilled", { chip: "Billed, Not Paid" }), "Cobrar"],
+      [row("quote_draft"), "Enviarlo"],
+      [row("invoice_draft"), "Enviarla"],
+      [row("quote_awaiting"), "Sigo Esperando"],
+      [row("inquiry"), "Ya Llamé"],
+      [row("appointment"), "Cerrar la Visita"],
+      [row("inspection_writeup"), "Abrir la Inspección"],
+      [row("job_to_schedule"), "Elegir un Día"],
+      [row("materials_needed", { openToBuy: 6 }), "Comprar Materiales · 6 Pendientes"],
+      // One is singular (the paired …One key).
+      [row("materials_needed", { openToBuy: 1 }), "Comprar Materiales · 1 Pendiente"],
+      [row("materials_needed"), "Comprar Materiales"],
+      [row("job_unbilled_work"), "Agregar Costos"],
+      [row("job_on_hold"), "Posponer"],
+      [row("invoice_overdue"), "Cobrar"],
+      [row("receipt_unbilled"), "Registrarlo"],
+      [row("organize", { paper: "tray" }), "Clasificarlo"],
+      [row("organize", { paper: "organize" }), "Archivarlo"],
+      [row("stock_short"), "Ajustarlo"],
+      [row("lien_deadline"), "Ver el Plazo"],
+      [row("contract_unsigned"), "Ver el Contrato"],
+      [row("permit_inspection", { chip: "To Book" }), "Agendarla"],
+      [row("permit_inspection", { chip: "Not Written Up" }), "Registrar el Resultado"],
+      [row("permit_inspection", { chip: "Failed" }), "Agendar Otra Visita"],
+      [row("permit_inspection"), "Ver el Permiso"],
+      [row("supplier_paper"), null],
+    ];
+    for (const [item, label] of cases) expect(rowButtons(item, es).primary?.label ?? null, item.kind).toBe(label);
+    expect(labels(rowButtons(row("inquiry", { phone: "555-0100" }), es).more)).toEqual(["Llamar", "Posponer", "Perdido"]);
+    expect(rowButtons(row("inquiry", { phone: "555-0100" }), esOff).primary?.label).toBe("Devolver la Llamada");
+    expect(labels(rowButtons(row("inspection_writeup", { affordances: ["dismiss", "wontHappen", "open"] }), es).more)).toEqual(["No Se Hizo", "Perdida"]);
+    expect(labels(rowButtons(row("job_to_schedule"), es).more)).toEqual(["Asignar", "Terminar", "Cancelar"]);
+    expect(rowButtons(row("invoice_draft"), es).more[0]).toMatchObject({ label: "Apartar hasta…", act: { type: "comeBack", button: "Apartar" } });
+  });
+
+  it("a pile's verb is its rows' word; Send It is told apart by the pile", () => {
+    const pile = (name: "estimates_not_sent" | "invoices_not_sent" | "leads_to_call", verb: string, kind: ActionKind) =>
+      row(kind, {
+        id: `pile:${name}`,
+        affordances: ["open"],
+        pile: { name, label: "x", count: 2, capped: false, listHref: null, listLabel: null, verb },
+        children: [row(kind), row(kind)],
+      });
+    expect(rowButtons(pile("estimates_not_sent", "Send It", "quote_draft"), es).primary?.label).toBe("Enviarlo");
+    expect(rowButtons(pile("invoices_not_sent", "Send It", "invoice_draft"), es).primary?.label).toBe("Enviarla");
+    expect(rowButtons(pile("leads_to_call", "Call Back", "inquiry"), esOff).primary?.label).toBe("Devolver la Llamada");
+    // English: the pile's own verb, as it always was.
+    expect(rowButtons(pile("invoices_not_sent", "Send It", "invoice_draft"), staff).primary?.label).toBe("Send It");
+  });
+
+  it("the confirm sheets stay English for now (their sentences embed the server's title)", () => {
+    const d = rowButtons(row("contract_unsigned", { title: "C-004" }), es).more[0];
+    expect(d.label).toBe("Firmado en Papel");
+    expect(d.act).toMatchObject({ type: "confirm", title: "Signed on Paper?", button: "Record It Signed", keep: "Keep It" });
+  });
+
+  it("Spanish asked for with no translator handed in reads English, never a raw key", () => {
+    expect(rowButtons(row("lien_deadline"), { isStaff: true, lang: "es" }).primary?.label).toBe("See Deadline");
   });
 });

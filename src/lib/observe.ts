@@ -63,16 +63,58 @@ export async function reportErrorAwaited(where: string, e: unknown, extra?: Reco
   }
 }
 
+/**
+ * A GATEWAY'S PAGE IS NOT A MESSAGE (sweep 2026-11-11). When the database's edge answers 502, the
+ * client hands back the whole HTML page as the error's `message`, and the ops sink filed it as the
+ * row's TITLE: "<html><head><title>502 Bad Gateway</title>…" read at the morning sweep. A page is
+ * cut down to what it says (its <title>, else its first heading, else its text with the tags
+ * taken out), marked as a page so nobody reads it as the database's own words. The dedup key is
+ * where::message, so every such page at one call site is now ONE row, where a page that carries a
+ * request id of its own would have made a new row each time. Anything that is not a page is
+ * returned as it came.
+ */
+export function pageToWords(s: string): string {
+  if (!/^\s*<(!doctype\s+html|html[\s>])/i.test(s)) return s;
+  const words = (m: RegExpExecArray | null) => (m?.[1] ?? "").replace(/\s+/g, " ").trim();
+  const said = words(/<title[^>]*>([^<]*)<\/title>/i.exec(s)) || words(/<h1[^>]*>([^<]*)<\/h1>/i.exec(s));
+  if (said) return `${said} (an HTML page, not an answer)`;
+  const text = pageText(s).slice(0, 160);
+  return text ? `${text} (an HTML page, not an answer)` : "An HTML page with no words, not an answer";
+}
+
+/** A page's own words: scripts and styles out whole, then every tag, then the space collapsed. */
+function pageText(s: string): string {
+  return s
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * THE PAGE'S BODY IS KEPT BESIDE THE TITLE (skeptic #64): the title says "502 Bad Gateway", and the
+ * one thing a provider's support asks for, its own request id, is in the page's body, which the
+ * title no longer carries. The body's words (300 characters at most) ride on the row's payload as
+ * `page`. They are not in the dedup key, so a page that differs only in its id is still ONE row.
+ * Null when the thrown thing's message is not a page.
+ */
+export function pageBody(e: unknown): string | null {
+  const raw =
+    e instanceof Error ? e.message : typeof e === "string" ? e : e && typeof e === "object" && typeof (e as { message?: unknown }).message === "string" ? (e as { message: string }).message : null;
+  if (!raw || pageToWords(raw) === raw) return null;
+  return pageText(raw).slice(0, 300) || null;
+}
+
 /** The message of ANYTHING thrown. postgrest-js hands back errors as PLAIN OBJECTS (PostgrestError
  *  is only thrown under throwOnError), so `String(e)` logged every Supabase failure as
  *  "[object Object]" — and, because the dedup key is where::message, every distinct DB error at
  *  one call site collapsed into ONE row. Now: message · details · hint · code, else JSON. */
 export function errorMessage(e: unknown): string {
-  if (e instanceof Error) return e.message;
+  if (e instanceof Error) return pageToWords(e.message);
   if (e && typeof e === "object") {
     const o = e as Record<string, unknown>;
     const parts = [o.message, o.details, o.hint, o.code].filter((x): x is string => typeof x === "string" && x.length > 0);
-    if (parts.length) return parts.join(" · ");
+    if (parts.length) return parts.map(pageToWords).join(" · ");
     try {
       return JSON.stringify(e).slice(0, 500);
     } catch {
@@ -124,6 +166,7 @@ export async function recordAppError(
   try {
     console.error(`[${where}]`, errorMessage(e), extra ?? "");
     const message = errorMessage(e).slice(0, 500);
+    const page = pageBody(e);
     const key = dedupKey(`${where}::${message}`);
     const sb = createServiceClient();
     const { data, error } = await sb.rpc("record_app_error", {
@@ -131,7 +174,7 @@ export async function recordAppError(
       p_title: message || where,
       p_where: where,
       p_level: level,
-      p_payload: { where, message, extra: extra ?? null } as Record<string, unknown>,
+      p_payload: { where, message, extra: extra ?? null, ...(page ? { page } : {}) } as Record<string, unknown>,
       p_org: orgOf(extra),
     });
     if (error) {

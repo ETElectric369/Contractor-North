@@ -350,7 +350,10 @@ describe("My Day's cards (structural: the page is a server component over the da
   });
 
   it("the decision inbox is called Needs You (Nort's words and the morning push say it too, same release)", () => {
-    expect(pageCode).toContain('<h2 className="text-sm font-semibold text-slate-900">{t("md_needsYou")}</h2>');
+    // The title is the page's words, drawn by the board as its <h2> (cn-v1161).
+    expect(pageCode).toContain('title={t("md_needsYou")}');
+    const list = codeOf(readFileSync(join(process.cwd(), "src/components/action-items/action-list.tsx"), "utf8"));
+    expect(list).toContain('<h2 className="text-sm font-semibold text-slate-900">{title}</h2>');
     expect(dict("en").md_needsYou).toBe("Needs You");
     expect(pageCode).not.toMatch(/Needs action/i);
     // ONE call for both lists (the shell's badge shares its fan-out).
@@ -364,9 +367,13 @@ describe("My Day's cards (structural: the page is a server component over the da
     );
     expect(pageCode).toContain("<WaitingFold items={needsYou.waiting} />");
     for (const gone of ["slice(0, 5)", "actions=all", "Show All", "visibleActions", "showAllActions"]) expect(pageCode, gone).not.toContain(gone);
-    // The card is drawn when either list has something; its pill is the open count, and none at zero.
+    // The card is drawn when either list has something. Its amber pill is gone (cn-v1161): the board's
+    // header says the counts with its marks, and amber means SOON and nothing else.
     expect(pageCode).toContain("{(needsYou.now.length > 0 || needsYou.waiting.length > 0) && (");
-    expect(pageCode).toMatch(/\{needsYou\.now\.length > 0 && \(\s*<span className="rounded-full bg-amber-100[^"]*">\{needsYou\.now\.length\}<\/span>/);
+    const card = pageCode.slice(pageCode.indexOf('data-tour="needs-you"'), pageCode.indexOf("<WaitingFold items={needsYou.waiting} />"));
+    expect(card).toContain("<ActionList");
+    expect(card).not.toContain("bg-amber-100");
+    expect(card).not.toContain('className="p-3"');
     // The Send sheet's Text It hears the company's texting, read once on the page.
     expect(pageCode).toContain("const textReady = smsReadiness(");
   });

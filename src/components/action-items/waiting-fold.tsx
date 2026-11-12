@@ -3,8 +3,14 @@
 import { useState } from "react";
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
+import { useLang } from "@/components/lang-provider";
 import { shortDay } from "@/lib/come-back-days";
+import { translator } from "@/lib/i18n";
+import { fillSlots, type Words } from "@/lib/lang-words";
+import type { Lang } from "@/lib/locale";
 import type { WaitingItem } from "@/lib/action-items/types";
+
+const EN = translator("en");
 
 /**
  * WAITING (N) — Erik: Needs You shows only what he can act on NOW, and everything waiting sits in one
@@ -18,6 +24,8 @@ import type { WaitingItem } from "@/lib/action-items/types";
  * day, so no clock here decides it) and opens its thing. Every row, and the toggle, is 44px.
  */
 export function WaitingFold({ items }: { items: WaitingItem[] }) {
+  const lang = useLang();
+  const t = translator(lang);
   const [open, setOpen] = useState(false);
   if (!items.length) return null;
   return (
@@ -29,16 +37,16 @@ export function WaitingFold({ items }: { items: WaitingItem[] }) {
         className="flex min-h-11 w-full items-center justify-between px-5 text-left text-sm font-medium text-slate-500 hover:bg-slate-50"
       >
         <span>
-          Waiting <span className="text-slate-400">({items.length})</span>
+          {t("ny_waiting")} <span className="text-slate-500">({items.length})</span>
         </span>
-        <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+        <ChevronDown className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
         <ul className="divide-y divide-slate-50 pb-1">
           {items.map((w) => (
             <li key={`${w.kind}:${w.id}`}>
               <Link href={w.href} className="flex min-h-11 items-center px-5 py-1.5 text-sm text-slate-600 hover:bg-slate-50">
-                <span className="min-w-0">{waitingLine(w)}</span>
+                <span className="min-w-0">{waitingLine(w, lang, t)}</span>
               </Link>
             </li>
           ))}
@@ -48,7 +56,7 @@ export function WaitingFold({ items }: { items: WaitingItem[] }) {
   );
 }
 
-/** "Tupelo Panel · J-034 · Waiting on the permit · Back Oct 3". */
-export function waitingLine(w: Pick<WaitingItem, "title" | "why" | "backOn">): string {
-  return [w.title, w.why, `Back ${shortDay(w.backOn)}`].filter(Boolean).join(" · ");
+/** "Tupelo Panel · J-034 · Waiting on the permit · Back Oct 3": the day said in the reader's language. */
+export function waitingLine(w: Pick<WaitingItem, "title" | "why" | "backOn">, lang: Lang = "en", words: Words = EN): string {
+  return [w.title, w.why, fillSlots(words("ag_btn_backOn"), { day: shortDay(w.backOn, lang) })].filter(Boolean).join(" · ");
 }

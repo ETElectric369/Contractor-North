@@ -19,12 +19,21 @@ vi.mock("@/components/send-sheet", () => ({ SendSheet: () => null }));
 import { ActionList, ROW_BUTTON, keepInFlight, prettyWhen, verbLanding } from "./action-list";
 import { WaitingFold, waitingLine } from "./waiting-fold";
 import { inquiryActionItem } from "@/lib/action-items/switches";
-import { AFFORDANCES, KIND_STREAM, WHEN_IS_A_DEADLINE, sortActionItems, waitingForViewer, waitingRow, type ActionItem, type WaitingItem } from "@/lib/action-items/types";
+import { AFFORDANCES, KIND_GROUP, WHEN_IS_A_DEADLINE, waitingForViewer, waitingRow, type ActionItem, type WaitingItem } from "@/lib/action-items/types";
 import { rollUpPiles } from "@/lib/action-items/piles";
+import { GROUP_ORDER } from "@/lib/action-items/needs-you-rule";
+import { translator } from "@/lib/i18n";
+import { fillSlots } from "@/lib/lang-words";
+
+/** The catalog's English, so a pin reads the words the box reads (lib/words/needs-you). */
+const t = translator("en");
+const say = (key: string, vars: Record<string, string | number>) => fillSlots(t(key), vars);
+/** No chip is drawn any more: the Badge's own markup. */
+const BADGE = "inline-flex items-center rounded-full px-2.5 py-0.5";
 
 const row = { id: "i1", name: "Dana Reyes", status: "new", next_follow_up_at: null, phone: "(530) 555-0142" };
 const render = (leadsOn: boolean) => {
-  const item = { ...inquiryActionItem(row, "2026-09-26", leadsOn), stream: KIND_STREAM.inquiry };
+  const item = { ...inquiryActionItem(row, "2026-09-26", leadsOn), group: KIND_GROUP.inquiry };
   return renderToStaticMarkup(createElement(ActionList, { items: [item], todayStr: "2026-09-26", leadsOn, isStaff: true }));
 };
 
@@ -38,43 +47,38 @@ describe("ActionList — a request with Leads off", () => {
     expect(html).toContain('aria-label="More for Dana Reyes"');
   });
 
-  it("Leads off: 'New Request from Dana Reyes' with a 44px Call Back that dials her", () => {
+  it("Leads off: her row with a 44px Call Back that dials her", () => {
     const html = render(false);
-    expect(html).toContain("New Request from Dana Reyes");
+    expect(html).toContain("Dana Reyes");
     const a = html.match(/<a [^>]*href="tel:[^"]*"[^>]*>.*?<\/a>/)![0];
     expect(a).toContain('href="tel:(530) 555-0142"');
     expect(a).toContain("Call Back");
     expect(a).toMatch(/\bh-11\b/);
   });
 
-  it("Leads off: its chip reads Request; Leads on: Lead, as always; and no section header either way", () => {
-    const off = render(false).replace(/<[^>]+>/g, "\n");
-    expect(off).toMatch(/\nRequest\n/);
-    expect(off).not.toMatch(/\nLeads?\n/);
-    expect(off).not.toMatch(/\nRequests\n/);
-    const on = render(true).replace(/<[^>]+>/g, "\n");
-    expect(on).toMatch(/\nLead\n/);
-    expect(on).not.toMatch(/\nLeads\n/);
-    expect(on).not.toMatch(/\nRequests?\n/);
+  it("no chip is drawn (cn-v1161): neither Request nor Lead stands as a word of its own, and no section header either way", () => {
+    for (const leadsOn of [false, true]) {
+      const html = render(leadsOn);
+      expect(html).not.toContain(BADGE);
+      const lines = html.replace(/<[^>]+>/g, "\n");
+      expect(lines).not.toMatch(/\nRequests?\n/);
+      expect(lines).not.toMatch(/\nLeads?\n/);
+    }
   });
 
-  it("the Request chip rides on the row itself (inquiryActionItem), so any list says it", () => {
+  it("the Request chip still rides on the row itself (inquiryActionItem): a state key the buttons read, never drawn", () => {
     expect(inquiryActionItem(row, "2026-09-26", false).chip).toBe("Request");
     expect(inquiryActionItem(row, "2026-09-26", true).chip).toBeUndefined();
-    // A row built without its chip still reads Request with Leads off (the list's fallback).
-    const bare = { ...inquiryActionItem(row, "2026-09-26", true), stream: KIND_STREAM.inquiry };
-    const html = renderToStaticMarkup(createElement(ActionList, { items: [bare], todayStr: "2026-09-26", leadsOn: false })).replace(/<[^>]+>/g, "\n");
-    expect(html).toMatch(/\nRequest\n/);
   });
 });
 
 /**
  * ONE FLAT LIST OF PLAIN CHIPS (Wave 1, W1-15, NY-list). No Money / Leads / Today / Waiting headers;
  * each row's chip says the state it is in. The list draws rows in the SERVER's order (the build sorts
- * once: money, leads, today, other) and only sinks a row ticked done.
+ * once: NOW, then the tiles in order) and only sinks a row ticked done.
  */
 const item = (o: Partial<ActionItem> & Pick<ActionItem, "id" | "kind">): ActionItem => ({
-  stream: KIND_STREAM[o.kind],
+  group: KIND_GROUP[o.kind],
   title: o.id,
   subtitle: null,
   who: null,
@@ -91,70 +95,157 @@ const words = (items: ActionItem[], extra: Record<string, unknown> = {}) =>
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean);
+/** One render per tile, each with that tile open: every row the board can show, once. */
+const everyTile = (items: ActionItem[], extra: Record<string, unknown> = {}) =>
+  GROUP_ORDER.map((g) => renderToStaticMarkup(createElement(ActionList, { items, todayStr: "2026-09-26", isStaff: true, defaultOpen: g, ...extra }))).join("\n");
 
-describe("ActionList — one flat list, the server's order, plain chips", () => {
-  const built = sortActionItems(
-    [
-      item({ id: "row-other", kind: "contract_unsigned" }),
-      item({ id: "row-today", kind: "job_to_schedule", urgency: 2 }),
-      item({ id: "row-lead", kind: "inquiry" }),
-      item({ id: "row-money", kind: "invoice_draft", urgency: 0 }),
-    ],
-    "2026-09-26",
-  );
+describe("ActionList — the board: Act Today, four tiles, the open tile's rows, in the server's order", () => {
+  // As the build stamps them (query.ts): a NOW row, three Win Work rows, one Run the Jobs row.
+  const given = [
+    item({ id: "row-now", kind: "quote_accepted", level: "now" }),
+    item({ id: "row-other", kind: "contract_unsigned" }),
+    item({ id: "row-lead", kind: "inquiry", level: "soon" }),
+    item({ id: "row-draft", kind: "quote_draft" }),
+    item({ id: "row-today", kind: "job_to_schedule" }),
+  ];
 
-  it("draws no section headers", () => {
-    const w = words(built);
+  it("draws the four tile names in order and no section headers (no Money, Leads, Today)", () => {
+    const w = words(given);
+    const names = ["ny_btn_tileGetPaid", "ny_btn_tileWinWork", "ny_btn_tileRunJobs", "ny_btn_tileKeepBooks"].map(t);
+    for (const n of names) expect(w, n).toContain(n);
+    for (let i = 1; i < names.length; i++) expect(w.indexOf(names[i - 1])).toBeLessThan(w.indexOf(names[i]));
     for (const header of ["Money", "Leads", "Today", "Waiting", "Requests"]) expect(w, header).not.toContain(header);
   });
 
-  it("the rows run money, leads, today, other, in the order the server sent them", () => {
-    const w = words(built);
+  it("the strip comes first, then the tiles, then the open tile's rows in the order the server sent them; a reversed list stays reversed", () => {
+    const w = words(given, { defaultOpen: "win_work" });
     const at = (id: string) => w.indexOf(id);
-    expect(at("row-money")).toBeGreaterThanOrEqual(0);
-    expect(at("row-money")).toBeLessThan(at("row-lead"));
-    expect(at("row-lead")).toBeLessThan(at("row-today"));
-    expect(at("row-today")).toBeLessThan(at("row-other"));
-    // Given another order, it keeps it: the list never re-sorts what the server sorted.
-    const flipped = words([...built].reverse());
-    expect(flipped.indexOf("row-other")).toBeLessThan(flipped.indexOf("row-money"));
+    expect(at(t("ny_stripTitle"))).toBeLessThan(at("row-now"));
+    expect(at("row-now")).toBeLessThan(at(t("ny_btn_tileGetPaid")));
+    expect(at(t("ny_btn_tileKeepBooks"))).toBeLessThan(at("row-other"));
+    expect(at("row-other")).toBeLessThan(at("row-lead"));
+    expect(at("row-lead")).toBeLessThan(at("row-draft"));
+    // Another tile's rows wait behind their tile.
+    expect(w).not.toContain("row-today");
+    // Given another order, it keeps it: the board never re-sorts what the server sorted.
+    const flipped = words([...given].reverse(), { defaultOpen: "win_work" });
+    expect(flipped.indexOf("row-draft")).toBeLessThan(flipped.indexOf("row-lead"));
+    expect(flipped.indexOf("row-lead")).toBeLessThan(flipped.indexOf("row-other"));
   });
 
-  it("each row's chip is the state it is in: the kind's words, or the row's own", () => {
-    const w = words([
-      item({ id: "a", kind: "invoice_overdue" }),
-      item({ id: "b", kind: "quote_accepted" }),
-      item({ id: "c", kind: "time_stray", chip: "Clock Left Running" }),
-      item({ id: "d", kind: "time_stray", chip: "On No Job" }),
+  it("a NOW row is drawn in the strip and nowhere else, whichever tile is open; no NOW, no strip", () => {
+    for (const g of GROUP_ORDER) {
+      const html = renderToStaticMarkup(createElement(ActionList, { items: given, todayStr: "2026-09-26", isStaff: true, defaultOpen: g }));
+      expect(html.match(/data-row="row-now"/g), g).toHaveLength(1);
+      const strip = html.slice(html.indexOf("data-strip"), html.indexOf("data-tile="));
+      expect(strip).toContain('data-row="row-now"');
+    }
+    const calm = renderToStaticMarkup(createElement(ActionList, { items: given.slice(1), todayStr: "2026-09-26", isStaff: true }));
+    expect(calm).not.toContain("data-strip");
+    expect(calm).not.toContain(t("ny_stripTitle"));
+  });
+
+  it("the tile that opens first is the first with a SOON row (Win Work here); one tile is pressed; a closed board draws no rows under the tiles", () => {
+    const html = renderToStaticMarkup(createElement(ActionList, { items: given, todayStr: "2026-09-26", isStaff: true }));
+    expect(html.match(/aria-pressed="true"/g)).toHaveLength(1);
+    expect(html).toMatch(/data-tile="win_work"[^>]*aria-pressed="true"/);
+    const closed = renderToStaticMarkup(createElement(ActionList, { items: given, todayStr: "2026-09-26", isStaff: true, defaultOpen: null }));
+    expect(closed).not.toContain("aria-pressed=\"true\"");
+    for (const id of ["row-other", "row-lead", "row-draft", "row-today"]) expect(closed).not.toContain(`data-row="${id}"`);
+  });
+
+  it("the header counts what is open (an octagon and 1, a triangle and 1, then the rest); an empty tile is drawn dimmed and disabled", () => {
+    const html = renderToStaticMarkup(createElement(ActionList, { items: given, todayStr: "2026-09-26", isStaff: true }));
+    const counts = html.slice(html.indexOf("data-counts"), html.indexOf("data-tile="));
+    expect(counts).toContain('data-shape="octagon"');
+    expect(counts).toContain('data-shape="triangle"');
+    expect(counts).toContain(say("ny_countMore", { n: 3 }));
+    // Get Paid and Keep the Books hold nothing: drawn, disabled, no number.
+    expect(html).toMatch(/<button[^>]*data-tile="get_paid"[^>]*disabled=""/);
+    expect(html).toMatch(/<button[^>]*data-tile="keep_books"[^>]*disabled=""/);
+    // An open tile left with nothing says so.
+    const empty = renderToStaticMarkup(createElement(ActionList, { items: given, todayStr: "2026-09-26", isStaff: true, defaultOpen: "keep_books" }));
+    expect(empty).toContain(t("ny_groupEmpty"));
+  });
+
+  it("no chip is drawn: no Badge, no kind word, no red '!', no pip", () => {
+    const html = everyTile([
+      item({ id: "a", kind: "invoice_overdue", urgency: 2 }),
+      item({ id: "b", kind: "quote_accepted", level: "now" }),
+      item({ id: "c", kind: "time_stray", chip: "Clock Left Running", subtitle: "Clock left running since Tuesday" }),
       item({ id: "e", kind: "visit_unbilled", chip: "Billed, Not Paid" }),
       item({ id: "f", kind: "stock_short" }),
       item({ id: "g", kind: "job_on_hold" }),
     ]);
-    for (const chip of ["Past Due", "Won", "Clock Left Running", "On No Job", "Billed, Not Paid", "To Settle", "Reminder"]) expect(w, chip).toContain(chip);
+    expect(html).not.toContain(BADGE);
+    expect(html).not.toContain("data-pip");
+    const w = html.replace(/<[^>]+>/g, "\n").split("\n").map((x) => x.trim());
+    for (const chip of ["Past Due", "Won", "Clock Left Running", "Billed, Not Paid", "To Settle", "Reminder", "!"]) expect(w, chip).not.toContain(chip);
+    // The row's own words are drawn (its WHAT; until a feeder says one, its subtitle).
+    expect(w).toContain("Clock left running since Tuesday");
   });
 
-  it("a row already done sinks below the rest, keeping their order", () => {
-    const w = words([item({ id: "first", kind: "invoice_draft", done: true }), item({ id: "second", kind: "inquiry" }), item({ id: "third", kind: "job_to_schedule" })]);
+  it("a row already done sinks below the rest of its tile, keeping their order", () => {
+    const w = words([item({ id: "first", kind: "quote_draft", done: true }), item({ id: "second", kind: "inquiry" }), item({ id: "third", kind: "contract_unsigned" })], { defaultOpen: "win_work" });
     expect(w.indexOf("second")).toBeLessThan(w.indexOf("third"));
     expect(w.indexOf("third")).toBeLessThan(w.indexOf("first"));
   });
-});
 
-describe("ActionList — one named button per row, and ⋯ (W1-13)", () => {
-  it("each row says its verb; the icon strip, the 20px box and the chevron are gone", () => {
+  it("a tech sees no tiles and no strip: the title, the counts and his rows flat, with no button, no ⋯ and no money", () => {
     const html = renderToStaticMarkup(
       createElement(ActionList, {
-        items: [
-          item({ id: "inv", kind: "invoice_overdue" }),
-          item({ id: "stock", kind: "stock_short" }),
-          item({ id: "rec", kind: "receipt_unbilled" }),
-          item({ id: "job", kind: "job_to_schedule", affordances: AFFORDANCES.job_to_schedule }),
-          item({ id: "hold", kind: "job_on_hold", affordances: AFFORDANCES.job_on_hold, holdReason: "Waiting on the permit" }),
-        ],
+        items: [item({ id: "visit", kind: "appointment", level: "soon", amount: 120, affordances: ["open"] }), item({ id: "visit2", kind: "appointment" })],
+        todayStr: "2026-09-26",
+        isStaff: false,
+        title: "My Board",
+      }),
+    );
+    expect(html).toContain("My Board");
+    expect(html).not.toContain("data-tile=");
+    expect(html).not.toContain("data-strip");
+    expect(html).toContain('data-row="visit"');
+    expect(html).toContain('data-row="visit2"');
+    expect(html).not.toContain("$");
+    expect(html).not.toContain("More for");
+    expect(html).not.toMatch(/-my-3 inline-flex h-11/);
+  });
+
+  it("a failed read is a row with no mark and no button, its sentence never cut", () => {
+    const html = renderToStaticMarkup(
+      createElement(ActionList, {
+        items: [item({ id: "receipts-unread", kind: "receipt_unbilled", title: "Receipts", subtitle: "The receipts could not be read. Open Bills to see them." })],
         todayStr: "2026-09-26",
         isStaff: true,
       }),
     );
+    const r = html.slice(html.indexOf('data-row="receipts-unread"'));
+    expect(r).not.toContain("data-mark=");
+    expect(r).not.toMatch(/-my-3 inline-flex h-11/);
+    expect(r).toContain("whitespace-normal");
+    expect(html.replace(/&#x27;/g, "'")).toContain(say("ny_tileUnread", { n: 1 }));
+  });
+
+  it("every tile is a 72px button with aria-pressed and aria-controls naming the rows' region, which follows the tiles", () => {
+    const html = renderToStaticMarkup(createElement(ActionList, { items: given, todayStr: "2026-09-26", isStaff: true }));
+    const tiles = Array.from(html.matchAll(/<button[^>]*data-tile="[^"]*"[^>]*>/g)).map((m) => m[0]);
+    expect(tiles).toHaveLength(4);
+    const controls = new Set(tiles.map((b) => b.match(/aria-controls="([^"]*)"/)![1]));
+    expect(controls.size).toBe(1);
+    const id = [...controls][0];
+    for (const b of tiles) expect(b).toContain("min-h-[72px]");
+    expect(html.indexOf(`id="${id}"`)).toBeGreaterThan(html.lastIndexOf("data-tile="));
+  });
+});
+
+describe("ActionList — one named button per row, and ⋯ (W1-13)", () => {
+  it("each row says its verb; the icon strip, the 20px box and the chevron are gone (five kinds in three tiles, each tile open once)", () => {
+    const html = everyTile([
+      item({ id: "inv", kind: "invoice_overdue" }),
+      item({ id: "stock", kind: "stock_short" }),
+      item({ id: "rec", kind: "receipt_unbilled" }),
+      item({ id: "job", kind: "job_to_schedule", affordances: AFFORDANCES.job_to_schedule }),
+      item({ id: "hold", kind: "job_on_hold", affordances: AFFORDANCES.job_on_hold, holdReason: "Waiting on the permit" }),
+    ]);
     for (const label of ["Get Paid", "Settle It", "Record It", "Pick a Day", "Snooze", "Take Off Hold"]) expect(html, label).toContain(`>${label}<`);
     for (const gone of ['title="Dismiss"', 'aria-label="Mark done"', 'title="Open"', 'title="Assign to someone"', 'title="Schedule / set a date"']) expect(html, gone).not.toContain(gone);
     expect(html).not.toMatch(/Dismiss|Delete/);
@@ -170,9 +261,10 @@ describe("ActionList — one named button per row, and ⋯ (W1-13)", () => {
     const link = html.match(/<a [^>]*>Get Paid<\/a>/)![0];
     expect(link).toMatch(/\bh-11\b/);
     // The open target covers the whole row (never two 20px lines), under the words.
-    expect(html).toMatch(/<button type="button" aria-label="Open inv" class="absolute inset-0 rounded-xl"><\/button>/);
+    expect(html).toContain(`<button type="button" aria-label="${say("ny_openRow", { title: "inv" })}" class="absolute inset-0 rounded-xl"></button>`);
     expect(html).toContain('class="pointer-events-none relative min-w-0 flex-1"');
-    expect(html).toMatch(/class="pointer-events-auto ml-auto flex shrink-0 items-center gap-1"><a [^>]*>Get Paid<\/a>/);
+    // The group may wrap inside the row on a narrow phone (no shrink-0): its buttons never run off the card.
+    expect(html).toMatch(/class="pointer-events-auto ml-auto flex max-w-full flex-wrap items-center justify-end gap-x-1 gap-y-6"><a [^>]*>Get Paid<\/a>/);
   });
 
   it("a tech's visit has no button and no ⋯: it only opens", () => {
@@ -185,14 +277,19 @@ describe("ActionList — one named button per row, and ⋯ (W1-13)", () => {
 
   it("the list never sorts, and the row table is the only place a row's doors come from", () => {
     const list = readFileSync(join(process.cwd(), "src/components/action-items/action-list.tsx"), "utf8");
-    expect(list).toContain("const doors = rowButtons(item, { leadsOn, isStaff: p.isStaff });");
+    expect(list).toContain("rowButtons(item, { leadsOn, isStaff: p.isStaff, lang: p.lang, words: p.t })");
+    // The client never sorts: everything it shows is a filter of the server's order.
+    for (const f of ["action-list.tsx", "needs-you-tiles.tsx", "level-mark.tsx", "waiting-fold.tsx"]) {
+      const src = readFileSync(join(process.cwd(), "src/components/action-items", f), "utf8");
+      expect(src, f).not.toMatch(/\.sort\(|toSorted|localeCompare/);
+    }
     expect(list).not.toMatch(/CalendarPlus|Clock3|UserPlus|ChevronRight|Check\b/);
   });
 });
 
 describe("ActionList — piles (W1-14)", () => {
   const drafts = [1, 2, 3].map((i) =>
-    item({ id: `qdraft-q${i}`, kind: "quote_draft", title: `Estimate E-0${i} started, never sent`, when: `2026-09-0${i}`, affordances: AFFORDANCES.quote_draft }),
+    item({ id: `qdraft-q${i}`, kind: "quote_draft", level: "soon", title: `Estimate E-0${i} started, never sent`, when: `2026-09-0${i}`, affordances: AFFORDANCES.quote_draft }),
   );
   const pile = (o: Parameters<typeof rollUpPiles>[1]["counts"] = {}) => rollUpPiles(drafts, { todayStr: "2026-09-26", isStaff: true, counts: o });
 
@@ -202,10 +299,13 @@ describe("ActionList — piles (W1-14)", () => {
     expect(html).toContain("Estimate E-01 started, never sent");
     // Folded: the other two wait behind See All.
     expect(html).not.toContain("Estimate E-02 started, never sent");
-    const seeAll = html.match(/<button[^>]*aria-expanded="false"[^>]*>See All 3<\/button>/)![0];
+    const seeAll = Array.from(html.matchAll(/<button[^>]*aria-expanded="false"[^>]*>([^<]*)<\/button>/g)).find((m) => m[1] === say("ny_btn_seeAll", { n: 3 }))![0];
     expect(seeAll).toMatch(/\bmin-h-11\b/);
-    // Text to visual: one pip per estimate, amber past a week.
-    expect(html.match(/data-pip="old"/g)).toHaveLength(3);
+    // The pile wears its children's mark (a triangle: they sat a week) and says how many are soon; no pips.
+    const pileHead = html.slice(html.indexOf('data-pile="estimates_not_sent"'));
+    expect(pileHead).toMatch(/data-mark="soon"[^>]*data-shape="triangle"/);
+    expect(pileHead).toContain('data-soon-count="3"');
+    expect(html).not.toContain("data-pip");
     // Its verb is its pile's.
     expect(html).toMatch(/<button[^>]*>Send It<\/button>/);
   });
@@ -213,7 +313,8 @@ describe("ActionList — piles (W1-14)", () => {
   it("when not every one is here, See All opens the list page instead", () => {
     const html = renderToStaticMarkup(createElement(ActionList, { items: pile({ estimates_not_sent: { capped: true } }), todayStr: "2026-09-26", isStaff: true }));
     expect(html).toContain("Estimates Not Sent · 3+");
-    expect(html).toMatch(/<a[^>]*href="\/quotes\?status=draft"[^>]*>See All on Estimates<\/a>/);
+    expect(html).toContain(`>${t("ny_btn_seeAllOnEstimates")}</a>`);
+    expect(html).toMatch(/<a[^>]*href="\/quotes\?status=draft"/);
   });
 
   it("a capped Done, Not Billed pile has no page that lists its rows: See All unfolds every row read here, never a link to /billing", () => {
@@ -221,15 +322,21 @@ describe("ActionList — piles (W1-14)", () => {
     const items = rollUpPiles(done, { todayStr: "2026-09-26", isStaff: true, counts: { done_not_billed: { capped: true } } });
     const html = renderToStaticMarkup(createElement(ActionList, { items, todayStr: "2026-09-26", isStaff: true }));
     expect(html).toContain("Done, Not Billed · 3+");
-    expect(html).toMatch(/<button[^>]*aria-expanded="false"[^>]*>See All 3 Here<\/button>/);
+    expect(html).toMatch(new RegExp(`<button[^>]*aria-expanded="false"[^>]*>${say("ny_btn_seeAllHere", { n: 3 })}</button>`));
     expect(html).not.toContain('href="/billing"');
     expect(html).not.toMatch(/See All On (Billing|Invoices)/);
   });
 
   it("the unfold and the fold are one client toggle (a second tap folds them)", () => {
     const list = readFileSync(join(process.cwd(), "src/components/action-items/action-list.tsx"), "utf8");
-    expect(list).toContain('{open ? "See Less" : `See All ${count}`}');
-    expect(list).toContain("{open && rest.map((c) => <Row key={c.id} {...p} item={c} nested />)}");
+    expect(list).toContain('{open ? t("ny_btn_seeLess") : fillSlots(t("ny_btn_seeAll"), { n: count })}');
+    // ONE keyed list: the first child is keyed like the rest, so an open sheet leaves with its own row.
+    expect(list).toContain("{[first, ...(open ? rest : [])].map((c) => (");
+    expect(list).toContain("<Row key={c.id} {...p} item={c} nested />");
+    const pile = list.slice(list.indexOf("function PileRow"), list.indexOf("function", list.indexOf("function PileRow") + 10));
+    const rowsInPile = pile.match(/<Row\b[^>]*>/g) ?? [];
+    expect(rowsInPile.length).toBeGreaterThan(0);
+    for (const r of rowsInPile) expect(r, "no <Row in the pile is unkeyed").toMatch(/\bkey=\{/);
     // Acting on a child drops it and counts down in place; a lone one left is a plain row.
     expect(list).toContain("const count = Math.max(0, item.pile.count - gone);");
     expect(list).toContain("if (kids.length === 1 && !item.pile.capped && count <= 1) return <Row key={kids[0].id} item={kids[0]} {...rowProps} />;");
@@ -249,8 +356,21 @@ describe("ActionList — a verb's refusal is always said, and the server's list 
     expect(src).toContain("const r = await p.run(p.item, a.verb, undefined, { child: p.nested, sheet: true });");
     expect(src).toContain("p.run(item, a.verb, { date: d }, { child: p.nested, sheet: true })");
     // The ⋯ run rows say a refusal in the sheet instead of closing on nothing.
-    expect(src).toContain('else setErr(r.error ?? "Couldn\'t do that.");');
+    expect(src).toContain('else setErr(r.error ?? p.t("ny_couldntDoThat"));');
     expect(src).not.toContain("else setAsking(null);");
+  });
+
+  it("the list's own banner is neutral (BANNER); the three inside sheets wear the app's refusal look (ui/refusal)", () => {
+    const src = list();
+    const banners = src.match(/<div role="alert" className=\{.*?\}>/g) ?? [];
+    expect(banners.filter((b) => b.includes("BANNER"))).toEqual(['<div role="alert" className={BANNER}>']);
+    expect(banners.filter((b) => b.includes("SHEET_REFUSAL"))).toHaveLength(3);
+    expect(banners).toHaveLength(4);
+    expect(src).toContain('import { SHEET_REFUSAL } from "@/components/ui/refusal";');
+    // The list's banner is the one drawn on the list (outside every sheet): MoreSheetBody and DoorForm hold the other three.
+    const sheets = src.slice(src.indexOf("function MoreSheetBody"));
+    expect(sheets).not.toContain("className={BANNER}");
+    expect((sheets.match(/SHEET_REFUSAL/g) ?? []).length).toBe(3);
   });
 
   it("a bare button's verb is optimistic, and its refusal is said on the list by run() itself", () => {
@@ -279,7 +399,10 @@ describe("the Waiting fold", () => {
   it("drawn only when something waits; a grey count, never a badge; collapsed", () => {
     expect(renderToStaticMarkup(createElement(WaitingFold, { items: [] }))).toBe("");
     const html = renderToStaticMarkup(createElement(WaitingFold, { items: [w({}), w({ id: "w2" })] }));
-    expect(html).toContain("Waiting");
+    expect(html).toContain(t("ny_waiting"));
+    // Its count is grey, but slate-500: slate-400 text is too faint to read (2.6:1).
+    expect(html).toContain('<span class="text-slate-500">(2)</span>');
+    expect(html).not.toContain("text-slate-400");
     expect(html).toContain("(2)");
     expect(html).not.toContain("rounded-full");
     expect(html).toContain('aria-expanded="false"');
@@ -325,7 +448,7 @@ describe("the Waiting fold", () => {
     const tech = waitingForViewer(rows, false);
     expect(tech.map((r) => r.id)).toEqual(["c"]);
     for (const r of tech) {
-      expect(KIND_STREAM[r.kind]).not.toBe("money");
+      expect(KIND_GROUP[r.kind]).toBe("run_jobs");
       expect(r.title).not.toContain("$");
     }
     expect(waitingForViewer(rows, true)).toHaveLength(4);
@@ -342,7 +465,7 @@ describe("ActionList — a shift on no job", () => {
   const stray = (o: Partial<ActionItem> = {}): ActionItem => ({
     id: "stray-t6",
     kind: "time_stray",
-    stream: KIND_STREAM.time_stray,
+    group: KIND_GROUP.time_stray,
     title: "JP's Aug 6 entry has no job",
     subtitle: "Closed hours nobody can bill",
     who: "JP",
@@ -375,23 +498,28 @@ describe("ActionList — a shift on no job", () => {
 describe("the when line: overdue for a deadline, ago for a day that happened", () => {
   const TZ = "America/Los_Angeles";
   it("a deadline past is overdue; a happened day past is yesterday or N days ago; today and the future read the same either way", () => {
-    expect(prettyWhen("2026-10-07", "2026-10-08", TZ, true)).toBe("1d overdue");
-    expect(prettyWhen("2026-10-07", "2026-10-08", TZ, false)).toBe("Yesterday");
-    expect(prettyWhen("2026-06-15", "2026-10-08", TZ, false)).toBe("115d ago");
-    expect(prettyWhen("2026-10-08", "2026-10-08", TZ, false)).toBe("Today");
-    expect(prettyWhen("2026-10-09", "2026-10-08", TZ, false)).toBe("Tomorrow");
+    // Its words are the catalog's (ny_age*); English when no language is handed in.
+    expect(prettyWhen("2026-10-07", "2026-10-08", TZ, true)).toBe(say("ny_ageOverdue", { n: 1 }));
+    expect(prettyWhen("2026-10-07", "2026-10-08", TZ, false)).toBe(t("ny_ageYesterday"));
+    expect(prettyWhen("2026-06-15", "2026-10-08", TZ, false)).toBe(say("ny_ageAgo", { n: 115 }));
+    expect(prettyWhen("2026-10-08", "2026-10-08", TZ, false)).toBe(t("ny_ageToday"));
+    expect(prettyWhen("2026-10-09", "2026-10-08", TZ, false)).toBe(t("ny_ageTomorrow"));
     // A timed value keeps its time: the inspection at 10 AM yesterday.
-    expect(prettyWhen("2026-10-07T17:00:00.000Z", "2026-10-08", TZ, false)).toBe("Yesterday · 10:00 AM");
-    expect(prettyWhen("2026-10-07T17:00:00.000Z", "2026-10-08", TZ, true)).toBe("1d overdue · 10:00 AM");
+    expect(prettyWhen("2026-10-07T17:00:00.000Z", "2026-10-08", TZ, false)).toBe(`${t("ny_ageYesterday")} · 10:00 AM`);
+    expect(prettyWhen("2026-10-07T17:00:00.000Z", "2026-10-08", TZ, true)).toBe(`${say("ny_ageOverdue", { n: 1 })} · 10:00 AM`);
+    // Spanish reads the Spanish catalog and a Spanish clock.
+    const es = translator("es");
+    expect(prettyWhen("2026-10-07T17:00:00.000Z", "2026-10-08", TZ, false, "es", es)).toBe(`${es("ny_ageYesterday")} · 10:00 a. m.`);
   });
   it("every kind says which its day is, and the happened-day kinds are the ones whose day is the deed", () => {
-    expect(Object.keys(WHEN_IS_A_DEADLINE).sort()).toEqual(Object.keys(KIND_STREAM).sort());
+    expect(Object.keys(WHEN_IS_A_DEADLINE).sort()).toEqual(Object.keys(KIND_GROUP).sort());
     for (const k of ["inspection_writeup", "visit_unbilled", "time_stray", "job_unbilled_work", "appointment", "receipt_unbilled"]) expect(WHEN_IS_A_DEADLINE[k as keyof typeof WHEN_IS_A_DEADLINE], k).toBe(false);
     for (const k of ["invoice_overdue", "inquiry", "lien_deadline", "supplier_pay", "job_on_hold", "permit_inspection"]) expect(WHEN_IS_A_DEADLINE[k as keyof typeof WHEN_IS_A_DEADLINE], k).toBe(true);
   });
   it("the list reads it: an inspection done yesterday is Yesterday on the row, never overdue", () => {
     const html = renderToStaticMarkup(createElement(ActionList, { items: [item({ id: "w", kind: "inspection_writeup", when: "2026-10-07T17:00:00.000Z" })], todayStr: "2026-10-08", isStaff: true }));
-    expect(html).toContain("Yesterday · 10:00 AM");
+    // The right edge is row-words' age (lib/action-items/row-words): the day it happened, never a miss.
+    expect(html).toContain(t("ny_ageYesterday"));
     expect(html).not.toContain("overdue");
   });
 });

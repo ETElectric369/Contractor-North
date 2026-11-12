@@ -1,6 +1,6 @@
 import type { SupplierPayDue } from "@/app/(app)/bills/supplier-pay-due";
 import { formatCurrency, formatDateShort } from "@/lib/utils";
-import { AFFORDANCES, KIND_STREAM, type ActionItem } from "./types";
+import { AFFORDANCES, KIND_GROUP, type ActionItem } from "./types";
 
 /** The door: /bills with the account's Record a Payment sheet already open (suppliers-card.tsx). */
 export function supplierPayHref(accountId: string): string {
@@ -24,12 +24,19 @@ export function supplierPayActionItems(dues: SupplierPayDue[] | null | undefined
   return (dues ?? []).map((d) => ({
     id: `supplierpay-${d.accountId}`, // synthetic (kind-prefixed): open-only, never dispatched
     kind: "supplier_pay" as const,
-    stream: KIND_STREAM.supplier_pay,
+    group: KIND_GROUP.supplier_pay,
     title: `Pay ${d.supplier} ${formatCurrency(d.owed)} by ${formatDateShort(d.payBy)}`,
     subtitle:
       `Saves ${formatCurrency(d.saves)} on ${d.invoices} ${d.invoices === 1 ? "invoice" : "invoices"}` +
       (d.sent > 0.005 ? ` · ${formatCurrency(d.sent)} already sent` : ""),
-    who: null,
+    // The box's words (cn-v1161): the supplier in bold, the deadline and the saving as a key and its
+    // slots, a chunk already sent as a second phrase, and what is owed at the right edge.
+    who: d.supplier,
+    what: {
+      key: d.invoices === 1 ? "ny_w_payBySavesOne" : "ny_w_payBySavesMany",
+      vars: { day: d.payBy, money: d.saves, n: d.invoices, ...(d.sent > 0.005 ? { andKey: "ny_w_alreadySent", money2: d.sent } : {}) },
+    },
+    amount: d.owed,
     when: d.payBy,
     // Red "!" only in the last three days, when waiting a little longer loses it.
     urgency: d.daysLeft <= 3 ? 2 : 1,

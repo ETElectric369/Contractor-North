@@ -1,6 +1,8 @@
-import { formatCurrency } from "@/lib/utils";
 import type { ActionItem, PileInfo, PileName } from "./types";
-import { sortActionItems } from "./types";
+import { KIND_GROUP, sortActionItems } from "./types";
+import { isUnreadLine, maxLevel } from "./needs-you-rule";
+
+export { isUnreadLine };
 
 /**
  * SAME-KIND PILES ROLL UP (Wave 1, W1-14).
@@ -23,7 +25,15 @@ import { sortActionItems } from "./types";
  *     finished visit, an inspection, a receipt): the pile says "N+" (at least the N here) and See
  *     All opens the list page.
  *   · neither: the rows here are all there are.
- * Money subtitles ("$2,340 across 4") are staff only, and never on a capped pile (a short sum).
+ * A pile's money is its `amount` (the sum, drawn once at its right edge): staff only, and never on a
+ * capped pile (a short sum).
+ *
+ * A PILE NEVER HIDES A NOW ROW (the redraw, 2026-11): its NOW children roll into a pile of their own,
+ * `pile:<name>:now`, drawn in the strip, and the rest keep `pile:<name>` in its tile. Invoices thirty
+ * days late are an unbounded set, and the badge may never count one row each; the split also keeps
+ * the strip at about one row per pile name. A lone row in either half stays a plain row. A pile
+ * wears its most urgent child's mark, and its `amount` is the children's sum only when that sum is
+ * the whole of it (every child has one, the read was not capped, every child is here).
  *
  * Never piled: supplier_paper and time_stray (already one rolled-up line each) and supplier_pay (each
  * deadline is its own line), and a "Couldn't Check" line (it is about a read, not a thing).
@@ -100,11 +110,6 @@ export function isTrayPaper(o: {
   if (o.doc_type && o.doc_type !== "not_a_cost") return true;
   const unread = !o.doc_type && !String(o.summary ?? "").trim() && (o.amount === null || o.amount === undefined || o.amount === "");
   return o.kind !== "note" && !!o.file_url && unread;
-}
-
-/** A "Couldn't Check" line: about a read, never a thing, so it never joins a pile. */
-export function isUnreadLine(item: Pick<ActionItem, "id">): boolean {
-  return item.id.endsWith("-unread");
 }
 
 /** Which pile a row belongs to, or null (never piled). */
@@ -202,26 +207,36 @@ export function rollUpPiles(
   opts: { todayStr: string; isStaff: boolean; leadsOn?: boolean; counts?: Partial<Record<PileName, PileCount>> },
 ): ActionItem[] {
   const leadsOn = opts.leadsOn !== false;
-  const groups = new Map<PileName, ActionItem[]>();
-  for (const it of items) {
+  // Keyed on (pile, is NOW): a NOW child never shares a pile with the rest of its kind.
+  const keyOf = (it: ActionItem): { name: PileName; now: boolean; key: string } | null => {
     const p = it.done ? null : pileOf(it);
-    if (p) groups.set(p, [...(groups.get(p) ?? []), it]);
+    if (!p) return null;
+    const now = it.level === "now";
+    return { name: p, now, key: now ? `${p}:now` : p };
+  };
+  const groups = new Map<string, ActionItem[]>();
+  for (const it of items) {
+    const k = keyOf(it);
+    if (k) groups.set(k.key, [...(groups.get(k.key) ?? []), it]);
   }
   const out: ActionItem[] = [];
-  const placed = new Set<PileName>();
+  const placed = new Set<string>();
   for (const it of items) {
-    const p = it.done ? null : pileOf(it);
-    const children = p ? (groups.get(p) ?? []) : [];
-    const fact = p ? (opts.counts?.[p] ?? {}) : {};
+    const k = keyOf(it);
+    const children = k ? (groups.get(k.key) ?? []) : [];
+    const fact = k ? (opts.counts?.[k.name] ?? {}) : {};
+    // `capped` holds for both halves (the read was short for the whole kind). An exact `total` is the
+    // read's count of the rows that are not NOW: no pile with an exact SQL count holds a NOW-able kind.
     const capped = !!fact.capped;
-    const count = Math.max(children.length, fact.total ?? 0);
+    const count = Math.max(children.length, k && !k.now ? (fact.total ?? 0) : 0);
     // A lone row stays a plain row, unless more of its kind exist than were read.
-    if (!p || (children.length < 2 && !capped && count <= children.length)) {
+    if (!k || (children.length < 2 && !capped && count <= children.length)) {
       out.push(it);
       continue;
     }
-    if (placed.has(p)) continue; // a later child: already inside its pile
-    placed.add(p);
+    if (placed.has(k.key)) continue; // a later child: already inside its pile
+    placed.add(k.key);
+    const p = k.name;
     const def = PILE_DEFS[p];
     const allNotes = p === "notes_to_review" && children.every((c) => c.chip === "Note to Review");
     const label =
@@ -243,16 +258,16 @@ export function rollUpPiles(
     const earliest = [...children].sort((a, b) => whenMs(a.when, opts.todayStr) - whenMs(b.when, opts.todayStr))[0];
     const urgency = Math.max(...children.map((c) => c.urgency)) as 0 | 1 | 2;
     const amounts = children.map((c) => c.amount).filter((a): a is number => typeof a === "number" && Number.isFinite(a));
-    const money =
-      opts.isStaff && !capped && count === children.length && amounts.length === children.length && amounts.length > 0
-        ? `${formatCurrency(amounts.reduce((s, a) => s + a, 0))} across ${children.length}`
-        : null;
+    const whole = opts.isStaff && !capped && count === children.length && amounts.length === children.length && amounts.length > 0;
+    const sum = whole ? amounts.reduce((s, a) => s + a, 0) : null;
     out.push({
-      id: `pile:${p}`,
+      id: k.now ? `pile:${p}:now` : `pile:${p}`,
       kind: children[0].kind,
-      stream: children[0].stream,
+      group: children[0].group ?? KIND_GROUP[children[0].kind],
+      level: maxLevel(children.map((c) => c.level)),
       title: pileTitle(pile),
-      subtitle: money,
+      // No subtitle: the box draws a pile's sum from `amount`, once, at its right edge.
+      subtitle: null,
       who: null,
       when: earliest?.when ?? null,
       urgency,
@@ -261,26 +276,8 @@ export function rollUpPiles(
       affordances: ["open"],
       pile,
       children,
+      amount: sum,
     });
   }
   return sortActionItems(out, opts.todayStr);
-}
-
-/**
- * A PILE'S PIPS (text to visual): one small mark per child, up to 9 then "+", amber for a child
- * waiting more than a week. Ages from the server's today (the list's todayStr prop), never the
- * browser's clock: the hydration law.
- */
-export const PIP_MAX = 9;
-export const PIP_OLD_DAYS = 7;
-
-export function pileAges(children: Pick<ActionItem, "since" | "when">[], todayStr: string): { pips: ("old" | "new")[]; more: boolean } {
-  const today = Date.parse(`${todayStr}T12:00:00Z`);
-  const pips = children.slice(0, PIP_MAX).map((c) => {
-    const at = String(c.since ?? c.when ?? "");
-    const day = /^\d{4}-\d{2}-\d{2}/.test(at) ? Date.parse(`${at.slice(0, 10)}T12:00:00Z`) : NaN;
-    const age = Number.isFinite(day) ? Math.round((today - day) / 86_400_000) : 0;
-    return age > PIP_OLD_DAYS ? ("old" as const) : ("new" as const);
-  });
-  return { pips, more: children.length > PIP_MAX };
 }

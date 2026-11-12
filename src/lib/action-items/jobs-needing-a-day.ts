@@ -1,6 +1,7 @@
 import { shortDay } from "@/lib/come-back-days";
 import { todayStrInTz } from "@/lib/tz";
 import { isSchedulable } from "@/lib/waiting-on";
+import type { Say } from "./types";
 
 /**
  * JOBS NEEDING A DAY (Wave 1, NY-feeders): ONE rule where there were two.
@@ -67,6 +68,9 @@ export type NeedDayFinding = {
   job: NeedDayJob;
   /** The why line. */
   why: string;
+  /** The same fact as a key and its slots (needDayWhyFact), for the box that says it in the
+   *  reader's language. The why line above stays for the title, the fold and the tests. */
+  whyFact: Say;
   /** The day it last had anything (worked, or dated), else the day it was made: a pile's pip age. */
   since: string | null;
   /** The company's day someone last clocked in on it, or null. */
@@ -114,6 +118,38 @@ export function needDayWhy(p: {
   else why = `Quiet since ${shortDay(p.lastWorked)}`;
   const n = Math.max(0, Math.floor(p.toBuy ?? 0));
   return (n > 0 ? `${why} · ${n} to buy` : why).slice(0, WHY_MAX);
+}
+
+/**
+ * THE WHY LINE AS A FACT (the redraw, cn-v1161): the same branches as needDayWhy, handed over as a
+ * key and its day so the box can say it in the reader's language. The server never writes the
+ * sentence here. Lines still to buy ride as a second phrase (`andKey`), the way the why line adds
+ * "· 6 to buy".
+ */
+export function needDayWhyFact(p: Parameters<typeof needDayWhy>[0]): Say {
+  let key: string;
+  let day: string | null = null;
+  if (!p.lastWorked) {
+    key = p.firstDated ? "ny_w_datedNeverWorked" : "ny_w_neverHadADay";
+    day = p.firstDated;
+  } else if (p.lastDated && p.lastDated > p.lastWorked) {
+    key = "ny_w_lastDay";
+    day = p.lastDated;
+  } else if (daysBetween(p.lastWorked, p.todayStr) <= RECENT_WORK_DAYS) {
+    key = "ny_w_workedNothingNext";
+    day = p.lastWorked;
+  } else {
+    key = "ny_w_quietSince";
+    day = p.lastWorked;
+  }
+  const n = Math.max(0, Math.floor(p.toBuy ?? 0));
+  const vars: Record<string, string | number | null> = {};
+  if (day) vars.day = day;
+  if (n > 0) {
+    vars.andKey = "ny_w_nToBuy";
+    vars.n = n;
+  }
+  return Object.keys(vars).length ? { key, vars } : { key };
 }
 
 /** Every job in `jobs` with nothing ahead of it, with its why line, in the order given. */
@@ -176,6 +212,7 @@ export function jobsNeedingADay(input: {
     out.push({
       job: j,
       why: needDayWhy({ lastWorked, firstDated, lastDated, todayStr, toBuy }),
+      whyFact: needDayWhyFact({ lastWorked, firstDated, lastDated, todayStr, toBuy }),
       since: lastWorked ?? lastDated ?? companyDay(j.created_at, tz),
       lastWorked,
       toBuy,

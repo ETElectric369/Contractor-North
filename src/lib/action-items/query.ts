@@ -2,7 +2,8 @@ import { cache } from "react";
 import { viewerSortsBank } from "@/lib/bank-viewer";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, NeedsYou, PileName, WaitingItem } from "./types";
-import { AFFORDANCES, KIND_STREAM, appointmentAffordances, sortActionItems, waitingForViewer, waitingRow } from "./types";
+import { AFFORDANCES, KIND_GROUP, appointmentAffordances, sortActionItems, waitingForViewer, waitingRow } from "./types";
+import { levelOf, withoutMoneyForTech } from "./needs-you-rule";
 import { bucketInspections, inspectionLabel } from "@/lib/inspections";
 import { leadRidesItsWriteUp, lessRidden } from "./lead-rides-its-writeup";
 import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES, visitTitle } from "@/lib/statuses";
@@ -63,6 +64,9 @@ import {
   type DoneRow,
 } from "./done-not-billed";
 import type { PaperTie } from "@/lib/job-photos";
+import { isGenericInspectionTitle } from "@/lib/inspections";
+import { isStockBookingTitle } from "@/lib/schedule/work-shape";
+import type { Say } from "./types";
 
 /**
  * Count for the dock Home badge: the length of NOW, from the SAME build as the list, so the badge
@@ -619,7 +623,7 @@ async function buildActionItems(ctx: {
     isStaff
       ? supabase
           .from("quotes")
-          .select("id, quote_number, doc_type, status, accepted_at, created_at, job_id, customer_id, customers(name), jobs:job_id(job_number, name, scheduled_start, status)", { count: "exact" })
+          .select("id, quote_number, doc_type, status, total, accepted_at, created_at, job_id, customer_id, customers(name), jobs:job_id(job_number, name, scheduled_start, status)", { count: "exact" })
           .eq("status", "accepted")
           .order("accepted_at", { ascending: false })
           .limit(50)
@@ -731,9 +735,9 @@ async function buildActionItems(ctx: {
     Read & { withDay: boolean }, Read | null, NeedsYouWaits,
   ];
 
-  // Built without `stream`, stamped once at the end from KIND_STREAM — one assignment site means a
-  // new kind can't ship with a forgotten/mismatched stream.
-  const items: Omit<ActionItem, "stream">[] = [];
+  // Built without `group`, stamped once at the end from KIND_GROUP — one assignment site means a
+  // new kind can't ship with a forgotten/mismatched tile.
+  const items: Omit<ActionItem, "group">[] = [];
   const waiting: WaitingItem[] = [];
   const counts: Partial<Record<PileName, PileCount>> = {};
   const todayMs = Date.parse(todayStr);
@@ -807,8 +811,8 @@ async function buildActionItems(ctx: {
     });
   };
 
-  // ── THE WIN: an accepted estimate whose job still has no date. Urgency 2, money stream → the top,
-  // so a "yes" can never again slip by unseen. Its Pick a Day puts the day on the JOB.
+  // ── THE WIN: an accepted estimate whose job still has no date. Always a row to act on today (the one
+  // rule, needs-you-rule), so a "yes" can never again slip by unseen. Its Pick a Day puts the day on the JOB.
   const wonJobIds = new Set<string>();
   {
     for (const a of (acceptedR.data ?? []) as any[]) {
@@ -829,7 +833,11 @@ async function buildActionItems(ctx: {
         kind: "quote_accepted",
         title: `${who ? `${who} said yes` : "Accepted"} · ${a.quote_number || "Estimate"}`,
         subtitle: job ? jobWords(job) : null,
-        who: null,
+        // The box's words (cn-v1161): the customer in bold, the estimate's number as a slot, the job
+        // as the tail, and the accepted total at the right edge (the one column this build added).
+        who,
+        what: { key: a.quote_number ? "ny_w_saidYes" : "ny_w_saidYesNoRef", vars: a.quote_number ? { ref: String(a.quote_number) } : undefined, tail: job ? jobWords(job) : null },
+        amount: Number(a.total ?? 0),
         when: a.accepted_at ?? null,
         urgency: 2,
         done: false,
@@ -891,7 +899,11 @@ async function buildActionItems(ctx: {
         // (inspectionLabel), so every row says what the visit is for. The day is the row's own `when`.
         title: label.title,
         subtitle: label.subtitle || null,
-        who: null,
+        // The box's words (cn-v1161): who it is for in bold, and its KIND always in the phrase (the
+        // `type` slot, said by the type's label), with a title a person typed as data beside it and
+        // the street as the tail. With nobody to name, the bold line is the title, so it is not said twice.
+        who: who || null,
+        what: writeUpWhat(a, who),
         // The DAY IT HAPPENED, not a due date — how long this has been sitting is the pressure.
         when: a.starts_at ?? null,
         urgency: 1,
@@ -964,7 +976,9 @@ async function buildActionItems(ctx: {
       // THIS row the one that disagrees with every other screen.
       title: visitTitle(a.title) || type || "Appointment",
       subtitle: [one(a.customers as any)?.name ?? null, type].filter(Boolean).join(" · ") || null,
-      who: null,
+      // The customer in bold (else the box leads with the title), and the type always in the phrase.
+      who: one(a.customers as any)?.name || null,
+      what: notClosedWhat(a, one(a.customers as any)?.name || null),
       when: a.starts_at,
       urgency: 0,
       done: false,
@@ -993,7 +1007,13 @@ async function buildActionItems(ctx: {
         chip: bank ? "Bank Download" : tray ? "Paper to Sort" : note ? "Note to Review" : "To File",
         title: bank ? "Bank Download to Sort" : String(o.title ?? "").trim() || (ORGANIZE_LABEL[o.kind] ?? "To file"),
         subtitle: null,
-        who: null,
+        // The box's words (cn-v1161): the paper's own title in bold (there is no customer or job to
+        // name), else its kind in words; where it is sorted as the phrase; its amount when it has one.
+        who: bank ? null : String(o.title ?? "").trim() || null,
+        ...(bank || String(o.title ?? "").trim() ? {} : { whoSay: { key: ORGANIZE_WHO[o.kind] ?? "ny_who_paper" } }),
+        ...(bank ? { whoSay: { key: "ny_who_bankDownload" } } : {}),
+        what: { key: bank ? "ny_w_bankToSort" : tray ? "ny_w_paperToSort" : note ? "ny_w_noteToReview" : "ny_w_toFile" },
+        ...(o.amount != null && Number.isFinite(Number(o.amount)) ? { amount: Number(o.amount) } : {}),
         when: null,
         since: o.created_at ?? null,
         urgency: 0,
@@ -1035,8 +1055,12 @@ async function buildActionItems(ctx: {
       kind: "invoice_overdue",
       title: `${inv.invoice_number} · ${a.due} due`,
       subtitle: [one(inv.customers as any)?.name, a.detail].filter(Boolean).join(" · ") || null,
-      who: null,
-      when: inv.due_date ?? inv.created_at ?? null,
+      // The customer in bold, else the invoice's number; the number as a slot in the phrase.
+      who: one(inv.customers as any)?.name || inv.invoice_number || null,
+      what: { key: "ny_w_invoice", vars: { ref: inv.invoice_number ?? null } },
+      // An invoice with no due day turned late INVOICE_STALE_DAYS after it was made, so that is its
+      // day: its lateness is counted from the day it went late, never from the day it was made.
+      when: inv.due_date ?? (inv.created_at ? daysAgoStr(dayOf(inv.created_at) ?? String(inv.created_at).slice(0, 10), -INVOICE_STALE_DAYS) : null),
       urgency: overWindow > 14 ? 2 : 1,
       done: false,
       href: `/billing/${inv.id}`,
@@ -1086,7 +1110,17 @@ async function buildActionItems(ctx: {
         kind: "quote_awaiting",
         title: `${doc} ${q.quote_number} awaiting reply`,
         subtitle: who ?? formatCurrency(Number(q.total ?? 0)),
-        who: null,
+        // The customer in bold; why it is here as a key: the follow-up day came, the offer ends or
+        // ended (its day a slot), else no answer yet. The sent day is `since`, below.
+        who: who || null,
+        what: {
+          key: followUp === "due" ? "ny_w_docFollowUp" : daysToExpiry != null && daysToExpiry < 0 ? "ny_w_docOfferEnded" : expiring ? "ny_w_docOfferEnds" : "ny_w_docNoAnswer",
+          vars: {
+            docKey: doc === "Estimate" ? "ny_docEstimate" : "ny_docQuote",
+            ref: q.quote_number ?? null,
+            ...(followUp !== "due" && expiring ? { day: q.valid_until ?? null } : {}),
+          },
+        },
         // The follow-up day he picked, when that's why it's here; else the expiry (that's the clock
         // that matters); fall back to created so undated offers still sort by age.
         when: (followUp === "due" ? q.follow_up_at : null) ?? q.valid_until ?? q.created_at ?? null,
@@ -1136,7 +1170,13 @@ async function buildActionItems(ctx: {
           ? `${jobWords(job)} ${job.status === "complete" ? "Finished" : "Cancelled"} · Send ${d.invoice_number}`
           : `Draft invoice ${d.invoice_number} · ${a.due}`,
       subtitle: [who, back ? a.due : null, a.detail].filter(Boolean).join(" · ") || null,
-      who: null,
+      // The customer in bold, else the job, else the number; the job as the tail beside a customer.
+      who: who || (job ? jobWords(job) : null) || d.invoice_number || null,
+      what: {
+        key: back && job ? (job.status === "complete" ? "ny_w_jobFinishedSend" : "ny_w_jobCancelledSend") : "ny_w_invoiceNotSent",
+        vars: { ref: d.invoice_number ?? null },
+        tail: who && job ? jobWords(job) : null,
+      },
       when: d.created_at ?? null,
       // The day it was set aside for came early: it is back on top.
       urgency: back ? 1 : 0,
@@ -1322,7 +1362,10 @@ async function buildActionItems(ctx: {
       kind: "quote_draft",
       title: `Estimate ${q.quote_number || ""} started, never sent`.replace(/\s+/g, " ").trim(),
       subtitle: who ?? (q.title || null),
-      who: null,
+      // The customer or the lead in bold, else the estimate's own title (the box leads with that).
+      // The read names no doc_type and the title says Estimate, so the phrase does too.
+      who: who || q.title || null,
+      what: { key: "ny_w_docNotSent", vars: { docKey: "ny_docEstimate", ref: q.quote_number || null } },
       when: q.created_at ?? null,
       urgency: 0,
       done: false,
@@ -1357,7 +1400,9 @@ async function buildActionItems(ctx: {
       kind: "contract_unsigned",
       title: cont.contract_number ? `Contract ${cont.contract_number}` : "A contract",
       subtitle: [job ? jobWords(job) : "Awaiting signature", one(cont.customers as any)?.name ?? null].filter(Boolean).join(" · "),
-      who: null,
+      // The customer in bold, else the job; the job as the tail beside a customer.
+      who: one(cont.customers as any)?.name || (job ? jobWords(job) : null),
+      what: { key: "ny_w_contractNotSigned", vars: { ref: cont.contract_number ?? null }, tail: one(cont.customers as any)?.name && job ? jobWords(job) : null },
       // The day it went out, said as a date ("Sent Jun 12"), never hidden.
       when: cont.created_at ?? null,
       urgency: 1,
@@ -1398,7 +1443,9 @@ async function buildActionItems(ctx: {
       kind: "lien_deadline",
       title: `${top.label} ${pastDue ? "past due" : "due soon"}`,
       subtitle: job ? jobWords(job) : null,
-      who: null,
+      // The job in bold, which deadline as a key (the candidate's label above says which).
+      who: job ? jobWords(job) : null,
+      what: { key: top.label === "Record lien" ? (pastDue ? "ny_w_lienRecordPast" : "ny_w_lienRecord") : pastDue ? "ny_w_lienPrelimPast" : "ny_w_lienPrelim" },
       when: top.when,
       urgency: 2,
       done: false,
@@ -1456,6 +1503,7 @@ async function buildActionItems(ctx: {
       // truncates at phone width, and the ellipsis used to eat them).
       subtitle: f.openStill ? `${door} · on since ${formatTime(f.when, tz || undefined)}` : "Closed hours nobody can bill",
       who: f.name,
+      what: { key: f.openStill ? "ny_w_clockRunning" : "ny_w_shiftNoJob" },
       when: f.when,
       urgency: f.openStill ? 2 : 1, // a forgotten clock is a wrong week until somebody stops it
       done: false,
@@ -1505,7 +1553,8 @@ async function buildActionItems(ctx: {
         kind: "job_unbilled_work",
         title: jobWords(f.job),
         subtitle: `Worked ${formatDateShort(f.lastWorked, tz || undefined)}, no costs on it yet`,
-        who: null,
+        who: jobWords(f.job),
+        what: { key: "ny_w_noCostsYet" },
         when: f.lastWorked,
         urgency: 1,
         done: false,
@@ -1538,6 +1587,8 @@ async function buildActionItems(ctx: {
       kind: "job_to_schedule",
       title: "Jobs Needing a Day · Couldn't Check",
       subtitle: "Couldn't read which jobs have nothing ahead of them just now. Open Schedule to see them.",
+      whoSay: { key: "ny_who_unread", vars: { labelKey: "ny_btn_pile_jobsNeedingADay" } },
+      what: { key: "ny_w_unreadJobsDay" },
       who: null,
       when: null,
       urgency: 1,
@@ -1566,7 +1617,9 @@ async function buildActionItems(ctx: {
         kind: "job_to_schedule",
         title: jobWords(j),
         subtitle: [f.why, one(j.customers as any)?.name ?? null].filter(Boolean).join(" · "),
-        who: null,
+        // The job in bold, the why as a key and its day (whyFact), the customer as the tail.
+        who: jobWords(j),
+        what: { ...f.whyFact, tail: one(j.customers as any)?.name ?? null },
         // Not a deadline: the why line says the day, and the row never reads "overdue".
         when: null,
         since: f.since,
@@ -1592,7 +1645,10 @@ async function buildActionItems(ctx: {
       kind: "materials_needed",
       title: jobWords(cand.job),
       subtitle: preview + (more > 0 ? ` +${more} more` : ""),
-      who: null,
+      // The job in bold; how many to buy and the first three lines (data) as the phrase, and the
+      // rest as a second phrase whose count is `andN`.
+      who: jobWords(cand.job),
+      what: { key: "ny_w_toBuy", vars: { n: need.length, text: preview, ...(more > 0 ? { andKey: "ny_w_plusMore", andN: more } : {}) } },
       when: cand.when,
       urgency: 1,
       done: false,
@@ -1617,6 +1673,8 @@ async function buildActionItems(ctx: {
         kind: "job_on_hold",
         title: "Holds · Couldn't Check",
         subtitle: "Couldn't read the jobs on hold just now, so one whose day has come may be missing here. Open Jobs to see them.",
+        whoSay: { key: "ny_who_unread", vars: { labelKey: "ny_lbl_holds" } },
+        what: { key: "ny_w_unreadHolds" },
         who: null,
         when: null,
         urgency: 1,
@@ -1644,7 +1702,14 @@ async function buildActionItems(ctx: {
         kind: "job_on_hold",
         title: `${jobWords(j)} · ${reason || "No reason saved"}`,
         subtitle: [by ? `Put on hold by ${by}` : null, back, toBuy > 0 ? `${toBuy} to buy` : null].filter(Boolean).join(" · ") || null,
-        who: null,
+        // The job in bold, the customer as the tail; whether its day came or it never had one as a
+        // key, with the reason as data (or the words for none saved), and lines to buy after it.
+        who: jobWords(j),
+        what: {
+          key: withDay && state !== "no_day" ? "ny_w_holdBack" : "ny_w_holdNoDay",
+          vars: { ...(reason ? { text: reason } : { textKey: "ny_w_noReason" }), ...(toBuy > 0 ? { andKey: "ny_w_nToBuy", n: toBuy } : {}) },
+          tail: one(j.customers as any)?.name ?? null,
+        },
         when: null,
         // The pip's age. A hold with no day (held before 0366, so among the oldest) ages from its last
         // touch, the proxy for "held since": age 0 would draw every old hold grey. Words stay "No Day Set".
@@ -1671,6 +1736,8 @@ async function buildActionItems(ctx: {
         kind: "receipt_unbilled",
         title: "Receipts · Couldn't Check",
         subtitle: "Couldn't tell which receipts on your jobs are on a bill just now. Open Bills to see them.",
+        whoSay: { key: "ny_who_unread", vars: { labelKey: "ny_lbl_receipts" } },
+        what: { key: "ny_w_unreadReceipts" },
         who: null,
         when: null,
         urgency: 1,
@@ -1685,7 +1752,9 @@ async function buildActionItems(ctx: {
           kind: "receipt_unbilled",
           title: receiptRowTitle(d, nameOf.get(String(d.uploaded_by ?? "")) || null, tz),
           subtitle: receiptRowJob(d),
-          who: null,
+          // The job in bold; a receipt or a bill, and who snapped it when known, as the phrase.
+          who: receiptRowJob(d),
+          what: receiptWhat(d.category, firstNameOf(nameOf.get(String(d.uploaded_by ?? "")) || null)),
           when: null,
           since: dayOf(d.created_at),
           urgency: 1,
@@ -1716,7 +1785,16 @@ async function buildActionItems(ctx: {
         // Counting can't settle a short (a count has no roll; settle_short walks rolls): name the two
         // ways that work (SHORT_FIX, the bell's own words).
         subtitle: `${who} took them for ${jb ? jobWords(jb) : "a job"} on ${formatDateShort(r.created_at, tz || undefined)}. ${SHORT_FIX}`,
-        who: null,
+        // The job in bold, else the item; who took how much of what as the phrase (the amount and
+        // the item are data).
+        who: jb ? jobWords(jb) : it?.name || null,
+        what: {
+          key: nameOf.get(String(r.created_by ?? "")) ? "ny_w_takenPastStock" : "ny_w_takenPastStockNoName",
+          vars: {
+            ...(nameOf.get(String(r.created_by ?? "")) ? { name: firstNameOf(nameOf.get(String(r.created_by ?? ""))) } : {}),
+            text: [q, it?.unit, it?.name].filter((v) => v != null && String(v).trim() !== "").join(" "),
+          },
+        },
         when: null,
         since: dayOf(r.created_at),
         urgency: 1,
@@ -1758,18 +1836,76 @@ async function buildActionItems(ctx: {
   // THE ENDLESS ROWS SOMEONE SNOOZED wait in the fold with their day (0367); on the day, back.
   const folded = foldWaitingRows(items, waitsR.waits);
 
-  // SORTED ONCE, HERE (Wave 1, NY-list): money, leads, today, other; then urgency; then oldest first,
-  // an undated row counting as today; ties keep the order built above (types.ts sortActionItems).
-  // Then the same-kind piles roll up (piles.ts): a pile sits where its most pressing child sat, and
-  // counts one on the badge.
+  // STAMPED AND SORTED ONCE, HERE: each row's tile and its mark (needs-you-rule.ts, in the company's
+  // days), then NOW first, the tiles in order, a Couldn't Check line leading its tile, SOON before no
+  // mark, oldest first with an undated row counting as today; ties keep the order built above
+  // (types.ts sortActionItems). Then the same-kind piles roll up (piles.ts): a pile sits where its most
+  // pressing child sat, its NOW children in a pile of their own, and each counts one on the badge.
   const sorted = sortActionItems(
-    folded.now.map((it) => ({ ...it, stream: KIND_STREAM[it.kind] })),
+    folded.now.map((it) => ({ ...it, group: KIND_GROUP[it.kind], level: levelOf(it, { todayStr, tz }) })),
     todayStr,
   );
-  const now = rollUpPiles(sorted, { todayStr, isStaff, leadsOn, counts });
+  // THE TECH'S BELT (needs-you-rule withoutMoneyForTech): every row, pile and child passes here on
+  // its way out, so a money slot a feeder let through still never reaches a tech. Staff: untouched.
+  const now = rollUpPiles(sorted, { todayStr, isStaff, leadsOn, counts }).map((it) => withoutMoneyForTech(it, isStaff));
   // The fold, soonest back first. A tech's holds no money kind and no dollar figure, ever.
   const fold = waitingForViewer([...waiting, ...folded.waiting], isStaff).sort((a, b) => a.backOn.localeCompare(b.backOn) || a.title.localeCompare(b.title));
   return { now, waiting: fold };
+}
+
+/** An untitled paper's bold line, by what kind of paper it is (cn-v1161). */
+const ORGANIZE_WHO: Record<string, string> = {
+  receipt: "ny_who_receipt",
+  note: "ny_who_note",
+  job_document: "ny_who_document",
+};
+
+/**
+ * A write-up row's phrase (cn-v1161): its KIND always (`type`, the stored type, which the box says by
+ * its label), and a title a person typed as data beside it. Only isGenericInspectionTitle and the
+ * type's label decide what counts as a title. With nobody to name, the box's bold line IS the title,
+ * so the phrase does not say it again.
+ */
+function writeUpWhat(a: { type?: string | null; title?: string | null; location?: string | null }, who: string | null): Say {
+  const title = visitTitle(a.title ?? null);
+  // A stamp the booking door wrote ("Inspection: <who>") is no title: it would say the bold name again.
+  const generic = isGenericInspectionTitle(title, a.type ? appointmentTypeLabel(a.type) : null) || isStockBookingTitle(title, stampNames(who, a.location));
+  const typed = !generic && !!who;
+  // With nobody named and no title, the bold line is already the street (inspectionLabel): no tail.
+  const street = String(a.location ?? "").trim() || null;
+  return {
+    key: typed ? "ny_w_toWriteUpTitled" : "ny_w_toWriteUp",
+    vars: typed ? { text: String(title).trim(), type: a.type ?? null } : { type: a.type ?? null },
+    tail: !who && generic ? null : street,
+  };
+}
+
+/** The names a booking door could have stamped a visit's title with: who it is for, and its place
+ *  (whole, and its street alone, the way the new-visit form suggests it). */
+function stampNames(who: string | null, location: string | null | undefined): string[] {
+  const place = String(location ?? "").trim();
+  return [who ?? "", place, place.split(",")[0].trim()].filter(Boolean);
+}
+
+/** A visit nobody closed out, as a phrase (cn-v1161): the same rule as writeUpWhat, no street. */
+function notClosedWhat(a: { type?: string | null; title?: string | null; location?: string | null }, who: string | null): Say {
+  const title = visitTitle(a.title ?? null);
+  const typed =
+    !!who &&
+    !!title &&
+    !isGenericInspectionTitle(title, a.type ? appointmentTypeLabel(a.type) : null) &&
+    !isStockBookingTitle(title, stampNames(who, a.location));
+  return {
+    key: typed ? "ny_w_visitNotClosedTitled" : "ny_w_visitNotClosed",
+    vars: typed ? { text: String(title).trim(), type: a.type ?? null } : { type: a.type ?? null },
+  };
+}
+
+/** A receipt or a bill nobody recorded, as a phrase (cn-v1161): the same words receiptRowTitle uses. */
+function receiptWhat(category: string | null | undefined, uploader: string | null): Say {
+  const bill = category === "Bill";
+  if (uploader) return { key: bill ? "ny_w_billFrom" : "ny_w_receiptFrom", vars: { name: uploader } };
+  return { key: bill ? "ny_w_bill" : "ny_w_receipt" };
 }
 
 /** "Pay <Supplier>" needs the supplier's name on its line: the same deadlines, in the same order. */

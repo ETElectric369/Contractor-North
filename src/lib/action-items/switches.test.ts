@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ALL_ON, offFeatureKey, featuresFromOffKey, type FeatureMap } from "@/lib/features";
-import { AFFORDANCES, KIND_STREAM, type ActionKind } from "./types";
+import { AFFORDANCES, KIND_GROUP, type ActionKind } from "./types";
 import { FEEDER_SWITCHES, LIVE_OBLIGATIONS, feederOn, inquiryActionItem } from "./switches";
 
 /**
@@ -11,7 +11,7 @@ import { FEEDER_SWITCHES, LIVE_OBLIGATIONS, feederOn, inquiryActionItem } from "
  * ONE plain string, so the shell's badge and My Day's list still share one fan-out (rule m).
  */
 const off = (...keys: (keyof FeatureMap)[]) => ({ ...ALL_ON, ...Object.fromEntries(keys.map((k) => [k, false])) }) as FeatureMap;
-const KINDS = Object.keys(KIND_STREAM) as ActionKind[];
+const KINDS = Object.keys(KIND_GROUP) as ActionKind[];
 const src = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
 
 describe("feederOn — which Needs You feeders a switch turns off", () => {
@@ -54,7 +54,8 @@ describe("inquiryActionItem — a request on Needs You", () => {
       kind: "inquiry",
       title: "Dana Reyes",
       subtitle: "New lead — reach out",
-      who: null,
+      who: "Dana Reyes",
+      what: { key: "ny_w_leadNew" },
       when: null,
       urgency: 2,
       done: false,
@@ -68,11 +69,11 @@ describe("inquiryActionItem — a request on Needs You", () => {
 
   it("Leads off: Call Back still shows, as the row's own button (row-buttons.ts)", async () => {
     const { rowButtons } = await import("./row-buttons");
-    const item = { ...inquiryActionItem(row, "2026-09-26", false), stream: KIND_STREAM.inquiry };
+    const item = { ...inquiryActionItem(row, "2026-09-26", false), group: KIND_GROUP.inquiry };
     const b = rowButtons(item, { leadsOn: false, isStaff: true });
     expect(b.primary).toEqual({ label: "Call Back", act: { type: "call", tel: "(530) 555-0142" } });
     // Leads on, the same person's button is Called, and the number is behind ⋯.
-    const on = rowButtons({ ...inquiryActionItem(row, "2026-09-26", true), stream: KIND_STREAM.inquiry }, { leadsOn: true, isStaff: true });
+    const on = rowButtons({ ...inquiryActionItem(row, "2026-09-26", true), group: KIND_GROUP.inquiry }, { leadsOn: true, isStaff: true });
     expect(on.primary?.label).toBe("Called");
     expect(on.more.map((d) => d.label)).toContain("Call");
   });

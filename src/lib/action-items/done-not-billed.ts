@@ -2,6 +2,7 @@ import type { ActionItem } from "./types";
 import { AFFORDANCES } from "./types";
 import type { PileCount } from "./piles";
 import { jobWords } from "./words";
+import { isStockBookingTitle } from "@/lib/schedule/work-shape";
 
 /**
  * DONE, NOT BILLED, READ WHOLE (W1-FU-misc A, migration 0371).
@@ -40,7 +41,7 @@ export type DoneRow = {
   total_count: number | string | null;
 };
 
-type Item = Omit<ActionItem, "stream">;
+type Item = Omit<ActionItem, "group">;
 
 /** PostgREST (PGRST202) or Postgres (42883) saying the function isn't there: 0371 not applied yet. */
 export function isMissingDoneRpc(err: unknown): boolean {
@@ -50,6 +51,10 @@ export function isMissingDoneRpc(err: unknown): boolean {
 
 /** A finished visit with no bill, or billed and waiting on the money (its chip says which). */
 export function doneVisitItem(v: { id: string; job_id: string | null; title: string | null; who: string | null; at: string | null; openInvoice: string | null }): Item {
+  // The title rides as data only when a person typed it AND somebody is in bold: a stamp the booking
+  // door wrote ("Service call: <who>") says the bold name twice, and with nobody named the bold line
+  // is already the title.
+  const text = v.title && v.who && !isStockBookingTitle(v.title, [v.who]) ? v.title : null;
   return {
     id: `unbilled-${v.id}`,
     kind: "visit_unbilled",
@@ -57,7 +62,12 @@ export function doneVisitItem(v: { id: string; job_id: string | null; title: str
     ...(v.openInvoice ? { chip: "Billed, Not Paid" } : {}),
     title: v.title || "Work done",
     subtitle: v.who,
-    who: null,
+    // The box's words (cn-v1161): the customer in bold, and the state as a key, with the visit's own
+    // title as data when a person typed it. Absent a customer, the box leads with the title.
+    who: v.who || null,
+    what: text
+      ? { key: v.openInvoice ? "ny_w_visitBilledNotPaid" : "ny_w_visitNotBilled", vars: { text } }
+      : { key: v.openInvoice ? "ny_w_workBilledNotPaid" : "ny_w_workNotBilled" },
     when: v.at ?? null,
     urgency: 1, // earned and unasked-for ages worse than a draft
     done: false,
@@ -78,7 +88,9 @@ export function doneJobItem(j: { id: string; job_number: string | null; name: st
     kind: "visit_unbilled",
     title: jobWords({ job_number: j.job_number, name: j.name }),
     subtitle: j.customer,
-    who: null,
+    // The job in bold, its customer as the tail (data), the state as a key (cn-v1161).
+    who: jobWords({ job_number: j.job_number, name: j.name }),
+    what: { key: "ny_w_jobNotBilled", tail: j.customer || null },
     when: j.at ?? null,
     urgency: 1,
     done: false,
@@ -121,6 +133,8 @@ export const DONE_UNREAD_ITEM: Item = {
   kind: "visit_unbilled",
   title: "Done, Not Billed · Couldn't Check",
   subtitle: "Couldn't read which finished work has no bill just now. Open Invoices to see finished jobs.",
+  whoSay: { key: "ny_who_unread", vars: { labelKey: "ny_btn_pile_doneNotBilled" } },
+  what: { key: "ny_w_unreadDone" },
   who: null,
   when: null,
   urgency: 1,

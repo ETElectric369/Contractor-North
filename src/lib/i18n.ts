@@ -1,4 +1,4 @@
-// THE ONE DICTIONARY (cn-v1138). The words a Spanish-speaking person reads live in twenty-nine catalogs,
+// THE ONE DICTIONARY (cn-v1138). The words a Spanish-speaking person reads live in thirty-one catalogs,
 // one per side of the app (lib/words/*: tc_ the Time Clock, cs_ its server, gf_ the geofence, nb_
 // the texts and pushes, au_ sign-in, md_ My Day, tk_ tasks, jb_ jobs, mt_ materials, sh_ the shell,
 // nt_ Nort, nv_ the office's map — cn-v1139, us_ the usage meter — cn-v1140; the agenda's four, ag_ / ag_cal_ /
@@ -59,20 +59,22 @@ import { words as inspections } from "@/lib/words/inspections";
 import { words as customers } from "@/lib/words/customers";
 import { words as customersServer } from "@/lib/words/customers-server";
 import { words as send } from "@/lib/words/send";
+import { words as needsYou } from "@/lib/words/needs-you";
 
 export const LANGUAGES: { code: Lang; label: string }[] = [
   { code: "en", label: "English" },
   { code: "es", label: "Español" },
 ];
 
-/** The thirty catalogs, by name, in the order they are merged (the agenda's four since the
+/** The thirty-one catalogs, by name, in the order they are merged (the agenda's four since the
  *  agenda-in-Spanish wave: ag_ the libraries + shared doors, ag_cal_ the calendar, ag_rail_ the rail
  *  and sheets, ag_srv_ the server messages; the visit page's three since the visit-page-in-Spanish
  *  wave: su_ the Settle Up button, vi_ the Inspector, vp_ the visit page and its hear-actions; the
  *  estimates' four since the estimates-in-Spanish wave, cn-v1145: qt_ the screens and the status
  *  family, qe_ the one estimate editor, qb_ the task breakdown, qs_ quotes/actions and its libraries; Ventas-2's five since cn-v1146: ld_ the leads
  *  and their libraries, ld_srv_ leads/actions, ip_ the inspections tab, cu_ the customers, cu_srv_ crm/actions
- *  and the share and portal-look actions; the review sheet's one since cn-v1155: sn_ the send sheet and the Sent Messages list). */
+ *  and the share and portal-look actions; the review sheet's one since cn-v1155: sn_ the send sheet and the Sent Messages list; the Needs You
+ *  box's one since cn-v1161: ny_ its marks, tiles, rows, buttons and piles). */
 export const CATALOGS: readonly WordCatalog[] = [
   timeclock, clockserver, geofence, messages, auth, myday, tasks, jobs, materials, shell, nort, nav, usage,
   agenda, agendaCalendar, agendaRail, agendaServer,
@@ -80,6 +82,7 @@ export const CATALOGS: readonly WordCatalog[] = [
   quotes, quotesEditor, quotesBreakdown, quotesServer,
   leads, leadsServer, inspections, customers, customersServer,
   send,
+  needsYou,
 ];
 
 type Dict = Record<string, string>;

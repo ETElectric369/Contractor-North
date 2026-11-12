@@ -10,7 +10,7 @@ import { WAITABLE_KINDS, foldWaitingRows, isMissingWaitsTable, readNeedsYouWaits
  * before 0367 runs: then no Snooze door and no error anywhere.
  */
 const TODAY = "2026-09-27";
-const item = (o: Partial<Omit<ActionItem, "stream">>): Omit<ActionItem, "stream"> => ({
+const item = (o: Partial<Omit<ActionItem, "group">>): Omit<ActionItem, "group"> => ({
   id: "materials-j1",
   kind: "materials_needed",
   title: "Fernhill Panel · J-034",

@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { AFFORDANCES, KIND_STREAM, sortActionItems, type ActionItem, type ActionKind } from "./types";
-import { ORGANIZE_PILE_MIXED, PILE_DEFS, codeCount, isTrayPaper, pileAges, pileOf, pileTitle, pileUnfoldsHere, rollUpPiles, sqlCount } from "./piles";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { AFFORDANCES, KIND_GROUP, sortActionItems, type ActionItem, type ActionKind } from "./types";
+import { ORGANIZE_PILE_MIXED, PILE_DEFS, codeCount, isTrayPaper, pileOf, pileTitle, pileUnfoldsHere, rollUpPiles, sqlCount } from "./piles";
 import { titleCaseIn } from "../../../tests/title-case-words";
 
 /**
@@ -12,7 +14,7 @@ let seq = 0;
 const row = (kind: ActionKind, o: Partial<ActionItem> = {}): ActionItem => ({
   id: `r${++seq}`,
   kind,
-  stream: KIND_STREAM[kind],
+  group: KIND_GROUP[kind],
   title: `${kind} ${seq}`,
   when: null,
   urgency: 1,
@@ -74,18 +76,73 @@ describe("grouping", () => {
 });
 
 describe("the sort position", () => {
-  it("a pile sits where its most pressing child sat: highest urgency, earliest when", () => {
-    const lead = row("inquiry", { urgency: 2 });
-    const quiet = row("quote_awaiting", { urgency: 1, when: "2026-09-20" });
-    const dying = row("quote_awaiting", { urgency: 2, when: "2026-09-25" });
-    const other = row("contract_unsigned");
-    const out = roll([lead, quiet, dying, other]);
-    // money first: the No Answer Yet pile (money) above the lead, the contract last.
-    expect(out.map((i) => i.id)).toEqual(["pile:no_answer_yet", lead.id, other.id]);
-    expect(out[0].urgency).toBe(2);
-    expect(out[0].when).toBe("2026-09-20");
+  it("a pile sits where its most pressing child sat: its mark, its tile, its earliest when", () => {
+    const lead = row("inquiry", { urgency: 2, when: "2026-09-01" });
+    const quiet = row("quote_awaiting", { urgency: 1, level: "soon", when: "2026-09-20" });
+    const dying = row("quote_awaiting", { urgency: 2, level: "soon", when: "2026-09-05" });
+    const books = row("organize");
+    const paid = row("invoice_draft");
+    const out = roll([lead, quiet, dying, books, paid]);
+    // Get Paid first; in Win Work the SOON pile above the plain lead; Keep the Books last.
+    expect(out.map((i) => i.id)).toEqual([paid.id, "pile:no_answer_yet", lead.id, books.id]);
+    expect(out[1].urgency).toBe(2);
+    expect(out[1].level).toBe("soon");
+    expect(out[1].when).toBe("2026-09-05");
     // The first child is the most pressing one (the unfold's first row).
-    expect(out[0].children?.[0].id).toBe(dying.id);
+    expect(out[1].children?.[0].id).toBe(dying.id);
+  });
+});
+
+describe("a pile never hides a NOW row", () => {
+  it("NOW children roll into pile:<name>:now; the rest keep pile:<name>", () => {
+    const late = [row("invoice_overdue", { level: "now", when: "2026-07-01" }), row("invoice_overdue", { level: "now", when: "2026-07-10" })];
+    const recent = [row("invoice_overdue", { level: "soon", when: "2026-09-10" }), row("invoice_overdue", { level: "soon", when: "2026-09-12" })];
+    const out = roll([...recent, ...late]);
+    expect(out.map((i) => i.id)).toEqual(["pile:late_invoices:now", "pile:late_invoices"]);
+    expect(out[0].children?.map((c) => c.id)).toEqual(late.map((c) => c.id));
+    expect(out[0].level).toBe("now");
+    expect(out[0].pile?.name).toBe("late_invoices");
+    expect(out[0].title).toBe("Late Invoices · 2");
+    expect(out[1].children?.map((c) => c.id)).toEqual(recent.map((c) => c.id));
+    expect(out[1].level).toBe("soon");
+    expect(out.every((p) => p.group === "get_paid")).toBe(true);
+  });
+
+  it("a lone NOW row stays a plain row, and so does a lone row left behind", () => {
+    const now = row("invoice_overdue", { level: "now" });
+    const soon = row("invoice_overdue", { level: "soon" });
+    const out = roll([soon, now]);
+    expect(out.map((i) => i.id)).toEqual([now.id, soon.id]);
+    expect(out.some((i) => i.pile)).toBe(false);
+  });
+
+  it("a capped read caps both halves", () => {
+    const out = roll([row("invoice_overdue", { level: "now" }), row("invoice_overdue")], { counts: { late_invoices: { capped: true } } });
+    expect(out.map((i) => i.id)).toEqual(["pile:late_invoices:now", "pile:late_invoices"]);
+    expect(out.every((p) => p.pile?.capped && /\+$/.test(p.title))).toBe(true);
+  });
+
+  it("an exact count is the half that is not NOW", () => {
+    const out = roll([row("inquiry"), row("inquiry"), row("inquiry", { level: "now" }), row("inquiry", { level: "now" })], { counts: { leads_to_call: { total: 9 } } });
+    expect(out.find((p) => p.id === "pile:leads_to_call:now")?.pile?.count).toBe(2);
+    expect(out.find((p) => p.id === "pile:leads_to_call")?.pile?.count).toBe(9);
+  });
+
+  it("a pile wears its most urgent child's mark: SOON if any child is, none if none is", () => {
+    const mixed = roll([row("quote_draft"), row("quote_draft", { level: "soon" }), row("quote_draft")]);
+    expect(mixed[0].level).toBe("soon");
+    const plain = roll([row("quote_draft"), row("quote_draft")]);
+    expect(plain[0].level).toBe("none");
+  });
+
+  it("no pile with an exact SQL count holds a kind that can be NOW", async () => {
+    const { NOW_KINDS } = await import("./needs-you-rule");
+    const query = readFileSync(join(process.cwd(), "src/lib/action-items/query.ts"), "utf8");
+    const exact = [...query.matchAll(/counts\.(\w+) = [^;\n]*sqlCount\(/g)].map((m) => m[1]);
+    expect(exact.length).toBeGreaterThan(0);
+    for (const name of exact) {
+      for (const kind of NOW_KINDS) expect(pileOf(row(kind)), `${name} holds ${kind}`).not.toBe(name);
+    }
   });
 });
 
@@ -177,22 +234,21 @@ describe("real counts", () => {
     expect(PILE_DEFS.receipts_not_on_a_bill.listHref).toBe("/bills?tab=receipts#all-bills");
   });
 
-  it("money across the pile is staff only, and never on a capped pile (a short sum)", () => {
+  it("a pile carries no '$X across N' subtitle: its sum is its amount, drawn once at its right edge (cn-v1161)", () => {
     const money = [row("invoice_draft", { amount: 1000 }), row("invoice_draft", { amount: 1340 })];
-    expect(roll(money)[0].subtitle).toBe("$2,340.00 across 2");
+    expect(roll(money)[0].subtitle).toBeNull();
+    expect(roll(money)[0].amount).toBe(2340);
     expect(roll(money, { isStaff: false })[0].subtitle).toBeNull();
     expect(roll(money, { counts: { invoices_not_sent: { capped: true } } })[0].subtitle).toBeNull();
   });
-});
 
-describe("the pips", () => {
-  it("one per child up to nine, then +; amber past a week, aged from the server's today", () => {
-    const kids = Array.from({ length: 11 }, (_, i) => ({ since: i < 3 ? "2026-09-01" : "2026-09-25", when: null }));
-    const { pips, more } = pileAges(kids, TODAY);
-    expect(pips).toHaveLength(9);
-    expect(more).toBe(true);
-    expect(pips.slice(0, 3)).toEqual(["old", "old", "old"]);
-    expect(pips[3]).toBe("new");
+  it("a pile's amount is its children's sum: staff only, never capped, never short a child", () => {
+    const money = [row("invoice_draft", { amount: 1000 }), row("invoice_draft", { amount: 1340 })];
+    expect(roll(money)[0].amount).toBe(2340);
+    expect(roll(money, { isStaff: false })[0].amount).toBeNull();
+    expect(roll(money, { counts: { invoices_not_sent: { capped: true } } })[0].amount).toBeNull();
+    expect(roll(money, { counts: { invoices_not_sent: { total: 3 } } })[0].amount).toBeNull();
+    expect(roll([row("invoice_draft", { amount: 1000 }), row("invoice_draft")])[0].amount).toBeNull();
   });
 });
 

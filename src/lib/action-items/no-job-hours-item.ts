@@ -1,6 +1,6 @@
 import { NO_JOB_READ_CAP, type NoJobHours } from "@/lib/no-job-hours";
 import { formatDateShort } from "@/lib/utils";
-import { AFFORDANCES, KIND_STREAM, type ActionItem } from "./types";
+import { AFFORDANCES, KIND_GROUP, type ActionItem } from "./types";
 
 /**
  * What to do with a shift on no job, in words that match the doors the company actually has: with a
@@ -15,6 +15,12 @@ export function noJobAdvice(companyCode: string | null): string {
 
 /** The rollup's id. Synthetic: open-only, never dispatched (types.ts AFFORDANCES.time_stray). */
 export const NO_JOB_HOURS_ITEM_ID = "stray-no-job";
+
+/** The line that says the shifts could not all be read (a failed read, or a full cap with nothing
+ *  listable in it). Its own id, ending in "-unread", because every Couldn't Check rule keys on that
+ *  suffix (needs-you-rule isUnreadLine, row-buttons, row-words): no button, a sentence never cut,
+ *  no mark, and counted in its tile's "couldn't be checked". */
+export const NO_JOB_HOURS_UNREAD_ID = "stray-no-job-unread";
 
 /** Where the rollup opens: the Timecards Fix These box, where each shift has its doors. */
 export const NO_JOB_HOURS_HREF = "/timecards#no-job";
@@ -34,12 +40,14 @@ export const NO_JOB_HOURS_HREF = "/timecards#no-job";
 export function noJobHoursActionItem(summary: NoJobHours | null | undefined, opts: { tz?: string; failed?: boolean } = {}): ActionItem | null {
   if (opts.failed) {
     return {
-      id: NO_JOB_HOURS_ITEM_ID,
+      id: NO_JOB_HOURS_UNREAD_ID,
       kind: "time_stray",
       chip: "On No Job",
-      stream: KIND_STREAM.time_stray,
+      group: KIND_GROUP.time_stray,
       title: "Hours on No Job · Couldn't Check",
       subtitle: "Couldn't read the shifts that are on no job just now. Open Timecards to see them.",
+      whoSay: { key: "ny_who_unread", vars: { labelKey: "ny_lbl_hoursNoJob" } },
+      what: { key: "ny_w_unreadHours" },
       who: null,
       when: null,
       urgency: 1,
@@ -53,12 +61,14 @@ export function noJobHoursActionItem(summary: NoJobHours | null | undefined, opt
     // THE CAP WAS FULL AND NOTHING IN IT COULD BE LISTED (every one billed, empty or today's): an
     // older shift on no job may still be waiting past it. Not "nothing waiting", so not null.
     return {
-      id: NO_JOB_HOURS_ITEM_ID,
+      id: NO_JOB_HOURS_UNREAD_ID,
       kind: "time_stray",
       chip: "On No Job",
-      stream: KIND_STREAM.time_stray,
+      group: KIND_GROUP.time_stray,
       title: "Hours on No Job · Couldn't List Them All",
       subtitle: `The newest ${NO_JOB_READ_CAP} shifts on no job are all billed, empty or today's, so older ones weren't checked.`,
+      whoSay: { key: "ny_who_hoursNotAllListed" },
+      what: { key: "ny_w_hoursNotAllListed", vars: { n: NO_JOB_READ_CAP } },
       who: null,
       when: null,
       urgency: 1,
@@ -78,11 +88,22 @@ export function noJobHoursActionItem(summary: NoJobHours | null | undefined, opt
     id: NO_JOB_HOURS_ITEM_ID,
     kind: "time_stray",
     chip: "On No Job",
-    stream: KIND_STREAM.time_stray,
+    group: KIND_GROUP.time_stray,
     title: `Hours on No Job · ${shifts.length}${summary?.capped ? "+" : ""}`,
     // ONE COMPANY CODE DECIDES THE WORDS, the same one that draws the Company Time door on
     // Timecards: without a not-billed code there is no such door, so the line never offers it.
     subtitle: `${hours} h ${span}${people.length <= 3 ? ` (${people.join(", ")})` : ""}, on no job and no invoice. ${noJobAdvice(summary?.companyCode ?? null)}`,
+    // The box's words (cn-v1161): the count in words, the hours and their days as a key and its
+    // slots, and up to three first names as the tail (data, never a sentence).
+    whoSay: { key: "ny_who_hoursNoJob", vars: { n: summary?.capped ? `${shifts.length}+` : shifts.length } },
+    what: {
+      key: days[0] === days[days.length - 1] ? "ny_w_hoursOn" : "ny_w_hoursSpan",
+      vars: days[0] === days[days.length - 1] ? { hours, day: days[0] } : { hours, day: days[0], day2: days[days.length - 1] },
+      tail: people.length <= 3 ? people.join(", ") : null,
+    },
+    // Still undated (no deadline), but it has an age: the oldest shift's day, so the week rule can
+    // mark a rollup that has sat a week (needs-you-rule levelOf reads since before when).
+    since: days[0] ?? null,
     who: null,
     // Undated on purpose, like the supplier bills: the oldest shift is weeks old, and a red
     // "overdue" would be a deadline nobody set. The rows on Timecards say their own days.

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { rowButtons, allDoors } from "./row-buttons";
-import { AFFORDANCES, KIND_STREAM, type ActionItem } from "./types";
+import { AFFORDANCES, KIND_GROUP, type ActionItem } from "./types";
 
 /**
  * A TAP OPENS THE INSPECTION, NEVER AN ESTIMATE (the owner, 2026-11-10). /quotes/new?capture= writes
@@ -26,7 +26,7 @@ describe("an inspection_writeup row never points at /quotes/new", () => {
     const item: ActionItem = {
       id: "appt-1",
       kind: "inspection_writeup",
-      stream: KIND_STREAM.inspection_writeup,
+      group: KIND_GROUP.inspection_writeup,
       title: "Row",
       when: null,
       urgency: 1,

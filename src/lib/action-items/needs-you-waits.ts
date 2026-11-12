@@ -82,10 +82,10 @@ export async function readNeedsYouWaits(supabase: any, orgId: string | null, tod
  * stays. Pure.
  */
 export function foldWaitingRows(
-  items: Omit<ActionItem, "stream">[],
+  items: Omit<ActionItem, "group">[],
   waits: NeedsYouWaits["waits"],
-): { now: Omit<ActionItem, "stream">[]; waiting: WaitingItem[] } {
-  const now: Omit<ActionItem, "stream">[] = [];
+): { now: Omit<ActionItem, "group">[]; waiting: WaitingItem[] } {
+  const now: Omit<ActionItem, "group">[] = [];
   const waiting: WaitingItem[] = [];
   for (const it of items) {
     const w = it.waitKey ? waits.get(it.waitKey) : undefined;

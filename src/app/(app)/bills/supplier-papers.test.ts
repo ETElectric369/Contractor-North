@@ -486,12 +486,12 @@ describe("one reading of 'is this paper already in his books?'", () => {
 });
 
 describe("the supplier bills badge as ONE line (the BADGE INVARIANT)", () => {
-  it("any number of cards is one item, in the money stream, open-only", () => {
+  it("any number of cards is one item, in Keep the Books, open-only", () => {
     const f = feedTonight();
     const item = supplierPaperActionItem(f)!;
     expect(item.id).toBe(SUPPLIER_PAPERS_ITEM_ID);
     expect(item.kind).toBe("supplier_paper");
-    expect(item.stream).toBe("money");
+    expect(item.group).toBe("keep_books");
     expect(item.affordances).toEqual(["open"]);
     expect(item.title).toBe(`Supplier Bills · ${f.cards.length}`);
     expect(item.subtitle).toBe(`$${supplierPaperTotals(f.cards).total.toLocaleString("en-US", { minimumFractionDigits: 2 })} from CED, not in your books yet`);

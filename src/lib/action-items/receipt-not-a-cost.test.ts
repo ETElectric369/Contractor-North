@@ -37,7 +37,7 @@ vi.mock("@/lib/supabase/server", () => ({
 
 import { dispatchAction } from "./dispatch";
 import { doorVerb, rowButtons } from "./row-buttons";
-import { AFFORDANCES, KIND_STREAM, type ActionItem } from "./types";
+import { AFFORDANCES, KIND_GROUP, type ActionItem } from "./types";
 import { REGISTRY } from "@/lib/actions/registry";
 import { AGENT_READ_ALLOWED, AGENT_WRITE_ALLOWED, agentWriteToolsForRole } from "@/lib/actions/agent-tools";
 import { actionRisk } from "@/lib/actions/risk";
@@ -49,7 +49,7 @@ import { categoryIsShowable } from "@/lib/portal/doc-kinds";
 const receipt: ActionItem = {
   id: "receipt-doc-1",
   kind: "receipt_unbilled",
-  stream: KIND_STREAM.receipt_unbilled,
+  group: KIND_GROUP.receipt_unbilled,
   title: "Receipt · Jun 18",
   subtitle: "Larkspur · J-014",
   when: null,

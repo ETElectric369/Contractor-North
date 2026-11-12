@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { AFFORDANCES, KIND_STREAM, type ActionItem, type ActionKind, type Affordance } from "./types";
+import { AFFORDANCES, KIND_GROUP, type ActionItem, type ActionKind, type Affordance } from "./types";
 import { allDoors, doorVerb, rowButtons } from "./row-buttons";
 import { recordId, resolveRowVerb } from "./dispatch-map";
 import { REGISTRY } from "@/lib/actions/registry";
@@ -17,7 +17,7 @@ let seq = 0;
 const row = (kind: ActionKind, o: Partial<ActionItem> = {}): ActionItem => ({
   id: `r${++seq}`,
   kind,
-  stream: KIND_STREAM[kind],
+  group: KIND_GROUP[kind],
   title: `Row ${seq}`,
   when: null,
   urgency: 1,
