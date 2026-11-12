@@ -24,7 +24,7 @@ import type { MeasureKind } from "@/lib/quick-measure";
  * A 3D MODEL THAT IS WAITING TAKES THE 3D SCAN ROW'S PLACE. The + holds one model at a time
  * (lib/quick-measure), so while one waits there is nothing to scan into: the row becomes "3D Model ·
  * Not Saved", which opens the sheet on it, and under it, last in the group, the way to let go of it.
- * Letting go ASKS FIRST, IN THE MENU: the house's two taps (inspections/missed-doors), never the
+ * Letting go ASKS FIRST, IN THE MENU: the house's two taps (inspections/inspection-row-menu), never the
  * browser's own dialog, whose buttons are the browser's words in the browser's language. The first
  * tap puts the question where the row was and moves the deed down a line, so a second tap on the same
  * spot lands on the question and does nothing; the deed is red, and Keep It is under it.

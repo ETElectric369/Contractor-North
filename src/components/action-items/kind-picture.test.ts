@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { GROUP_ICON, GROUP_TINT, GroupPicture, KindPicture, PICTURE_ICON, PLAIN_PICTURE, pictureTint } from "./kind-picture";
+import { GROUP_ICON, GROUP_TINT, GroupPicture, KindPicture, PICTURE_ICON, PLAIN_PICTURE, TilePicture, pictureTint } from "./kind-picture";
+import { CalendarClock } from "lucide-react";
 import { KIND_PICTURE } from "@/lib/action-items/kind-picture";
 import { GROUP_ORDER } from "@/lib/action-items/needs-you-rule";
 
@@ -104,5 +105,34 @@ describe("drawn", () => {
       expect(h).toMatch(/^<span aria-hidden="true"[^>]*class="[^"]*\bh-7 w-7\b/);
       expect(h).toContain("h-[18px] w-[18px]");
     }
+  });
+});
+
+/**
+ * ANY TILE'S PICTURE (TilePicture, cn-v1163): the Inspections page's tiles wear it, and Needs You's
+ * GroupPicture is drawn through it. GroupPicture must not change by a byte, so its whole markup for
+ * one tile is pinned here as it was drawn before TilePicture existed.
+ */
+describe("the generic tile picture", () => {
+  const html = (el: ReturnType<typeof createElement>) => renderToStaticMarkup(el);
+
+  it("GroupPicture is byte for byte what it was", () => {
+    expect(html(createElement(GroupPicture, { group: "win_work" }))).toBe(
+      '<span aria-hidden="true" data-group-picture="win_work" data-tint="win_work" class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sky-700"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-trending-up h-[18px] w-[18px]" aria-hidden="true"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline><polyline points="16 7 22 7 22 13"></polyline></svg></span>',
+    );
+    for (const g of GROUP_ORDER) {
+      expect(html(createElement(GroupPicture, { group: g }))).toBe(html(createElement(TilePicture, { icon: GROUP_ICON[g], group: g, "data-group-picture": g })));
+    }
+  });
+
+  it("a group lends its chip and ink; null is plain grey on a pale chip, never slate-400; hidden either way", () => {
+    const tinted = html(createElement(TilePicture, { icon: CalendarClock, group: "win_work" }));
+    expect(tinted).toMatch(/^<span aria-hidden="true" data-tint="win_work" class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sky-700">/);
+    expect(tinted).toContain("lucide-calendar-clock h-[18px] w-[18px]");
+    expect(tinted).not.toContain("data-group-picture");
+    const plain = html(createElement(TilePicture, { icon: CalendarClock, group: null }));
+    expect(plain).toMatch(/^<span aria-hidden="true" class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">/);
+    expect(plain).not.toContain("data-tint");
+    expect(plain).not.toContain("slate-400");
   });
 });

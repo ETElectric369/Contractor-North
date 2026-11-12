@@ -46,11 +46,17 @@ describe("an inspection_writeup row never points at /quotes/new", () => {
 });
 
 describe("every other link to /quotes/new?capture= is an explicit button, never a row body", () => {
-  it("the Inspections list: the link sits around a labelled Button, beside the row's own link to the visit", () => {
+  it("the Inspections list: the link is the row's own labelled verb, beside the row's own link to the visit", () => {
     const page = src("src/app/(app)/inspections/page.tsx");
-    expect(page).toContain("href={`/appointments/${a.id}`}");
-    // The estimate link wraps the labelled button and nothing else.
-    expect(page).toMatch(/<Link href=\{estimateHref\}[^>]*>\s*<Button>[\s\S]*?ip_btn_createEstimate[\s\S]*?<\/Button>\s*<\/Link>/);
+    // The row's body opens the visit; the capture link is only ever the verb Create Estimate.
+    expect(page).toContain("href: `/appointments/${a.id}`,");
+    expect(page).toMatch(/\{ label: t\("ip_btn_createEstimate"\), href: `\/quotes\/new\?capture=\$\{a\.id\}/);
+    // The board draws the row's link around who/what/edge, and the verb as its own link holding its
+    // label and nothing else.
+    const board = src("src/app/(app)/inspections/inspections-board.tsx");
+    expect(board).toMatch(/<Link href=\{row\.href\} [^>]*>/);
+    expect(board).toMatch(/<Link href=\{row\.verb\.href\} [^>]*>\s*\{row\.verb\.label\}\s*<\/Link>/);
+    expect(board.indexOf("<Link href={row.verb.href}")).toBeGreaterThan(board.indexOf("</Link>", board.indexOf("<Link href={row.href}")));
   });
 
   it("the visit page hands the Inspector the href for its Start the Estimate button; nothing else on it links there", () => {

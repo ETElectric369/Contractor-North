@@ -16,9 +16,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     # A wedged run would otherwise burn the 360-minute default against the monthly quota.
-    # 25, not 15: the DB suites run one file at a time (vitest.config.ts, project "db"), which took
-    # ~8 minutes of `npm test` from the Mac; 15 left too little room for install + test + build.
-    timeout-minutes: 25
+    # 45: the DB suites run one file at a time (vitest.config.ts, project "db") against the test
+    # database, and how long they take is that database's mood, not the code's. The Test step took 6
+    # and 9 minutes on two runs of 2026-11-11 and 19.7 on 2026-11-12 (the DB files alone 16.5), when
+    # the 25-minute cap cut a run whose type check and every test had passed, 3 minutes into a build
+    # that takes about 2.5; the re-run passed in 23.5. The cap is for a wedged run, so it sits well
+    # above a slow one.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 

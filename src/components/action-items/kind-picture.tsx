@@ -114,13 +114,22 @@ export function KindPicture({ kind, group, level, done = false }: { kind: Action
   );
 }
 
-/** A TILE'S PICTURE, left of its name: always in the tile's colour, 28px round with an 18px icon. */
-export function GroupPicture({ group }: { group: Group }) {
-  const Icon = GROUP_ICON[group];
-  const tint = GROUP_TINT[group];
+/**
+ * ANY TILE'S PICTURE, left of its name: 28px round with an 18px icon, hidden from a screen reader (the
+ * tile's name says it). `group` lends it that tile colour's chip and ink (the Inspections page's open
+ * tiles wear Sales'); null draws it plain, grey on a pale grey chip. `data-group-picture` is carried
+ * through for Needs You's own tiles, whose tests find a tile's picture by it.
+ */
+export function TilePicture({ icon: Icon, group, "data-group-picture": groupPicture }: { icon: LucideIcon; group: Group | null; "data-group-picture"?: Group }) {
+  const look = group ? `${GROUP_TINT[group].chip} ${GROUP_TINT[group].ink}` : `bg-slate-100 ${PLAIN_PICTURE}`;
   return (
-    <span aria-hidden="true" data-group-picture={group} data-tint={group} className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${tint.chip} ${tint.ink}`}>
+    <span aria-hidden="true" data-group-picture={groupPicture} data-tint={group ?? undefined} className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${look}`}>
       <Icon aria-hidden="true" className="h-[18px] w-[18px]" />
     </span>
   );
+}
+
+/** A NEEDS YOU TILE'S PICTURE: its group's icon, always in the tile's colour. */
+export function GroupPicture({ group }: { group: Group }) {
+  return <TilePicture icon={GROUP_ICON[group]} group={group} data-group-picture={group} />;
 }

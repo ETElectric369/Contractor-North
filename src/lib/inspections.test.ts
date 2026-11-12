@@ -391,3 +391,138 @@ describe("inspectionLabel", () => {
     expect(inspectionLabel(input)).toEqual(want);
   });
 });
+
+/* ── The page's tiles ────────────────────────────────────────────────────────────────────────── */
+import { FILED_TILES, OPEN_TILES, inspectionRowWords, openFirstTile, rowTagWords, tileInspections, tilesOf, type InspectionTile } from "./inspections";
+
+describe("the seven tiles: every inspection under exactly one", () => {
+  type R = { id: string; status: string; starts_at: string | null; inquiry_id: string | null; job_id: string | null; outcome?: string | null; created_at?: string | null };
+  const row = (id: string, o: Partial<R> = {}): R => ({ id, status: "scheduled", starts_at: null, inquiry_id: null, job_id: null, ...o });
+
+  it("names the tiles of each view in drawn order", () => {
+    expect([...OPEN_TILES]).toEqual(["write_up", "coming_up", "needs_day", "missed"]);
+    expect([...FILED_TILES]).toEqual(["completed", "lost", "cancelled"]);
+    expect(tilesOf("open")).toBe(OPEN_TILES);
+    expect(tilesOf("filed")).toBe(FILED_TILES);
+  });
+
+  it("splits upcoming by a start and by whether that start is before today, and orders the waiting ones by the day they were made", () => {
+    // 1 PM Pacific on March 10: "today" began at 07:00Z.
+    const now = new Date("2026-03-10T20:00:00Z");
+    const tiles = tileInspections(
+      {
+        toWriteUp: [row("w1")],
+        upcoming: [
+          row("p-old", { starts_at: "2026-02-20T17:00:00Z", status: "proposed" }), // nobody picked; its day went by
+          row("p-late", { starts_at: "2026-03-08T17:00:00Z", status: "proposed" }),
+          row("d2", { created_at: "2026-03-09T10:00:00Z" }),
+          row("d0"), // no stamp: keeps the end
+          row("d1", { created_at: "2026-03-02T10:00:00Z" }),
+          row("c0", { starts_at: "2026-03-10T15:00:00Z" }), // 8 AM today, already past: still today's
+          row("c1", { starts_at: "2026-03-20T17:00:00Z" }),
+          row("c2", { starts_at: "2026-03-22T17:00:00Z", status: "proposed" }),
+        ],
+        missed: [row("m1", { starts_at: "2026-03-01T17:00:00Z" })],
+        filed: [
+          row("f1", { status: "completed" }),
+          row("f2", { status: "scheduled", outcome: "lost" }),
+          row("f3", { status: "cancelled" }),
+          row("f4", { status: "cancelled", outcome: "no_bid" }),
+        ],
+      },
+      now,
+      "America/Los_Angeles",
+    );
+    const ids = (t: InspectionTile) => tiles[t].map((r) => r.id);
+    expect(ids("write_up")).toEqual(["w1"]);
+    expect(ids("coming_up")).toEqual(["c0", "c1", "c2"]);
+    expect(ids("needs_day")).toEqual(["d1", "d2", "d0"]);
+    // A proposal whose day went by with no pick did not happen: with the missed, newest first.
+    expect(ids("missed")).toEqual(["p-late", "m1", "p-old"]);
+    expect(ids("completed")).toEqual(["f1"]);
+    expect(ids("lost")).toEqual(["f2", "f4"]);
+    expect(ids("cancelled")).toEqual(["f3"]);
+    const all = [...OPEN_TILES, ...FILED_TILES].flatMap(ids);
+    expect(all).toHaveLength(14);
+    expect(new Set(all).size).toBe(14);
+  });
+
+  it("'before today' is the company's midnight: 11 PM yesterday in Truckee is not today, though UTC says it is", () => {
+    const now = new Date("2026-03-10T20:00:00Z");
+    const late = { toWriteUp: [], upcoming: [row("p", { starts_at: "2026-03-10T06:30:00Z", status: "proposed" })], missed: [], filed: [] };
+    expect(tileInspections(late, now, "America/Los_Angeles").missed.map((r) => r.id)).toEqual(["p"]);
+    expect(tileInspections(late, now, "UTC").coming_up.map((r) => r.id)).toEqual(["p"]);
+  });
+
+  it("opens the tile asked for when it is this view's and has rows, else the first with rows, else none", () => {
+    const counts = (o: Partial<Record<InspectionTile, number>>): Record<InspectionTile, number> => ({ write_up: 0, coming_up: 0, needs_day: 0, missed: 0, completed: 0, lost: 0, cancelled: 0, ...o });
+    expect(openFirstTile("open", counts({ coming_up: 2, missed: 1 }))).toBe("coming_up");
+    expect(openFirstTile("open", counts({ coming_up: 2, missed: 1 }), "missed")).toBe("missed");
+    expect(openFirstTile("open", counts({ coming_up: 2 }), "missed")).toBe("coming_up"); // asked for, but empty
+    expect(openFirstTile("open", counts({ coming_up: 2, lost: 4 }), "lost")).toBe("coming_up"); // another view's tile
+    expect(openFirstTile("open", counts({ coming_up: 2 }), "'; drop")).toBe("coming_up");
+    expect(openFirstTile("filed", counts({ write_up: 9, lost: 4 }))).toBe("lost");
+    expect(openFirstTile("filed", counts({ lost: 4, cancelled: 1 }), "cancelled")).toBe("cancelled");
+    expect(openFirstTile("open", counts({ lost: 4 }))).toBeNull();
+  });
+});
+
+describe("a row's words: who in bold, then what, and no pill", () => {
+  it("says the tags as plain words, with no field notes under Write Up only and no 'cancelled' under Cancelled", () => {
+    const es = (k: string) => ({ ip_lib_pendingPick: "por elegir", ip_lib_cancelled: "cancelada", ip_lib_noFieldNotes: "sin notas de campo" })[k] ?? k;
+    expect(rowTagWords({ status: "completed", capture: null }, "write_up")).toEqual(["no field notes"]);
+    expect(rowTagWords({ status: "completed", capture: { notes: "panel is full" } }, "write_up")).toEqual([]);
+    expect(rowTagWords({ status: "scheduled", capture: null }, "coming_up")).toEqual([]);
+    expect(rowTagWords({ status: "proposed" }, "coming_up")).toEqual(["pending pick"]);
+    expect(rowTagWords({ status: "proposed" }, "coming_up", "es", es)).toEqual(["por elegir"]);
+    expect(rowTagWords({ status: "cancelled" }, "cancelled")).toEqual([]);
+    expect(rowTagWords({ status: "cancelled" }, "lost")).toEqual(["cancelled"]);
+    expect(rowTagWords({ status: "cancelled" }, "lost", "es", es)).toEqual(["cancelada"]);
+    expect(rowTagWords({ type: "final_inspection", status: "scheduled" }, "coming_up")).toEqual(["Final Inspection"]);
+    // Every kind but the plain inspection says which it is, first; the plain one says nothing.
+    expect(rowTagWords({ type: "quote", status: "proposed" }, "coming_up")).toEqual(["Quote / Estimate", "pending pick"]);
+    expect(rowTagWords({ type: "inspection", status: "scheduled" }, "coming_up")).toEqual([]);
+    expect(rowTagWords({ type: null, status: "scheduled" }, "coming_up")).toEqual([]);
+    // The tags with their tones are the older rule, kept as it was: a quote visit wears none.
+    expect(inspectionRowTags({ type: "quote", status: "scheduled" })).toEqual([]);
+    // The tags with their tones are the same rule, unchanged.
+    expect(inspectionRowTags({ status: "proposed" })).toEqual([{ tone: "amber", label: "pending pick" }]);
+  });
+
+  it("somebody is named: the name is the who; a typed title, the street and the tags are the what", () => {
+    expect(inspectionRowWords({ title: "Hot tub hookup", typeLabel: "Inspection", customer: "Dana Rook", street: "12 Larkspur Ln, Truckee", tags: ["no field notes"] })).toEqual({
+      who: "Dana Rook",
+      what: "Hot tub hookup · 12 Larkspur Ln, Truckee · no field notes",
+    });
+    // A bare title and a booking door's stamp are not typed titles: the name is never said twice.
+    for (const title of ["Inspection", "inspection:", "Inspection: Dana Rook", "Site inspection: Dana Rook", "", null]) {
+      expect(inspectionRowWords({ title, typeLabel: "Inspection", customer: "Dana Rook", street: "12 Larkspur Ln" })).toEqual({ who: "Dana Rook", what: "12 Larkspur Ln" });
+    }
+    // The phrase begins with a capital even when a tag leads it, in the reader's language.
+    expect(inspectionRowWords({ title: null, typeLabel: "Inspection", customer: "Dana Rook", street: null, tags: ["no field notes"] }).what).toBe("No field notes");
+    expect(inspectionRowWords({ title: null, typeLabel: "Inspección", customer: "Dana Rook", tags: ["sin notas de campo"], lang: "es" }).what).toBe("Sin notas de campo");
+    expect(inspectionRowWords({ title: null, typeLabel: "Inspection", customer: "Dana Rook" })).toEqual({ who: "Dana Rook", what: "" });
+  });
+
+  it("nobody is named: the typed title is the who, else the street, else the type's label", () => {
+    expect(inspectionRowWords({ title: "Generator pad", typeLabel: "Inspection", street: "4 Snowbell Ct", tags: ["pending pick"] })).toEqual({ who: "Generator pad", what: "4 Snowbell Ct · pending pick" });
+    expect(inspectionRowWords({ title: "Inspection", typeLabel: "Inspection", street: "4 Snowbell Ct", tags: ["pending pick"] })).toEqual({ who: "4 Snowbell Ct", what: "Pending pick" });
+    expect(inspectionRowWords({ title: "Inspection: 4 Snowbell Ct", typeLabel: "Inspection", street: "4 Snowbell Ct, Truckee" })).toEqual({ who: "4 Snowbell Ct, Truckee", what: "" });
+    expect(inspectionRowWords({ title: " ", typeLabel: "Quote / Estimate" })).toEqual({ who: "Quote / Estimate", what: "" });
+  });
+
+  it("a tag never repeats the bold line, and a title stamped in English is no typed title for a Spanish reader", () => {
+    // Nobody named, nothing typed: the bold line IS the type's label, so its own tag is left out.
+    expect(inspectionRowWords({ title: "Final Inspection", typeLabel: "Final Inspection", tags: ["Final Inspection", "pending pick"] })).toEqual({ who: "Final Inspection", what: "Pending pick" });
+    // A quote visit whose booking door stamped it: the name once, and the kind in the phrase.
+    expect(inspectionRowWords({ title: "Quote: Sam Tillery", typeLabel: "Quote / Estimate", customer: "Sam Tillery", street: "12 Larkspur Ln", tags: ["Quote / Estimate"] })).toEqual({
+      who: "Sam Tillery",
+      what: "12 Larkspur Ln · Quote / Estimate",
+    });
+    // The stored stamp is English whoever reads it.
+    const es = { title: "Final Inspection", typeLabel: "Inspección Final", customer: "Dana Rook", street: "9 Snowbell Ct", tags: ["Inspección Final"], lang: "es" as const };
+    expect(inspectionRowWords(es).what).toBe("Final Inspection · 9 Snowbell Ct · Inspección Final"); // without the English label it reads as typed
+    expect(inspectionRowWords({ ...es, stampLabels: ["Final Inspection"] })).toEqual({ who: "Dana Rook", what: "9 Snowbell Ct · Inspección Final" });
+    expect(inspectionRowWords({ title: "Final Inspection", typeLabel: "Inspección Final", stampLabels: ["Final Inspection"], tags: ["Inspección Final"], lang: "es" })).toEqual({ who: "Inspección Final", what: "" });
+  });
+});

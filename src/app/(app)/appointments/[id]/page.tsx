@@ -483,7 +483,7 @@ export default async function AppointmentCapturePage({
             />
           )}
           {/* A booked inspection's main button: done, so the Inspections tab moves it to
-              To write up. A completed inspection has none: the Inspector's Start the Estimate
+              the Write Up tile. A completed inspection has none: the Inspector's Start the Estimate
               is its next step. A cancelled visit has none either. */}
           {viewerIsStaff && isInspection && booked && (
             <MarkCompleteButton id={a.id} label={t("vp_btn_markInspectionDone")} />

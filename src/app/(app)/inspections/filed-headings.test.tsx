@@ -1,23 +1,25 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
-import { createElement } from "react";
+import { cloneElement, createElement, isValidElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * THE FILED PILE HAS THREE HEADINGS, AND LOST IS ONE OF THEM (cn-v1158; found by the review of cn-v1157).
+ * THE FILED PILE HAS THREE TILES, AND LOST IS ONE OF THEM (cn-v1158; found by the review of cn-v1157).
  *
- * The Didn't Happen? group asks about a visit that was scheduled, is past and holds no notes, and one
- * of its two answers is Lost. The answer is the visit's outcome; its status stays 'scheduled'. The
- * page then split the filed pile on STATUS alone, anything not cancelled under "Completed & written
- * up", so a visit that never happened was filed as completed and written up. The owner's rule: a
- * visit that did not become work is LOST, everywhere. So the heading is by outcome, whatever the
- * status (lib/inspections filedUnder), and the page draws Completed & written up, Lost, Cancelled, in
- * that order, each only when it has a row.
+ * The Didn't Happen? tile asks about a visit that was scheduled, is past and holds no notes, and one
+ * of its answers is Lost. The answer is the visit's outcome; its status stays 'scheduled'. The page
+ * once split the filed pile on STATUS alone, anything not cancelled under "Completed & written up", so
+ * a visit that never happened was filed as completed and written up. The owner's rule: a visit that
+ * did not become work is LOST, everywhere. So which tile a filed row sits under is by outcome, whatever
+ * the status (lib/inspections filedUnder, through tileInspections), and the Filed view draws
+ * Completed, Lost, Cancelled, in that order; a tile with nothing in it is drawn dimmed with no number.
  *
  * This renders THE PAGE ITSELF against a fake database (made-up people and streets), in English and
- * in Spanish. The page's client doors are drawn as markers: this is about the headings and which
- * rows sit under each.
+ * in Spanish, opening each tile through the board the page built, with that tile first (what the
+ * phone draws when the address's hash names it, the way Back lands on one). The row's ⋯
+ * is drawn as a marker carrying the moves the page handed it: this is about the tiles and which rows
+ * sit under each.
  */
 
 const state = vi.hoisted(() => ({
@@ -56,11 +58,12 @@ vi.mock("next/navigation", () => ({
   },
   useRouter: () => ({ refresh: () => {}, push: () => {}, replace: () => {} }),
   usePathname: () => "/inspections",
-  useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock("@/components/toast", () => ({ useToast: () => () => {} }));
-// The server actions behind the row's doors and the header's two buttons: never called by a render.
-vi.mock("../appointments/actions", () => ({ setAppointmentOutcome: vi.fn(), wontHappenAppointment: vi.fn() }));
+// The row's ⋯, as a marker carrying the moves the page offered on that row.
+vi.mock("./inspection-row-menu", () => ({
+  InspectionRowMenu: ({ row }: { row: { menu: unknown } }) => createElement("span", { "data-menu": JSON.stringify(row.menu) }),
+}));
 vi.mock("../appointments/appointment-button", () => ({
   AppointmentButton: ({ buttonLabel }: { buttonLabel?: string }) => createElement("span", { "data-door": "book" }, buttonLabel),
 }));
@@ -76,6 +79,8 @@ const visit = (id: string, over: Record<string, unknown>) => ({
   title: "Inspection",
   status: "completed",
   starts_at: at("2026-11-03"),
+  ends_at: null,
+  created_at: at("2026-10-20"),
   location: null,
   capture: null,
   inquiry_id: null,
@@ -89,8 +94,8 @@ const visit = (id: string, over: Record<string, unknown>) => ({
 // Became work: on a job. And one somebody marked Won.
 const WRITTEN_UP = visit("done-1", { title: "Panel upgrade", job_id: "job-1", starts_at: at("2026-11-07"), customers: { name: "Sam Tillery" }, location: "12 Larkspur Ln" });
 const WON = visit("won-1", { title: "Hot tub circuit", outcome: "won", starts_at: at("2026-11-06") });
-// THE ROW THIS IS ABOUT: scheduled, past, nothing on it, answered Lost from the Didn't Happen? group.
-// Its stock title gives way to who and where (inspectionLabel), so that is what the row reads.
+// THE ROW THIS IS ABOUT: scheduled, past, nothing on it, answered Lost from the Didn't Happen? tile.
+// Its stock title gives way to who (bold) and where (the phrase under it).
 const NEVER_HAPPENED = visit("lost-missed", { status: "scheduled", outcome: "lost", starts_at: at("2026-11-05"), customers: { name: "Dana Rook" }, location: "9 Snowbell Ct" });
 // Happened, and the bid was lost.
 const LOST_BID = visit("lost-done", { title: "Garage subpanel", outcome: "lost", starts_at: at("2026-11-04"), customers: { name: "Theo Vance" }, location: "4 Bayberry Rd" });
@@ -103,20 +108,35 @@ const CALLED_OFF = visit("cancelled-1", { title: "Service change", status: "canc
 const ALL = [WRITTEN_UP, WON, NEVER_HAPPENED, LOST_BID, LOST_AND_CANCELLED, NO_BID, CALLED_OFF];
 
 const decode = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#x27;|&#39;/g, "'").replace(/\s+/g, " ").trim();
-/** Each drawn pile: its heading, the titles of its rows in order, and its own markup. */
-const piles = (html: string) =>
-  [...html.matchAll(/<section>([\s\S]*?)<\/section>/g)].map((m) => ({
-    heading: decode(/<h2[^>]*>([\s\S]*?)<\/h2>/.exec(m[1])?.[1] ?? ""),
-    rows: [...m[1].matchAll(/<span class="truncate font-medium[^"]*">([\s\S]*?)<\/span>/g)].map((x) => decode(x[1])),
-    html: m[1],
+/** The tiles as drawn: id, name, the number (null when none is drawn), pressed. */
+const tilesOf = (html: string) =>
+  [...html.matchAll(/<button[^>]*data-tile="([^"]+)"[^>]*>([\s\S]*?)<\/button>/g)].map((m) => ({
+    id: m[1],
+    name: decode(/font-semibold leading-tight text-slate-900">([\s\S]*?)<\/span>/.exec(m[2])?.[1] ?? ""),
+    count: /text-xl[^"]*">(\d+)</.exec(m[2])?.[1] ?? null,
+    pressed: /aria-pressed="true"/.test(m[0]),
   }));
+/** The open tile's region: its heading, the who of each row in order, and its own markup. */
+const region = (html: string) => {
+  const m = /<div id="[^"]*" role="region"[^>]*>([\s\S]*)$/.exec(html);
+  const body = m?.[1] ?? "";
+  return {
+    heading: decode(/<h2[^>]*>([\s\S]*?)<\/h2>/.exec(body)?.[1] ?? ""),
+    rows: [...body.matchAll(/data-who="">([\s\S]*?)<\/span>/g)].map((x) => decode(x[1])),
+    html: body,
+  };
+};
 
 let InspectionsPage: (p: { searchParams: Promise<{ view?: string }> }) => Promise<unknown>;
+let InspectionsBoard: unknown;
+let LangProvider: (p: { lang: "en" | "es"; children: React.ReactNode }) => React.ReactElement;
 beforeAll(async () => {
   // The page asks the clock which visits are past: a fixed one, after every fixture's day.
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-11-10T18:00:00Z"));
   InspectionsPage = (await import("./page")).default as any;
+  InspectionsBoard = (await import("./inspections-board")).InspectionsBoard;
+  LangProvider = (await import("@/components/lang-provider")).LangProvider as any;
 }, 30_000);
 afterAll(() => vi.useRealTimers());
 beforeEach(() => {
@@ -124,130 +144,165 @@ beforeEach(() => {
   state.language = undefined;
 });
 
-const render = async (view?: "completed") =>
-  renderToStaticMarkup((await InspectionsPage({ searchParams: Promise.resolve(view ? { view } : {}) })) as React.ReactElement);
+/** The page's tree with its board opening `tile` first; every other element as the page built it. */
+const openOn = (node: unknown, tile: string): unknown => {
+  if (Array.isArray(node)) return node.map((n) => openOn(n, tile));
+  if (!isValidElement(node)) return node;
+  if (node.type === InspectionsBoard) return cloneElement(node as React.ReactElement<any>, { defaultOpen: tile });
+  const kids = (node.props as { children?: unknown }).children;
+  return kids === undefined ? node : cloneElement(node as React.ReactElement<any>, {}, ...([] as React.ReactNode[]).concat(openOn(kids, tile) as React.ReactNode));
+};
+const render = async (view?: "completed", tile?: string) => {
+  let page = (await InspectionsPage({ searchParams: Promise.resolve(view ? { view } : {}) })) as React.ReactElement;
+  if (tile) page = openOn(page, tile) as React.ReactElement;
+  return renderToStaticMarkup(createElement(LangProvider, { lang: state.language === "es" ? "es" : "en", children: page }));
+};
+/** Each filed tile opened in turn: its name, and the who of its rows. */
+const filedRows = async () => {
+  const out: [string, string[]][] = [];
+  for (const id of ["completed", "lost", "cancelled"]) {
+    const html = await render("completed", id);
+    const tile = tilesOf(html).find((x) => x.id === id)!;
+    out.push([tile.name, tile.pressed ? region(html).rows : []]);
+  }
+  return out;
+};
 
-describe("the filed pile: Completed & written up, Lost, Cancelled", () => {
-  it("English: the three headings in that order, each row under the one its OUTCOME names", async () => {
-    const drawn = piles(await render("completed"));
-    expect(drawn.map((p) => [p.heading, p.rows])).toEqual([
-      ["Completed & written up", ["Panel upgrade", "Hot tub circuit"]],
+describe("the filed tiles: Completed, Lost, Cancelled", () => {
+  it("English: the three tiles in that order, each row under the one its OUTCOME names", async () => {
+    const html = await render("completed");
+    expect(tilesOf(html).map((x) => [x.id, x.name, x.count])).toEqual([
+      ["completed", "Completed", "2"],
+      ["lost", "Lost", "4"],
+      ["cancelled", "Cancelled", "1"],
+    ]);
+    expect(await filedRows()).toEqual([
+      ["Completed", ["Sam Tillery", "Hot tub circuit"]],
       // Whatever the status: still scheduled, completed, cancelled; lost and the old no_bid alike.
-      ["Lost", ["Dana Rook · 9 Snowbell Ct", "Garage subpanel", "Car charger", "Deck lighting"]],
+      ["Lost", ["Dana Rook", "Theo Vance", "Casey Loam", "Deck lighting"]],
       ["Cancelled", ["Service change"]],
     ]);
   });
 
-  it("Spanish: Terminadas y redactadas, Perdidas, Canceladas, over the same rows, with no English heading left", async () => {
+  it("Spanish: Terminadas, Perdidas, Canceladas, over the same rows, with no English tile name left", async () => {
     state.language = "es";
-    const drawn = piles(await render("completed"));
-    expect(drawn.map((p) => [p.heading, p.rows])).toEqual([
-      ["Terminadas y redactadas", ["Panel upgrade", "Hot tub circuit"]],
-      ["Perdidas", ["Dana Rook · 9 Snowbell Ct", "Garage subpanel", "Car charger", "Deck lighting"]],
+    const rows = await filedRows();
+    expect(rows).toEqual([
+      ["Terminadas", ["Sam Tillery", "Hot tub circuit"]],
+      ["Perdidas", ["Dana Rook", "Theo Vance", "Casey Loam", "Deck lighting"]],
       ["Canceladas", ["Service change"]],
     ]);
-    for (const p of drawn) expect(p.heading).not.toMatch(/Lost|Cancelled|Completed|written/);
+    for (const [name] of rows) expect(name).not.toMatch(/Lost|Cancelled|Completed|written/);
   });
 
-  it("the visit that never happened is no longer filed as completed and written up, in either language", async () => {
+  it("the visit that never happened is not filed as completed and written up, in either language", async () => {
     for (const lang of [undefined, "es"]) {
       state.language = lang;
-      const [completed, lost] = piles(await render("completed"));
-      expect(completed.rows, String(lang)).not.toContain("Dana Rook · 9 Snowbell Ct");
-      expect(completed.html, String(lang)).not.toContain('href="/appointments/lost-missed"');
-      expect(lost.html, String(lang)).toContain('href="/appointments/lost-missed"');
+      expect(region(await render("completed", "completed")).html, String(lang)).not.toContain('href="/appointments/lost-missed"');
+      expect(region(await render("completed", "lost")).html, String(lang)).toContain('href="/appointments/lost-missed"');
     }
   });
 
-  it("every filed row is drawn once, under one heading", async () => {
-    const html = await render("completed");
-    for (const v of ALL) expect(html.split(`href="/appointments/${v.id}"`).length - 1, String(v.id)).toBe(1);
-    expect(piles(html).flatMap((p) => p.rows)).toHaveLength(ALL.length);
+  it("every filed row is drawn once, under one tile", async () => {
+    const seen: string[] = [];
+    for (const id of ["completed", "lost", "cancelled"]) {
+      const html = region(await render("completed", id)).html;
+      for (const v of ALL) if (html.includes(`href="/appointments/${v.id}"`)) seen.push(String(v.id));
+      for (const v of ALL) expect(html.split(`href="/appointments/${v.id}"`).length - 1, `${id} ${v.id}`).toBeLessThanOrEqual(1);
+    }
+    expect(seen.sort()).toEqual(ALL.map((v) => String(v.id)).sort());
   });
 });
 
-describe("a group with no rows draws no heading", () => {
-  const headings = async () => piles(await render("completed")).map((p) => p.heading);
+describe("a tile with no rows is drawn dimmed, with no number", () => {
+  /** The tiles that have a number, by name. */
+  const counted = async () => tilesOf(await render("completed")).filter((x) => x.count !== null).map((x) => x.name);
 
   it("only lost rows: Lost alone", async () => {
     state.visits = structuredClone([NEVER_HAPPENED, NO_BID]);
-    expect(await headings()).toEqual(["Lost"]);
+    expect(await counted()).toEqual(["Lost"]);
     state.language = "es";
-    expect(await headings()).toEqual(["Perdidas"]);
+    expect(await counted()).toEqual(["Perdidas"]);
   });
 
-  it("nothing lost: the two headings the page always had, and no Lost between them", async () => {
+  it("nothing lost: Completed and Cancelled, and no number on Lost between them", async () => {
     state.visits = structuredClone([WRITTEN_UP, WON, CALLED_OFF]);
-    expect(await headings()).toEqual(["Completed & written up", "Cancelled"]);
+    expect(await counted()).toEqual(["Completed", "Cancelled"]);
     state.language = "es";
-    expect(await headings()).toEqual(["Terminadas y redactadas", "Canceladas"]);
+    expect(await counted()).toEqual(["Terminadas", "Canceladas"]);
   });
 
-  it("only one group at a time, each of the other two", async () => {
+  it("only one tile at a time, each of the other two", async () => {
     state.visits = structuredClone([WRITTEN_UP]);
-    expect(await headings()).toEqual(["Completed & written up"]);
+    expect(await counted()).toEqual(["Completed"]);
     state.visits = structuredClone([CALLED_OFF]);
-    expect(await headings()).toEqual(["Cancelled"]);
+    expect(await counted()).toEqual(["Cancelled"]);
   });
 
   it("a cancelled visit marked Lost empties Cancelled, not Lost", async () => {
     state.visits = structuredClone([LOST_AND_CANCELLED]);
-    expect(await headings()).toEqual(["Lost"]);
+    expect(await counted()).toEqual(["Lost"]);
   });
 
-  it("nothing filed at all: the empty state, and no heading", async () => {
+  it("nothing filed at all: the empty state, and no tile", async () => {
     state.visits = [];
     const html = await render("completed");
-    expect(piles(html)).toEqual([]);
+    expect(tilesOf(html)).toEqual([]);
     expect(decode(html)).toContain("Nothing filed away yet");
   });
 });
 
 describe("the rows keep their own row and doors", () => {
-  it("a filed row opens its visit and carries no button: no Create Estimate, no Didn't Happen, no Lost", async () => {
-    const drawn = piles(await render("completed"));
-    for (const p of drawn) {
-      expect(p.html, p.heading).not.toMatch(/<button/);
-      expect(p.html, p.heading).not.toContain("/quotes/new");
+  it("a filed row opens its visit and carries no button: no Create Estimate, no verb, no ⋯", async () => {
+    for (const id of ["completed", "lost", "cancelled"]) {
+      const r = region(await render("completed", id));
+      expect(r.html, id).not.toMatch(/<button/);
+      expect(r.html, id).not.toContain("/quotes/new");
+      expect(r.html, id).not.toContain("data-verb");
+      expect(r.html, id).not.toContain("data-menu");
     }
-    expect(drawn[1].html).toContain('href="/appointments/lost-done"');
+    expect(region(await render("completed", "lost")).html).toContain('href="/appointments/lost-done"');
   });
 
-  it("the cancelled visit under Lost still says it was cancelled, on its own row (the row's one tag rule)", async () => {
-    const [, lost, cancelled] = piles(await render("completed"));
+  it("the cancelled visit under Lost still says it was cancelled, on its own row; under Cancelled the tile says it", async () => {
+    const lost = region(await render("completed", "lost"));
     expect(decode(lost.html).match(/\bcancelled\b/g)).toHaveLength(1);
-    expect(decode(cancelled.html).match(/\bcancelled\b/g)).toHaveLength(1);
+    const cancelled = region(await render("completed", "cancelled"));
+    // The rows say no "cancelled" of their own: the tile's name and its heading already do.
+    expect(decode(cancelled.html.replace(/<h2[\s\S]*?<\/h2>/, "")).match(/\bcancelled\b/gi)).toBeNull();
+    expect(cancelled.heading).toBe("Cancelled · 1");
     state.language = "es";
-    const [, perdidas] = piles(await render("completed"));
+    const perdidas = region(await render("completed", "lost"));
     expect(decode(perdidas.html).match(/\bcancelada\b/g)).toHaveLength(1);
   });
 
-  it("the open view: the answered visit is in none of the open piles; one nobody answered still asks", async () => {
+  it("the open view: the answered visit is in none of the open tiles; one nobody answered still asks", async () => {
     const unanswered = visit("missed-1", { status: "scheduled", title: "Attic fan", starts_at: at("2026-11-06") });
     state.visits = structuredClone([...ALL, unanswered]);
-    const drawn = piles(await render());
-    expect(drawn.map((p) => [p.heading, p.rows])).toEqual([["Didn't Happen?", ["Attic fan"]]]);
-    // Its two answers are still the row's doors.
-    expect([...drawn[0].html.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)].map((m) => decode(m[1]))).toEqual(["Didn't Happen", "Lost"]);
+    const html = await render();
+    expect(tilesOf(html).map((x) => [x.id, x.count])).toEqual([
+      ["write_up", null],
+      ["coming_up", null],
+      ["needs_day", null],
+      ["missed", "1"],
+    ]);
+    const r = region(html);
+    expect([r.heading, r.rows]).toEqual(["Didn't Happen? · 1", ["Attic fan"]]);
+    // Its answers are still the row's: in its ⋯, It Happened and Lost beside Move and Delete.
+    expect(r.html).toContain(`data-menu="${JSON.stringify({ move: true, happened: true, lost: true, del: true }).replace(/"/g, "&quot;")}"`);
   });
 });
 
-describe("in the source: ONE rule decides the heading", () => {
+describe("in the source: ONE rule decides the tile", () => {
   const page = readFileSync(join(process.cwd(), "src/app/(app)/inspections/page.tsx"), "utf8");
 
-  it("each filed row is placed once by filedUnder; the page tests no status and no outcome of its own for it", () => {
-    expect(page).toMatch(/import \{[^}]*\bfiledUnder\b[^}]*\} from "@\/lib\/inspections";/);
-    expect(page).toContain("const filedBy: Record<FiledUnder, typeof filed> = { completed: [], lost: [], cancelled: [] };");
-    expect(page).toContain("for (const r of filed) filedBy[filedUnder(r)].push(r);");
+  it("each row is placed once by tileInspections (filedUnder within it); the page tests no status and no outcome of its own", () => {
+    expect(page).toMatch(/import \{[^}]*\btileInspections\b[^}]*\} from "@\/lib\/inspections";/);
+    expect(page).toContain("const byTile = tileInspections({ toWriteUp, upcoming, missed, filed }, now, tz);");
     expect(page).not.toMatch(/\.status\s*[!=]==\s*"cancelled"/);
     expect(page).not.toMatch(/\.outcome\b/);
-  });
-
-  it("the three headings are drawn in order, each behind its own rows, each from the catalog", () => {
-    const order = ['filedBy.completed.length > 0 && <Section title={t("ip_completedWrittenUp")}', 'filedBy.lost.length > 0 && <Section title={t("ip_lost")}', 'filedBy.cancelled.length > 0 && <Section title={t("ip_cancelled")}'];
-    const found = order.map((s) => page.indexOf(s));
-    expect(found.every((i) => i > 0)).toBe(true);
-    expect([...found].sort((a, b) => a - b)).toEqual(found);
+    // The filed tiles are drawn in the library's order (FILED_TILES), never a list of the page's own.
+    expect(page).toContain("tilesOf(view).map(");
   });
 
   it("the page reads the outcome with its rows: the column is in its select, beside the status", () => {
@@ -257,11 +312,12 @@ describe("in the source: ONE rule decides the heading", () => {
     expect(cols).toContain("status");
   });
 
-  it("the heading's words: Lost and Perdidas, a pile's name beside Terminadas and Canceladas; the row's button stays Perdida", async () => {
+  it("the tile's words: Lost and Perdidas, a pile's name beside Terminadas and Canceladas; the row's answer stays Perdida", async () => {
     const { translator } = await import("@/lib/i18n");
-    expect(translator("en")("ip_lost")).toBe("Lost");
-    expect(translator("es")("ip_lost")).toBe("Perdidas");
+    expect(translator("en")("ip_btn_tileLost")).toBe("Lost");
+    expect(translator("es")("ip_btn_tileLost")).toBe("Perdidas");
     expect(translator("es")("ip_btn_lost")).toBe("Perdida");
-    expect(translator("es")("ip_cancelled")).toBe("Canceladas");
+    expect(translator("es")("ip_btn_tileCancelled")).toBe("Canceladas");
+    expect(translator("es")("ip_btn_tileCompleted")).toBe("Terminadas");
   });
 });

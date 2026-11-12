@@ -183,17 +183,30 @@ describe("every tab count in the app is an open count", () => {
  * front is [a customer] tagged Done while it sits in the open box"). /inspections draws ONE row
  * component for the open piles and the filed pile, and its green Done pill came off
  * `status === "completed"` alone — so every row of "To write up", Create Estimate button and all,
- * said it was finished. The tags now come from ONE rule (lib/inspections inspectionRowTags) and the
- * page writes none of its own, which is what stops the next one riding into the wrong pile.
+ * said it was finished. The tags come from ONE rule (lib/inspections, inspectionRowTags and its plain-
+ * words twin rowTagWords) and the page writes none of its own, which is what stops the next one riding
+ * into the wrong pile. Since the page became tiles (cn-v1163) a row draws no pill at all: what a pill
+ * said is said in the row's phrase, handed to it by that rule.
  */
 describe("the open Inspections pile wears no Done pill", () => {
-  it("every tag on a row comes from the one rule — the page writes none itself", () => {
+  it("every tag on a row comes from the one rule — the page and its board write none themselves", () => {
     const page = read("app/(app)/inspections/page.tsx");
-    // The one rule, handed the reader's language and translator since cn-v1146 (the tags' words only).
-    expect(page).toContain("{inspectionRowTags(a, writeUp, lang, t).map((tag) => (");
-    // One <Badge> on the page, and it is the mapped one. A tag written inline here is the bug.
-    expect([...page.matchAll(/<Badge\b/g)].length).toBe(1);
-    expect(page).not.toMatch(/<Badge[^>]*tone="/);
+    const board = read("app/(app)/inspections/inspections-board.tsx");
+    // The one rule, handed the row's tile, the reader's language and translator (the tags' words only).
+    expect(page).toContain("tags: rowTagWords(a, tile, lang, t),");
+    // No pill on the page or its board. A tag written inline there is the bug.
+    for (const f of [page, board]) {
+      expect(f).not.toMatch(/<Badge\b/);
+      expect(f).not.toMatch(/\bDone\b/);
+    }
+  });
+
+  it("the rule says no Done on a completed visit, under any tile", async () => {
+    const { rowTagWords, OPEN_TILES, FILED_TILES } = await import("../src/lib/inspections");
+    for (const tile of [...OPEN_TILES, ...FILED_TILES]) {
+      const words = rowTagWords({ type: "inspection", status: "completed", capture: null }, tile);
+      expect(words.join(" "), tile).not.toMatch(/done/i);
+    }
   });
 });
 

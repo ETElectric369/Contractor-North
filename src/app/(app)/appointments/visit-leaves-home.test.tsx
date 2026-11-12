@@ -34,10 +34,22 @@ import { join } from "node:path";
  */
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }) }));
 vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
-vi.mock("./actions", () => ({ setAppointmentOutcome: vi.fn(), wontHappenAppointment: vi.fn() }));
+vi.mock("@/components/use-org-public-base", () => ({ useOrgPublicBase: () => "" }));
+vi.mock("../schedule/actions", () => ({ moveJobDay: vi.fn() }));
+vi.mock("./actions", () => ({
+  setAppointmentOutcome: vi.fn(),
+  wontHappenAppointment: vi.fn(),
+  setAppointmentStatus: vi.fn(),
+  rescheduleAppointment: vi.fn(),
+  createAppointment: vi.fn(),
+  updateAppointment: vi.fn(),
+  deleteAppointment: vi.fn(),
+  createJobFromAppointment: vi.fn(),
+  createAppointmentProposal: vi.fn(),
+}));
 
 const { LangProvider } = await import("@/components/lang-provider");
-const { MissedDoors, MissedDoorsView } = await import("../inspections/missed-doors");
+const { InspectionRowMenu, InspectionRowMenuView } = await import("../inspections/inspection-row-menu");
 
 const src = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
 const decode = (s: string) => s.replace(/&#x27;|&#39;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
@@ -107,38 +119,56 @@ describe("⋯ › Edit Details… › Delete leaves with its sheet still open: n
   });
 });
 
-describe("the Didn't Happen? row asks in the row, never in the browser's own dialog", () => {
-  const doors = src("src/app/(app)/inspections/missed-doors.tsx");
+describe("an inspection row's Delete… asks in its sheet, never in the browser's own dialog", () => {
+  const doors = src("src/app/(app)/inspections/inspection-row-menu.tsx");
   const noop = () => {};
   const face = (asking: boolean, lang: "en" | "es", pending = false) =>
     renderToStaticMarkup(
       <LangProvider lang={lang}>
-        <MissedDoorsView asking={asking} pending={pending} onAsk={noop} onDidntHappen={noop} onKeep={noop} onLost={noop} />
+        <InspectionRowMenuView
+          doors={["move", "happened", "lost", "del"]}
+          asking={asking}
+          pending={pending}
+          onPickDay={async () => ({ ok: true })}
+          onHappened={noop}
+          onLost={noop}
+          onAsk={noop}
+          onDelete={noop}
+          onKeep={noop}
+        />
       </LangProvider>,
     );
 
   it("no confirm() in the file: the first tap opens the question, the second is the deed", () => {
     expect(doors).not.toMatch(/\bconfirm\s*\(/);
     expect(doors).toContain("onAsk={() => setAsking(true)}");
-    expect(doors).toContain("onDidntHappen={didntHappen}");
+    expect(doors).toMatch(/onDelete=\{\(\) => start\(\(\) => deleteTheVisit\(row\.id,/);
     expect(doors).toContain("onKeep={() => setAsking(false)}");
     // The deed is the one rule the visit's page runs, with nothing between the tap and it.
-    expect(doors).toMatch(/const didntHappen = \(\) =>\s*start\(async \(\) => \{\s*const res = await wontHappenAppointment\(id\);/);
+    expect(doors).toMatch(/export async function deleteTheVisit\([\s\S]*?\{\s*let res[^;]*;\s*try \{\s*res = await deps\.wontHappen\(id\);/);
+    expect(doors).toMatch(/deps: \{ wontHappen: typeof wontHappenAppointment; setStatus: typeof setAppointmentStatus \} = \{\s*wontHappen: wontHappenAppointment,/);
   });
 
-  it("resting: Didn't Happen and Lost; asking: the question, the deed in red and Keep It (Title Case, both languages)", () => {
-    expect(buttons(face(false, "en"))).toEqual(["Didn't Happen", "Lost"]);
-    expect(buttons(face(false, "es"))).toEqual(["No Se Hizo", "Perdida"]);
+  it("resting: the sheet's rows; asking: the question, the deed in red and Keep It (Title Case, both languages)", () => {
+    expect(buttons(face(false, "en"))).toEqual(["Move to Another Day…", "It Happened: Write It Up", "Lost", "Delete…"]);
+    expect(buttons(face(false, "es"))).toEqual(["Mover a Otro Día…", "Sí Se Hizo: Redactarla", "Perdida", "Eliminar…"]);
     const en = face(true, "en");
-    expect(text(en)).toContain("This visit didn't happen? It is removed if nothing was captured on it, otherwise it is cancelled and kept on file.");
-    expect(buttons(en)).toEqual(["Didn't Happen", "Keep It"]);
-    expect(en).toMatch(/<button[^>]*text-red-600[^>]*>Didn&#x27;t Happen<\/button>/);
+    expect(text(en)).toContain("Delete this visit? It is removed if nothing is on it. If anything is (notes, an estimate, an invoice, a time-pick link), it is cancelled and kept on file.");
+    expect(buttons(en)).toEqual(["Delete", "Keep It"]);
+    expect(en).toMatch(/<button[^>]*text-red-600[^>]*>Delete<\/button>/);
     const es = face(true, "es");
-    expect(text(es)).toContain("¿Esta visita no se hizo? Se elimina si no se capturó nada en ella; si no, se cancela y se conserva en el archivo.");
-    expect(buttons(es)).toEqual(["No Se Hizo", "Dejarla"]);
-    expect(es).not.toMatch(/Didn|Keep It|Lost/);
-    // The door as the list mounts it starts at rest.
-    expect(buttons(renderToStaticMarkup(createElement(MissedDoors, { id: "a1" })))).toEqual(["Didn't Happen", "Lost"]);
+    expect(text(es)).toContain("¿Eliminar esta visita? Se elimina si no tiene nada. Si tiene algo (notas, un presupuesto, una factura, un enlace para elegir hora), se cancela y se conserva en el archivo.");
+    expect(buttons(es)).toEqual(["Eliminar", "Dejarla"]);
+    expect(es).not.toMatch(/Delete|Keep It|Lost/);
+    // The door as the list mounts it is the one ⋯, and its sheet starts at rest (it opens closed).
+    const mounted = renderToStaticMarkup(
+      createElement(InspectionRowMenu, {
+        row: { id: "a1", who: "Dana Rook", what: "", menu: { move: false, happened: false, lost: true, del: true }, startsAt: null, endsAt: null },
+        tz: "America/Los_Angeles",
+      }),
+    );
+    expect(mounted.match(/<button/g)).toHaveLength(1);
+    expect(mounted).toContain('aria-label="More for Dana Rook"');
   });
 
   it("while the deed is out both buttons wait, and the deed says so", () => {
@@ -149,6 +179,14 @@ describe("the Didn't Happen? row asks in the row, never in the browser's own dia
 
   it("on the list the row leaves and the person stays: the list re-reads, and nothing navigates", () => {
     expect(doors).not.toMatch(/router\.(push|replace|back)\(/);
-    expect(doors.match(/router\.refresh\(\)/g)).toHaveLength(3); // the deed, its refusal (a stale row re-reads), and Lost
+    // One re-read for every deed: the list's router.refresh, handed to each deed as io.refresh.
+    expect(doors.match(/router\.refresh\(\)/g)).toHaveLength(1);
+    expect(doors).toContain("refresh: () => router.refresh()");
+    const del = doors.slice(doors.indexOf("export async function deleteTheVisit"), doors.indexOf("export async function moveTheVisit"));
+    // The deed re-reads, and so does its refusal (a stale row): said, the sheet closed, then the
+    // re-read, through the one helper every deed's refusal takes.
+    expect(del.match(/io\.refresh\(\)/g)).toHaveLength(1);
+    expect(del).toContain('if (!res.ok || !res.did) return refused(io, res.error ?? io.t("vp_thatVisitDidntChange"));');
+    expect(doors).toMatch(/function refused\(io: DoorIo, sentence: string\) \{\s*io\.toast\(sentence, "error"\);\s*io\.close\(\);\s*io\.refresh\(\);\s*\}/);
   });
 });

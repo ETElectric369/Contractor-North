@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1163", date: "2026-11-12", line: "Inspections is drawn as tiles: Write Up, Coming Up, Needs a Day, Didn't Happen?; under Filed: Completed, Lost, Cancelled. Each row has one small ⋯ in place of the two big buttons." },
   { version: "cn-v1162", date: "2026-11-12", line: "Needs You: amber now means a real day is close or just passed, and reads Due; every row has a picture of what there is to do; the tiles are Get Paid, Sales, Operations, Bookkeeping, each in a colour." },
   { version: "cn-v1161", date: "2026-11-11", line: "Needs You is redrawn: a Now strip, four tiles that open one at a time (Get Paid, Win Work, Run the Jobs, Keep the Books), a mark only where one is earned; each row says who, what and how much." },
   { version: "cn-v1160", date: "2026-11-11", line: "Measure, Measure Area and 3D Scan are in the + menu; papers put the address under the customer's name beside the job site; a job takes its estimate's scope; the circuit card shows only when used." },

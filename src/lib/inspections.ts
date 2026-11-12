@@ -3,21 +3,27 @@
  * whole promise is TRUTHFUL buckets (Erik's design 2026-07-14: open work first, settled
  * paperwork files away like estimates do).
  *
- *   • "To write up" — the money bucket: the visit happened (status completed, or its time
+ *   • toWriteUp — the money bucket: the visit happened (status completed, or its time
  *     is past AND field capture exists — capture is what makes an unmarked visit "done")
  *     but no estimate exists yet on its inquiry or job. Each row's next step is one
- *     button: Create estimate.
- *   • "Upcoming & proposed" — scheduled/proposed visits that are still ahead (or today).
- *   • "Didn't Happen?" (missed) — a visit still 'scheduled' on a day before today with NO capture and
- *     nothing written from it: it may never have happened, so it asks, one tap from Didn't Happen.
- *   • Filed — everything settled, behind the ?view=completed toggle, under three headings by ONE
+ *     verb: Create Estimate.
+ *   • upcoming — scheduled/proposed visits that are still ahead (or today), and a visit with no day.
+ *   • missed — a visit still 'scheduled' on a day before today with NO capture and nothing written
+ *     from it: it may never have happened, so the page asks (its Didn't Happen? tile).
+ *   • filed — everything settled, behind the ?view=completed toggle, under three headings by ONE
  *     rule (filedUnder): completed and written up, lost (by OUTCOME, whatever the status), cancelled.
  *
  * The tags a row wears live here too (inspectionRowTags), for the same reason: one rule, one place.
+ *
+ * THE PAGE DRAWS THE PILES AS TILES (tileInspections): Write Up, Coming Up, Needs a Day and Didn't
+ * Happen? for open work; Completed, Lost and Cancelled for what is filed. Which tile a visit sits
+ * under, which tile opens first and what a row says (inspectionRowWords) are decided here, so the
+ * page and its tests read one rule.
  */
 import { appointmentTypeLabel } from "@/lib/statuses";
 import type { Lang } from "@/lib/locale";
 import { say, type Words } from "@/lib/lang-words";
+import { isStockBookingTitle } from "@/lib/schedule/work-shape";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 
 export interface InspectionBucketRow {
@@ -52,9 +58,10 @@ export function hasCaptureData(capture: unknown): boolean {
   return filled(c.notes) || filled(c.measurements) || filled(c.materials) || some(c.photos) || some(c.items) || some(c.measures);
 }
 
-/** One tag on an Inspections row: what it says, and the Badge tone it says it in. The tone names
+/** One tag on an Inspections row: what it says, and the Badge tone it would say it in. The tone names
  *  are components/ui/badge's `Tone`, spelled out here so this module stays pure (no component
- *  import); the page's `<Badge tone={t.tone}>` is what checks the two against each other. */
+ *  import). The page draws no pill (it says the tags in the row's phrase, rowTagWords); the tones are
+ *  kept for a caller that draws one. */
 export interface InspectionRowTag {
   tone: "indigo" | "amber" | "slate";
   label: string;
@@ -67,28 +74,37 @@ export interface InspectionRowTag {
  *
  * THERE IS NO "done" TAG, and that is the rule. Report 8592392b (2026-10-02): "glaring on the front
  * is [a customer] tagged Done while it sits in the open box." The green pill was drawn from
- * `status === "completed"` alone, so every row of "To write up" — the OPEN pile, each row carrying a
- * Create Estimate button — advertised itself as finished work. BADGES AND TAGS SHOW ONLY WHAT IS
- * OPEN. Nothing is lost by dropping it: every heading on this page already says the bucket ("To
- * write up", "Completed & written up", "Lost", "Cancelled").
+ * `status === "completed"` alone, so every row of the write-up pile — the OPEN pile, each row carrying
+ * a Create Estimate button — advertised itself as finished work. BADGES AND TAGS SHOW ONLY WHAT IS
+ * OPEN. Nothing is lost by dropping it: every tile on the page already says the pile (Write Up,
+ * Completed, Lost, Cancelled).
  */
 export function inspectionRowTags(
   row: { type?: string | null; status: string; capture?: unknown },
-  /** The row is in "To write up", the one pile where a visit with no field notes is worth saying. */
+  /** The row is under Write Up, the one pile where a visit with no field notes is worth saying. */
   writeUp = false,
   /** The reader's language and translator (the Ventas-2 wave, cn-v1146): English, the default, is the
    *  tags' words byte for byte; a Spanish caller's translator reads lib/words/inspections' ip_lib_…. */
   lang: Lang = "en",
   words?: Words,
 ): InspectionRowTag[] {
-  const tags: InspectionRowTag[] = [];
+  return keyedTags(row, writeUp, lang, words).map(({ tone, label }) => ({ tone, label }));
+}
+
+/** A tag and which of the four it is, so a reader can leave one out by what it IS, never by its words. */
+type KeyedTag = InspectionRowTag & { key: "type" | "pending" | "cancelled" | "noNotes" };
+
+/** The one list both readers draw from: inspectionRowTags (a tag with its tone) and rowTagWords (the
+ *  same tags as plain words, for a row that says them in its phrase). */
+function keyedTags(row: { type?: string | null; status: string; capture?: unknown }, writeUp: boolean, lang: Lang, words?: Words): KeyedTag[] {
+  const tags: KeyedTag[] = [];
   // The CITY'S inspection on a permit (type final_inspection) is a different animal from the site
   // visit before a price (type inspection), and this list
   // holds both (ESTIMATE_VISIT_TYPES), so the row says which one it is.
-  if (row.type === "final_inspection") tags.push({ tone: "indigo", label: appointmentTypeLabel(row.type, lang, words) });
-  if (row.status === "proposed") tags.push({ tone: "amber", label: say(lang, words, "ip_lib_pendingPick", "pending pick") });
-  if (row.status === "cancelled") tags.push({ tone: "slate", label: say(lang, words, "ip_lib_cancelled", "cancelled") });
-  if (writeUp && !hasCaptureData(row.capture)) tags.push({ tone: "slate", label: say(lang, words, "ip_lib_noFieldNotes", "no field notes") });
+  if (row.type === "final_inspection") tags.push({ key: "type", tone: "indigo", label: appointmentTypeLabel(row.type, lang, words) });
+  if (row.status === "proposed") tags.push({ key: "pending", tone: "amber", label: say(lang, words, "ip_lib_pendingPick", "pending pick") });
+  if (row.status === "cancelled") tags.push({ key: "cancelled", tone: "slate", label: say(lang, words, "ip_lib_cancelled", "cancelled") });
+  if (writeUp && !hasCaptureData(row.capture)) tags.push({ key: "noNotes", tone: "slate", label: say(lang, words, "ip_lib_noFieldNotes", "no field notes") });
   return tags;
 }
 
@@ -236,4 +252,142 @@ export function bucketInspections<T extends InspectionBucketRow>(
   out.missed.sort((a, b) => time(b) - time(a));
   out.filed.sort((a, b) => time(b) - time(a));
   return out;
+}
+
+/* ── THE PAGE'S TILES ───────────────────────────────────────────────────────────────────────────── */
+
+/** The four piles of open work, in the order the page draws their tiles. An id is never shown. */
+export const OPEN_TILES = ["write_up", "coming_up", "needs_day", "missed"] as const;
+/** The filed pile's three headings as tiles: filedUnder's own words, in the order they are drawn. */
+export const FILED_TILES = ["completed", "lost", "cancelled"] as const satisfies readonly FiledUnder[];
+export type OpenTile = (typeof OPEN_TILES)[number];
+export type FiledTile = (typeof FILED_TILES)[number];
+export type InspectionTile = OpenTile | FiledTile;
+/** The page's two views: open work, and what is filed (the URL still says ?view=completed for it). */
+export type InspectionsView = "open" | "filed";
+
+/** The tiles of a view, in the order they are drawn. */
+export function tilesOf(view: InspectionsView): readonly InspectionTile[] {
+  return view === "filed" ? FILED_TILES : OPEN_TILES;
+}
+
+/**
+ * EVERY INSPECTION UNDER EXACTLY ONE TILE, from the buckets bucketInspections made (which My Day's
+ * Needs You reads too, so the two can never disagree about what is open).
+ *
+ *   write_up    the visit happened and nothing was written from it: oldest first.
+ *   coming_up   today or later, booked or proposed and waiting on the customer's pick: soonest first.
+ *   needs_day   booked with no day (0368): the one that has waited longest first, by the day it was
+ *               made. A row with no such stamp keeps its place at the end.
+ *   missed      its day went by with nothing captured: newest first. A PROPOSED visit whose day went
+ *               by with no pick is here too. bucketInspections leaves it in `upcoming` for ever (only
+ *               a booked visit can be "missed" there), and under Coming Up it stood first and said
+ *               "Next: 12d ago". A proposal nobody picked did not happen; its row says "pending pick".
+ *   completed / lost / cancelled   the filed pile under filedUnder's three headings, newest first.
+ *
+ * "Upcoming" is split by two facts, whether the visit has a start and whether that start is before
+ * today (the company's midnight, as bucketInspections reads it), so a row cannot sit under two tiles.
+ */
+export function tileInspections<T extends InspectionBucketRow & { created_at?: string | null }>(
+  b: InspectionBuckets<T>,
+  now: Date = new Date(),
+  tz: string = "UTC",
+): Record<InspectionTile, T[]> {
+  const out: Record<InspectionTile, T[]> = { write_up: [...b.toWriteUp], coming_up: [], needs_day: [], missed: [...b.missed], completed: [], lost: [], cancelled: [] };
+  const todayStart = tzDayStartUtc(todayStrInTz(tz, now), tz).getTime();
+  const start = (r: T) => (r.starts_at ? new Date(r.starts_at).getTime() : 0);
+  let lateProposal = false;
+  for (const r of b.upcoming) {
+    if (!r.starts_at) out.needs_day.push(r);
+    else if (start(r) < todayStart) {
+      out.missed.push(r);
+      lateProposal = true;
+    } else out.coming_up.push(r);
+  }
+  if (lateProposal) out.missed.sort((a, c) => start(c) - start(a));
+  const made = (r: T) => {
+    const at = r.created_at ? new Date(r.created_at).getTime() : NaN;
+    return Number.isFinite(at) ? at : Number.MAX_SAFE_INTEGER;
+  };
+  out.needs_day.sort((a, c) => made(a) - made(c));
+  for (const r of b.filed) out[filedUnder(r)].push(r);
+  return out;
+}
+
+/**
+ * WHICH TILE IS OPEN TO BEGIN WITH. The one asked for (the address's ?tile=, so Back from an
+ * inspection lands on the tile it was opened from) when it is a tile of this view and still has rows;
+ * else the first tile that has any; else none. Anything else in the address is ignored.
+ */
+export function openFirstTile(view: InspectionsView, counts: Readonly<Record<InspectionTile, number>>, wanted?: string | null): InspectionTile | null {
+  const tiles = tilesOf(view);
+  const asked = tiles.find((t) => t === wanted);
+  if (asked && counts[asked] > 0) return asked;
+  return tiles.find((t) => counts[t] > 0) ?? null;
+}
+
+/**
+ * THE TAGS A ROW WOULD WEAR, AS PLAIN WORDS, in order: the page says them in the row's phrase and
+ * draws no pill. The same rule as inspectionRowTags (no "done" tag, ever); "no field notes" is said
+ * under Write Up only, and "cancelled" is left out under the Cancelled tile, whose name already says it
+ * (a cancelled visit filed under Lost still says so).
+ *
+ * EVERY KIND BUT THE PLAIN INSPECTION SAYS WHICH IT IS. The page holds three kinds of visit
+ * (ESTIMATE_VISIT_TYPES). The city's Final Inspection has always had its tag; a Quote / Estimate visit
+ * used to say so through the title its booking door stamped ("Quote: Sam Tillery"), and a row that
+ * says the person in bold no longer repeats that stamp, so the kind is said here, first.
+ */
+export function rowTagWords(
+  row: { type?: string | null; status: string; capture?: unknown },
+  tile: InspectionTile,
+  lang: Lang = "en",
+  words?: Words,
+): string[] {
+  const tags = keyedTags(row, tile === "write_up", lang, words).filter((t) => !(t.key === "cancelled" && tile === "cancelled"));
+  const kind = row.type && row.type !== "inspection" && !tags.some((t) => t.key === "type") ? [appointmentTypeLabel(row.type, lang, words)] : [];
+  return [...kind, ...tags.map((t) => t.label)];
+}
+
+/**
+ * WHAT A ROW ON THE PAGE SAYS: who it is for in bold, then what it is as a phrase.
+ *
+ * A title counts as TYPED only when a person wrote it: not the bare word (isGenericInspectionTitle)
+ * and not a stamp a booking door wrote ("Inspection: Sam Tillery", isStockBookingTitle), which would
+ * say the bold name twice.
+ *
+ *   somebody is named   who = the name;                         what = typed title · street · tags
+ *   nobody is named     who = the typed title, else the street,  what = the street (only when the title
+ *                       else the type's label;                   is the who) · tags
+ *
+ * The parts of `what` are joined with " · " and its first letter is a capital in the reader's
+ * language (a phrase that begins with a tag reads "No field notes"). It may be empty. The day is not
+ * here: the page puts it at the row's right edge. Pure: the caller hands the type's label and the
+ * tags already said in the reader's language.
+ *
+ * `stampLabels` are the other spellings of the type's label a stored title may be: a title is stamped
+ * in English whoever reads it, so a Spanish reader's caller hands the English label too, and "Final
+ * Inspection" is not taken for words somebody typed. A tag that only repeats the bold line is left out
+ * (with nobody named and nothing typed the bold line IS the type's label).
+ */
+export function inspectionRowWords(p: {
+  title?: string | null;
+  typeLabel: string;
+  stampLabels?: readonly string[];
+  customer?: string | null;
+  street?: string | null;
+  tags?: readonly string[];
+  lang?: Lang;
+}): { who: string; what: string } {
+  const clean = (v: string | null | undefined) => String(v ?? "").trim();
+  const customer = clean(p.customer);
+  const street = clean(p.street);
+  const title = clean(p.title);
+  const generic = [p.typeLabel, ...(p.stampLabels ?? [])].some((label) => isGenericInspectionTitle(title, label));
+  // The names a booking door could have stamped: who, the place whole, and its street alone.
+  const typed = !!title && !generic && !isStockBookingTitle(title, [customer, street, street.split(",")[0]]);
+  const who = customer || (typed ? title : street || p.typeLabel);
+  const tags = (p.tags ?? []).map(clean).filter((tag) => tag.toLowerCase() !== who.toLowerCase());
+  const parts = customer ? [typed ? title : "", street, ...tags] : typed ? [street, ...tags] : tags;
+  const what = parts.filter(Boolean).join(" · ");
+  return { who, what: what ? what.charAt(0).toLocaleUpperCase(p.lang === "es" ? "es" : "en") + what.slice(1) : "" };
 }

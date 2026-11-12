@@ -12,7 +12,7 @@ import { useStatusUndo } from "./visit-header-actions";
 
 /** The visit page's main button on an inspection that is booked (W2-11): flips it to `completed`
  *  so the Inspections tab's buckets stay truthful (a visit that happened stops reading as
- *  "upcoming" and lands in "To write up" until its estimate exists). 44px, primary: at most one main
+ *  "upcoming" and lands under the Write Up tile until its estimate exists). 44px, primary: at most one main
  *  button sits in the header, and on a booked inspection this is it. Said in a toast, with Undo:
  *  the page has no other way back from Done. Its words are the signed-in person's language
  *  (lib/words/visit-page, vp_); the page may hand its own label. */
