@@ -11,8 +11,9 @@ import type { ActionItem, Affordance, AlreadyInvoicedTarget } from "./types";
  * 20px box: five guesses per row, none of them saying what it did. Now each row has ONE button that
  * says its verb ("Send It", "Pick a Day", "Close Out"), and behind lane 1a's ⋯ (RowMoreSheet) only
  * what is real for that row: a Snooze that picks a day, Assign on a job needing a day, and the row's
- * honest ending behind a confirm (Lost, Not Needed, Didn't Happen, Cancel, Set Aside, Not a Cost). Tapping the
- * row still opens it. The words Dismiss and Delete never appear.
+ * honest ending behind a confirm (Lost, Not Needed, Dismiss, Cancel, Set Aside, Not a Cost). Tapping the
+ * row still opens it. The word Delete never appears; Dismiss is a visit's ending (the owner's word for
+ * it since cn-v1166) and appears nowhere else.
  *
  * ONE TABLE, read by the list and by anything else that names what a row can do (Nort next wave), so
  * the two can never offer different doors. Every verb a door here sends is one of the row's own
@@ -238,7 +239,7 @@ export function rowButtons(item: ActionItem, ctx: RowButtonsCtx): RowButtons {
         primary: { label: L("ny_btn_closeOut"), act: { type: "run", verb: "do" } },
         also: null,
         more: has(item, "dismiss")
-          ? [ending("dismiss", L("ny_btn_didntHappen"), "Didn't Happen?", `Marks ${what} cancelled, so it stops asking. You can change it back on the visit.`, "Didn't Happen")]
+          ? [ending("dismiss", L("ny_btn_didntHappen"), "Dismiss This Visit?", `Takes ${what} off the schedule. It is deleted if nothing is on it, otherwise cancelled and kept on file.`, "Dismiss")]
           : [],
       };
     case "inspection_writeup":
@@ -254,7 +255,7 @@ export function rowButtons(item: ActionItem, ctx: RowButtonsCtx): RowButtons {
         // row's id is the visit), so the ⋯ row was the same door twice under a second name.
         more: [
           ...(has(item, "wontHappen")
-            ? [ending("wontHappen", L("ny_btn_didntHappen"), "Didn't Happen?", `Marks ${what} as a visit that didn't happen. It is removed if nothing was captured on it, otherwise cancelled and kept on file.`, "Didn't Happen")]
+            ? [ending("wontHappen", L("ny_btn_didntHappen"), "Dismiss This Visit?", `Takes ${what} off the schedule. It is deleted if nothing is on it, otherwise cancelled and kept on file.`, "Dismiss")]
             : []),
           ...(has(item, "dismiss")
             ? [ending("dismiss", L("ny_btn_lostVisit"), "Didn't Win It?", `Records ${what} as lost, so it stops asking. The inspection is marked lost; you can change it back on its own page.`, "Mark It Lost")]

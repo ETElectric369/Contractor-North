@@ -139,7 +139,7 @@ export function RailCardRows({ i, todayStr, close }: { i: Placeable; todayStr?: 
   return (
     <>
       <SheetLink href={open.href}>{open.label}</SheetLink>
-      {/* A WAITING VISIT CAN BE ENDED HERE (2026-11-16): the visit page's own Won't Happen, behind the
+      {/* A WAITING VISIT CAN BE ENDED HERE (2026-11-16): the visit page's own Dismiss, behind the
           sheet's own ask. Leads and jobs get no such row. */}
       {i.kind === "appointment" && <VisitWontHappen id={i.id} close={close} />}
       {i.kind === "job" && !i.onHold && (

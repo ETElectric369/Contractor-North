@@ -1,6 +1,6 @@
 import { hoursBetween } from "@/lib/utils";
 import { summarizeMileage } from "@/lib/mileage-math";
-import { todayStrInTz } from "@/lib/tz";
+import { payPeriodBounds, todayStrInTz } from "@/lib/tz";
 import { isPaymentMethod, paymentMethodKey, paymentMethodLabel } from "@/lib/payment-method";
 
 /** Coerce to a finite number, else 0 — payroll feeds real wages; one bad row must
@@ -525,6 +525,291 @@ export function leftByPeriod(
     return { start: p.start, end: p.end, gross: p.grossCents / 100, paid: paid / 100, left: (p.grossCents - paid) / 100 };
   });
   return { rows, earlier: Math.max(0, owedCents - grossCents) / 100 };
+}
+
+// ── HOW FAR BACK A BALANCE READS, AND THE OPEN PERIODS IT IS MADE OF ─────────────────────────────
+
+/** How far back a balance reads its hours: a BOUND, not a rule (the Payroll page's reasoning stands
+ *  above its reads). Two surfaces read it now, the office's Payroll and a worker's My Pay Periods, and
+ *  a worker's own figures must be built from the same window as the office's or the two could differ. */
+export const BALANCE_MONTHS = 18;
+
+/** The org-local first day of the balance window, from the org's today. */
+export function balanceWindowStartYmd(todayYmd: string): string {
+  const d = new Date(`${todayYmd}T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() - BALANCE_MONTHS);
+  return d.toISOString().slice(0, 10);
+}
+
+export type PaySchedule = "weekly" | "biweekly" | "semimonthly" | "monthly";
+
+/**
+ * WHAT THE OWED FIGURE IS MADE OF, period by period, for ONE person: the gross of his closed hours not
+ * yet locked, by the pay period each entry's ORG-local day falls in. Moved here whole from the Payroll
+ * page (cn-v1166), where it was built inline, because a worker's own statement reads it too and two
+ * copies of one money rule are free to drift.
+ *
+ * Only UNLOCKED hours: a locked period's gross is frozen on its payroll_run and is already inside
+ * `earned`, so re-pricing it here at today's rate would be the very drift the CSV bug was. A running
+ * shift (no clock_out) is skipped: its hours are not known yet. Each period's gross is accumulated in
+ * the order the entries come and rounded once, exactly as the page did, and a period that comes to
+ * nothing is left out.
+ */
+export function openPeriodsFor(
+  entries: any[] | null | undefined,
+  o: { tz: string; schedule: PaySchedule; anchor: string; fallbackRate: number },
+): { start: string; end: string; gross: number }[] {
+  const per = new Map<string, { start: string; end: string; gross: number }>();
+  for (const e of entries ?? []) {
+    if (!e || !e.clock_out || e.paid_at) continue;
+    const day = todayStrInTz(o.tz, new Date(e.clock_in));
+    const p = payPeriodBounds(o.schedule, o.anchor, day);
+    const key = `${p.start}|${p.end}`;
+    const cur = per.get(key) ?? { start: p.start, end: p.end, gross: 0 };
+    cur.gross += hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) * payRateForEntry(e, o.fallbackRate);
+    per.set(key, cur);
+  }
+  return [...per.values()]
+    .map((x) => ({ start: x.start, end: x.end, gross: r2(x.gross) }))
+    .filter((x) => x.gross > 0)
+    .sort((a, b) => a.start.localeCompare(b.start));
+}
+
+// ── MY PAY PERIODS: a worker's own statement, built from the office's own figures ──────────────
+//
+// The owner, 2026-11-16: "yes for tech sees all their own data and past pay periods". Two techs had
+// asked the assistant for "the payroll" and "the rest of my pay periods". Nothing here is re-derived:
+// owed is balanceForPerson's, what is left on each open period is leftByPeriod's over openPeriodsFor,
+// and a locked period's gross is the frozen gross on its own payroll_runs row. So the figure a worker
+// reads is the figure the office pays him against, to the cent.
+
+/** One of a worker's pay periods. `end` is EXCLUSIVE, as on payroll_runs. */
+export type MyPayPeriod = {
+  start: string;
+  end: string;
+  /** The locked hours as they were frozen, plus his closed hours not locked yet. */
+  hours: number;
+  /** The frozen gross of a locked part plus the live gross of the unlocked part. */
+  gross: number;
+  /** What has been paid toward it: a locked part in full, and the money that landed on the open part. */
+  paid: number;
+  /** What is still owed on it (leftByPeriod's). */
+  left: number;
+  /** onClock: the period holds only a shift still running, so nothing in it is counted yet. */
+  state: "paid" | "partly" | "unpaid" | "onClock";
+  /** It has a base run: some of it was locked by a payment. */
+  locked: boolean;
+  /** A shift in it is still running, and its hours are not in these figures. */
+  running: boolean;
+  /** Business miles not settled yet, and settled, by the office's own aggregation. */
+  heldMiles: number;
+  settledMiles: number;
+  /** What the office said it paid for mileage in this period, or null when nothing was settled. */
+  mileagePaid: number | null;
+};
+
+/** A payroll_runs row as a worker reads it: never the office's note, never who wrote it. */
+export type MyPayRun = {
+  kind: string | null;
+  period_start: string;
+  period_end: string;
+  hours: number | string | null;
+  gross: number | string | null;
+  miles: number | string | null;
+  mileage_amount: number | string | null;
+};
+
+export type MyPay = {
+  /** Newest first. */
+  periods: MyPayPeriod[];
+  /** balanceForPerson's owed: negative means paid ahead. */
+  owed: number;
+  /** leftByPeriod's earlier: owed beyond the open periods. */
+  earlier: number;
+  /** A shift is running, so owed is short it (owedReading withholds the figure). */
+  onClock: boolean;
+  /** Hours are marked paid but no locked period came back: the runs read could not see them (a deploy
+   *  ahead of 0410 reads nothing, silently). No figure may be drawn. */
+  unreadable: boolean;
+};
+
+const cents = (n: unknown) => Math.round(fin(n) * 100);
+
+type PeriodRule = { tz: string; schedule: PaySchedule; anchor: string };
+
+/**
+ * WHICH OF A WORKER'S PERIODS ONE ENTRY BELONGS TO. PURE, and the one rule both My Pay pages use (the
+ * list's figures and the one period's list of entries), so an entry is never counted or listed twice.
+ *
+ * An entry marked PAID belongs to the base run whose [period_start, period_end) holds its company-local
+ * day (when several do, the one that starts latest): its hours were frozen on that run, and a company
+ * that later moved its pay anchor or schedule must not see them again in a period cut the new way. Only
+ * when no run holds it does it fall back to payPeriodBounds. An UNPAID entry is always payPeriodBounds,
+ * which is openPeriodsFor's key, so its live gross and its row meet.
+ */
+export function myPeriodOfEntry(
+  e: { clock_in: string; paid_at?: unknown },
+  baseRuns: { period_start: string; period_end: string }[],
+  o: PeriodRule,
+): { start: string; end: string } {
+  const day = todayStrInTz(o.tz, new Date(e.clock_in));
+  if (e.paid_at) {
+    let best: { start: string; end: string } | null = null;
+    for (const r of baseRuns) {
+      const start = String(r.period_start).slice(0, 10);
+      const end = String(r.period_end).slice(0, 10);
+      if (day >= start && day < end && (!best || start > best.start)) best = { start, end };
+    }
+    if (best) return best;
+  }
+  return payPeriodBounds(o.schedule, o.anchor, day);
+}
+
+const baseRunsOf = (runs: MyPayRun[] | null | undefined) =>
+  (runs ?? []).filter((r): r is MyPayRun => !!r && !!r.period_start && !!r.period_end && (r.kind ?? "base") === "base");
+
+/** The entries of ONE of a worker's periods, by myPeriodOfEntry, in the order they came. */
+export function entriesOfMyPeriod<T extends { clock_in: string; paid_at?: unknown }>(
+  entries: T[] | null | undefined,
+  runs: MyPayRun[] | null | undefined,
+  o: PeriodRule,
+  period: { start: string; end: string },
+): T[] {
+  const base = baseRunsOf(runs).map((r) => ({ period_start: String(r.period_start), period_end: String(r.period_end) }));
+  return (entries ?? []).filter((e) => {
+    if (!e) return false;
+    const p = myPeriodOfEntry(e, base, o);
+    return p.start === period.start && p.end === period.end;
+  });
+}
+
+/**
+ * A WORKER'S PAY PERIODS, from rows already fetched (his own entries over BALANCE_MONTHS, all his runs
+ * of both kinds, all his payments). PURE.
+ *
+ * A period's key is a run's own dates when it has a run (a moved anchor must not lose a locked period),
+ * and otherwise payPeriodBounds of the entry's org-local day, which is openPeriodsFor's key, so the
+ * open part of a period and its locked part meet in one row whenever the schedule has not moved.
+ *
+ * THE ROWS ADD UP: every period's `left`, plus `earlier`, is max(owed, 0) to the cent, because the
+ * left figures are leftByPeriod's over the same open periods and the same owed the office reads.
+ */
+export function myPayPeriods(input: {
+  profileId: string;
+  name: string;
+  entries: any[];
+  runs: MyPayRun[];
+  payments: PayPaymentRow[];
+  tz: string;
+  schedule: PaySchedule;
+  anchor: string;
+  fallbackRate: number;
+}): MyPay {
+  const profileId = String(input.profileId);
+  const mine = (input.entries ?? [])
+    .filter((e) => e && (e.profile_id == null || String(e.profile_id) === profileId))
+    .map((e) => ({ ...e, profile_id: profileId }));
+  const runs = (input.runs ?? []).filter((r): r is MyPayRun => !!r && !!r.period_start && !!r.period_end);
+  const baseRuns = runs.filter((r) => (r.kind ?? "base") === "base");
+  const mileageRuns = runs.filter((r) => r.kind === "mileage");
+
+  const bal = balanceForPerson({
+    profileId,
+    name: input.name,
+    entries: mine,
+    lockedRuns: baseRuns.map((r) => ({ period_start: String(r.period_start), period_end: String(r.period_end), gross: fin(r.gross) })),
+    payments: input.payments ?? [],
+    tz: input.tz,
+    fallbackRate: input.fallbackRate,
+  });
+  const open = openPeriodsFor(mine, { tz: input.tz, schedule: input.schedule, anchor: input.anchor, fallbackRate: input.fallbackRate });
+  const lbp = leftByPeriod(open, bal.owed);
+  const unreadable = mine.some((e) => !!e.paid_at) && baseRuns.length === 0;
+
+  type Bucket = {
+    start: string;
+    end: string;
+    frozenCents: number;
+    frozenHours: number;
+    locked: boolean;
+    mileageCents: number | null;
+    entries: any[];
+    live: PeriodLeft | null;
+  };
+  const buckets = new Map<string, Bucket>();
+  const bucket = (start: string, end: string): Bucket => {
+    const key = `${start}|${end}`;
+    let b = buckets.get(key);
+    if (!b) {
+      b = { start, end, frozenCents: 0, frozenHours: 0, locked: false, mileageCents: null, entries: [], live: null };
+      buckets.set(key, b);
+    }
+    return b;
+  };
+  for (const r of baseRuns) {
+    const b = bucket(String(r.period_start).slice(0, 10), String(r.period_end).slice(0, 10));
+    b.locked = true;
+    b.frozenCents += cents(r.gross);
+    b.frozenHours += fin(r.hours);
+  }
+  for (const r of mileageRuns) {
+    const b = bucket(String(r.period_start).slice(0, 10), String(r.period_end).slice(0, 10));
+    b.mileageCents = (b.mileageCents ?? 0) + cents(r.mileage_amount);
+  }
+  // One rule for where an entry belongs (myPeriodOfEntry): a paid entry in the run that froze it, so
+  // locked hours are counted once, from the run, even after the pay anchor or schedule moved.
+  const baseKeys = baseRuns.map((r) => ({ period_start: String(r.period_start), period_end: String(r.period_end) }));
+  const rule = { tz: input.tz, schedule: input.schedule, anchor: input.anchor };
+  for (const e of mine) {
+    const p = myPeriodOfEntry(e, baseKeys, rule);
+    bucket(p.start, p.end).entries.push(e);
+  }
+  for (const row of lbp.rows) bucket(row.start, row.end).live = row;
+
+  const periods: MyPayPeriod[] = [];
+  for (const b of buckets.values()) {
+    const closed = b.entries.filter((e) => !!e.clock_out);
+    const running = b.entries.some((e) => !e.clock_out);
+    let liveHours = 0;
+    let paidHoursNoRun = 0;
+    for (const e of closed) {
+      const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
+      if (!e.paid_at) liveHours += h;
+      else if (!b.locked) paidHoursNoRun += h;
+    }
+    // The office's own mileage figure for one period (the Payroll page's held-miles rule).
+    const [agg] = aggregatePayrollEntries(closed, input.tz, input.fallbackRate);
+    const heldMiles = agg?.heldMiles ?? 0;
+    const settledMiles = agg?.settledMiles ?? 0;
+    const grossCents = b.frozenCents + (b.live ? Math.round(b.live.gross * 100) : 0);
+    const paidCents = b.frozenCents + (b.live ? Math.round(b.live.paid * 100) : 0);
+    const leftCents = b.live ? Math.round(b.live.left * 100) : 0;
+    const hours = r2(b.frozenHours + liveHours + paidHoursNoRun);
+    // Nothing to say about a period with no hours, no money, no miles and no running shift (a 0193
+    // auto-closed ghost of zero hours, say).
+    if (!running && !b.locked && hours === 0 && grossCents === 0 && heldMiles <= 0.05 && settledMiles === 0 && b.mileageCents == null) continue;
+    let state: MyPayPeriod["state"];
+    if (closed.length === 0 && !b.locked && running) state = "onClock";
+    else if (leftCents > 0) state = paidCents > 0 ? "partly" : "unpaid";
+    else if (grossCents > 0) state = "paid";
+    else state = liveHours > 0 ? "unpaid" : "paid";
+    periods.push({
+      start: b.start,
+      end: b.end,
+      hours,
+      gross: grossCents / 100,
+      paid: paidCents / 100,
+      left: leftCents / 100,
+      state,
+      locked: b.locked,
+      running,
+      heldMiles,
+      settledMiles,
+      mileagePaid: b.mileageCents == null ? null : b.mileageCents / 100,
+    });
+  }
+  periods.sort((a, b) => b.start.localeCompare(a.start) || b.end.localeCompare(a.end));
+  return { periods, owed: bal.owed, earlier: lbp.earlier, onClock: bal.hasOpenShift, unreadable };
 }
 
 // ── WHO IS ON THE WAGES BOARD (0286) ─────────────────────────────────────────

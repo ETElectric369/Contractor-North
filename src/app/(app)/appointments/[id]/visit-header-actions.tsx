@@ -20,7 +20,7 @@ import { putVisitBackOnSchedule, setAppointmentStatus, wontHappenAppointment } f
  * "Mark inspection complete" (under 44px), a Delete for empty visits, a bare ✓ and ✗, Clear the Date
  * and Edit Details (whose modal footer had a hard Delete). Now it carries at most ONE main button
  * (Get Paid on a work visit, Mark Inspection Done on a booked inspection) and this menu, last on
- * the row: Mark Done · Edit Details… · Clear the Date · Put It Back on the Schedule · — · Won't Happen.
+ * the row: Mark Done · Edit Details… · Clear the Date · Put It Back on the Schedule · — · Dismiss (cn-v1166; was Won't Happen).
  *
  * Each row says what happened in a toast and closes the panel; a status it changes has an Undo.
  * The rows' own words are the signed-in person's language (lib/words/visit-page, vp_); a note the
@@ -112,7 +112,7 @@ export function PutBackRow({ id }: { id: string }) {
 }
 
 /**
- * 'Won't Happen' — after a divider, in red and last. The confirm says which will happen, from the
+ * 'Dismiss' (key vp_btn_wontHappen) — after a divider, in red and last. The confirm says which will happen, from the
  * page's reading of the same four facts (`deletes`); the server decides again at the write and the
  * toast repeats ITS verdict, so a capture saved in between wins.
  *

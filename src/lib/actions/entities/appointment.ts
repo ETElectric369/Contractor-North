@@ -266,19 +266,20 @@ export const appointmentActions: Record<string, ActionDef> = {
     effect: "write",
     handler: (i) => setAppointmentOutcome(i.id, i.outcome),
   },
-  /** The visit page's Won't Happen, reached from a Needs You row's ⋯ (Didn't Happen). It runs the
+  /** The visit page's Dismiss door (cn-v1166: one name everywhere), reached from a Needs You row's ⋯. It runs the
    *  SAME rule (wontHappenAppointment: delete only when nothing hangs on it, else cancel), never a
    *  second copy. A row door only: it is deliberately NOT in AGENT_WRITE_ALLOWED. */
   "appointment.wontHappen": {
     name: "appointment.wontHappen",
     group: "appointment",
-    label: "Visit won't happen",
-    description: "Mark a visit as one that won't happen: removed when nothing was captured on it, otherwise cancelled and kept on file.",
+    label: "Dismiss a visit",
+    description:
+      "Dismiss a visit (the app's Dismiss door): deleted when nothing is on it, otherwise cancelled and kept on file. Not Lost: Lost records that the visit happened and the work was not won.",
     input: z.object({ id: z.string() }),
     auth: "staff",
     effect: "write",
     confirm: "destructive",
-    describe: () => "Mark this visit as one that won't happen?",
+    describe: () => "Dismiss this visit?",
     handler: async (i): Promise<ActionResult> => {
       const r = await wontHappenAppointment(i.id);
       return r.ok ? { ok: true, ...(r.note ? { speak: r.note } : {}) } : { ok: false, error: r.error };

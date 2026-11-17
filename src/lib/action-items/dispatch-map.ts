@@ -94,7 +94,7 @@ export function resolveRowVerb(
     return null;
   }
 
-  // Didn't Happen on an inspection row: the visit page's Won't Happen rule (appointment.wontHappen).
+  // Dismiss on an inspection row: the visit page's own rule (appointment.wontHappen).
   if (verb === "wontHappen") {
     return kind === "inspection_writeup" ? { name: "appointment.wontHappen", input: { id } } : null;
   }
@@ -111,7 +111,10 @@ export function resolveRowVerb(
     // inspection's outcome, a cancelled visit or job, a paper in the Archive), so Needs You stays a
     // projection of reality and never a list of things somebody clicked away.
     if (kind === "inquiry") return { name: "inquiry.markLost", input: { id } };
-    if (kind === "appointment") return { name: "appointment.setStatus", input: { id, status: "cancelled" } };
+    // Dismiss on a visit nobody closed out (cn-v1166, ONE DEED): the same door as every other Dismiss,
+    // the visit page's rule (deleted when nothing hangs on it, else cancelled and kept), never a bare
+    // cancel under the same name. The row's visit is always still scheduled (query.ts reads only those).
+    if (kind === "appointment") return { name: "appointment.wontHappen", input: { id } };
     if (kind === "organize") return { name: "organize.archive", input: { id } };
     if (kind === "quote_awaiting") return { name: "quote.setStatus", input: { id, status: "declined" } };
     // A win that went away after all (Lost): the estimate is declined; its job is left as it is.

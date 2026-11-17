@@ -183,29 +183,29 @@ describe("a rail card: one ⋯, no status dropdown", () => {
     expect(text(visit + lead)).not.toMatch(/Hold|Snooze|Why/);
   });
 
-  it("a waiting visit's ⋯ has one more row, Won't Happen, under Open the Visit; a lead and a job have none (2026-11-16)", () => {
+  it("a waiting visit's ⋯ has one more row, Dismiss, under Open the Visit; a lead and a job have none (2026-11-16)", () => {
     const visit = rows({ id: "a1", kind: "appointment", type: "job", name: "Larkspur", address: null, city: null });
     const t = text(visit);
     expect(t.indexOf("Open the Visit")).toBeGreaterThan(-1);
-    expect(t.indexOf("Won't Happen")).toBeGreaterThan(t.indexOf("Open the Visit"));
+    expect(t.indexOf("Dismiss")).toBeGreaterThan(t.indexOf("Open the Visit"));
     // Its label never says Hold, Snooze or Why (the pin above), and it is a 44px door.
     expect(t).not.toMatch(/Hold|Snooze|Why/);
     for (const d of visit.match(/<(button|a)\b[^>]*>/g) ?? []) expect(d, d).toMatch(/min-h-\[44px\]|\bh-11\b|min-h-11/);
-    expect(text(rows({ id: "l1", kind: "lead", name: "Larkspur", address: null, city: null }))).not.toContain("Won't Happen");
-    expect(text(rows(job()))).not.toContain("Won't Happen");
-    expect(text(rows(job({ onHold: true, holdReason: "x", status: "on_hold" })))).not.toContain("Won't Happen");
+    expect(text(rows({ id: "l1", kind: "lead", name: "Larkspur", address: null, city: null }))).not.toContain("Dismiss");
+    expect(text(rows(job()))).not.toContain("Dismiss");
+    expect(text(rows(job({ onHold: true, holdReason: "x", status: "on_hold" })))).not.toContain("Dismiss");
   });
 
-  it("Won't Happen asks first, in the sheet: the question, the deed in red and Keep It; nothing is written on the first tap", () => {
+  it("Dismiss asks first, in the sheet: the question, the deed in red and Keep It; nothing is written on the first tap", () => {
     const view = (asking: boolean, pending = false) =>
       renderToStaticMarkup(createElement(VisitWontHappenView, { asking, pending, onAsk: () => {}, onDo: () => {}, onKeep: () => {} }));
     const resting = view(false);
-    expect(text(resting).trim()).toBe("Won't Happen");
+    expect(text(resting).trim()).toBe("Dismiss");
     const asking = view(true);
     expect(text(asking)).toContain(
-      "This visit won't happen? It is deleted if nothing is on it. If anything is (notes, an estimate, an invoice, a time-pick link), it is cancelled and kept on file.",
+      "Dismiss this visit? It is deleted if nothing is on it. If anything is (notes, an estimate, an invoice, a time-pick link), it is cancelled and kept on file.",
     );
-    expect(asking).toMatch(/<button[^>]*text-red-600[^>]*>Won&#x27;t Happen<\/button>/);
+    expect(asking).toMatch(/<button[^>]*text-red-600[^>]*>Dismiss<\/button>/);
     expect(text(asking)).toContain("Keep It");
     // While the deed is out both buttons wait, and the deed says Working… (true whether the visit ends
     // deleted or cancelled; nothing is saved), Procesando… to a Spanish reader.
@@ -230,8 +230,8 @@ describe("a rail card: one ⋯, no status dropdown", () => {
     expect(piece).toContain("await deleteTheVisit(id, io);");
     expect(piece).not.toMatch(/confirm\(/);
     expect(read("src/app/(app)/schedule/place-rail.tsx")).toContain('import { deleteTheVisit, type DoorIo } from "../inspections/inspection-row-menu";');
-    expect(railWords.en.ag_rail_btn_wontHappen).toBe("Won't Happen");
-    expect(railWords.es.ag_rail_btn_wontHappen).toBe("No Se Hará");
+    expect(railWords.en.ag_rail_btn_wontHappen).toBe("Dismiss");
+    expect(railWords.es.ag_rail_btn_wontHappen).toBe("Descartar");
   });
 
   it("every row is a 44px door", () => {

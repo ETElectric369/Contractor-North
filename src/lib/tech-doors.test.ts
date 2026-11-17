@@ -71,7 +71,7 @@ describe("the job's side doors", () => {
       expect(s).toMatch(new RegExp(`\\{viewerIsStaff && [^\\n]*\\(\\n\\s*${tag}`));
     }
     // Every other verb is a row inside that staff-only menu: Edit Details…, Clear the Date, Put It
-    // Back On The Schedule, Won't Happen.
+    // Back On The Schedule, Dismiss.
     expect(s).toMatch(/\{viewerIsStaff && \(\s*<SectionActionsMenu tree=\{VISIT_ACTIONS_MENU\}>/);
     const menu = s.slice(s.indexOf("<SectionActionsMenu tree={VISIT_ACTIONS_MENU}>"), s.indexOf("</SectionActionsMenu>"));
     for (const tag of ["<MarkDoneRow", "<AppointmentButton", "<UnscheduleButton id={a.id} menuItem", "<PutBackRow", "<WontHappenRow"]) {

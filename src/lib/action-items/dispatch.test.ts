@@ -112,8 +112,10 @@ describe("the mappings that matter", () => {
     expect(dispatch).not.toContain("job_needs_return");
   });
 
-  it("Didn't Happen on an inspection row is the visit page's Won't Happen, by its own registry door, and Nort cannot reach it", () => {
+  it("Dismiss on an inspection row and on a visit nobody closed out is the visit page's own door, by its registry action, and Nort cannot reach it", () => {
     expect(map("inspection_writeup", "wontHappen", "appt-1")).toEqual({ name: "appointment.wontHappen", input: { id: "appt-1" } });
+    // ONE DEED (cn-v1166): the plain visit row's Dismiss is the same door, never a bare cancel.
+    expect(map("appointment", "dismiss", "appt-1")).toEqual({ name: "appointment.wontHappen", input: { id: "appt-1" } });
     expect(map("inspection_writeup", "dismiss", "appt-1")).toEqual({ name: "appointment.setOutcome", input: { id: "appt-1", outcome: "lost" } });
     expect(map("inquiry", "wontHappen", "lead-1")).toBeNull();
     const agent = readFileSync(join(process.cwd(), "src/lib/actions/agent-tools.ts"), "utf8");

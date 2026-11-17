@@ -61,7 +61,7 @@ const openPunch = {
 } as never;
 
 describe("the catalog names the clock's client side", () => {
-  it("lists the nine screens, every key is tc_, and the shared headline is in both languages", () => {
+  it("lists the twelve screens (My Pay Periods' three since cn-v1166), every key is tc_, and the shared headline is in both languages", () => {
     expect(words.files).toEqual([
       "src/app/(app)/timeclock/page.tsx",
       "src/app/(app)/timeclock/timeclock-panel.tsx",
@@ -72,6 +72,9 @@ describe("the catalog names the clock's client side", () => {
       "src/app/(app)/timeclock/next-up.tsx",
       "src/app/(app)/timeclock/app-chose-notice.tsx",
       "src/app/(app)/timeclock/daily-report-debrief.tsx",
+      "src/app/(app)/timeclock/pay/page.tsx",
+      "src/app/(app)/timeclock/pay/[period]/page.tsx",
+      "src/app/(app)/timeclock/pay/my-pay-views.tsx",
     ]);
     expect(Object.keys(words.en).every((k) => k.startsWith("tc_"))).toBe(true);
     expect(Object.keys(words.en).length).toBeGreaterThanOrEqual(190);
@@ -82,8 +85,11 @@ describe("the catalog names the clock's client side", () => {
   it("no screen it names formats a clock or a day in en-US by hand any more: the locale follows the person", () => {
     for (const f of words.files) expect(src(f), f).not.toContain('"en-US"');
     expect(src("src/app/(app)/timeclock/page.tsx")).toContain("toLocaleDateString(localeOf(lang), {");
-    expect(src("src/app/(app)/timeclock/page.tsx")).toContain("formatCurrency(myPeriod.gross, lang)");
-    expect(src("src/app/(app)/timeclock/page.tsx")).toContain("formatDate(period.start, undefined, lang)");
+    // The pay card's words are My Pay Periods' (cn-v1166): one row's words, worked out in the views.
+    expect(src("src/app/(app)/timeclock/page.tsx")).toContain("<MyPayCard newest={newest} cantShow={myPayCantShow} lang={lang} />");
+    expect(src("src/app/(app)/timeclock/pay/my-pay-views.tsx")).toContain("const w = newest ? rowWords(newest, lang) : null;");
+    expect(src("src/app/(app)/timeclock/pay/my-pay-views.tsx")).toContain("formatCurrency(p.gross, lang)");
+    expect(src("src/app/(app)/timeclock/pay/my-pay-views.tsx")).toContain("formatDate(start, undefined, lang)");
     expect(src("src/app/(app)/timeclock/timeclock-panel.tsx")).toContain("const locale = localeOf(lang);");
     expect(src("src/app/(app)/timeclock/same-day-shifts.tsx")).toContain("toLocaleTimeString(localeOf(lang), {");
   });
@@ -278,8 +284,10 @@ describe("the server pieces read the same catalog", () => {
 
   it("the page's cards: My timecard, Week total, My pay period, the badges and the two notes, by key", () => {
     const s = src("src/app/(app)/timeclock/page.tsx");
+    // The pay card is drawn in pay/my-pay-views (MyPayCard) since cn-v1166, so it renders in a test.
+    const card = src("src/app/(app)/timeclock/pay/my-pay-views.tsx");
     for (const key of ["tc_myTimecard", "tc_last7Days", "tc_weekTotal", "tc_myPayPeriod", "tc_paid", "tc_partlyPaid", "tc_unpaid", "tc_openNotCounted", "tc_basePayOnly", "tc_onTheClock", "tc_now", "tc_checkingSchedule"]) {
-      expect(s, key).toContain(`t("${key}")`);
+      expect(s.includes(`t("${key}")`) || card.includes(`t("${key}")`), key).toBe(true);
       expect(es[key], key).not.toBe(en[key]);
     }
     expect(s).toContain('fillText(t("tc_lunchShort"), { min: String(r.lunch) })');

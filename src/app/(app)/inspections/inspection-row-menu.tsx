@@ -23,7 +23,7 @@ import type { BoardRow } from "./board-types";
  *     the toast names the day it went to.
  *   · It Happened: Write It Up: marks the visit done, so it moves to Write Up (Undo puts its status back).
  *   · Lost: the visit did not become work; it is kept, under Lost (Undo clears the outcome).
- *   · Delete…: the visit page's own Won't Happen, behind its ask; a visit that is cancelled and kept
+ *   · Dismiss… (cn-v1166; was Delete…): the visit page's own Dismiss, behind its ask; a visit that is cancelled and kept
  *     (something was on it) offers Undo, as the visit's own page does.
  * The page decides which a row gets (its `menu`); a row with none of them gets no ⋯ at all, and a
  * visit with no start gets no Move (there is no time of day to keep).
@@ -158,7 +158,7 @@ export async function markItLost(
 }
 
 /**
- * DELETE, the second tap: the visit page's own rule (wontHappenAppointment: removed when nothing hangs
+ * DISMISS, the second tap: the visit page's own rule (wontHappenAppointment: removed when nothing hangs
  * on it, otherwise cancelled and kept), said the way the visit page says it. A visit cancelled and
  * kept offers Undo, which puts its status back by the visit page's rule; a toast that carries a
  * withdrawn-link note stays until it is read.

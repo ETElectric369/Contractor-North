@@ -7,7 +7,7 @@ import { titleCaseIn } from "../../../../tests/title-case-words";
 
 /**
  * AN OPEN INSPECTION'S ⋯. Every open row's moves sit behind the app's one row sheet: Move to Another
- * Day…, It Happened: Write It Up, Lost and Delete…, in that order, as the row's `menu` allows. Delete
+ * Day…, It Happened: Write It Up, Lost and Dismiss…, in that order, as the row's `menu` allows. Dismiss
  * asks first in the sheet (never the browser's dialog); It Happened and Lost carry an Undo that calls
  * the right door with the right value; a refusal is said, then the sheet closes, then the list
  * re-reads; no connection is said with the sheet still open; nobody is sent anywhere. Rendered statically (no DOM): the pure view's two faces, and the deeds
@@ -106,22 +106,22 @@ describe("which moves a row's ⋯ holds", () => {
 describe("the sheet's two faces", () => {
   it("resting: the rows the menu allows, in order, each a 44px sheet row, nothing red", () => {
     const en = face(["move", "happened", "lost", "del"], false);
-    expect(buttons(en)).toEqual(["Move to Another Day…", "It Happened: Write It Up", "Lost", "Delete…"]);
+    expect(buttons(en)).toEqual(["Move to Another Day…", "It Happened: Write It Up", "Lost", "Dismiss…"]);
     expect(en.match(/<button[^>]*class="[^"]*min-h-\[44px\] w-full[^"]*"/g)).toHaveLength(4);
     expect(en).not.toMatch(/red-/);
-    expect(buttons(face(["move", "del"], false))).toEqual(["Move to Another Day…", "Delete…"]);
+    expect(buttons(face(["move", "del"], false))).toEqual(["Move to Another Day…", "Dismiss…"]);
     expect(buttons(face(["lost"], false))).toEqual(["Lost"]);
   });
 
   it("asking: the question, the deed in red and Keep It; the rows are gone", () => {
     const en = face(["move", "happened", "lost", "del"], true);
-    expect(text(en)).toContain("Delete this visit? It is removed if nothing is on it. If anything is (notes, an estimate, an invoice, a time-pick link), it is cancelled and kept on file.");
-    expect(buttons(en)).toEqual(["Delete", "Keep It"]);
-    expect(en).toMatch(/<button[^>]*text-red-600[^>]*>Delete<\/button>/);
+    expect(text(en)).toContain("Dismiss this visit? It is deleted if nothing is on it. If anything is (notes, an estimate, an invoice, a time-pick link), it is cancelled and kept on file.");
+    expect(buttons(en)).toEqual(["Dismiss", "Keep It"]);
+    expect(en).toMatch(/<button[^>]*text-red-600[^>]*>Dismiss<\/button>/);
     expect(en.match(/red-/g)).toHaveLength(1);
     const es = face(["del"], true, "es");
-    expect(text(es)).toContain("¿Eliminar esta visita? Se elimina si no tiene nada. Si tiene algo (notas, un presupuesto, una factura, un enlace para elegir hora), se cancela y se conserva en el archivo.");
-    expect(buttons(es)).toEqual(["Eliminar", "Dejarla"]);
+    expect(text(es)).toContain("¿Descartar esta visita? Se elimina si no tiene nada. Si tiene algo (notas, un presupuesto, una factura, un enlace para elegir hora), se cancela y se conserva en el archivo.");
+    expect(buttons(es)).toEqual(["Descartar", "Dejarla"]);
     expect(es).not.toMatch(/Delete|Keep It/);
   });
 
@@ -135,7 +135,7 @@ describe("the sheet's two faces", () => {
 
   it("Spanish, and every label Title Case in both languages", () => {
     const es = face(["move", "happened", "lost", "del"], false, "es");
-    expect(buttons(es)).toEqual(["Mover a Otro Día…", "Sí Se Hizo: Redactarla", "Perdida", "Eliminar…"]);
+    expect(buttons(es)).toEqual(["Mover a Otro Día…", "Sí Se Hizo: Redactarla", "Perdida", "Descartar…"]);
     for (const lang of ["en", "es"] as const) {
       const t = translator(lang);
       for (const k of ["ip_btn_moveToAnotherDay", "ip_btn_itHappened", "ip_btn_lost", "ip_btn_delete", "ip_btn_deleteIt", "vp_btn_keepIt", "ag_btn_undo"]) {
@@ -266,7 +266,7 @@ describe("Lost", () => {
   });
 });
 
-describe("Delete…, the second tap", () => {
+describe("Dismiss…, the second tap", () => {
   const setStatus = vi.fn(async () => ({ ok: true }));
 
   it("removed: said the visit page's way, no Undo (there is nothing to put back); the sheet closes and the list re-reads", async () => {

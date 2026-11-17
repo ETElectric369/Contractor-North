@@ -213,7 +213,7 @@ export const NY_EN: Readonly<Record<string, string>> = {
   ny_btn_lostVisit: "Lost",
   ny_btn_assign: "Assign",
   ny_btn_finish: "Finish",
-  ny_btn_didntHappen: "Didn't Happen",
+  ny_btn_didntHappen: "Dismiss",
   ny_btn_setAsideUntil: "Set Aside Until…",
   ny_btn_setAside: "Set Aside",
   ny_btn_notACost: "Not a Cost",

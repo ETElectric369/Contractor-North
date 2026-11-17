@@ -143,16 +143,16 @@ describe("a visit's sheet", () => {
     for (const d of doors(html)) expect(d, d).toMatch(/\b(min-)?h-11\b/);
   });
 
-  it("Won't Happen beside Clear the Date, for a visit that is scheduled or proposed, never for one that is done or for the crew (2026-11-16)", () => {
-    expect(text(html)).toContain("Won't Happen");
-    expect(text(html).indexOf("Clear the Date")).toBeLessThan(text(html).indexOf("Won't Happen"));
+  it("Dismiss beside Clear the Date, for a visit that is scheduled or proposed, never for one that is done or for the crew (2026-11-16)", () => {
+    expect(text(html)).toContain("Dismiss");
+    expect(text(html).indexOf("Clear the Date")).toBeLessThan(text(html).indexOf("Dismiss"));
     const proposed = render({ ...visit, visit: { ...(visit as Extract<TileTarget, { kind: "visit" }>).visit, status: "proposed" } } as TileTarget);
-    expect(text(proposed)).toContain("Won't Happen");
+    expect(text(proposed)).toContain("Dismiss");
     const done = render({ ...visit, visit: { ...(visit as Extract<TileTarget, { kind: "visit" }>).visit, status: "completed" } } as TileTarget);
-    expect(text(done)).not.toContain("Won't Happen");
-    expect(text(render(visit, false))).not.toContain("Won't Happen");
+    expect(text(done)).not.toContain("Dismiss");
+    expect(text(render(visit, false))).not.toContain("Dismiss");
     // A job's sheet has no such door.
-    expect(text(render(siskin()))).not.toContain("Won't Happen");
+    expect(text(render(siskin()))).not.toContain("Dismiss");
     // Never the browser's own dialog.
     const rail = readFileSync(join(process.cwd(), "src/app/(app)/schedule/place-rail.tsx"), "utf8");
     const piece = rail.slice(rail.indexOf("export function VisitWontHappen("), rail.indexOf('/** "13:30" is a database.'));
@@ -383,7 +383,7 @@ describe("nothing said to a sheet nobody can see", () => {
     expect(sheet).toContain("holdOpen={busy > 0}");
     expect(sheet).toMatch(/<DayRow [^>]*voice=\{voice\}/);
     expect(sheet.match(/<ClearTheDate [^>]*voice=\{voice\}/g)?.length).toBe(2);
-    // The two time boxes, and the visit's Won't Happen (2026-11-16), which holds the sheet open while its write is out.
+    // The two time boxes, and the visit's Dismiss (2026-11-16), which holds the sheet open while its write is out.
     expect(sheet.match(/onPending=\{voice\?\.pending\}/g)?.length).toBe(3);
     expect(sheet).toContain("<VisitWontHappen id={visit.id} close={onClose} as=\"button\" onPending={voice?.pending} />");
     expect(sheet.match(/onRefusal=\{voice\?\.refusal\}/g)?.length).toBe(2);

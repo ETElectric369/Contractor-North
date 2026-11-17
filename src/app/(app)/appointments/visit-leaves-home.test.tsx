@@ -56,7 +56,7 @@ const decode = (s: string) => s.replace(/&#x27;|&#39;/g, "'").replace(/&amp;/g, 
 const text = (html: string) => decode(html.replace(/<[^>]+>/g, " "));
 const buttons = (html: string) => [...html.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)].map((m) => decode(m[1]));
 
-describe("⋯ › Won't Happen leaves for the visit's home in the tick the server answers", () => {
+describe("⋯ › Dismiss leaves for the visit's home in the tick the server answers", () => {
   const rows = src("src/app/(app)/appointments/[id]/visit-header-actions.tsx");
   const row = rows.slice(rows.indexOf("export function WontHappenRow"));
 
@@ -119,7 +119,7 @@ describe("⋯ › Edit Details… › Delete leaves with its sheet still open: n
   });
 });
 
-describe("an inspection row's Delete… asks in its sheet, never in the browser's own dialog", () => {
+describe("an inspection row's Dismiss… asks in its sheet, never in the browser's own dialog", () => {
   const doors = src("src/app/(app)/inspections/inspection-row-menu.tsx");
   const noop = () => {};
   const face = (asking: boolean, lang: "en" | "es", pending = false) =>
@@ -150,15 +150,15 @@ describe("an inspection row's Delete… asks in its sheet, never in the browser'
   });
 
   it("resting: the sheet's rows; asking: the question, the deed in red and Keep It (Title Case, both languages)", () => {
-    expect(buttons(face(false, "en"))).toEqual(["Move to Another Day…", "It Happened: Write It Up", "Lost", "Delete…"]);
-    expect(buttons(face(false, "es"))).toEqual(["Mover a Otro Día…", "Sí Se Hizo: Redactarla", "Perdida", "Eliminar…"]);
+    expect(buttons(face(false, "en"))).toEqual(["Move to Another Day…", "It Happened: Write It Up", "Lost", "Dismiss…"]);
+    expect(buttons(face(false, "es"))).toEqual(["Mover a Otro Día…", "Sí Se Hizo: Redactarla", "Perdida", "Descartar…"]);
     const en = face(true, "en");
-    expect(text(en)).toContain("Delete this visit? It is removed if nothing is on it. If anything is (notes, an estimate, an invoice, a time-pick link), it is cancelled and kept on file.");
-    expect(buttons(en)).toEqual(["Delete", "Keep It"]);
-    expect(en).toMatch(/<button[^>]*text-red-600[^>]*>Delete<\/button>/);
+    expect(text(en)).toContain("Dismiss this visit? It is deleted if nothing is on it. If anything is (notes, an estimate, an invoice, a time-pick link), it is cancelled and kept on file.");
+    expect(buttons(en)).toEqual(["Dismiss", "Keep It"]);
+    expect(en).toMatch(/<button[^>]*text-red-600[^>]*>Dismiss<\/button>/);
     const es = face(true, "es");
-    expect(text(es)).toContain("¿Eliminar esta visita? Se elimina si no tiene nada. Si tiene algo (notas, un presupuesto, una factura, un enlace para elegir hora), se cancela y se conserva en el archivo.");
-    expect(buttons(es)).toEqual(["Eliminar", "Dejarla"]);
+    expect(text(es)).toContain("¿Descartar esta visita? Se elimina si no tiene nada. Si tiene algo (notas, un presupuesto, una factura, un enlace para elegir hora), se cancela y se conserva en el archivo.");
+    expect(buttons(es)).toEqual(["Descartar", "Dejarla"]);
     expect(es).not.toMatch(/Delete|Keep It|Lost/);
     // The door as the list mounts it is the one ⋯, and its sheet starts at rest (it opens closed).
     const mounted = renderToStaticMarkup(

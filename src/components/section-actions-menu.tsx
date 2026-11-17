@@ -23,7 +23,7 @@ export const ACTIONS_NOTE_CLS = "relative z-10 px-4 py-2.5 text-left text-xs lea
 const DANGER_ROW_CLS =
   "relative z-10 flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50/60 disabled:opacity-50";
 
-/** The red row, for a composed child that is the panel's destructive verb (the visit's Won't Happen,
+/** The red row, for a composed child that is the panel's destructive verb (the visit's Dismiss,
  *  W2-11): the same look a danger node gets, so it reads as the one to be careful with. */
 export const ACTIONS_DANGER_ROW_CLS = DANGER_ROW_CLS;
 

@@ -78,7 +78,7 @@ describe("the table", () => {
     expect(labels(rowButtons(row("inquiry", { phone: "555-0100" }), staff).more)).toEqual(["Call", "Snooze", "Lost"]);
     expect(labels(rowButtons(row("quote_awaiting"), staff).more)).toEqual(["Won It", "Lost"]);
     expect(labels(rowButtons(row("quote_draft"), staff).more)).toEqual(["Not Needed"]);
-    expect(labels(rowButtons(row("appointment"), staff).more)).toEqual(["Didn't Happen"]);
+    expect(labels(rowButtons(row("appointment"), staff).more)).toEqual(["Dismiss"]);
     expect(labels(rowButtons(row("visit_unbilled"), staff).more)).toEqual(["Cancel"]);
     expect(labels(rowButtons(row("invoice_draft"), staff).more)).toEqual(["Set Aside Until…"]);
     expect(labels(rowButtons(row("organize", { paper: "tray" }), staff).more)).toEqual(["Set Aside"]);
@@ -175,11 +175,20 @@ describe("the laws", () => {
         }
   });
 
-  it("the words Dismiss and Delete never appear; every label is Title Case", () => {
+  // THE ONE EXCEPTION (the owner, 2026-11-16, cn-v1166): a visit that isn't going ahead is Dismissed,
+  // one name on every screen, and its confirm says plainly that an empty visit is deleted. Every
+  // other row still says what its ending records (Lost, Not Needed, Cancel, Set Aside…).
+  const visitDismiss = (item: ActionItem, d: RowDoor) =>
+    d.act.type === "confirm" && ((item.kind === "appointment" && d.act.verb === "dismiss") || d.act.verb === "wontHappen");
+  it("the words Dismiss and Delete never appear but on a visit's Dismiss; every label is Title Case", () => {
     for (const item of every())
       for (const d of allDoors(rowButtons(item, staff))) {
-        expect(d.label).not.toMatch(/dismiss|delete/i);
-        if (d.act.type === "confirm") expect(`${d.act.title} ${d.act.body} ${d.act.button}`).not.toMatch(/dismiss|delete/i);
+        if (visitDismiss(item, d)) {
+          expect(d.label).toBe("Dismiss");
+        } else {
+          expect(d.label).not.toMatch(/dismiss|delete/i);
+          if (d.act.type === "confirm") expect(`${d.act.title} ${d.act.body} ${d.act.button}`).not.toMatch(/dismiss|delete/i);
+        }
         expect(d.label, d.label).toMatch(/^[A-Z0-9]/);
         expect(titleCaseIn(d.label.replace(/…/g, "").trim(), "en"), d.label).toBe(true);
       }
@@ -225,13 +234,25 @@ describe("an inspection to write up can be OPENED, not only written up or called
     expect(allDoors(b).map((d) => d.label)).not.toContain("Write It Up");
   });
 
-  it("⋯ gains Didn't Happen only when the row carries the wontHappen verb (a visit not yet completed)", () => {
+  it("⋯ gains Dismiss only when the row carries the wontHappen verb (a visit not yet completed)", () => {
     const withIt = rowButtons(row("inspection_writeup", { affordances: ["dismiss", "wontHappen", "open"] }), staff);
-    expect(withIt.more.map((d) => d.label)).toEqual(["Didn't Happen", "Lost"]);
-    const door = withIt.more.find((d) => d.label === "Didn't Happen")!;
-    expect(door.act).toMatchObject({ type: "confirm", verb: "wontHappen" });
+    expect(withIt.more.map((d) => d.label)).toEqual(["Dismiss", "Lost"]);
+    const door = withIt.more.find((d) => d.label === "Dismiss")!;
+    expect(door.act).toMatchObject({ type: "confirm", verb: "wontHappen", title: "Dismiss This Visit?", button: "Dismiss" });
     const without = rowButtons(row("inspection_writeup", { affordances: ["dismiss", "open"] }), staff);
-    expect(without.more.map((d) => d.label)).not.toContain("Didn't Happen");
+    expect(without.more.map((d) => d.label)).not.toContain("Dismiss");
+  });
+
+  it("both visit endings are one Dismiss: the same title, button and body (cn-v1166)", () => {
+    const plain = rowButtons(row("appointment"), staff).more[0];
+    const writeUp = rowButtons(row("inspection_writeup", { affordances: ["dismiss", "wontHappen", "open"] }), staff).more[0];
+    for (const d of [plain, writeUp]) {
+      expect(d.label).toBe("Dismiss");
+      expect(d.act).toMatchObject({ type: "confirm", title: "Dismiss This Visit?", button: "Dismiss" });
+      if (d.act.type === "confirm") expect(d.act.body).toMatch(/off the schedule\. It is deleted if nothing is on it, otherwise cancelled and kept on file\.$/);
+    }
+    expect(plain.act).toMatchObject({ verb: "dismiss" });
+    expect(writeUp.act).toMatchObject({ verb: "wontHappen" });
   });
 });
 
@@ -413,7 +434,7 @@ describe("the doors in Spanish", () => {
     for (const [item, label] of cases) expect(rowButtons(item, es).primary?.label ?? null, item.kind).toBe(label);
     expect(labels(rowButtons(row("inquiry", { phone: "555-0100" }), es).more)).toEqual(["Llamar", "Posponer", "Perdido"]);
     expect(rowButtons(row("inquiry", { phone: "555-0100" }), esOff).primary?.label).toBe("Devolver la Llamada");
-    expect(labels(rowButtons(row("inspection_writeup", { affordances: ["dismiss", "wontHappen", "open"] }), es).more)).toEqual(["No Se Hizo", "Perdida"]);
+    expect(labels(rowButtons(row("inspection_writeup", { affordances: ["dismiss", "wontHappen", "open"] }), es).more)).toEqual(["Descartar", "Perdida"]);
     expect(labels(rowButtons(row("job_to_schedule"), es).more)).toEqual(["Asignar", "Terminar", "Cancelar"]);
     expect(rowButtons(row("invoice_draft"), es).more[0]).toMatchObject({ label: "Apartar hasta…", act: { type: "comeBack", button: "Apartar" } });
   });

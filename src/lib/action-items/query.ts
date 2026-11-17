@@ -911,7 +911,7 @@ async function buildActionItems(ctx: {
         // A TAP OPENS THE INSPECTION (the owner, 11-10): reading or changing the report comes first;
         // the estimate and the job are chosen from the visit page, never made by a tap on a row.
         href: `/appointments/${a.id}`,
-        // Didn't Happen (the visit page's Won't Happen) is offered while the visit is not completed.
+        // Dismiss (the visit page's own door, appointment.wontHappen) is offered while the visit is not completed.
         affordances: a.status === "completed" ? AFFORDANCES.inspection_writeup : [...AFFORDANCES.inspection_writeup, "wontHappen"],
       });
       writeUpApptIds.add(a.id);

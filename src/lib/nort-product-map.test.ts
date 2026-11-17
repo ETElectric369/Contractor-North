@@ -57,28 +57,47 @@ describe("Nort's product map after the shell wave", () => {
     expect(visibleDock({ isStaff: false }).some((s) => s.key === "clock")).toBe(true);
   });
 
-  it("tells a tech where their own hours and pay are, and never sends them to the office's page (sweep 2026-11-16)", () => {
+  it("tells a tech where their own hours and pay are, every pay period of theirs, and never sends them to the office's page (sweep 2026-11-16; cn-v1166)", () => {
     // A tech asked Nort to "show me the payroll" and was told about Timecards, an office page, with
-    // no word that his own hours and this period's pay sit under his clock. The map names the two
-    // cards by the words the page draws, so a renamed card breaks this line and not the answer.
+    // no word that his own hours and pay sit under his clock; then "where are the rest of my pay
+    // periods". The owner, 2026-11-16: "yes for tech sees all their own data and past pay periods".
+    // The map names the cards and the page by the words the screens draw, so a renamed card breaks
+    // this line and not the answer.
     const t = translator("en");
     expect(NORT_PRODUCT_MAP).toContain(`"${t("tc_myTimecard")}" (the last 7 days, with a week total)`);
-    expect(NORT_PRODUCT_MAP).toContain(`"${t("tc_myPayPeriod")}" (the CURRENT pay period's hours and base pay, marked ${t("tc_paid")}, ${t("tc_partlyPaid")} or ${t("tc_unpaid")}`);
+    expect(NORT_PRODUCT_MAP).toContain(`"${t("tc_myPayPeriod")}" (the NEWEST pay period's hours and base pay, marked ${t("tc_paid")}, ${t("tc_partlyPaid")} or ${t("tc_unpaid")}`);
+    expect(NORT_PRODUCT_MAP).toContain(`with ${t("tc_seeAllPayPeriods")} under it. That opens "${t("tc_myPayPeriods")}" (/timeclock/pay): their pay periods, newest first (every period the office has locked, and the open ones from the last 18 months)`);
+    // Only what the read does: open hours older than the balance window are not read (BALANCE_MONTHS).
+    expect(NORT_PRODUCT_MAP).not.toContain("EVERY one of their pay periods");
+    expect(readFileSync(join(process.cwd(), "src/lib/payroll-math.ts"), "utf8")).toContain("export const BALANCE_MONTHS = 18;");
     expect(NORT_PRODUCT_MAP).toContain("never send a tech to Timecards or Payroll");
+    expect(NORT_PRODUCT_MAP).not.toContain("Earlier pay periods are not on a tech's screen");
     // A card with no hours in it is not drawn, and the map says so (a tech told a card is there
     // when it is not is the answer this line exists to end).
-    expect(NORT_PRODUCT_MAP).toContain('Each card is drawn only once it has hours in it: "My timecard" after a punch in the last 7 days, "My pay period" after a shift in this period is clocked out.');
+    // The pay card is also drawn to say the pay can't be shown (a read that failed), and the map says so.
+    expect(NORT_PRODUCT_MAP).toContain(`"My timecard" is drawn only once it has hours in it (a punch in the last 7 days); "My pay period" is drawn once one of those pay periods has hours in it, or to say their pay can't be shown right now when it could not be read.`);
     expect(NORT_PRODUCT_MAP).toContain("Office only: the page turns a tech back to Clock.");
-    // True in code: the page draws both cards with those keys, the pay card for a tech only and for
-    // the current period only, and the office's page turns a tech back.
+    // True in code: the page draws both cards with those keys, the pay card for a tech only, from the
+    // newest row of My Pay Periods, with the door to the list; the office's page turns a tech back.
     const page = readFileSync(join(process.cwd(), "src/app/(app)/timeclock/page.tsx"), "utf8");
     expect(page).toContain('t("tc_myTimecard")');
-    expect(page).toContain('t("tc_myPayPeriod")');
-    expect(page).toContain("if (!isStaff && user)");
-    expect(page).toContain("payPeriodBounds(orgSettings.pay_schedule, orgSettings.pay_anchor, todayStrInTz(tz))");
+    expect(page).toContain("!isStaff && user");
+    expect(page).toContain("const newest = myPay?.kind === \"ok\" ? (myPay.pay.periods[0] ?? null) : null;");
     expect(page).toContain("7 * 86400_000");
     expect(page).toContain("{myTimecard.length > 0 && (");
-    expect(page).toContain("{!isStaff && myPeriod && (");
+    expect(page).toContain("{!isStaff && <MyPayCard newest={newest} cantShow={myPayCantShow} lang={lang} />}");
+    // The card itself (pay/my-pay-views MyPayCard): drawn for a period, or to say the pay can't be shown.
+    const card = readFileSync(join(process.cwd(), "src/app/(app)/timeclock/pay/my-pay-views.tsx"), "utf8");
+    expect(card).toContain('t("tc_myPayPeriod")');
+    expect(card).toContain("if (!newest && !cantShow) return null;");
+    expect(card).toContain('{t("tc_payCantShow")}');
+    expect(card).toContain('href="/timeclock/pay"');
+    expect(card).toContain('{t("tc_seeAllPayPeriods")}');
+    // The list and one period are pages of their own under the clock.
+    const list = readFileSync(join(process.cwd(), "src/app/(app)/timeclock/pay/page.tsx"), "utf8");
+    expect(list).toContain("<MyPayList pay={data.pay} payments={data.payments} lang={lang} />");
+    const one = readFileSync(join(process.cwd(), "src/app/(app)/timeclock/pay/[period]/page.tsx"), "utf8");
+    expect(one).toContain("<MyPayPeriodView");
     expect(readFileSync(join(process.cwd(), "src/app/(app)/timecards/page.tsx"), "utf8")).toContain('redirect("/timeclock")');
   });
 

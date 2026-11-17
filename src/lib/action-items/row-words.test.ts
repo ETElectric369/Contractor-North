@@ -91,24 +91,22 @@ describe("the one English table", () => {
     expect(d.ny_btn_takeOffHold).toBe(d.ag_rail_btn_takeOffHold);
     expect(d.ny_btn_getPaid).toBe(d.su_btn_getPaid);
     expect(d.ny_btn_recordIt).toBe(d.su_btn_recordIt);
-    // The door Didn't Happen opens has a name of its own on each screen: see "one door, three names".
+    // The visit's Dismiss is one name on every screen: see "one door, one name".
     expect(d.ny_btn_lostVisit).toBe(d.ip_btn_lost);
   });
 });
 
-describe("one door, three names", () => {
+describe("one door, one name", () => {
   // THE DOOR THAT ENDS A VISIT THAT WILL NOT GO AHEAD (wontHappenAppointment: removed when nothing is
-  // on it, else cancelled and kept) is ONE door with three names: Delete… in a row's ⋯ on the
-  // Inspections page, Didn't Happen in My Day's ⋯, Won't Happen in the visit's own ⋯ Actions. The owner
-  // has not picked the one name yet. This pin holds the three as they are, so none of them changes by
-  // accident; a rename starts here, and when he picks it the three keys say one word.
-  it("Delete… on Inspections, Didn't Happen on My Day, Won't Happen on the visit's page, in both languages", () => {
+  // on it, else cancelled and kept) had three names until the owner picked one (2026-11-16, cn-v1166):
+  // Dismiss / Descartar, with the Inspections ⋯ row's ellipsis (its neighbours carry one).
+  it("Dismiss… on Inspections, Dismiss on My Day and on the visit's page, in both languages", () => {
     const names = (lang: "en" | "es") => {
       const d = dict(lang);
       return [d.ip_btn_delete, d.ny_btn_didntHappen, d.vp_btn_wontHappen];
     };
-    expect(names("en")).toEqual(["Delete…", "Didn't Happen", "Won't Happen"]);
-    expect(names("es")).toEqual(["Eliminar…", "No Se Hizo", "No Se Hará"]);
+    expect(names("en")).toEqual(["Dismiss…", "Dismiss", "Dismiss"]);
+    expect(names("es")).toEqual(["Descartar…", "Descartar", "Descartar"]);
     const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
     const menu = read("src/app/(app)/inspections/inspection-row-menu.tsx");
     expect(menu).toContain('t("ip_btn_delete")');

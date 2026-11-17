@@ -72,8 +72,8 @@ export function wontHappenVerdict(f: WontHappenFacts): "delete" | "cancel" {
 /** The confirm, saying which will happen before it does. */
 export function wontHappenConfirm(verdict: "delete" | "cancel", lang: Lang | string | null = "en", words?: Words): string {
   return verdict === "delete"
-    ? say(lang, words, "vp_wontHappenDeleteAsk", "This visit won't happen? Nothing was captured on it, so it will be deleted.")
-    : say(lang, words, "vp_wontHappenCancelAsk", "This visit won't happen? Its notes, photos and answers stay on file, marked Cancelled.");
+    ? say(lang, words, "vp_wontHappenDeleteAsk", "Dismiss this visit? Nothing was captured on it, so it will be deleted.")
+    : say(lang, words, "vp_wontHappenCancelAsk", "Dismiss this visit? Its notes, photos and answers stay on file, marked Cancelled.");
 }
 
 /** What the result toast says: the server's verdict, in plain words, with any withdrawn-link note

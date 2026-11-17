@@ -28,7 +28,7 @@ import type { WordCatalog } from "./types";
  * languages): Write Up, Coming Up, Needs a Day, Didn't Happen?, and under Filed: Completed, Lost,
  * Cancelled. Falta el Día is Needs You's own phrase for a thing with no day (ny_btn_pile_wonNeedsADay).
  * Each tile's quiet line is a phrase (sentence case). A row's ⋯ holds Move to Another Day…, It Happened:
- * Write It Up, Lost and Delete…; the old headings and the two big buttons of the Didn't Happen? group
+ * Write It Up, Lost and Dismiss… (cn-v1166: the door's one name); the old headings and the two big buttons of the Didn't Happen? group
  * are gone with their keys.
  */
 export const words: WordCatalog = {
@@ -77,9 +77,9 @@ export const words: WordCatalog = {
     ip_btn_moveToAnotherDay: "Move to Another Day…",
     ip_btn_itHappened: "It Happened: Write It Up",
     ip_btn_lost: "Lost",
-    ip_btn_delete: "Delete…",
-    ip_deleteAsk: "Delete this visit? It is removed if nothing is on it. If anything is (notes, an estimate, an invoice, a time-pick link), it is cancelled and kept on file.",
-    ip_btn_deleteIt: "Delete",
+    ip_btn_delete: "Dismiss…",
+    ip_deleteAsk: "Dismiss this visit? It is deleted if nothing is on it. If anything is (notes, an estimate, an invoice, a time-pick link), it is cancelled and kept on file.",
+    ip_btn_deleteIt: "Dismiss",
     ip_movedToWriteUp: "Moved to Write Up.",
     ip_movedToDay: "Moved to {day}.",
     ip_backWhereItWas: "Back where it was.",
@@ -121,9 +121,9 @@ export const words: WordCatalog = {
     ip_btn_moveToAnotherDay: "Mover a Otro Día…",
     ip_btn_itHappened: "Sí Se Hizo: Redactarla",
     ip_btn_lost: "Perdida",
-    ip_btn_delete: "Eliminar…",
-    ip_deleteAsk: "¿Eliminar esta visita? Se elimina si no tiene nada. Si tiene algo (notas, un presupuesto, una factura, un enlace para elegir hora), se cancela y se conserva en el archivo.",
-    ip_btn_deleteIt: "Eliminar",
+    ip_btn_delete: "Descartar…",
+    ip_deleteAsk: "¿Descartar esta visita? Se elimina si no tiene nada. Si tiene algo (notas, un presupuesto, una factura, un enlace para elegir hora), se cancela y se conserva en el archivo.",
+    ip_btn_deleteIt: "Descartar",
     ip_movedToWriteUp: "Pasó a Por Redactar.",
     ip_movedToDay: "Se movió al {day}.",
     ip_backWhereItWas: "Volvió a donde estaba.",

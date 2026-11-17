@@ -353,7 +353,7 @@ export default async function AppointmentCapturePage({
   /* WHERE THIS VISIT LIVES (lib/appointments/visit-home), read off the row this page already holds:
      Sales › Inspections for an inspection, its day on the Schedule for any other booking, My Day for a
      tech. The shell is told (NavHome below), so the dock lights that cluster and its sub-nav stays;
-     and it is where Won't Happen and Edit Details' Delete land once the visit is gone from under
+     and it is where Dismiss and Edit Details' Delete land once the visit is gone from under
      this page (Erik, 2026-11-10: deleting an inspection ended on the 404). */
   const home = visitHome(a.type, { day: dayStr, staff: viewerIsStaff });
 

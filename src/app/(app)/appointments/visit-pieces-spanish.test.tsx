@@ -319,8 +319,8 @@ describe("the pure libraries: English inline by default, the catalog's Spanish w
   });
 
   it("wont-happen: the confirm, the toast, Undo's note, Put It Back's sentence", () => {
-    expect(wontHappenConfirm("delete", "es", t)).toBe("¿Esta visita no se hará? No se capturó nada en ella, así que se eliminará.");
-    expect(wontHappenConfirm("cancel", "es", t)).toBe("¿Esta visita no se hará? Sus notas, fotos y respuestas se quedan guardadas, marcada como Cancelada.");
+    expect(wontHappenConfirm("delete", "es", t)).toBe("¿Descartar esta visita? No se capturó nada en ella, así que se eliminará.");
+    expect(wontHappenConfirm("cancel", "es", t)).toBe("¿Descartar esta visita? Sus notas, fotos y respuestas se quedan guardadas, marcada como Cancelada.");
     expect(wontHappenToast("deleted", null, "es", t)).toBe("Eliminada. No tenía nada.");
     expect(wontHappenToast("cancelled", null, "es", t)).toBe("Marcada como Cancelada. Todo lo que tiene se queda guardado.");
     expect(wontHappenToast("cancelled", "Se retiró el enlace.", "es", t)).toBe("Marcada como Cancelada. Todo lo que tiene se queda guardado. Se retiró el enlace."); // the server's note, as received
@@ -332,7 +332,7 @@ describe("the pure libraries: English inline by default, the catalog's Spanish w
     expect(putBackPlan("2026-09-20", "2026-10-01", "es", t)).toEqual({ keepDay: false, message: `De vuelta en la agenda, esperando un día: el ${visitDayWords("2026-09-20", "es")} ya pasó.` });
     expect(putBackPlan(null, "2026-10-01", "es", t)).toEqual({ keepDay: false, message: "De vuelta en la agenda, esperando un día." });
     // English defaults, byte for byte what wont-happen.test pins.
-    expect(wontHappenConfirm("delete")).toBe("This visit won't happen? Nothing was captured on it, so it will be deleted.");
+    expect(wontHappenConfirm("delete")).toBe("Dismiss this visit? Nothing was captured on it, so it will be deleted.");
     expect(wontHappenToast("cancelled")).toBe("Marked Cancelled. Everything on it stays on file.");
     expect(wontHappenUndo("proposed")).toEqual({ status: "scheduled", note: "The pick-a-time link stays withdrawn — send a new one." });
     expect(putBackPlan("2026-10-01", "2026-10-01")).toEqual({ keepDay: true, message: "Back on the schedule for Thu Oct 1." });
@@ -593,8 +593,8 @@ describe("the visit page catalog (vp_), builder D's half", () => {
     vp_startedAndClockedIn: "Started {job}{who} and clocked you in at {at}.",
     vp_startedAndMovedPunch: "Started {job}{who} and moved your whole punch since {at} onto it.",
     vp_startedAndSwitched: "Started {job}{who} and switched your clock here{from} at {at}.",
-    vp_wontHappenDeleteAsk: "This visit won't happen? Nothing was captured on it, so it will be deleted.",
-    vp_wontHappenCancelAsk: "This visit won't happen? Its notes, photos and answers stay on file, marked Cancelled.",
+    vp_wontHappenDeleteAsk: "Dismiss this visit? Nothing was captured on it, so it will be deleted.",
+    vp_wontHappenCancelAsk: "Dismiss this visit? Its notes, photos and answers stay on file, marked Cancelled.",
     vp_deletedNothingOnIt: "Deleted. Nothing was on it.",
     vp_markedCancelledStays: "Marked Cancelled. Everything on it stays on file.",
     vp_pickLinkStaysWithdrawn: "The pick-a-time link stays withdrawn — send a new one.",

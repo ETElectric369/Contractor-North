@@ -254,8 +254,8 @@ describe("the rule, pure", () => {
   });
 
   it("the words: the confirm says which, the toast repeats the server's verdict", () => {
-    expect(wontHappenConfirm("delete")).toBe("This visit won't happen? Nothing was captured on it, so it will be deleted.");
-    expect(wontHappenConfirm("cancel")).toBe("This visit won't happen? Its notes, photos and answers stay on file, marked Cancelled.");
+    expect(wontHappenConfirm("delete")).toBe("Dismiss this visit? Nothing was captured on it, so it will be deleted.");
+    expect(wontHappenConfirm("cancel")).toBe("Dismiss this visit? Its notes, photos and answers stay on file, marked Cancelled.");
     expect(wontHappenToast("deleted")).toBe("Deleted. Nothing was on it.");
     expect(wontHappenToast("cancelled")).toBe("Marked Cancelled. Everything on it stays on file.");
     expect(wontHappenToast("cancelled", "The customer's pick-a-time link was withdrawn and can't be un-withdrawn.")).toBe(
@@ -287,7 +287,7 @@ describe("the visit page's header: at most one main button, then ⋯", () => {
     expect(page).not.toContain("Mark inspection complete");
   });
 
-  it("the ⋯ rows, in order, 44px and Title Case, Won't Happen red and last behind a divider", () => {
+  it("the ⋯ rows, in order, 44px and Title Case, Dismiss red and last behind a divider", () => {
     const menu = page.slice(page.indexOf("<SectionActionsMenu tree={VISIT_ACTIONS_MENU}>"), page.indexOf("</SectionActionsMenu>"));
     const order = ["<MarkDoneRow", "<AppointmentButton", "<UnscheduleButton id={a.id} menuItem", "<PutBackRow", "<WontHappenRow"].map((t) => menu.indexOf(t));
     expect(order.every((i) => i >= 0)).toBe(true);
@@ -302,7 +302,7 @@ describe("the visit page's header: at most one main button, then ⋯", () => {
     expect(page).toContain('const VISIT_ACTIONS_MENU: NavTree = { center: { label: t("vp_btn_actions"), icon: "more" }, nodes: [] };');
     expect(translator("en")("vp_btn_actions")).toBe("Actions");
     // The rows' words come from the catalog (the visit-page-in-Spanish wave), the English byte for byte.
-    for (const [key, w] of [["vp_btn_markDone", "Mark Done"], ["vp_btn_putItBackOnTheSchedule", "Put It Back on the Schedule"], ["vp_btn_wontHappen", "Won't Happen"]]) {
+    for (const [key, w] of [["vp_btn_markDone", "Mark Done"], ["vp_btn_putItBackOnTheSchedule", "Put It Back on the Schedule"], ["vp_btn_wontHappen", "Dismiss"]]) {
       expect(rows).toContain(`t("${key}")`);
       expect(translator("en")(key)).toBe(w);
     }

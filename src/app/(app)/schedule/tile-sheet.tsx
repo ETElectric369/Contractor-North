@@ -695,7 +695,7 @@ function VisitSheet({ day, visit, tz, workDay, team, canEdit, onClose, voice }: 
           {t("ag_btn_openTheVisit")}
         </Link>
         {canEdit && open && <ClearTheDate what="visit" clear={clear} voice={voice} />}
-        {/* Won't Happen (2026-11-16): the rail's own piece, asked the way Clear the Date asks, calling the
+        {/* Dismiss (2026-11-16; one name since cn-v1166): the rail's own piece, asked the way Clear the Date asks, calling the
             visit page's own action; it tells the sheet while its write is out, so the sheet holds open. */}
         {canEdit && open && <VisitWontHappen id={visit.id} close={onClose} as="button" onPending={voice?.pending} />}
       </div>

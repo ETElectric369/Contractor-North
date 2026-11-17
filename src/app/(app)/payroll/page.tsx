@@ -8,12 +8,12 @@ import { translator } from "@/lib/i18n";
 import { currentLangFor } from "@/lib/current-lang";
 import { getOrgSettings } from "@/lib/org-settings";
 import { payPeriodBounds, payPeriodForOffset, payPeriodOffsetOf, tzDayStartUtc, todayStrInTz } from "@/lib/tz";
-import { hoursBetween } from "@/lib/utils";
 import {
   aggregatePayrollEntries,
   balanceForPerson,
+  balanceWindowStartYmd,
   drawIdsFrom,
-  payRateForEntry,
+  openPeriodsFor,
   toPayPaymentRow,
   wagesOnly,
   type PayPaymentRow,
@@ -35,7 +35,8 @@ export const dynamic = "force-dynamic";
  *  than a year of neglected periods (Brian's oldest unpaid hours are ~2 months old). The frozen
  *  payroll_runs snapshots that make up the locked half of `earned` are NOT windowed at all, so
  *  only never-locked hours older than this could fall out of view. */
-const BALANCE_MONTHS = 18;
+// The number itself lives in payroll-math (BALANCE_MONTHS) since cn-v1166: a worker's own My Pay
+// Periods reads the same window, and his figures must be built from the same rows as these.
 
 /** Every column the balance math and the mileage block read off a time entry. One list, used by
  *  both entry queries, so a field can never go missing from one of them (THE PROJECTION LAW: the
@@ -128,11 +129,7 @@ export default async function PayrollPage({
 
   // Days are ORG-local (lib/tz), so the window's first instant is the org's midnight, not the
   // server's — the same rule every other date on this page obeys.
-  const windowStartYmd = (() => {
-    const d = new Date(`${today}T00:00:00Z`);
-    d.setUTCMonth(d.getUTCMonth() - BALANCE_MONTHS);
-    return d.toISOString().slice(0, 10);
-  })();
+  const windowStartYmd = balanceWindowStartYmd(today);
   const windowIso = tzDayStartUtc(windowStartYmd, tz).toISOString();
 
   // THE SIX READS EVERY FIGURE ON THIS PAGE IS MADE OF. Each is paged to the end and each reports
@@ -332,27 +329,13 @@ export default async function PayrollPage({
   // the very drift the CSV bug was. Bucketed by the entry's ORG-local day, the same way the pay
   // period itself is drawn.
   const owedPeriods: Record<string, { start: string; end: string; gross: number }[]> = {};
-  {
-    const byPerson = new Map<string, Map<string, { start: string; end: string; gross: number }>>();
-    for (const e of closed) {
-      if (e.paid_at) continue;
-      const id = e.profile_id ? String(e.profile_id) : "";
-      if (!id || drawIds.has(id)) continue;
-      const day = todayStrInTz(tz, new Date(e.clock_in));
-      const p = payPeriodBounds(settings.pay_schedule, settings.pay_anchor, day);
-      const key = `${p.start}|${p.end}`;
-      const per = byPerson.get(id) ?? new Map<string, { start: string; end: string; gross: number }>();
-      const cur = per.get(key) ?? { start: p.start, end: p.end, gross: 0 };
-      cur.gross += hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) * payRateForEntry(e, baseRateFor(id));
-      per.set(key, cur);
-      byPerson.set(id, per);
-    }
-    for (const [id, per] of byPerson) {
-      owedPeriods[id] = [...per.values()]
-        .map((x) => ({ start: x.start, end: x.end, gross: r2(x.gross) }))
-        .filter((x) => x.gross > 0)
-        .sort((a, b) => a.start.localeCompare(b.start));
-    }
+  // ONE RULE (cn-v1166): openPeriodsFor is the builder that lived inline here, moved whole into
+  // payroll-math, because a worker's own My Pay Periods reads the same figures. A running shift and a
+  // locked entry are skipped inside it, exactly as the closed-only, paid_at-skipping loop did.
+  for (const [id, mine] of entriesByPerson) {
+    if (drawIds.has(id)) continue;
+    const list = openPeriodsFor(mine, { tz, schedule: settings.pay_schedule, anchor: settings.pay_anchor, fallbackRate: baseRateFor(id) });
+    if (list.length > 0) owedPeriods[id] = list;
   }
 
   /**

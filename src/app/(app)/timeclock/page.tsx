@@ -1,19 +1,17 @@
 import { Suspense } from "react";
 import { isStaffRole } from "@/lib/actions/perms";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
-import { payPeriodBounds, todayStrInTz, tzDayStartUtc } from "@/lib/tz";
+import { todayStrInTz } from "@/lib/tz";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { TimeclockPanel } from "./timeclock-panel";
 import { NextUp } from "./next-up";
 import { AutoClockoutPrompt } from "./auto-clockout-prompt";
 import { autoClockoutPromptState } from "./close-math";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
-import { aggregatePayrollEntries } from "@/lib/payroll-math";
-import { hoursBetween, formatCurrency, formatDate, formatDuration } from "@/lib/utils";
+import { hoursBetween, formatDuration } from "@/lib/utils";
 import { fillText, localeOf, translator } from "@/lib/i18n";
 import type { JobCode, TimeEntry } from "@/lib/types";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
@@ -21,6 +19,8 @@ import { loadShiftChains } from "@/lib/shift-chain";
 import { reportError } from "@/lib/observe";
 import { getCrewStatus, type CrewMember } from "@/lib/crew-status";
 import { WhosOnTheClock } from "./whos-on-the-clock";
+import { readMyPay, type MyPayData } from "./pay/my-pay-read";
+import { MyPayCard } from "./pay/my-pay-views";
 
 export const dynamic = "force-dynamic";
 
@@ -33,19 +33,15 @@ export default async function TimeclockPage() {
   const weekAgo = new Date(Date.now() - 7 * 86400_000).toISOString();
 
   // The caller's OWN row, read twice over. `profiles` carries the plain fields (language,
-  // role); home_address (the MILEAGE ORIGIN) and hourly_rate live behind the profile_pay view,
-  // because 0216 revoked those columns from the authenticated role. profile_pay is staff-or-SELF,
-  // so a person reading their own address and rate is exactly what it allows, and nobody else's
-  // ever loads here.
+  // role); home_address (the MILEAGE ORIGIN) lives behind the profile_pay view, because 0216 revoked
+  // it from the authenticated role. profile_pay is staff-or-SELF, so a person reading their own
+  // address is exactly what it allows, and nobody else's ever loads here.
   //
-  // hourly_rate MUST come from THIS read. "My pay period" below hands it to
-  // aggregatePayrollEntries as the fallback pay rate, and it was being read off `prof` — a select
-  // that asks for language and role only, on a table whose rate column is revoked twice over. The
-  // fallback was therefore 0, so a tech with no per-entry rate_override saw a real week of work
-  // priced at $0.00 under an "unpaid" badge. A wrong number on a pay screen is worse than none.
+  // hourly_rate is no longer read here (cn-v1166): "My pay period" below is the newest row of My Pay
+  // Periods, whose read (pay/my-pay-read) takes the caller's own rate off this same view.
   const [{ data: prof }, { data: selfPay }] = await Promise.all([
     supabase.from("profiles").select("language, role, org_id").eq("id", user?.id ?? "").maybeSingle(),
-    supabase.from("profile_pay").select("home_address, hourly_rate").eq("id", user?.id ?? "").maybeSingle(),
+    supabase.from("profile_pay").select("home_address").eq("id", user?.id ?? "").maybeSingle(),
   ]);
   const lang = prof?.language ?? "en";
   const t = translator(lang);
@@ -53,6 +49,17 @@ export default async function TimeclockPage() {
   const clockWords = (iso: string, tz: string) =>
     new Date(iso).toLocaleTimeString(localeOf(lang), { timeZone: tz, hour: "numeric", minute: "2-digit" });
   const isStaff = !!prof && isStaffRole(prof.role);
+
+  // MY PAY PERIODS (techs only; cn-v1166): started now, awaited where the card is built, so its reads
+  // run beside the page's own. Office people reach their own list at /timeclock/pay.
+  const myPayP: Promise<MyPayData | null> =
+    !isStaff && user
+      ? (async () => {
+          const { data } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+          const s = getOrgSettings((data as any)?.settings);
+          return readMyPay(supabase, user.id, { tz: s.timezone, schedule: s.pay_schedule, anchor: s.pay_anchor, today: todayStrInTz(s.timezone) });
+        })()
+      : Promise.resolve(null);
 
   // WHO'S ON THE CLOCK (cn-v1134; Erik, 2026-10-27: "keep the who's on the clock with Time Clock
   // instead of Timecards"): the office's live crew pulse, read the moment the role is known, STAFF
@@ -346,59 +353,15 @@ export default async function TimeclockPage() {
     for (const [day, g] of byDay) myTimecard.push({ day, ...g });
   }
 
-  // MY PAY PERIOD (techs only) — the same period summary the office reads on
-  // /timecards, for THIS tech alone: total hours + base pay via the EXACT
-  // /payroll math (aggregatePayrollEntries — per-entry rate_override honored,
-  // lunch deducted) + the paid/unpaid state /payroll's Mark-paid stamps
-  // (paid_at). Mileage dollars never appear — mileage is a human-stated
-  // settlement on /payroll (payroll-two-buckets doctrine), never app-computed.
-  let myPeriod:
-    | {
-        label: string;
-        hours: number;
-        gross: number;
-        state: "paid" | "partly" | "unpaid";
-        /** The $48.50 lesson (mirrors /payroll's open-entries banner): a still-open shift is
-         *  EXCLUDED by the closed-only filter below — say so, or the period under-counts silently. */
-        openNotCounted: boolean;
-      }
-    | null = null;
-  if (!isStaff && user) {
-    const tz = orgSettings.timezone;
-    const period = payPeriodBounds(orgSettings.pay_schedule, orgSettings.pay_anchor, todayStrInTz(tz));
-    const { data: periodEntries } = await supabase
-      .from("time_entries")
-      .select("profile_id, clock_in, clock_out, lunch_minutes, rate_override, paid_at, mileage_paid_at")
-      .eq("profile_id", user.id)
-      .eq("status", "closed")
-      .not("clock_out", "is", null)
-      .gte("clock_in", tzDayStartUtc(period.start, tz).toISOString())
-      .lt("clock_in", tzDayStartUtc(period.end, tz).toISOString());
-    const [row] = aggregatePayrollEntries(
-      (periodEntries ?? []) as any[],
-      tz,
-      // The caller's own rate, off profile_pay (see the read at the top) — NOT off `prof`,
-      // whose table no longer carries the column.
-      Number((selfPay as any)?.hourly_rate ?? 0),
-    );
-    if (row) {
-      // Inclusive last day as a date STRING so formatDate prints it literally.
-      const endIncl = new Date(new Date(`${period.end}T00:00:00Z`).getTime() - 86_400_000)
-        .toISOString()
-        .slice(0, 10);
-      const openInMs = openEntry ? new Date(openEntry.clock_in).getTime() : null;
-      myPeriod = {
-        label: `${formatDate(period.start, undefined, lang)} – ${formatDate(endIncl, undefined, lang)}`,
-        hours: row.paidHours + row.unpaidHours,
-        gross: Math.round((row.paidGross + row.unpaidGross) * 100) / 100,
-        state: row.unpaidHours === 0 ? "paid" : row.paidHours > 0 ? "partly" : "unpaid",
-        openNotCounted:
-          openInMs != null &&
-          openInMs >= tzDayStartUtc(period.start, tz).getTime() &&
-          openInMs < tzDayStartUtc(period.end, tz).getTime(),
-      };
-    }
-  }
+  // MY PAY PERIOD (techs only), driven by the NEWEST row of My Pay Periods (cn-v1166): the office's
+  // own figures for this person (lib/payroll-math myPayPeriods, over the rows the Payroll page reads for
+  // him), so a period paid in part says partly paid. The card used to read only paid_at, and a person
+  // handed part of a period read "unpaid". Mileage dollars never appear here: mileage is a human-stated
+  // settlement on /payroll (payroll-two-buckets doctrine), never app-computed. The read was started at
+  // the top (myPayP), beside the others.
+  const myPay = await myPayP;
+  const newest = myPay?.kind === "ok" ? (myPay.pay.periods[0] ?? null) : null;
+  const myPayCantShow = myPay?.kind === "cantShow";
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -514,36 +477,9 @@ export default async function TimeclockPage() {
           </Card>
         )}
 
-        {/* MY PAY PERIOD (techs only) — hours + base pay + paid state for the
-            current period, mirroring what the office sees on /timecards.
-            Mileage $ is deliberately absent (settled by a human on /payroll). */}
-        {!isStaff && myPeriod && (
-          <Card>
-            <CardContent className="py-4">
-              <div className="mb-1 flex items-baseline justify-between">
-                <h3 className="text-sm font-semibold text-slate-900">{t("tc_myPayPeriod")}</h3>
-                <span className="text-xs text-slate-400">{myPeriod.label}</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-slate-600">{formatDuration(myPeriod.hours)}</span>
-                <span className="flex items-center gap-2">
-                  <span className="font-bold text-slate-900">{formatCurrency(myPeriod.gross, lang)}</span>
-                  {myPeriod.state === "paid" ? (
-                    <Badge tone="green">{t("tc_paid")}</Badge>
-                  ) : myPeriod.state === "partly" ? (
-                    <Badge tone="amber">{t("tc_partlyPaid")}</Badge>
-                  ) : (
-                    <Badge tone="slate">{t("tc_unpaid")}</Badge>
-                  )}
-                </span>
-              </div>
-              {myPeriod.openNotCounted && (
-                <p className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">{t("tc_openNotCounted")}</p>
-              )}
-              <p className="mt-1.5 text-xs text-slate-400">{t("tc_basePayOnly")}</p>
-            </CardContent>
-          </Card>
-        )}
+        {/* MY PAY PERIOD (techs only): the newest of My Pay Periods and the door to every period
+            (drawn in pay/my-pay-views, MyPayCard, so it renders in a test). */}
+        {!isStaff && <MyPayCard newest={newest} cantShow={myPayCantShow} lang={lang} />}
       </div>
     </div>
   );

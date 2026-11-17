@@ -122,7 +122,7 @@ export type Affordance =
   | "assign" // give to a person
   | "snooze" // defer to a later date
   | "dismiss" // remove from my list (delete / cancel / archive)
-  | "wontHappen" // the visit page's Won't Happen, from a row's ⋯ (added per row, only while the visit is not completed)
+  | "wontHappen" // the visit page's Dismiss (appointment.wontHappen), from a row's ⋯ (added per row, only while the visit is not completed)
   | "notACost" // a receipt row's ⋯ Not a Cost: the paper is filed under that name (the job's paper list's own category edit)
   | "open"; // drill into the detail page
 
@@ -365,7 +365,7 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // Called (do), Snooze (the day only: inquiry.snooze, never a contact), Lost (inquiry.markLost,
   // kept with status lost, never deleted).
   inquiry: ["do", "snooze", "dismiss", "open"],
-  // Close Out (do), ⋯ Didn't Happen (dismiss). A tech's row only opens (appointmentAffordances).
+  // Close Out (do), ⋯ Dismiss (dismiss: appointment.wontHappen, cn-v1166). A tech's row only opens (appointmentAffordances).
   appointment: ["do", "dismiss", "open"],
   // The href opens THE INSPECTION, the visit's own page (/appointments/<id>), never the estimate
   // builder (cn-v1157: a tap reads or changes the report first; the estimate and the job are chosen

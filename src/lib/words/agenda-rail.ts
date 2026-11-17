@@ -87,11 +87,11 @@ export const words: WordCatalog = {
     // A waiting visit of type Job is a visit, not the job's own day (2026-11-16): its pill says so.
     ag_rail_kindJobVisit: "Job Visit",
     // A waiting visit's ⋯ ends it: the visit page's own door (vp_btn_wontHappen), in the same words.
-    ag_rail_btn_wontHappen: "Won't Happen",
+    ag_rail_btn_wontHappen: "Dismiss",
     // Its busy word: true whether the visit ends deleted or cancelled (nothing is "saved").
     ag_rail_btn_working: "Working…",
     ag_rail_wontHappenAsk:
-      "This visit won't happen? It is deleted if nothing is on it. If anything is (notes, an estimate, an invoice, a time-pick link), it is cancelled and kept on file.",
+      "Dismiss this visit? It is deleted if nothing is on it. If anything is (notes, an estimate, an invoice, a time-pick link), it is cancelled and kept on file.",
 
     // ── The placement bar (place-rail's footer) ──
     ag_rail_nPickedOne: "{n} picked",
@@ -312,10 +312,10 @@ export const words: WordCatalog = {
     ag_rail_email: "Correo",
     ag_rail_emailOnTheSpot: "Correo — anótalo aquí mismo",
     ag_rail_kindJobVisit: "Visita de Trabajo",
-    ag_rail_btn_wontHappen: "No Se Hará",
+    ag_rail_btn_wontHappen: "Descartar",
     ag_rail_btn_working: "Procesando…",
     ag_rail_wontHappenAsk:
-      "¿Esta visita no se hará? Se elimina si no tiene nada. Si tiene algo (notas, un presupuesto, una factura, un enlace para elegir hora), se cancela y se conserva en el archivo.",
+      "¿Descartar esta visita? Se elimina si no tiene nada. Si tiene algo (notas, un presupuesto, una factura, un enlace para elegir hora), se cancela y se conserva en el archivo.",
 
     ag_rail_nPickedOne: "{n} elegido",
     ag_rail_nPickedMany: "{n} elegidos",

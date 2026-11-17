@@ -125,9 +125,8 @@ describe("migration 0409: born from an estimate", () => {
   const backfill = sql.slice(at(BACKFILL), at(SELF));
   const self = sql.slice(at(SELF));
 
-  it("is the one 0409 and nothing sits past it", () => {
+  it("is the one 0409 (what sits past it is the newest migration's own test: migration-0410.test.ts)", () => {
     expect(names.filter((n) => n.startsWith("0409_"))).toEqual(["0409_born_from_an_estimate.sql"]);
-    expect(names.some((n) => /^041\d_|^04[2-9]\d_|^0[5-9]\d\d_|^[1-9]\d{3}_/.test(n))).toBe(false);
   });
 
   it("names itself, quotes the owner, runs under the house timeouts, and opens no transaction of its own", () => {

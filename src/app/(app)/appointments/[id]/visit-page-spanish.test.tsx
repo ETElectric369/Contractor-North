@@ -264,7 +264,7 @@ describe("the link picker, in Spanish", () => {
 });
 
 describe("the header's ⋯ rows and Mark Complete, in Spanish", () => {
-  it("Marcar Hecha · Devolverla a la Agenda · No Se Hará, and the main button Marcar Inspección Hecha", () => {
+  it("Marcar Hecha · Devolverla a la Agenda · Descartar, and the main button Marcar Inspección Hecha", () => {
     const rows = es(
       <>
         <MarkDoneRow id="appt-1" />
@@ -272,8 +272,8 @@ describe("the header's ⋯ rows and Mark Complete, in Spanish", () => {
         <WontHappenRow id="appt-1" deletes={false} afterHref="/schedule" />
       </>,
     );
-    for (const w of ["Marcar Hecha", "Devolverla a la Agenda", "No Se Hará"]) expect(rows, w).toContain(w);
-    expect(rows).not.toMatch(/Mark Done|Put It Back|Won't Happen/);
+    for (const w of ["Marcar Hecha", "Devolverla a la Agenda", "Descartar"]) expect(rows, w).toContain(w);
+    expect(rows).not.toMatch(/Mark Done|Put It Back|Dismiss|Won't Happen/);
     const main = es(createElement(MarkCompleteButton, { id: "appt-1" }));
     expect(main).toContain("Marcar Inspección Hecha");
     expect(es(createElement(MarkCompleteButton, { id: "appt-1", label: t("vp_btn_markDone") }))).toContain("Marcar Hecha");
@@ -543,7 +543,7 @@ describe("the visit page catalog (vp_)", () => {
       vp_backOnTheSchedule: "Back on the schedule.",
       vp_btn_putItBackOnTheSchedule: "Put It Back on the Schedule",
       vp_thatVisitDidntChange: "That visit didn't change — try again.",
-      vp_btn_wontHappen: "Won't Happen",
+      vp_btn_wontHappen: "Dismiss",
       vp_couldntUpdateStatus: "Couldn't update the status — try again.",
       vp_signInFirst: "Sign in first.",
       vp_inspectionNoLongerExists: "That inspection no longer exists.",

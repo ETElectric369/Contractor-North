@@ -34,7 +34,7 @@ import type { WordCatalog } from "./types";
  * Waiting For A Day = Esperando Un Día (jb_waitingForADay), pending pick = esperando elección
  * (ag_cal_pendingPick), cancelled = cancelada (ag_srv_apptStatus_cancelled), done = hecha
  * (ag_cal_doneLower). Coined here, once: Won = Ganada and Lost = Perdida (the visit's own ending, so
- * feminine), Won't Happen = No Se Hará, Actions = Acciones, Planned = Planeado, Written up as =
+ * feminine), Dismiss = Descartar, Actions = Acciones, Planned = Planeado, Written up as =
  * Redactada como.
  *
  * A SPANISH CLOCK ENDS IN A PERIOD ("8:00 a. m.", lib/lang-words esMeridiem), so no Spanish sentence here
@@ -243,7 +243,7 @@ export const words: WordCatalog = {
     vp_backOnTheSchedule: "Back on the schedule.",
     vp_btn_putItBackOnTheSchedule: "Put It Back on the Schedule",
     vp_thatVisitDidntChange: "That visit didn't change — try again.",
-    vp_btn_wontHappen: "Won't Happen",
+    vp_btn_wontHappen: "Dismiss",
     vp_couldntUpdateStatus: "Couldn't update the status — try again.",
 
     // ── The voice fill's server words (hear-actions.ts) ──
@@ -376,8 +376,8 @@ export const words: WordCatalog = {
 
     // ── lib/appointments/wont-happen (pure): the confirm, the toast, Undo's note, and Put It Back's
     //    sentence (putBackPlan, said by appointments/actions putVisitBackOnSchedule) ──
-    vp_wontHappenDeleteAsk: "This visit won't happen? Nothing was captured on it, so it will be deleted.",
-    vp_wontHappenCancelAsk: "This visit won't happen? Its notes, photos and answers stay on file, marked Cancelled.",
+    vp_wontHappenDeleteAsk: "Dismiss this visit? Nothing was captured on it, so it will be deleted.",
+    vp_wontHappenCancelAsk: "Dismiss this visit? Its notes, photos and answers stay on file, marked Cancelled.",
     vp_deletedNothingOnIt: "Deleted. Nothing was on it.",
     vp_markedCancelledStays: "Marked Cancelled. Everything on it stays on file.",
     vp_pickLinkStaysWithdrawn: "The pick-a-time link stays withdrawn — send a new one.",
@@ -558,7 +558,7 @@ export const words: WordCatalog = {
     vp_backOnTheSchedule: "De vuelta en la agenda.",
     vp_btn_putItBackOnTheSchedule: "Devolverla a la Agenda",
     vp_thatVisitDidntChange: "Esa visita no cambió — inténtalo de nuevo.",
-    vp_btn_wontHappen: "No Se Hará",
+    vp_btn_wontHappen: "Descartar",
     vp_couldntUpdateStatus: "No se pudo actualizar el estado — inténtalo de nuevo.",
 
     vp_signInFirst: "Inicia sesión primero.",
@@ -675,8 +675,8 @@ export const words: WordCatalog = {
     vp_startedAndMovedPunch: "Empezaste {job}{who} y toda tu marcación desde {at} pasó a él.",
     vp_startedAndSwitched: "Empezaste {job}{who} y a las {at} tu reloj cambió aquí{from}.",
 
-    vp_wontHappenDeleteAsk: "¿Esta visita no se hará? No se capturó nada en ella, así que se eliminará.",
-    vp_wontHappenCancelAsk: "¿Esta visita no se hará? Sus notas, fotos y respuestas se quedan guardadas, marcada como Cancelada.",
+    vp_wontHappenDeleteAsk: "¿Descartar esta visita? No se capturó nada en ella, así que se eliminará.",
+    vp_wontHappenCancelAsk: "¿Descartar esta visita? Sus notas, fotos y respuestas se quedan guardadas, marcada como Cancelada.",
     vp_deletedNothingOnIt: "Eliminada. No tenía nada.",
     vp_markedCancelledStays: "Marcada como Cancelada. Todo lo que tiene se queda guardado.",
     vp_pickLinkStaysWithdrawn: "El enlace para elegir hora sigue retirado — envía uno nuevo.",
