@@ -42,6 +42,7 @@ import { versionNumber } from "@/lib/release-notes";
 import { envelope, stripMarkerChar, HOLDING_OPEN, HOLDING_CLOSE, WROTE_OPEN, WROTE_CLOSE, CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE, SCREEN_OPEN, SCREEN_CLOSE, sanitizeHudCard, sanitizeScreen, type AgentConfirm, type AgentOpen, type AgentPick } from "@/lib/assistant-protocol";
 import { screenPromptBlock } from "@/lib/nort/screens";
 import { doorContextLines, seenLines } from "@/lib/nort/door-context";
+import { budgetRefusal, isDayBookingWrite, outOfTimeSaid, roundsOutOfTime, turnBudget } from "@/lib/nort/turn-budget";
 import { asLang } from "@/lib/locale";
 
 // A client-intent tool: show/refresh the LIVE quote preview as the agent builds it. Not a
@@ -135,8 +136,9 @@ const SHOW_CARD_TOOL = {
 } satisfies Anthropic.Tool;
 
 // Long-term memory used to be a bespoke REMEMBER_TOOL handled inline here — the ONE agent write
-// that skipped the chokepoint (no role gate, no audit row, and `continue`d past the MAX_WRITES
-// cap), while writing text that is read back into every crew member's system prompt forever.
+// that skipped the chokepoint (no role gate, no audit row, and `continue`d past the write cap,
+// today lib/nort/turn-budget), while writing text that is read back into every crew member's
+// system prompt forever.
 // It's now the registry action "memory.remember" (src/lib/actions/entities/memory.ts), generated
 // into the write-tool set like every other write, so it inherits all three protections.
 
@@ -252,6 +254,9 @@ interface ChatMessage {
 }
 
 export async function POST(req: Request) {
+  // When this request began: the turn's change budget (lib/nort/turn-budget) reads its age, so a
+  // long turn says what is left before the platform's wall (maxDuration) cuts it with nothing said.
+  const turnStartedAt = Date.now();
   // Require a signed-in user.
   const supabase = await createClient();
   const {
@@ -927,10 +932,12 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       let outputTokens = 0;
       let cacheWrite = 0;
       let inputUncached = 0;
-      // Cap agent writes per request so a prompt-injection in tool-returned data can't
-      // mass-create — bounds the blast radius of the tier-1 write exposure.
-      const MAX_WRITES = 3;
+      // HOW MANY CHANGES THIS TURN HAS ASKED FOR, and how many of them were not booking a day. The
+      // budget itself (twenty for booking a day, three for everything else, and the clock that
+      // stops a long turn in time) is lib/nort/turn-budget's rule: it bounds what a line Nort only
+      // read in a tool's answer could ever make him change before a person speaks again.
       let writeCount = 0;
+      let otherWriteCount = 0;
       // The registry writes that ran and said ok this turn, for the page under the chat (WROTE).
       const wroteActions: string[] = [];
       // The model's text before a tool call and its text after it are two blocks the stream
@@ -1158,13 +1165,20 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               // only way to get the id memory.forget needs). A read changes nothing, so it must not
               // spend the write budget or sit behind another action's pending confirm.
               const readOnlyAction = REGISTRY[actionName]?.effect === "read";
+              // A read spends nothing and is never refused for the budget or the clock. A write is
+              // judged on what the model asked for (tu.input), before anything is stripped or run.
+              const booking = isDayBookingWrite(actionName, tu.input);
+              const spent = readOnlyAction ? "ok" : turnBudget({ writes: writeCount, others: otherWriteCount, booking, elapsedMs: Date.now() - turnStartedAt });
               if (!readOnlyAction && batchHasGated && !gatedWrite(tu.name)) {
                 // M5: hold this write until the confirm-gated action in this turn is approved.
                 out = JSON.stringify({ ok: false, deferred: true, error: "I'll make that change right after you confirm the pending action — confirm it first, then ask me again." });
-              } else if (!readOnlyAction && writeCount >= MAX_WRITES) {
-                out = JSON.stringify({ ok: false, error: "That's enough changes for one go — ask me to continue if you want more." });
+              } else if (spent !== "ok") {
+                out = budgetRefusal(spent);
               } else {
-                if (!readOnlyAction) writeCount++;
+                if (!readOnlyAction) {
+                  writeCount++;
+                  if (!booking) otherWriteCount++;
+                }
                 // A switched-off feature's fields on a tool that stays (To-Do Extras' priority and
                 // parent task on task.create) come off here, and the model is told what came off.
                 const switched = agentInputForSwitches(actionName, tu.input, features);
@@ -1260,6 +1274,18 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
           }
 
           convo.push({ role: "user", content: results });
+
+          // THE CLOCK ENDS THE TURN IN WORDS (lib/nort/turn-budget). The budget only turns writes
+          // away; another round is another model call, and one that starts this late can run into
+          // the platform's wall, where the stream is cut with nothing said and the transcript is not
+          // saved. So the loop stops here and says so itself, in the person's language, and the
+          // sentence is kept in the reply, so the next turn's "continue" has something to continue.
+          if (roundsOutOfTime(Date.now() - turnStartedAt)) {
+            const said = `${assistantReply && !/\s$/.test(assistantReply) ? "\n\n" : ""}${outOfTimeSaid(lang)}`;
+            assistantReply += said;
+            emit(said);
+            break;
+          }
 
           if (round === MAX_ROUNDS - 1) {
             emit("\n\n[Reached the tool-call limit — answering with what I have.]");

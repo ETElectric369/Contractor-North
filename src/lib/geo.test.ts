@@ -98,6 +98,19 @@ describe("routing: the phone reads in a shell that offers currentPosition", () =
     expect((await g.getPosition()).status).toBe("ok");
     expect(webGet).toHaveBeenCalledTimes(1);
   });
+  it("the caller's accuracy rides to the phone (2026-11-16): only an explicit enableHighAccuracy false is coarse", async () => {
+    const g = await load();
+    await g.getPosition({ enableHighAccuracy: false, timeout: 10_000, maximumAge: 30 * 60 * 1000 }); // the weather's own options
+    expect(fake.currentPosition).toHaveBeenLastCalledWith({ timeout: 10_000, highAccuracy: false });
+    await g.getPosition({ enableHighAccuracy: true, timeout: 4_000, maximumAge: 30_000 });
+    expect(fake.currentPosition).toHaveBeenLastCalledWith({ timeout: 10_000, highAccuracy: true });
+    await g.getPosition();
+    expect(fake.currentPosition).toHaveBeenLastCalledWith({ timeout: 10_000, highAccuracy: true });
+    await g.getPosition({});
+    expect(fake.currentPosition).toHaveBeenLastCalledWith({ timeout: 10_000, highAccuracy: true });
+    expect(fake.currentPosition).toHaveBeenCalledTimes(4);
+    expect(webGet).not.toHaveBeenCalled();
+  });
 });
 
 describe("permission: from the phone in the shell, never from the WebView", () => {

@@ -1,5 +1,6 @@
 import Capacitor
 import CoreLocation
+import UIKit
 import UserNotifications
 
 /// THE JOB'S FENCE, WITH THE SCREEN OFF (field feedback 10-13, item 4; Chris 2026-10-14 351e2be4
@@ -117,20 +118,52 @@ final class GeofenceCore: NSObject, CLLocationManagerDelegate {
     /// The page's position reads, waiting on one requestLocation. Main queue only.
     private var readers: [(CLLocation?, String?) -> Void] = []
     private var readTimer: Timer?
+    /// Whether the read in flight asked for Best (true) or a hundred metres (false). Main queue only.
+    private var readIsSharp = false
+    /// Sharp callers held behind a coarse read: each gets the Best read that starts when it ends. Main queue only.
+    private var sharpWaiting: [(CLLocation?, String?) -> Void] = []
     static let readTimeout: TimeInterval = 10
 
     /// ONE FIX, NOW, THROUGH CORELOCATION — so the page never goes through the WebView's own
     /// per-site permission (which keeps saying "prompt" and can raise its own alert after the phone
     /// is set to Always). It NEVER asks for authorization: not asked yet → "not-determined" (a tap
     /// on the page asks), denied → "denied", nothing in 10 s → "timeout". No network, nothing kept.
-    func currentPosition(_ done: @escaping (CLLocation?, String?) -> Void) {
+    ///
+    /// THE ACCURACY IS ASKED PER READ (2026-11-16). desiredAccuracy was never set before, so every
+    /// read asked for the default, Best; Apple answers a one-shot requestLocation at the accuracy
+    /// asked for, and more accuracy takes longer. The 2026-11-11 report held three 10 s timeouts
+    /// in thirty seconds on My Day, with location allowed (a timeout is only reachable then); the
+    /// weather is the reader that runs there on every open and on every tap of its button, and it
+    /// asks for a city-level fix.
+    /// `highAccuracy` false asks for a hundred metres; true or absent asks for Best, as before.
+    ///
+    /// One read in flight answers every caller. A coarse caller may ride a sharp read. A sharp
+    /// caller that arrives while a coarse read is out is held (sharpWaiting) and gets a Best read of
+    /// its own as soon as the coarse one ends, on the next main-queue turn, so it can wait up to that
+    /// read's remaining time (10 s at most) longer than before. Nothing is stopped or restarted
+    /// mid-read. Nobody has run any of this on a phone.
+    func currentPosition(highAccuracy: Bool = true, _ done: @escaping (CLLocation?, String?) -> Void) {
         switch manager.authorizationStatus {
         case .notDetermined: return done(nil, "not-determined")
         case .denied, .restricted: return done(nil, "denied")
         default: break
         }
+        if readers.isEmpty {
+            readers.append(done)
+            return startRead(sharp: highAccuracy)
+        }
+        if highAccuracy && !readIsSharp {
+            sharpWaiting.append(done)
+            return
+        }
         readers.append(done)
-        guard readers.count == 1 else { return } // one read in flight answers every caller
+    }
+
+    /// Start one requestLocation at the given sharpness, with a fresh 10 s timer. Main queue only.
+    private func startRead(sharp: Bool) {
+        readIsSharp = sharp
+        manager.desiredAccuracy = sharp ? kCLLocationAccuracyBest : kCLLocationAccuracyHundredMeters
+        readTimer?.invalidate()
         readTimer = Timer.scheduledTimer(withTimeInterval: GeofenceCore.readTimeout, repeats: false) { [weak self] _ in
             guard let self = self else { return }
             // The requestLocation is still pending: stop it, so a late fix is never handed to the
@@ -144,20 +177,32 @@ final class GeofenceCore: NSObject, CLLocationManagerDelegate {
     private func finishRead(_ location: CLLocation?, _ error: String?) {
         readTimer?.invalidate()
         readTimer = nil
+        readIsSharp = false
         let waiting = readers
         readers = []
         for r in waiting { r(location, error) }
+        // The held sharp callers: their own Best read, started on the next main-queue turn (never
+        // inside the delegate callback that is finishing). readIsSharp is true at once, so a sharp
+        // caller arriving in the gap joins them and is not held again.
+        guard !sharpWaiting.isEmpty else { return }
+        readers = sharpWaiting
+        sharpWaiting = []
+        readIsSharp = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, !self.readers.isEmpty else { return }
+            self.startRead(sharp: true)
+        }
     }
 
     // MARK: CLLocationManagerDelegate
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard !readers.isEmpty, let last = locations.last else { return }
+        guard !readers.isEmpty, readTimer != nil, let last = locations.last else { return } // no timer: no read is out (the hand-over gap)
         finishRead(last, nil)
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        guard !readers.isEmpty else { return }
+        guard !readers.isEmpty, readTimer != nil else { return } // no timer: no read is out (the hand-over gap)
         let code = (error as? CLError)?.code
         if code == .locationUnknown { return } // CoreLocation keeps trying; the timeout ends it
         finishRead(nil, code == .denied ? "denied" : "unavailable")
@@ -214,6 +259,7 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "readPendingExit", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "status", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "currentPosition", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "openSettings", returnType: CAPPluginReturnPromise),
     ]
 
     public override func load() {
@@ -258,8 +304,10 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
     /// (timestamp in ms since 1970), or a rejection whose code is "not-determined", "denied",
     /// "timeout" or "unavailable". Never asks for permission (see GeofenceCore.currentPosition).
     @objc func currentPosition(_ call: CAPPluginCall) {
+        // Only an explicit false is coarse: an older page sends nothing and reads at Best, as before.
+        let highAccuracy = call.getBool("highAccuracy") ?? true
         DispatchQueue.main.async {
-            GeofenceCore.shared.currentPosition { location, error in
+            GeofenceCore.shared.currentPosition(highAccuracy: highAccuracy) { location, error in
                 guard let location else {
                     let code = error ?? "unavailable"
                     return call.reject(code, code)
@@ -270,6 +318,21 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
                     "accuracy": location.horizontalAccuracy,
                     "timestamp": location.timestamp.timeIntervalSince1970 * 1000,
                 ])
+            }
+        }
+    }
+
+    /// The iPhone's Settings page for North (2026-11-16, "always on went away"): the page's lines that
+    /// say While Using or location off get a button that goes there (lib/native-geofence.ts
+    /// openLocationSettings). Resolves once the system opened it, rejects "unavailable" otherwise.
+    /// No change to authorization, regions or reads; no network.
+    @objc func openSettings(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            guard let url = URL(string: UIApplication.openSettingsURLString) else {
+                return call.reject("unavailable", "unavailable")
+            }
+            UIApplication.shared.open(url, options: [:]) { opened in
+                if opened { call.resolve(["ok": true]) } else { call.reject("unavailable", "unavailable") }
             }
         }
     }

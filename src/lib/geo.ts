@@ -86,7 +86,7 @@ export function invalidateLastFix(): void {
 type NativeGeo = {
   arm: unknown;
   status(): Promise<{ authorization?: string; monitorable?: boolean; ok?: boolean } | null>;
-  currentPosition?(o?: { timeout?: number }): Promise<{ latitude?: number; longitude?: number; accuracy?: number; timestamp?: number }>;
+  currentPosition?(o?: { timeout?: number; highAccuracy?: boolean }): Promise<{ latitude?: number; longitude?: number; accuracy?: number; timestamp?: number }>;
 };
 type Cap = {
   Plugins?: { Geofence?: NativeGeo; App?: { addListener?(ev: string, cb: (s: { isActive?: boolean }) => void): Promise<unknown> } };
@@ -101,8 +101,9 @@ function shellPlugin(): NativeGeo | null {
   return p && typeof p.arm === "function" ? p : null;
 }
 /** Capacitor's plugin object is a proxy that hands back a function for ANY name, so a method is
- *  detected the honest way: the headers the native side published at launch. */
-function nativeDeclares(plugin: string, method: string): boolean {
+ *  detected the honest way: the headers the native side published at launch. Exported for
+ *  native-geofence's openSettings door (2026-11-16), which an older shell does not have. */
+export function nativeDeclares(plugin: string, method: string): boolean {
   const h = cap()?.PluginHeaders;
   if (!Array.isArray(h)) return false;
   return !!h.find((x) => x?.name === plugin)?.methods?.some((m) => m?.name === method);
@@ -228,10 +229,12 @@ function errCode(e: unknown): string {
   return String(o?.code ?? o?.message ?? "");
 }
 
-/** The phone's own read (GeofencePlugin.currentPosition). null = hand over to the WebView path. */
-async function nativePosition(p: NativeGeo): Promise<GeoResult | null> {
+/** The phone's own read (GeofencePlugin.currentPosition). null = hand over to the WebView path.
+ *  The caller's own enableHighAccuracy rides along (2026-11-16): only an explicit false asks the
+ *  phone for a hundred metres (the weather's city-level read); anything else asks for Best. */
+async function nativePosition(p: NativeGeo, opts?: PositionOptions): Promise<GeoResult | null> {
   try {
-    const r = await p.currentPosition!({ timeout: 10_000 });
+    const r = await p.currentPosition!({ timeout: 10_000, highAccuracy: opts?.enableHighAccuracy !== false });
     if (typeof r?.latitude !== "number" || typeof r?.longitude !== "number") return { status: "unavailable" };
     const coords = { lat: r.latitude, lng: r.longitude };
     const accuracy = typeof r.accuracy === "number" ? r.accuracy : 0;
@@ -260,7 +263,7 @@ async function nativePosition(p: NativeGeo): Promise<GeoResult | null> {
 export async function getPosition(opts?: PositionOptions): Promise<GeoResult> {
   const p = hasNativeRead() ? shellPlugin() : null;
   if (p) {
-    const r = await nativePosition(p);
+    const r = await nativePosition(p, opts);
     if (r) return r;
   }
   return webPosition(opts);

@@ -135,10 +135,13 @@ describe("the wiring, pinned", () => {
     expect(insp).toContain('on: () => { open1("measures"); if (!atMeasureCap()) setMeasures((m) => [...m, { id: captureId(), label: "", value: null, unit: "" }]); }');
   });
 
-  it("nothing new under ios/ (a Swift change would force a new app build)", () => {
+  it("nothing new in the two measuring plugins (a change to them would force a new app build for this door)", () => {
+    // SCOPED TO THE PLUGINS THIS DOOR CALLS (2026-11-16). It pinned the whole of ios/ at cn-v1160,
+    // which was that release's promise and nobody else's: the first release to change another
+    // plugin (cn-v1164, the Geofence plugin's position read) failed here before its own commit.
     let changed = "";
     try {
-      changed = execSync("git status --porcelain -- ios", { cwd: ROOT, encoding: "utf8" });
+      changed = execSync("git status --porcelain -- ios/App/App/MeasurePlugin.swift ios/App/App/ScanPlugin.swift", { cwd: ROOT, encoding: "utf8" });
     } catch {
       return; // no git here (a copied tree): the source pins above still hold
     }

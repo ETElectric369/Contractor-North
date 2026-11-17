@@ -12,7 +12,7 @@ import type { ActionDef } from "../types";
  * permanent, org-wide, invisible effect from one turn of conversation. Prompt injection reaching
  * the model (a stranger's inquiry text copied onto a customer's notes, say) could park a false
  * "standing rule" in the company's head forever. Routing it here buys the role gate, the real
- * agent_audit_log row, and the agent loop's MAX_WRITES cap in one move.
+ * agent_audit_log row, and the agent loop's change budget (lib/nort/turn-budget) in one move.
  *
  * THREE further limits live here, none of which the prompt can talk its way past:
  *  · LENGTH — one short sentence, not a document (a long "fact" is really an instruction block).

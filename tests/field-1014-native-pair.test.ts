@@ -81,3 +81,93 @@ describe("one position, read by the phone", () => {
     expect(geo.split("private func finishRead")[1].split("}")[0]).toContain("readers = []");
   });
 });
+
+describe("the accuracy is asked per read, and the Settings door (2026-11-16)", () => {
+  const geo = read("ios/App/App/GeofencePlugin.swift");
+  it("no accuracy is set at init: the manager is set up as it was", () => {
+    const init = geo.split("private override init() {")[1].split("\n    }\n")[0];
+    expect(init).not.toContain("desiredAccuracy");
+    expect(geo.split("desiredAccuracy =").length - 1).toBe(1); // set in one place only: where a read starts
+  });
+  // Code shape only (the skeptic, 2026-11-16): comments are stripped before anything is pinned.
+  const code = (x: string) => x.replace(/\/\/[^\n]*/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n\s*\n/g, "\n");
+  it("currentPosition has three branches in order (nothing out: start at its sharpness; sharp behind coarse: held; else join) and never stops or asks itself", () => {
+    const fn = code(geo.split("func currentPosition(highAccuracy: Bool = true, _ done: @escaping (CLLocation?, String?) -> Void) {")[1].split("private func startRead")[0]);
+    expect(fn).toContain(
+      "if readers.isEmpty {\n            readers.append(done)\n            return startRead(sharp: highAccuracy)\n        }\n" +
+        "        if highAccuracy && !readIsSharp {\n            sharpWaiting.append(done)\n            return\n        }\n" +
+        "        readers.append(done)\n    }",
+    );
+    expect(fn.indexOf('case .denied, .restricted: return done(nil, "denied")')).toBeLessThan(fn.indexOf("if readers.isEmpty {"));
+    expect(fn).not.toContain("stopUpdatingLocation");
+    expect(fn).not.toContain("requestLocation");
+    expect(fn).not.toContain("desiredAccuracy"); // only startRead sets it
+    expect(geo).toContain("private var sharpWaiting: [(CLLocation?, String?) -> Void] = []");
+  });
+  it("finishRead answers the read's callers first, then hands the held sharp callers their own Best read on the next main-queue turn", () => {
+    const fin = code(geo.split("private func finishRead(_ location: CLLocation?, _ error: String?) {")[1].split("\n    }\n")[0]);
+    const order = [
+      "readTimer = nil",
+      "readIsSharp = false",
+      "let waiting = readers",
+      "readers = []",
+      "for r in waiting { r(location, error) }",
+      "guard !sharpWaiting.isEmpty else { return }",
+      "readers = sharpWaiting",
+      "sharpWaiting = []",
+      "readIsSharp = true",
+      "DispatchQueue.main.async { [weak self] in",
+      "guard let self = self, !self.readers.isEmpty else { return }",
+      "self.startRead(sharp: true)",
+    ];
+    const at = order.map((o) => fin.indexOf(o));
+    for (const [i, n] of at.entries()) expect(n, order[i]).toBeGreaterThan(-1);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    // The start is inside the async block, not in the callback that is finishing.
+    expect(fin.split("startRead(").length - 1).toBe(1);
+    // In the hand-over gap no timer runs, so a late fix or failure answers nobody.
+    expect(code(geo)).toContain("guard !readers.isEmpty, readTimer != nil, let last = locations.last else { return }");
+    expect(code(geo)).toContain("guard !readers.isEmpty, readTimer != nil else { return }\n        let code = (error as? CLError)?.code");
+  });
+  it("startRead sets the sharpness and the accuracy, replaces the timer, then asks; finishRead resets the sharpness first", () => {
+    const start = code(geo.split("private func startRead(sharp: Bool) {")[1].split("private func finishRead")[0]);
+    const order = ["readIsSharp = sharp", "manager.desiredAccuracy = sharp ? kCLLocationAccuracyBest : kCLLocationAccuracyHundredMeters", "readTimer?.invalidate()", "readTimer = Timer.scheduledTimer(withTimeInterval: GeofenceCore.readTimeout, repeats: false)", "manager.requestLocation()"];
+    const at = order.map((o) => start.indexOf(o));
+    for (const [i, n] of at.entries()) expect(n, order[i]).toBeGreaterThan(-1);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(geo).toContain("private var readIsSharp = false");
+    const fin = code(geo.split("private func finishRead(_ location: CLLocation?, _ error: String?) {")[1].split("\n    }\n")[0]);
+    expect(fin).toContain("readTimer = nil\n        readIsSharp = false\n        let waiting = readers\n        readers = []");
+    // One place sets the accuracy, one place asks CoreLocation for a fix.
+    expect(code(geo).split("desiredAccuracy =").length - 1).toBe(1);
+    expect(code(geo).split("manager.requestLocation()").length - 1).toBe(1);
+    // The one stop is the timeout's.
+    expect(code(geo).split("stopUpdatingLocation()").length - 1).toBe(1);
+  });
+  it("the plugin: only an explicit false is coarse; absent (an older page) or true is Best", () => {
+    const call = code(geo.split("@objc func currentPosition(_ call: CAPPluginCall) {")[1].split("@objc func")[0]);
+    expect(call).toContain('let highAccuracy = call.getBool("highAccuracy") ?? true');
+    expect(call).toContain("GeofenceCore.shared.currentPosition(highAccuracy: highAccuracy) { location, error in");
+  });
+  it("openSettings is in the method list and opens the app's Settings page on the main queue", () => {
+    expect(geo).toContain('CAPPluginMethod(name: "openSettings", returnType: CAPPluginReturnPromise),');
+    const body = geo.split("@objc func openSettings(_ call: CAPPluginCall) {")[1].split("@objc func status")[0];
+    expect(body.trim().startsWith("DispatchQueue.main.async {")).toBe(true);
+    expect(body).toContain("URL(string: UIApplication.openSettingsURLString)");
+    expect(body).toContain("UIApplication.shared.open(url, options: [:]) { opened in");
+    expect(body).toContain('if opened { call.resolve(["ok": true]) } else { call.reject("unavailable", "unavailable") }');
+    // It touches nothing else: no authorization, no region, no read.
+    expect(body).not.toMatch(/request(Always|WhenInUse)Authorization|startMonitoring|stopMonitoring|requestLocation|GeofenceCore/);
+    expect(geo).toContain("import UIKit");
+    expect(geo).not.toMatch(/URLSession|URLRequest/);
+  });
+  it("the read's timeout path is as it was: ten seconds, stop the request, answer every reader \"timeout\"", () => {
+    expect(geo).toContain("static let readTimeout: TimeInterval = 10");
+    const timer = geo.split("readTimer = Timer.scheduledTimer(withTimeInterval: GeofenceCore.readTimeout, repeats: false) { [weak self] _ in")[1].split("manager.requestLocation()")[0];
+    expect(timer).toContain("self.manager.stopUpdatingLocation()");
+    expect(timer).toContain('self.finishRead(nil, "timeout")');
+    expect(geo).toContain("if code == .locationUnknown { return }");
+    expect(geo).toContain('case .notDetermined: return done(nil, "not-determined")');
+    expect(geo).toContain('case .denied, .restricted: return done(nil, "denied")');
+  });
+});

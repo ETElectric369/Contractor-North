@@ -13,7 +13,7 @@ import { fallbackArmed, type GeofencePhase } from "./geofence-fallback";
 import { Button } from "@/components/ui/button";
 import { speakSmart } from "@/lib/tts";
 import { geoPermission, getPosition, shellMayReadLocation, watchPosition } from "@/lib/geo";
-import { armFence, disarmFence, fenceArmOptions, fenceReadiness, onFenceExit, takePendingExit, type FenceReadiness, type PendingExit } from "@/lib/native-geofence";
+import { armFence, canOpenLocationSettings, disarmFence, fenceArmOptions, fenceReadiness, onFenceExit, openLocationSettings, takePendingExit, type FenceReadiness, type PendingExit } from "@/lib/native-geofence";
 import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
 import { trace } from "@/lib/nort/trace";
@@ -59,6 +59,8 @@ export function GeofenceIdleLine({
   anchorKnown,
   jobLabel,
   onTurnOn,
+  canOpenSettings = false,
+  onOpenSettings,
 }: {
   watchOff: boolean;
   waitingGrant: boolean;
@@ -69,11 +71,31 @@ export function GeofenceIdleLine({
   anchorKnown: boolean;
   jobLabel: string;
   onTurnOn: () => void;
+  /** The shell has GeofencePlugin.openSettings (native-geofence canOpenLocationSettings). */
+  canOpenSettings?: boolean;
+  onOpenSettings?: () => void;
 }) {
   // The person's language (cn-v1138): every line is a gf_ key; outside a provider (a test) it is English.
   const t = translator(useLang());
   const line = "mx-auto mb-3 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800";
-  if (watchOff) return <div className={line}>{t("gf_locationOffForApp")}</div>;
+  // OPEN SETTINGS (2026-11-16, "always on went away"): the off line, the While Using line and the
+  // fence's off line tell a person to go to Settings; a shell that has the door also takes them
+  // there. An older shell and a browser draw the words alone, as before; a refused open says
+  // nothing more (the words say where).
+  const withSettings = (words: string) =>
+    canOpenSettings && onOpenSettings ? (
+      <div className={line}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span>{words}</span>
+          <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={onOpenSettings}>
+            {t("sh_btn_openSettings")}
+          </Button>
+        </div>
+      </div>
+    ) : (
+      <div className={line}>{words}</div>
+    );
+  if (watchOff) return withSettings(t("gf_locationOffForApp"));
   if (waitingGrant)
     return (
       <div className={line}>
@@ -86,16 +108,13 @@ export function GeofenceIdleLine({
         {grantNote && <p className="mt-1">{grantNote}</p>}
       </div>
     );
-  if (fenceDark)
-    return (
-      <div className={line}>
-        {fenceDark === "unavailable"
-          ? t("gf_phoneCantWatchScreenOff")
-          : fenceDark === "denied"
-            ? t("gf_locationOffForNorth")
-            : t("gf_locationWhileUsing")}
-      </div>
-    );
+  if (fenceDark) {
+    const words =
+      fenceDark === "unavailable" ? t("gf_phoneCantWatchScreenOff") : fenceDark === "denied" ? t("gf_locationOffForNorth") : t("gf_locationWhileUsing");
+    // A phone that cannot watch regions: Settings cannot help, so no door there.
+    if (fenceDark === "unavailable") return <div className={line}>{words}</div>;
+    return withSettings(words);
+  }
   if (anchorLost && !anchorKnown) return <div className={line}>{fillText(t("gf_couldntGetLocationAt"), { label: jobLabel })}</div>;
   return null;
 }
@@ -347,6 +366,9 @@ export function GeofenceMonitor({
   const armRef = useRef<() => void>(() => {});
   /** iOS's fence can't work with the screen off (While Using, Denied, or no region monitoring): said, not swallowed. */
   const [fenceDark, setFenceDark] = useState<FenceReadiness | null>(null);
+  /** The shell has the Open Settings door (2026-11-16); read after mount, so the first render is the server's. */
+  const [canSettings, setCanSettings] = useState(false);
+  useEffect(() => setCanSettings(canOpenLocationSettings()), []);
 
   // The fence anchor. Depend on PRIMITIVE lat/lng everywhere — the layout re-renders on
   // every navigation and hands us a fresh gpsIn object ref, which would otherwise tear
@@ -923,6 +945,8 @@ export function GeofenceMonitor({
         anchorKnown={typeof anchorLat === "number"}
         jobLabel={jobLabel}
         onTurnOn={turnOnLocation}
+        canOpenSettings={canSettings}
+        onOpenSettings={() => void openLocationSettings()}
       />
     );
 

@@ -44,6 +44,8 @@ export const words: WordCatalog = {
     "src/components/feature-off-line.tsx",
     "src/components/nav-link.tsx",
     "src/components/weather-widget.tsx",
+    // The fence's idle line reads one shell word, Open Settings (sh_btn_openSettings, 2026-11-16).
+    "src/components/geofence-monitor.tsx",
   ],
   // "Plan" is the same word; Tap to Pay on iPhone is Apple's name; Nort is Nort; the two maps apps are their names.
   sameInBoth: ["sh_dock_plan", "sh_push_tap_to_pay", "sh_kind_nort", "sh_btn_googleMaps", "sh_btn_appleMaps"],
@@ -358,6 +360,13 @@ export const words: WordCatalog = {
     sh_wx_humidity: "Humidity {n}%",
     sh_wx_shopArea: "Shop area",
     sh_wx_blocked: "Location Blocked",
+    // 2026-11-16 ("Location is acting up again, not turning on"): a read that got no location (a
+    // timeout, unavailable) is said as that, never as location off; the tap is Try Again (sh_tryAgain), and while it
+    // reads it says so. Open Settings goes to the iPhone's Settings page for North (a shell that has it).
+    sh_wx_forPlace: "Weather for {place}.",
+    sh_wx_noAnswer: "Couldn't get your location just now.",
+    sh_btn_findingYou: "Finding You…",
+    sh_btn_openSettings: "Open Settings",
     // ── MEASURE FROM THE + (cn-v1160; components/quick-measure-rows + quick-measure-sheet). The three
     //    rows themselves are the Inspector's own words (vi_lidar, vi_btn_measure, vi_btn_measureArea,
     //    vi_btn_scan3d). A clickable is sh_btn_, Title Case in both languages; {job} is a job's label
@@ -681,12 +690,16 @@ export const words: WordCatalog = {
     sh_wx_theShop: "el negocio",
     sh_wx_turnOn: "Activar Ubicación",
     sh_wx_toFollow: "para que te siga.",
-    sh_wx_denied: "El iPhone tiene bloqueada la ubicación para la app instalada — Ajustes → North → Ubicación, o borra la app y vuelve a agregarla.",
+    sh_wx_denied: "El iPhone tiene bloqueada la ubicación para la app instalada — Configuración → North → Ubicación, o borra la app y vuelve a agregarla.",
     sh_wx_feels: "Sensación de {n}°",
     sh_wx_wind: "Viento {n} mph",
     sh_wx_humidity: "Humedad {n}%",
     sh_wx_shopArea: "Zona del negocio",
     sh_wx_blocked: "Ubicación Bloqueada",
+    sh_wx_forPlace: "Clima de {place}.",
+    sh_wx_noAnswer: "No se pudo obtener tu ubicación por ahora.",
+    sh_btn_findingYou: "Buscándote…",
+    sh_btn_openSettings: "Abrir Configuración",
     // ── MEDIR DESDE EL + (cn-v1160).
     sh_btn_measureSaveToThisJob: "Guardar en Este Trabajo",
     sh_btn_measureSaveToJob: "Guardar en {job}",

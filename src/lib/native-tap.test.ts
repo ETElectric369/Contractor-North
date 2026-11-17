@@ -252,6 +252,24 @@ describe("the warm-up reports its failures to ops", () => {
     expect(h.report).toHaveBeenLastCalledWith("tap-to-pay", "warm-up failed: network", expect.anything());
   });
 
+  it("does not report the reader's 'in the background' answer, in either wording: a skip (sweep 2026-11-16)", async () => {
+    // The connect's own sentence when the app is already dark matched nothing and was filed as
+    // "unclassified at connecting the reader" each time the phone left the app mid-warm-up.
+    for (const said of [
+      "Unable to communicate with the reader while the app is in the background. Try again.",
+      "The application went to background before a reader request completed.",
+    ]) {
+      const tap = await freshBridge();
+      h.report.mockClear();
+      t.connect = async () => {
+        throw new Error(said);
+      };
+      const r = await tap.prepareTapToPay();
+      expect(r.ok).toBe(false);
+      expect(h.report).not.toHaveBeenCalled();
+    }
+  });
+
   it("does not report Apple's not-enabled answer, which is a skip", async () => {
     const tap = await freshBridge();
     t.plugin.isTapToPayAccountLinked.mockResolvedValue({ isLinked: false });

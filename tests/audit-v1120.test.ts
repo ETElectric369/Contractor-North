@@ -159,8 +159,13 @@ describe("class 6: the site fence has one lifecycle", () => {
     expect(g).toContain("fenceDark={fenceDark}");
     expect(g).toContain('t("gf_locationWhileUsing")');
     expect(read("src/lib/words/geofence.ts")).toContain("Set it to Always in Settings, under Location Services, North.");
+    // 2026-11-16: the location-off line, the While Using and the off line carry Open Settings in a shell that publishes the door.
+    expect(g).toContain("canOpenSettings && onOpenSettings ? (");
+    expect(g).toContain('if (watchOff) return withSettings(t("gf_locationOffForApp"));');
+    expect(g).toContain('if (fenceDark === "unavailable") return <div className={line}>{words}</div>;\n    return withSettings(words);');
     const n = read("src/lib/native-geofence.ts");
     expect(n).toContain("export async function armFence(o: FenceArmOptions): Promise<FenceReadiness | null>");
+    expect(n).toContain('return !!plugin() && nativeDeclares("Geofence", "openSettings");');
   });
   it("the layout arms the alert for techs only and stands the fence down whenever no entry is open", () => {
     const l = read("src/app/(app)/layout.tsx");

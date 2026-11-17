@@ -140,7 +140,7 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "capture.quick",
   // Nort's long-term memory. It USED to bypass this whole apparatus — an inline insert in the
   // chat route with no role gate, no audit row, and (because it was `continue`d before the
-  // MAX_WRITES check) no blast-radius cap either, while writing text that gets injected into
+  // write cap, today lib/nort/turn-budget) no blast-radius cap either, while writing text that gets injected into
   // every crew member's system prompt forever. It's a write; it belongs in the write set.
   "memory.remember",
   // Confirm-gated: its payload becomes instruction authority in every future prompt (audit 8).

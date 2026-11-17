@@ -1,5 +1,6 @@
 import { isNativeShell } from "@/lib/native-shell";
 import { fillText } from "@/lib/i18n";
+import { nativeDeclares } from "@/lib/geo";
 
 /**
  * THE JOB'S FENCE WITH THE SCREEN OFF — the page's door to GeofencePlugin.swift (field feedback
@@ -26,6 +27,8 @@ type Plugin = {
   readPendingExit(o: { clear?: boolean }): Promise<{ pending: unknown }>;
   status(): Promise<{ authorization: string; armed: unknown; monitorable?: boolean }>;
   addListener(ev: "exit", cb: (p: unknown) => void): Promise<{ remove: () => void }>;
+  /** A shell built from 2026-11-16 on: opens the iPhone's Settings page for North. */
+  openSettings?(): Promise<unknown>;
 };
 
 export const EXIT_EVENT = "cn:geofence-exit";
@@ -103,6 +106,30 @@ export async function fenceReadiness(): Promise<FenceReadiness | null> {
  * keep their import.
  */
 export { shellMayReadLocation } from "@/lib/geo";
+
+/**
+ * THE DOOR TO THE iPHONE'S SETTINGS FOR NORTH (2026-11-16; the owner's "always on went away"). The
+ * lines that say While Using or location off already tell a person to go to Settings; in a shell that
+ * has GeofencePlugin.openSettings they also get a button that goes there. Detected through the
+ * headers the shell published (geo.ts nativeDeclares), never the plugin proxy, which answers every
+ * name: an older shell and a browser get false and draw what they drew before.
+ */
+export function canOpenLocationSettings(): boolean {
+  return !!plugin() && nativeDeclares("Geofence", "openSettings");
+}
+
+/** Open the iPhone's Settings page for North. Never throws: false when the shell has no such
+ *  method or the phone would not open it (the words beside the button already say where to go). */
+export async function openLocationSettings(): Promise<boolean> {
+  const p = plugin();
+  if (!p || !canOpenLocationSettings() || typeof p.openSettings !== "function") return false;
+  try {
+    await p.openSettings();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export async function disarmFence(): Promise<void> {
   const p = plugin();

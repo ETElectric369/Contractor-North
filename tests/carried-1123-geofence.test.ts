@@ -175,6 +175,34 @@ describe("Turn On Location: the fence says it is waiting, and the tap is the ges
     expect(idle({ anchorLost: true, anchorKnown: false })).toContain("I couldn’t get a location at 85 Larkspur");
   });
 
+  it("Open Settings (2026-11-16): on the location-off, the While Using and the off line, only in a shell that has the door", () => {
+    const door = { canOpenSettings: true, onOpenSettings: () => {} };
+    for (const fenceDark of ["whenInUse", "denied"] as const) {
+      const html = idle({ fenceDark, ...door });
+      expect(html, fenceDark).toMatch(/<button[^>]*type="button"[^>]*>Open Settings<\/button>/);
+      expect(idle({ fenceDark }), fenceDark).not.toContain("Open Settings"); // an older shell, a browser
+      expect(idle({ fenceDark, canOpenSettings: true }), fenceDark).not.toContain("Open Settings"); // no handler, no door
+      // Without the door the line is exactly what it was.
+      expect(idle({ fenceDark })).toBe(`<div class="mx-auto mb-3 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">${fenceDark === "denied" ? dict("en").gf_locationOffForNorth : dict("en").gf_locationWhileUsing}</div>`);
+    }
+    expect(idle({ fenceDark: "whenInUse", ...door })).toContain("Set it to Always in Settings, under Location Services, North.");
+    // The location-off line (watchOff) sends him to Settings too: the same door under the same guard.
+    const off = idle({ watchOff: true, ...door });
+    expect(off).toContain(dict("en").gf_locationOffForApp);
+    expect(off).toMatch(/<button[^>]*type="button"[^>]*>Open Settings<\/button>/);
+    expect(idle({ watchOff: true })).toBe(`<div class="mx-auto mb-3 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">${dict("en").gf_locationOffForApp}</div>`);
+    expect(idle({ watchOff: true, canOpenSettings: true })).not.toContain("Open Settings");
+    expect(idle({ watchOff: true, waitingGrant: true, ...door })).not.toContain("Turn On Location"); // a denial still takes over the line
+    // Not where Settings cannot help: a phone that cannot watch regions, the ask, a lost anchor, nothing wrong.
+    expect(idle({ fenceDark: "unavailable", ...door })).not.toContain("Open Settings");
+    expect(idle({ waitingGrant: true, fenceDark: "whenInUse", ...door })).not.toContain("Open Settings");
+    expect(idle({ anchorLost: true, anchorKnown: false, ...door })).not.toContain("Open Settings");
+    expect(idle(door)).toBe("");
+    // The monitor reads the door after mount and hands the plugin's call to the line.
+    expect(g).toContain("useEffect(() => setCanSettings(canOpenLocationSettings()), []);");
+    expect(g).toContain("canOpenSettings={canSettings}\n        onOpenSettings={() => void openLocationSettings()}");
+  });
+
   it("arm() sets the waiting state from the one unasked rule (denied is never it), and the monitor draws the idle line", () => {
     expect(g).toContain("async function locationUnasked(): Promise<boolean> {\n  if ((await shellMayReadLocation()) !== null) return false;\n  return (await geoPermission()) === \"prompt\";\n}");
     expect(g).toContain("const unasked = await locationUnasked();\n        if (!disposed) setWaitingGrant(unasked);");

@@ -57,6 +57,31 @@ describe("Nort's product map after the shell wave", () => {
     expect(visibleDock({ isStaff: false }).some((s) => s.key === "clock")).toBe(true);
   });
 
+  it("tells a tech where their own hours and pay are, and never sends them to the office's page (sweep 2026-11-16)", () => {
+    // A tech asked Nort to "show me the payroll" and was told about Timecards, an office page, with
+    // no word that his own hours and this period's pay sit under his clock. The map names the two
+    // cards by the words the page draws, so a renamed card breaks this line and not the answer.
+    const t = translator("en");
+    expect(NORT_PRODUCT_MAP).toContain(`"${t("tc_myTimecard")}" (the last 7 days, with a week total)`);
+    expect(NORT_PRODUCT_MAP).toContain(`"${t("tc_myPayPeriod")}" (the CURRENT pay period's hours and base pay, marked ${t("tc_paid")}, ${t("tc_partlyPaid")} or ${t("tc_unpaid")}`);
+    expect(NORT_PRODUCT_MAP).toContain("never send a tech to Timecards or Payroll");
+    // A card with no hours in it is not drawn, and the map says so (a tech told a card is there
+    // when it is not is the answer this line exists to end).
+    expect(NORT_PRODUCT_MAP).toContain('Each card is drawn only once it has hours in it: "My timecard" after a punch in the last 7 days, "My pay period" after a shift in this period is clocked out.');
+    expect(NORT_PRODUCT_MAP).toContain("Office only: the page turns a tech back to Clock.");
+    // True in code: the page draws both cards with those keys, the pay card for a tech only and for
+    // the current period only, and the office's page turns a tech back.
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/timeclock/page.tsx"), "utf8");
+    expect(page).toContain('t("tc_myTimecard")');
+    expect(page).toContain('t("tc_myPayPeriod")');
+    expect(page).toContain("if (!isStaff && user)");
+    expect(page).toContain("payPeriodBounds(orgSettings.pay_schedule, orgSettings.pay_anchor, todayStrInTz(tz))");
+    expect(page).toContain("7 * 86400_000");
+    expect(page).toContain("{myTimecard.length > 0 && (");
+    expect(page).toContain("{!isStaff && myPeriod && (");
+    expect(readFileSync(join(process.cwd(), "src/app/(app)/timecards/page.tsx"), "utf8")).toContain('redirect("/timeclock")');
+  });
+
   it("names My Day's parts: the Now card, Tasks & Reminders, Needs You and the agenda", () => {
     const myDay = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- My Day (/planner)"))!;
     for (const part of ["Now card", "Tasks & Reminders", "Needs You", "agenda"]) expect(myDay, part).toContain(part);

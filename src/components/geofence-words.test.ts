@@ -75,6 +75,15 @@ describe("GeofenceIdleLine: the idle line in the person's language", () => {
     expect(idle("es", { anchorLost: true })).toContain("No pude obtener una ubicación en 41 Larkspur");
     expect(idle("es", { waitingGrant: true })).not.toContain("Turn On Location");
   });
+  it("Open Settings (2026-11-16): Spanish names the iPhone's Settings as the lines do, Configuración", () => {
+    const door = { canOpenSettings: true, onOpenSettings: () => {} };
+    expect(idle("es", { fenceDark: "whenInUse", ...door })).toMatch(/<button[^>]*>Abrir Configuración<\/button>/);
+    expect(idle("es", { fenceDark: "denied", ...door })).toMatch(/<button[^>]*>Abrir Configuración<\/button>/);
+    expect(idle("es", { fenceDark: "denied", ...door })).toContain("en Configuración");
+    expect(idle("es", { watchOff: true, ...door })).toMatch(/<button[^>]*>Abrir Configuración<\/button>/);
+    expect(idle("es", { fenceDark: "whenInUse" })).not.toContain("Abrir");
+    expect(idle("es", { fenceDark: "whenInUse", ...door })).not.toContain("Open Settings");
+  });
   it("English, and outside a provider: what it said before", () => {
     expect(idle("en", { waitingGrant: true })).toContain("Location isn’t on yet for North, so I can’t notice when you leave 41 Larkspur.");
     expect(idle("en", { waitingGrant: true })).toMatch(/<button[^>]*>\s*Turn On Location<\/button>/);

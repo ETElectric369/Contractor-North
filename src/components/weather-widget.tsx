@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Cloud, MapPin, MapPinOff } from "lucide-react";
+import { Cloud, Loader2, MapPin, MapPinOff } from "lucide-react";
 import * as geo from "@/lib/geo";
 import type { GeoCoords } from "@/lib/geo";
+import { canOpenLocationSettings, openLocationSettings } from "@/lib/native-geofence";
 import { isNativeShell } from "@/lib/native-shell";
 import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
@@ -97,6 +98,16 @@ export type WeatherGeo = Pick<typeof geo, "mayReadLocation" | "geoPermission" | 
  *    "Allow Once" is back at "prompt" and never asks unasked) — the cn-v327 law; a denial clears it.
  * 3. Otherwise the shop's town, and the row SAYS so (never silent) with the tap beside it.
  * start() runs it and runs it again on every resume; locate() is the tap.
+ *
+ * A READ WITH NO ANSWER IS NOT LOCATION OFF (2026-11-16; the owner, on My Day one evening:
+ * "Location is acting up again, not turning on"; his console held three of the shell's 10 s
+ * "timeout" rejections in 30 s, which the shell sends only when location is ALLOWED). A read that
+ * is neither ok nor denied (a timeout, unavailable) used to fall through to the shop, and the row
+ * then said Turn On Location, which reads as off. Now: if this follower already showed the phone's
+ * place in this page's life, that place stays and nothing on screen changes; otherwise the shop is
+ * shown as before and onNoAnswer(true) lets the row say it could not get a location, with Try
+ * Again. A later ok read, a denial, or a gate that has closed says onNoAnswer(false). A place that
+ * is kept still gets fresh weather once its reading is old (shouldRefetch).
  */
 export function weatherFollower(d: {
   geo: WeatherGeo;
@@ -106,15 +117,22 @@ export function weatherFollower(d: {
   onPlace: (p: { device: boolean; coords: GeoCoords }) => void;
   onDenied: (denied: boolean) => void;
   onFail: () => void;
+  /** A read was asked and got no location, not a denial (true), or a later read or a closed gate settled it (false). */
+  onNoAnswer?: (noAnswer: boolean) => void;
   inShell?: () => boolean;
   standalone?: () => boolean;
   now?: () => number;
 }) {
   const now = d.now ?? Date.now;
+  const noAnswer = (on: boolean) => {
+    if (!stopped) d.onNoAnswer?.(on);
+  };
   let reading: WeatherReading | null = null;
   let stopped = false;
   let running = false;
   let again = false;
+  /** The tap's read in flight: a second tap joins it, never a second read. */
+  let tapping: Promise<"ok" | "denied" | "failed"> | null = null;
 
   async function show(coords: GeoCoords, device: boolean): Promise<boolean> {
     if (shouldRefetch(reading, coords, device, now())) {
@@ -128,7 +146,10 @@ export function weatherFollower(d: {
   async function once() {
     if (d.source === "device") {
       const recent = d.geo.lastFix();
-      if (recent && (await show(recent, true))) return;
+      if (recent && (await show(recent, true))) {
+        noAnswer(false);
+        return;
+      }
       if (stopped) return;
       const may = await d.geo.mayReadLocation();
       const perm = may ? "granted" : await d.geo.geoPermission();
@@ -141,14 +162,31 @@ export function weatherFollower(d: {
         if (stopped) return;
         if (res.status === "ok") {
           d.onDenied(false);
+          noAnswer(false);
           if (await show(res.coords, true)) return;
         } else if (res.status === "denied") {
           d.onDenied(true);
+          noAnswer(false);
           writeFollow(false);
+        } else {
+          // Asked, and no answer: the phone's place already on screen stays, and its weather is
+          // fetched again only when the reading is too old (show → shouldRefetch). A refetch that
+          // fails keeps what is on screen: no fall to the shop, no no-answer line.
+          if (reading?.device) {
+            const kept = { lat: reading.lat, lng: reading.lng };
+            if (shouldRefetch(reading, kept, true, now())) await show(kept, true);
+            return;
+          }
+          noAnswer(true);
         }
       } else if (perm === "denied") {
         d.onDenied(true);
+        noAnswer(false);
         writeFollow(false);
+      } else {
+        // The gate is closed and it is not a denial (Ask Next Time, an Allow Once that lapsed): no read
+        // ran, so a no-answer from an earlier read no longer stands.
+        noAnswer(false);
       }
     }
     if (stopped) return;
@@ -173,18 +211,30 @@ export function weatherFollower(d: {
     }
   }
 
-  /** The Turn On Location tap — THE legitimate first-ask moment (getPosition fires inside the tap). */
-  async function locate(): Promise<"ok" | "denied" | "failed"> {
-    const res = await d.geo.getPosition(GEO_OPTS);
-    if (res.status === "denied") {
-      d.onDenied(true);
-      writeFollow(false);
-      return "denied";
-    }
-    if (res.status !== "ok") return "failed";
-    writeFollow(true);
-    d.onDenied(false);
-    return (await show(res.coords, true)) ? "ok" : "failed";
+  /** The Turn On Location (or Try Again) tap — THE legitimate first-ask moment (getPosition fires
+   *  inside the tap). One read at a time: a tap while one is out gets that read's answer. */
+  function locate(): Promise<"ok" | "denied" | "failed"> {
+    if (tapping) return tapping;
+    tapping = (async () => {
+      const res = await d.geo.getPosition(GEO_OPTS);
+      if (res.status === "denied") {
+        d.onDenied(true);
+        noAnswer(false);
+        writeFollow(false);
+        return "denied" as const;
+      }
+      if (res.status !== "ok") {
+        noAnswer(true);
+        return "failed" as const;
+      }
+      writeFollow(true);
+      d.onDenied(false);
+      noAnswer(false);
+      return (await show(res.coords, true)) ? ("ok" as const) : ("failed" as const);
+    })().finally(() => {
+      tapping = null;
+    });
+    return tapping;
   }
 
   function start(): () => void {
@@ -236,10 +286,34 @@ async function townFor(c: GeoCoords): Promise<string | null> {
   }
 }
 
+/** The tap's word: busy while its read is out, Try Again after a read the phone did not answer,
+ *  else Turn On Location (both the compact row and the card draw it). */
+function tapWord(t: (k: string) => string, busy: boolean, noAnswer: boolean): string {
+  if (busy) return t("sh_btn_findingYou");
+  return noAnswer ? t("sh_tryAgain") : t("sh_wx_turnOn");
+}
+
+/** Open Settings beside the denied hint, only in a shell that has the door (canOpenLocationSettings). */
+function SettingsDoor({ show, onOpen }: { show: boolean; onOpen?: () => void }) {
+  const t = translator(useLang());
+  if (!show || !onOpen) return null;
+  return (
+    <>
+      {" "}
+      <button type="button" onClick={onOpen} className="font-medium text-sky-600 underline-offset-2 hover:text-sky-700 hover:underline">
+        {t("sh_btn_openSettings")}
+      </button>
+    </>
+  );
+}
+
 /**
  * THE COMPACT ROW (My Day's header). It always says which place it shows: following the phone, the
  * town (or the pin when the town cannot be said); on the shop's weather, one line — "Weather for
- * <town> — Turn On Location to follow you." — the tap in it. Pure, so a test renders it.
+ * <town> — Turn On Location to follow you." — the tap in it. After a read the phone did not answer
+ * (2026-11-16) the line is "Weather for <town>. Couldn't get your location just now." and the tap is Try
+ * Again; while a tap's read is out the tap says Finding You… and takes no second tap. Pure, so a test
+ * renders it.
  */
 export function WeatherRow({
   data,
@@ -250,8 +324,12 @@ export function WeatherRow({
   hint,
   town,
   label,
+  noAnswer = false,
+  busy = false,
+  canOpenSettings = false,
   onLocate,
   onToggleHint,
+  onOpenSettings,
 }: {
   data: WeatherData | null;
   status: "loading" | "ok" | "error";
@@ -261,12 +339,21 @@ export function WeatherRow({
   hint: boolean;
   town: string | null;
   label?: string;
+  /** The last read was asked and got no location (not a denial). */
+  noAnswer?: boolean;
+  /** A tap's read is out. */
+  busy?: boolean;
+  /** The shell has GeofencePlugin.openSettings. */
+  canOpenSettings?: boolean;
   onLocate: () => void;
   onToggleHint: () => void;
+  onOpenSettings?: () => void;
 }) {
   const t = translator(useLang());
   const DENIED_HINT = t("sh_wx_denied");
   const shopLine = source === "device" && !usingDevice && status === "ok" && !!data;
+  const place = label || t("sh_wx_theShop");
+  const said = noAnswer && !denied;
   return (
     <div className="relative flex min-w-0 shrink flex-col items-end text-xs text-slate-500">
       <div className="flex min-w-0 items-center gap-2">
@@ -294,25 +381,117 @@ export function WeatherRow({
         </div>
       )}
       {shopLine && (
-        <div className="max-w-[18rem] truncate text-[11px] leading-snug text-slate-500">
-          {fillText(t("sh_wx_forShop"), { place: label || t("sh_wx_theShop") })}{" "}
+        <div className={said ? "max-w-[18rem] text-right text-[11px] leading-snug text-slate-500" : "max-w-[18rem] truncate text-[11px] leading-snug text-slate-500"}>
+          {said ? `${fillText(t("sh_wx_forPlace"), { place })} ${t("sh_wx_noAnswer")}` : fillText(t("sh_wx_forShop"), { place })}{" "}
           <button
             type="button"
             onClick={denied ? onToggleHint : onLocate}
+            disabled={!denied && busy}
             title={denied ? DENIED_HINT : undefined}
-            className={denied ? "inline-flex items-center gap-0.5 font-medium text-amber-600 hover:text-amber-700" : "inline-flex items-center gap-0.5 font-medium text-sky-600 hover:text-sky-700"}
+            className={denied ? "inline-flex items-center gap-0.5 font-medium text-amber-600 hover:text-amber-700" : "inline-flex items-center gap-0.5 font-medium text-sky-600 hover:text-sky-700 disabled:text-slate-400"}
           >
-            {denied ? <MapPinOff className="h-3 w-3" /> : <MapPin className="h-3 w-3" />}
-            {t("sh_wx_turnOn")}
-          </button>{" "}
-          {t("sh_wx_toFollow")}
+            {denied ? <MapPinOff className="h-3 w-3" /> : busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <MapPin className="h-3 w-3" />}
+            {denied ? t("sh_wx_turnOn") : tapWord(t, busy, said)}
+          </button>
+          {!said && !(busy && !denied) && <> {t("sh_wx_toFollow")}</>}
         </div>
       )}
       {denied && hint && (
         <span className="absolute right-0 top-full z-20 mt-1 w-64 rounded-lg border border-amber-200 bg-white px-2.5 py-1.5 text-[11px] leading-snug text-slate-600 shadow-lg">
           {DENIED_HINT}
+          <SettingsDoor show={canOpenSettings} onOpen={onOpenSettings} />
         </span>
       )}
+    </div>
+  );
+}
+
+/** THE FULL-SIZE CARD: the same doors as the compact row (the tap, its busy word, Try Again after a
+ *  read the phone did not answer, the denied hint with Open Settings). Pure, so a test renders it. */
+export function WeatherCard({
+  data,
+  status,
+  source,
+  usingDevice,
+  denied,
+  hint,
+  town,
+  label,
+  noAnswer = false,
+  busy = false,
+  canOpenSettings = false,
+  onLocate,
+  onToggleHint,
+  onOpenSettings,
+}: Parameters<typeof WeatherRow>[0]) {
+  const t = translator(useLang());
+  const DENIED_HINT = t("sh_wx_denied");
+  return (
+    <div className="mb-4 flex items-center gap-4 rounded-xl border border-sky-100 bg-gradient-to-br from-sky-50 to-white px-5 py-4">
+      {data?.iconUri ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={data.iconUri} alt={data.description} className="h-12 w-12" />
+      ) : (
+        <Cloud className="h-10 w-10 text-sky-400" />
+      )}
+      <div className="flex-1">
+        {status === "loading" || !data ? (
+          <div className="text-sm text-slate-400">{status === "error" ? t("sh_wx_unavailable") : t("sh_wx_loading")}</div>
+        ) : (
+          <>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-bold text-slate-900">{data.tempF}°F</span>
+              <span className="text-sm text-slate-600">{data.description}</span>
+            </div>
+            <div className="text-xs text-slate-500">
+              {fillText(t("sh_wx_feels"), { n: String(data.feelsF) })}
+              {data.windMph != null ? ` · ${fillText(t("sh_wx_wind"), { n: String(data.windMph) })}` : ""}
+              {data.humidity != null ? ` · ${fillText(t("sh_wx_humidity"), { n: String(data.humidity) })}` : ""}
+              {" · "}
+              {usingDevice ? (
+                <span className="text-emerald-600">{town ?? t("sh_wx_yourLocation")}</span>
+              ) : (
+                <>
+                  {label || t("sh_wx_shopArea")}
+                  {source === "device" && (
+                    <>
+                      {" · "}
+                      {denied ? (
+                        <button
+                          type="button"
+                          onClick={onToggleHint}
+                          title={DENIED_HINT}
+                          className="inline-flex items-center gap-0.5 font-medium text-amber-600 hover:text-amber-700"
+                        >
+                          <MapPinOff className="h-3 w-3" /> {t("sh_wx_blocked")}
+                        </button>
+                      ) : (
+                        <>
+                          {noAnswer && <>{t("sh_wx_noAnswer")} </>}
+                          <button
+                            type="button"
+                            onClick={onLocate}
+                            disabled={busy}
+                            className="inline-flex items-center gap-0.5 font-medium text-sky-600 hover:text-sky-700 disabled:text-slate-400"
+                          >
+                            {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <MapPin className="h-3 w-3" />} {tapWord(t, busy, noAnswer)}
+                          </button>
+                        </>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+            {denied && hint && (
+              <div className="mt-1 text-xs text-amber-700">
+                {DENIED_HINT}
+                <SettingsDoor show={canOpenSettings} onOpen={onOpenSettings} />
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -343,8 +522,6 @@ export function WeatherWidget({
   compact?: boolean;
 }) {
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-  const t = translator(useLang());
-  const DENIED_HINT = t("sh_wx_denied");
   const [data, setData] = useState<WeatherData | null>(null);
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
   const [usingDevice, setUsingDevice] = useState(false); // true = showing the user's own GPS location
@@ -352,6 +529,14 @@ export function WeatherWidget({
   const [hint, setHint] = useState(false); // the denied explainer line/popover is open
   const [deviceAt, setDeviceAt] = useState<GeoCoords | null>(null); // the phone's place on screen
   const [town, setTown] = useState<string | null>(null); // the town it resolves to, when it can be said
+  const [noAnswer, setNoAnswer] = useState(false); // the last read was asked and got no location
+  const [busy, setBusy] = useState(false); // a tap's read is out
+  const busyRef = useRef(false);
+  // Open Settings is drawn only in a shell that has the door; read after mount, so the server's
+  // render and the first client render agree (both false).
+  const [canSettings, setCanSettings] = useState(false);
+  useEffect(() => setCanSettings(canOpenLocationSettings()), []);
+  const openSettings = useCallback(() => void openLocationSettings(), []);
   const failCodeRef = useRef<number | null>(null); // last non-ok HTTP status (403 = referrer block)
   const reportedRef = useRef(false); // log the outage to the error sink once per mount, not per retry
 
@@ -424,6 +609,7 @@ export function WeatherWidget({
         setDeviceAt(device ? coords : null);
       },
       onDenied: setDenied,
+      onNoAnswer: setNoAnswer,
       onFail: () => {
         setStatus("error");
         // Surface the outage in the error log instead of silently vanishing. A 403 here almost
@@ -451,10 +637,21 @@ export function WeatherWidget({
   }, [key, source, fetchWeatherFor, shopCoords]);
 
   // The Turn On Location tap — THE legitimate first-ask moment: getPosition() fires inside this click
-  // chain. One that works is kept (FOLLOW_KEY); a denial opens the explainer, never a loop.
+  // chain. One that works is kept (FOLLOW_KEY); a denial opens the explainer, never a loop. While its
+  // read is out the button is disabled and says Finding You…; a second tap does nothing (2026-11-16:
+  // the read takes up to ten seconds and used to show nothing at all).
   const locate = useCallback(async () => {
-    const r = await followerRef.current?.locate();
-    if (r === "denied") setHint(true); // the tap did nothing visible otherwise — say why, right where they tapped
+    const f = followerRef.current;
+    if (!f || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      const r = await f.locate();
+      if (r === "denied") setHint(true); // the tap did nothing visible otherwise — say why, right where they tapped
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
   }, []);
 
   // Following the phone: the town it resolves to (cached per ~1 km), else the pin alone.
@@ -488,69 +685,32 @@ export function WeatherWidget({
         hint={hint}
         town={town}
         label={label}
+        noAnswer={noAnswer}
+        busy={busy}
+        canOpenSettings={canSettings}
         onLocate={locate}
         onToggleHint={() => setHint((v) => !v)}
+        onOpenSettings={openSettings}
       />
     );
   }
 
   return (
-    <div className="mb-4 flex items-center gap-4 rounded-xl border border-sky-100 bg-gradient-to-br from-sky-50 to-white px-5 py-4">
-      {data?.iconUri ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={data.iconUri} alt={data.description} className="h-12 w-12" />
-      ) : (
-        <Cloud className="h-10 w-10 text-sky-400" />
-      )}
-      <div className="flex-1">
-        {status === "loading" || !data ? (
-          <div className="text-sm text-slate-400">{status === "error" ? t("sh_wx_unavailable") : t("sh_wx_loading")}</div>
-        ) : (
-          <>
-            <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-bold text-slate-900">{data.tempF}°F</span>
-              <span className="text-sm text-slate-600">{data.description}</span>
-            </div>
-            <div className="text-xs text-slate-500">
-              {fillText(t("sh_wx_feels"), { n: String(data.feelsF) })}
-              {data.windMph != null ? ` · ${fillText(t("sh_wx_wind"), { n: String(data.windMph) })}` : ""}
-              {data.humidity != null ? ` · ${fillText(t("sh_wx_humidity"), { n: String(data.humidity) })}` : ""}
-              {" · "}
-              {usingDevice ? (
-                <span className="text-emerald-600">{town ?? t("sh_wx_yourLocation")}</span>
-              ) : (
-                <>
-                  {label || t("sh_wx_shopArea")}
-                  {source === "device" && (
-                    <>
-                      {" · "}
-                      {denied ? (
-                        <button
-                          type="button"
-                          onClick={() => setHint((v) => !v)}
-                          title={DENIED_HINT}
-                          className="inline-flex items-center gap-0.5 font-medium text-amber-600 hover:text-amber-700"
-                        >
-                          <MapPinOff className="h-3 w-3" /> {t("sh_wx_blocked")}
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={locate}
-                          className="inline-flex items-center gap-0.5 font-medium text-sky-600 hover:text-sky-700"
-                        >
-                          <MapPin className="h-3 w-3" /> {t("sh_wx_turnOn")}
-                        </button>
-                      )}
-                    </>
-                  )}
-                </>
-              )}
-            </div>
-            {denied && hint && <div className="mt-1 text-xs text-amber-700">{DENIED_HINT}</div>}
-          </>
-        )}
-      </div>
-    </div>
+    <WeatherCard
+      data={data}
+      status={status}
+      source={source}
+      usingDevice={usingDevice}
+      denied={denied}
+      hint={hint}
+      town={town}
+      label={label}
+      noAnswer={noAnswer}
+      busy={busy}
+      canOpenSettings={canSettings}
+      onLocate={locate}
+      onToggleHint={() => setHint((v) => !v)}
+      onOpenSettings={openSettings}
+    />
   );
 }

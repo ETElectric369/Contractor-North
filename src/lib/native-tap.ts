@@ -928,7 +928,12 @@ function classify(e: unknown): { kind: TapFailKind; sentence: string } | null {
     return { kind: "blocked", sentence: "Apple has banned this iPhone from Tap to Pay on iPhone — contact Stripe support." };
   }
   // [3905] "The application went to background before a reader request completed."
-  if (/went to background/i.test(m)) {
+  // The connect says it another way when the app is ALREADY dark as it starts: "Unable to
+  // communicate with the reader while the app is in the background. Try again." That sentence
+  // matched nothing here, so it was filed to ops as a failure: the row's first sighting
+  // (2026-10-01) and its latest (2026-11-16, the owner leaving the app for an address mid-warm-up)
+  // both say it, four sightings in all. The same thing happened, so it is the same kind.
+  if (/went to background|while the app is in the background/i.test(m)) {
     return { kind: "background", sentence: "The app went to the background before the tap finished — keep the app on screen and try again." };
   }
   // [1110] the SDK is mid-connection (see isAlreadyConnected). connectIfNeeded waits it out and

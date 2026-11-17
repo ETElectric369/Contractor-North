@@ -61,7 +61,7 @@ export const SCREENS: Screen[] = [
       { name: "schedule-calendar", say: "the calendar" },
     ],
   },
-  { name: "Clock", word: "sh_dock_clock", path: "/timeclock", say: "a tech's clock tile (the two-button clock and Switch Job)" },
+  { name: "Clock", word: "sh_dock_clock", path: "/timeclock", say: "a tech's clock tile (the two-button clock and Switch Job), and a tech's own hours and pay: My timecard (the last 7 days) and My pay period (the current one)" },
   // Reminders has no dock row (it rides Today's owns): its word is Search or Ask's row for it.
   { name: "Reminders", word: "sh_reminders", path: "/tasks", say: "the full Reminders list (Overdue, Today, This Week, Later, Someday); everyone sees their own" },
   { name: "Jobs", word: "sh_dock_jobs", path: "/jobs", say: "?status=<status>", spots: [{ name: "new-job", say: "New Job (office)" }] },
