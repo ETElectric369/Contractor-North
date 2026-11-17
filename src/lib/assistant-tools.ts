@@ -6,7 +6,11 @@ import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 import { tzDayStartUtc, todayStrInTz, payPeriodForOffset, weekDayStrs, type WeekStart } from "@/lib/tz";
 import { escapeLike, hoursBetween, formatFullAddress } from "@/lib/utils";
-import { getOrgSettings } from "@/lib/org-settings";
+import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
+import { readJobBlock } from "@/lib/schedule/job-block";
+import { jobDaysInWindow, jobDayInstants, toJobDayBlock } from "@/lib/schedule/job-day-read";
+import { segmentCols, withDayHours, type SegmentRow } from "@/lib/schedule/segment-hours";
+import { readDayHours } from "@/lib/schedule/day-hours";
 import { LONG_SHIFT_HOURS, forgottenReason } from "@/lib/long-shift";
 import { loadShiftChains } from "@/lib/shift-chain";
 import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES, visitTitle } from "@/lib/statuses";
@@ -104,7 +108,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_jobs",
     description:
-      "List this company's jobs. Use for questions like 'what jobs are in progress', 'show me my jobs', 'find the job at the Smith house'. Filter by status and/or a text search on job name/number/description.",
+      "List this company's jobs. Use for questions like 'what jobs are in progress', 'show me my jobs', 'find the job at the Smith house'. Filter by status and/or a text search on job name/number/description. Each job says `has_day` (false = it has no day on the calendar and sits under Waiting for a Day, even if its status says scheduled) and `crew` (the names on the job; empty = nobody yet). For which days and hours, use schedule_overview or get_job.",
     input_schema: {
       type: "object",
       properties: {
@@ -215,7 +219,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "schedule_overview",
     description:
-      "What's scheduled in a time window — jobs, appointments, and tasks due. Use for 'what's on the schedule this week', 'what do I have today', 'anything next week'. PAST windows work too: for 'when was the <customer> <visit>', pass around (or date) with a past date instead of a named range.",
+      "What's on the Schedule in a time window, read by the calendar's own rules: job days, visits, and tasks due. Use for 'what's on the schedule this week', 'what do I have today', 'anything next week', and to check what is true after you book something. `jobs` are the JOBS' OWN PLANNED DAYS (kind job_day): one row per job per day it is on inside the window, whichever day the job started, each with that day's start and end, whether it is all day, and its crew (the names on the job; an empty list means nobody is on it yet). Times are 24-hour HH:MM on this company's wall clock (`timezone`); starts_at/ends_at are the same moments as instants. `appointments` are VISITS (kind visit): inspections, estimates, calls and other stops. A visit whose type is Job is NOT the job's day and puts no job on the calendar. A job that has no job_day row for a day is NOT on that day, whatever its status says (a job can say Scheduled and still be waiting for a day). If `lists_cut` is present a list was cut at its bound: say so rather than calling the schedule complete. PAST windows work too: for 'when was the <customer> <visit>', pass around (or date) with a past date instead of a named range.",
     input_schema: {
       type: "object",
       properties: {
@@ -532,7 +536,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_job",
     description:
-      "Read ONE job in full — number, name, status, customer, address, billing type, description, schedule. Use for 'tell me about the Jones job', or before acting on a job. Pass a job_id.",
+      "Read ONE job in full — number, name, status, customer, address, billing type, description, schedule. Use for 'tell me about the Jones job', or before acting on a job. Pass a job_id. Also returns `has_day` (false = Waiting for a Day, whatever the status says), `crew` (names; empty = nobody yet), `planned_days` (every date range the calendar draws the job on, past ones included: from/to are days, start/end are that range's own 24-hour HH:MM hours, null = the job's usual hours) and `usual_hours` (HH:MM on this company's wall clock, in `timezone`).",
     input_schema: { type: "object", properties: { job_id: { type: "string" } } },
   },
   {
@@ -771,6 +775,40 @@ function windowFor(
   };
 }
 
+/* A JOB'S DAYS AS THE CALENDAR DRAWS THEM (cn-v1165, 2026-11-16): schedule_overview reads which days
+   a job is on and at what hours through lib/schedule/job-day-read, the one composition of the calendar's
+   own rules (bookedKeys, jobDayBlock, the grid's end-after-start guard) that job.scheduleDay's read-back
+   (readJobDay) uses too, so the two can never say different things about a day. Every segment of each
+   job asked about is handed to it: a job counts as having ranges only if one is in the list. */
+
+/** Bounds, each said back when a read reaches it. */
+const SCHED_JOBS_CAP = 300;
+const SCHED_SEGS_CAP = 1000;
+const SCHED_VISITS_CAP = 300;
+const SCHED_TASKS_CAP = 40;
+const SCHED_JOB_DAYS_CAP = 400;
+const CREW_IDS_CAP = 400;
+
+/** The names of the people on `jobs.assigned_to`, by id; null when the read failed (said, never a
+ *  crew of nobody). An id with no profile row reads "Unknown person". */
+async function readCrewNames(supabase: any, idLists: readonly unknown[]): Promise<Map<string, string> | null> {
+  const ids = [...new Set(idLists.flatMap((l) => (Array.isArray(l) ? l : [])).filter((x): x is string => typeof x === "string" && !!x))].slice(0, CREW_IDS_CAP);
+  const names = new Map<string, string>();
+  if (!ids.length) return names;
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await supabase.from("profiles").select("id, full_name").in("id", ids.slice(i, i + 200)).limit(200);
+    if (error) return null;
+    for (const r of (data ?? []) as { id: string; full_name: string | null }[]) names.set(String(r.id), String(r.full_name ?? "").trim() || "Unknown person");
+  }
+  return names;
+}
+
+/** A job's crew as names, in the order stored; null when the names could not be read. */
+function crewOf(assigned: unknown, names: Map<string, string> | null): string[] | null {
+  if (!names) return null;
+  return (Array.isArray(assigned) ? assigned : []).filter((x): x is string => typeof x === "string" && !!x).map((id) => names.get(id) ?? "Unknown person");
+}
+
 /**
  * Execute a read-only data tool. `supabase` must be the request-scoped client
  * (RLS-bound to the signed-in user). Returns a compact JSON string for the model.
@@ -791,7 +829,7 @@ export async function runDataTool(
         const lim = clampLimit(input.limit, 15);
         let q = supabase
           .from("jobs")
-          .select("id, job_number, name, status, address, scheduled_start, scheduled_end, customers(name)")
+          .select("id, job_number, name, status, address, scheduled_start, scheduled_end, assigned_to, customers(name)")
           .order("created_at", { ascending: false })
           .limit(lim);
         if (input.status) q = q.eq("status", String(input.status));
@@ -802,9 +840,16 @@ export async function runDataTool(
         if (input.customer_id) q = q.eq("customer_id", String(input.customer_id)); // narrow to one customer's jobs
         const { data, error } = await q;
         if (error) throw error;
+        // THE CREW AND WHETHER IT HAS A DAY (cn-v1165, 2026-11-16): a job whose status says Scheduled
+        // with no scheduled_start is still under Waiting for a Day, and Nort said such jobs were
+        // scheduled with their crew. has_day and crew are what is stored, so he can see it.
+        const listNames = await readCrewNames(supabase, (data ?? []).map((j: any) => j.assigned_to));
         return JSON.stringify({
           count: data?.length ?? 0,
+          ...(listNames ? {} : { crew_unread: "The crew's names could not be read just now: crew is null, not empty." }),
           jobs: (data ?? []).map((j: any) => ({
+            has_day: !!j.scheduled_start,
+            crew: crewOf(j.assigned_to, listNames),
             id: j.id, // needed to schedule / assign / set status / finish / invoice a job
             job: j.job_number,
             name: j.name,
@@ -1119,12 +1164,55 @@ export async function runDataTool(
         if (!jid) return JSON.stringify({ error: "Provide a job_id." });
         const { data: j, error } = await supabase
           .from("jobs")
-          .select("id, job_number, name, status, billing_type, address, description, scheduled_start, scheduled_end, customers(name)")
+          .select("id, job_number, name, status, billing_type, address, description, scheduled_start, scheduled_end, planned_minutes, assigned_to, customers(name)")
           .eq("id", jid)
           .maybeSingle();
         if (error) throw error;
         if (!j) return JSON.stringify({ found: false, message: "Job not found." });
+        // ITS DAYS, ITS USUAL HOURS AND ITS CREW (cn-v1165, 2026-11-16), read by the calendar's rules:
+        // segments first (each range with its own hours where the day keeps them, 0370), else the
+        // listed span on the company's days; the usual hours are job-block readJobBlock's.
+        const jobRow = j as any;
+        const [{ data: jobOrg }, segRead, jobNames] = await Promise.all([
+          supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+          withDayHours((h) =>
+            supabase
+              .from("job_schedule_segments")
+              .select(segmentCols("job_id, start_date, end_date", h))
+              .eq("job_id", jobRow.id)
+              .order("start_date")
+              .limit(200),
+          ),
+          readCrewNames(supabase, [jobRow.assigned_to]),
+        ]);
+        if (segRead.error) throw segRead.error;
+        const jobTz = getOrgSettings((jobOrg as any)?.settings).timezone || "America/Los_Angeles";
+        const jobWorkDay = workDayWindowHm((jobOrg as any)?.settings);
+        const segRows = ((segRead.data ?? []) as unknown as SegmentRow[]).filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s?.start_date ?? "")));
+        let plannedDays: { from: string; to: string; start: string | null; end: string | null }[];
+        if (segRows.length) {
+          plannedDays = segRows
+            .map((s) => {
+              const own = readDayHours(s.start_time, s.end_time);
+              return { from: s.start_date, to: s.end_date >= s.start_date ? s.end_date : s.start_date, start: own?.start ?? null, end: own?.end ?? null };
+            })
+            .sort((a, b) => a.from.localeCompare(b.from));
+        } else if (jobRow.scheduled_start) {
+          const from = todayStrInTz(jobTz, new Date(jobRow.scheduled_start));
+          const toRaw = jobRow.scheduled_end ? todayStrInTz(jobTz, new Date(jobRow.scheduled_end)) : from;
+          plannedDays = [{ from, to: toRaw < from ? from : toRaw, start: null, end: null }];
+        } else plannedDays = [];
+        const usual = jobRow.scheduled_start
+          ? readJobBlock({ scheduledStart: jobRow.scheduled_start, scheduledEnd: jobRow.scheduled_end, plannedMinutes: jobRow.planned_minutes, tz: jobTz, workDay: jobWorkDay })
+          : null;
         return JSON.stringify({
+          has_day: !!jobRow.scheduled_start,
+          crew: crewOf(jobRow.assigned_to, jobNames),
+          ...(jobNames ? {} : { crew_unread: "The crew's names could not be read just now: crew is null, not empty." }),
+          planned_days: plannedDays,
+          ...(segRows.length >= 200 ? { planned_days_cut: "Only the first 200 date ranges were read." } : {}),
+          usual_hours: usual ? { start: usual.startHm, end: usual.endHm, all_day: usual.allDay } : null,
+          timezone: jobTz,
           found: true,
           id: (j as any).id,
           job: (j as any).job_number,
@@ -2016,20 +2104,41 @@ export async function runDataTool(
         } else {
           ({ start, end, label } = windowFor(String(input.range ?? "this_week"), schedTz, schedSettings.week_start));
         }
-        const [jobsRes, apptRes, taskRes] = await Promise.all([
+        // The window as the company's days, first and last inclusive (the job days are days).
+        const firstDay = todayStrInTz(schedTz, new Date(start));
+        const lastDay = todayStrInTz(schedTz, new Date(Date.parse(end) - 1));
+        const workDay = workDayWindowHm((schedOrg as any)?.settings);
+        const cut: string[] = [];
+        const JOB_DAY_COLS = "id, job_number, name, status, scheduled_start, scheduled_end, planned_minutes, assigned_to, customers(name)";
+        const [jobsRes, segRes, apptRes, taskRes] = await Promise.all([
+          // Every job whose LISTED SPAN touches the window (the calendar's overlap test: it starts
+          // before the window ends, and ends after it starts or is a one-day job inside it), not only
+          // the ones that START in it: the later days of a job that began last week are this week's.
           supabase
             .from("jobs")
-            .select("job_number, name, status, scheduled_start, scheduled_end, customers(name)")
-            .gte("scheduled_start", start)
+            .select(JOB_DAY_COLS)
             .lt("scheduled_start", end)
-            .order("scheduled_start"),
+            .or(`scheduled_end.gte.${start},and(scheduled_end.is.null,scheduled_start.gte.${start})`)
+            .order("scheduled_start")
+            .limit(SCHED_JOBS_CAP),
+          // Every planned day range touching the window, with the day's own hours (0370) when the
+          // database has them: a job's days are its segments when it has any.
+          withDayHours((h) =>
+            supabase
+              .from("job_schedule_segments")
+              .select(segmentCols("job_id, start_date, end_date", h))
+              .gte("end_date", firstDay)
+              .lte("start_date", lastDay)
+              .limit(SCHED_SEGS_CAP),
+          ),
           supabase
             .from("appointments")
             .select("id, title, type, starts_at, ends_at, location, status, customers(name), jobs(name)")
             .eq("absorbed", false) // don't list a converted visit beside the job it became (audit v921)
             .gte("starts_at", start)
             .lt("starts_at", end)
-            .order("starts_at"),
+            .order("starts_at")
+            .limit(SCHED_VISITS_CAP),
           // Tasks due in-window — the WHEN buckets' cargo, so "what's on Friday"
           // includes the permit deadline, not just the crew's blocks.
           supabase
@@ -2038,22 +2147,86 @@ export async function runDataTool(
             .gte("due_date", start.slice(0, 10))
             .lt("due_date", end.slice(0, 10))
             .order("due_date")
-            .limit(40),
+            .limit(SCHED_TASKS_CAP),
         ]);
         if (jobsRes.error) throw jobsRes.error;
+        if (segRes.error) throw segRes.error;
         if (apptRes.error) throw apptRes.error;
         if (taskRes.error) throw taskRes.error;
+
+        const listedJobs = (jobsRes.data ?? []) as any[];
+        const windowSegs = ((segRes.data ?? []) as unknown as SegmentRow[]).filter((s) => !!s?.job_id);
+        if (listedJobs.length >= SCHED_JOBS_CAP) cut.push(`jobs: only the first ${SCHED_JOBS_CAP} jobs whose listed span touches the window were read; a job day may be missing.`);
+        if (windowSegs.length >= SCHED_SEGS_CAP) cut.push(`jobs: only the first ${SCHED_SEGS_CAP} planned date ranges in the window were read; a job day may be missing.`);
+        const listedIds = new Set(listedJobs.map((j) => String(j.id)));
+        const inWindowSegJobs = new Set(windowSegs.map((s) => String(s.job_id)));
+        // A LISTED JOB WITH NO RANGE IN THE WINDOW may still have ranges elsewhere, and then it is on
+        // those days only (segments first), never on its listed span: ask which of them have any.
+        // A JOB WITH A RANGE IN THE WINDOW that the span read did not bring (its date was cleared, or
+        // its span is elsewhere) is read by id. Both in reads of 200 ids, as the calendar does.
+        const chunks = (ids: string[]) => {
+          const out: string[][] = [];
+          for (let i = 0; i < ids.length; i += 200) out.push(ids.slice(i, i + 200));
+          return out;
+        };
+        const askSegs = [...listedIds].filter((id) => !inWindowSegJobs.has(id));
+        const askJobs = [...inWindowSegJobs].filter((id) => !listedIds.has(id));
+        const [otherSegReads, otherJobReads] = await Promise.all([
+          Promise.all(
+            chunks(askSegs).map((ids) =>
+              supabase.from("job_schedule_segments").select("job_id, start_date, end_date").in("job_id", ids).limit(SCHED_SEGS_CAP),
+            ),
+          ),
+          Promise.all(chunks(askJobs).map((ids) => supabase.from("jobs").select(JOB_DAY_COLS).in("id", ids).limit(200))),
+        ]);
+        const otherSegs: SegmentRow[] = [];
+        for (const r of otherSegReads as { data: unknown; error: unknown }[]) {
+          if (r.error) throw r.error;
+          const rows = (r.data ?? []) as SegmentRow[];
+          if (rows.length >= SCHED_SEGS_CAP) cut.push("jobs: a read of the jobs' other date ranges reached its bound; a job may be shown on its listed span where it has ranges elsewhere.");
+          otherSegs.push(...rows);
+        }
+        const allJobs = [...listedJobs];
+        for (const r of otherJobReads as { data: unknown; error: unknown }[]) {
+          if (r.error) throw r.error;
+          allJobs.push(...((r.data ?? []) as any[]));
+        }
+        let jobDays = jobDaysInWindow({ jobs: allJobs, segments: [...windowSegs, ...otherSegs], firstDay, lastDay, tz: schedTz, workDay }).sort(
+          (a, b) => a.day.localeCompare(b.day) || a.startMin - b.startMin || String(a.job.job_number ?? "").localeCompare(String(b.job.job_number ?? "")),
+        );
+        if (jobDays.length > SCHED_JOB_DAYS_CAP) {
+          cut.push(`jobs: ${jobDays.length} job days are in the window; only the first ${SCHED_JOB_DAYS_CAP} are listed. Ask for a shorter window.`);
+          jobDays = jobDays.slice(0, SCHED_JOB_DAYS_CAP);
+        }
+        const schedNames = await readCrewNames(supabase, jobDays.map((d) => d.job.assigned_to));
+        const appts = (apptRes.data ?? []) as any[];
+        if (appts.length >= SCHED_VISITS_CAP) cut.push(`appointments: only the first ${SCHED_VISITS_CAP} visits in the window were read.`);
+        if ((taskRes.data ?? []).length >= SCHED_TASKS_CAP) cut.push(`tasks_due: only the first ${SCHED_TASKS_CAP} tasks due in the window were read.`);
+        if (!schedNames) cut.push("crew: the crew's names could not be read just now; crew is null on every job day, which is not the same as nobody.");
         return JSON.stringify({
           window: label,
-          jobs: (jobsRes.data ?? []).map((j: any) => ({
+          // Every start/end below is "HH:MM", 24-hour, on this company's wall clock in this timezone;
+          // starts_at/ends_at are the same moments as UTC instants (the visits' own convention).
+          timezone: schedTz,
+          ...(cut.length ? { lists_cut: cut } : {}),
+          jobs: jobDays.map(({ job: j, day: d, startMin, endMin, allDay, ownHours }) => ({
+            kind: "job_day",
+            id: j.id, // pass to job.scheduleDay / job.move / job.assign
             job: j.job_number,
             name: j.name,
             status: j.status,
             customer: embedName(j.customers),
+            // start/end "HH:MM" and starts_at/ends_at are the same moments; a block to midnight is
+            // said as 23:59 in both (job-day-read blockEndMin).
+            ...toJobDayBlock({ day: d, startMin, endMin, allDay, ownHours }),
+            ...jobDayInstants({ day: d, startMin, endMin }, schedTz),
+            crew: crewOf(j.assigned_to, schedNames),
+            // The job's LISTED span as stored (instants): the first day's start to the last day's end.
             scheduled_start: j.scheduled_start,
             scheduled_end: j.scheduled_end,
           })),
-          appointments: (apptRes.data ?? []).map((a: any) => ({
+          appointments: appts.map((a: any) => ({
+            kind: "visit",
             id: a.id, // pass to appointment.update (reschedule) / appointment.setStatus
             // AND THE TITLE, for the same reason: a row stamped "Walk-Through: <who>" from cn-v1034
             // (2026-09-30) to 2026-10-03 is still stored that way, and Nort reading it aloud would

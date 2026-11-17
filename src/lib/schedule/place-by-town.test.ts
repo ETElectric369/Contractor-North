@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupByTown, nextAction, NO_TOWN, spreadTimes, townFromAddress, townsOnDay, whatsMissing, type Placeable } from "./place-by-town";
+import { groupByTown, HELD_GROUP_KEY, nextAction, NO_TOWN, spreadTimes, townFromAddress, townsOnDay, whatsMissing, type Placeable } from "./place-by-town";
 
 const lead = (name: string, city: string | null, over: Partial<Placeable> = {}): Placeable => ({
   id: name.toLowerCase().replace(/\s+/g, "-"),
@@ -234,5 +234,76 @@ describe("whatsMissing — a job has no phone, and that is not a gap", () => {
   it("a LEAD still reports a missing number — that one matters", () => {
     expect(whatsMissing({ kind: "lead", city: "Truckee", address: "14424 Sumac Lane", phone: null, email: null }))
       .toBe("contact");
+  });
+});
+
+describe("groupByTown — everything on hold is ONE group, at the bottom (2026-11-16)", () => {
+  // The owner: "i want to move everything on hold into one category on the board at the bottom".
+  const job = (name: string, city: string | null, over: Partial<Placeable> = {}): Placeable => ({
+    ...lead(name, city),
+    kind: "job",
+    ...over,
+  });
+  const held = (name: string, city: string | null, holdUntil?: string | null) =>
+    job(name, city, { onHold: true, holdReason: "Waiting on the permit", ...(holdUntil !== undefined ? { holdUntil } : {}) });
+
+  it("held jobs leave their towns and sit last, whatever the group's size", () => {
+    const g = groupByTown([
+      lead("Larkspur", "Truckee"),
+      held("Snowbell", "Truckee", "2026-11-20"),
+      held("Bayberry", "Truckee", "2026-11-18"),
+      held("Thistle", "Catbird", "2026-11-19"),
+      held("Wren", null, "2026-11-25"),
+    ]);
+    // Four held against one waiting: size would put them first; the owner's ask puts them last.
+    expect(g.map((x) => x.town)).toEqual(["Truckee", "On Hold"]);
+    expect(g[0].items.map((i) => i.name)).toEqual(["Larkspur"]);
+    const last = g[g.length - 1];
+    expect(last.held).toBe(true);
+    expect(last.unlocatable).toBe(false);
+    expect(last.items).toHaveLength(4);
+    // A held job is in its town's bucket no more: no Catbird group, no townless group.
+    expect(g.some((x) => x.town === "Catbird" || x.unlocatable)).toBe(false);
+    for (const x of g.slice(0, -1)) expect(x.held).toBe(false);
+  });
+
+  it("inside it: no come-back day first of all, then the soonest day, then name A–Z", () => {
+    const g = groupByTown([
+      held("Zed late", "Truckee", "2026-12-01"),
+      held("Soon B", "Truckee", "2026-11-18"),
+      held("Soon A", "Tahoe City", "2026-11-18"),
+      held("No day Z", "Truckee", null),
+      held("No day A", null), // the column not read at all: no day either
+      held("Middle", "Truckee", "2026-11-20"),
+    ]);
+    expect(g).toHaveLength(1);
+    expect(g[0].items.map((i) => i.name)).toEqual(["No day A", "No day Z", "Soon A", "Soon B", "Middle", "Zed late"]);
+  });
+
+  it("no held group when nothing is held, and never an empty town left behind", () => {
+    const none = groupByTown(REAL);
+    expect(none.some((x) => x.held)).toBe(false);
+    const onlyHeld = groupByTown([held("Snowbell", "Truckee", null)]);
+    expect(onlyHeld).toHaveLength(1);
+    expect(onlyHeld[0].held).toBe(true);
+    expect(groupByTown([])).toEqual([]);
+    for (const x of groupByTown([lead("a", "Truckee"), held("b", "Truckee")])) expect(x.items.length).toBeGreaterThan(0);
+  });
+
+  it("the heading is the On Hold word through the caller's words; each group has a stable key that is not its display name", () => {
+    const words = (k: string) => ({ ag_stateOnHold: "En Pausa", ag_noTownYet: "Sin ciudad aún" })[k as "ag_stateOnHold"] ?? k;
+    // A town spelled like the held group's heading, and the townless bucket: three distinct keys.
+    const g = groupByTown([lead("a", "En Pausa"), lead("b", "En Pausa"), lead("c", null), held("d", "Truckee")], "es", words);
+    expect(g.map((x) => x.town)).toEqual(["En Pausa", "Sin ciudad aún", "En Pausa"]);
+    expect(g.map((x) => x.key)).toEqual(["town:en pausa", "town:no town yet", HELD_GROUP_KEY]);
+    expect(new Set(g.map((x) => x.key)).size).toBe(g.length);
+    // The same items in another order and language keep the same keys.
+    const again = groupByTown([held("d", "Truckee"), lead("c", null), lead("b", "EN PAUSA"), lead("a", "En Pausa")]);
+    expect(again.map((x) => x.key)).toEqual(["town:en pausa", "town:no town yet", HELD_GROUP_KEY]);
+  });
+
+  it("a held job's urgency does not lift it out of the held group", () => {
+    const g = groupByTown([lead("Calm", "Truckee"), held("Urgent hold", "Truckee", null)].map((i, n) => (n === 1 ? { ...i, urgent: true } : i)));
+    expect(g.map((x) => x.town)).toEqual(["Truckee", "On Hold"]);
   });
 });

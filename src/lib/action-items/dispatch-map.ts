@@ -55,9 +55,11 @@ export function resolveRowVerb(
 
   if (verb === "schedule") {
     if (!date) return null;
-    if (kind === "job_to_schedule") return { name: "job.scheduleDay", input: { id, date } };
+    // replace: true is the write this tap always made (the job's plan becomes that day). Nort's
+    // job.scheduleDay ADDS a day without it since 2026-11-16; a person's tap does what it did.
+    if (kind === "job_to_schedule") return { name: "job.scheduleDay", input: { id, date, replace: true } };
     // A won estimate's day goes on its job (the row names it; no job, no day to set here).
-    if (kind === "quote_accepted") return target ? { name: "job.scheduleDay", input: { id: target, date } } : null;
+    if (kind === "quote_accepted") return target ? { name: "job.scheduleDay", input: { id: target, date, replace: true } } : null;
     return null;
   }
 

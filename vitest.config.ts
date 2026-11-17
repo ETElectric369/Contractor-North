@@ -31,6 +31,12 @@ export default defineConfig({
           // .tsx too (cn-v1134): a test that renders a screen with react-dom/server sits beside it.
           include: ["src/**/*.test.{ts,tsx}", "tests/**/*.test.{ts,tsx}"],
           exclude: [...configDefaults.exclude, ...DB_SUITES],
+          // FIFTEEN SECONDS, NOT THE DEFAULT FIVE (2026-11-16). A few tests are exhaustive on purpose
+          // (every half-cent a formula can meet, every combination of a rule's inputs, a 500-row
+          // render) and take two to four seconds on a quiet machine. Three full runs in a row on a
+          // loaded one each lost a different one of them at 5.2 to 5.9 seconds, with a failure that
+          // said "timed out" and nothing about the code. Fifteen still catches a test that hangs.
+          testTimeout: 15_000,
         },
       },
       {

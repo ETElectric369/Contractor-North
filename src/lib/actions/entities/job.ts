@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   scheduleJobWindow,
+  addJobDay,
+  setJobDayTimes,
   setJobCrew,
   createJob,
   moveJobDay,
@@ -17,6 +19,9 @@ import { WAITABLE_KINDS, saveNeedsYouWait, waitKey } from "@/lib/action-items/ne
 // Which statuses END a job, so they only go through finishing (which bills first) — the one typed
 // table every door reads (M2).
 import { finishesTheJob } from "@/lib/job-status";
+import { hmToMinutes, minutesToHm } from "@/lib/schedule/fit-day";
+import type { JobLength } from "@/lib/schedule/job-block";
+import { readJobDay } from "@/lib/schedule/job-day-read";
 import { resolveCustomerId, resolveContactId, resolveJobId, resolveProfileId } from "../resolve-id";
 import type { ActionDef } from "../types";
 
@@ -29,6 +34,93 @@ async function jobIdOf(value: string, ask: string): Promise<{ id: string } | { e
   if ("error" in job) return { error: job.error };
   if (!job.id) return { error: ask };
   return { id: job.id };
+}
+
+type Db = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * ADD PEOPLE TO A JOB'S CREW the way job.assign does: read the crew as saved, add, never take anyone
+ * off, and write through setJobCrew (which rings the bell for someone new). A crew that would not
+ * change is not written. Kept beside job.assign, whose own lines are not changed (2026-11-16).
+ */
+async function addToJobCrew(supabase: Db, jobId: string, ids: string[]): Promise<{ ok: boolean; error?: string }> {
+  if (!ids.length) return { ok: true };
+  const { data: cur, error } = await supabase.from("jobs").select("assigned_to").eq("id", jobId).maybeSingle();
+  if (error) return { ok: false, error: "I couldn't read the job's crew, so nobody was added." };
+  const now = (((cur as { assigned_to?: string[] | null } | null)?.assigned_to ?? []) as string[]).map(String);
+  const next = Array.from(new Set([...now, ...ids]));
+  if (next.length === now.length) return { ok: true };
+  return setJobCrew(jobId, next);
+}
+
+/** "A", "A and B", "A, B and C". */
+function andList(names: string[]): string {
+  if (names.length <= 1) return names.join("");
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/**
+ * THE CREW AS STORED, read back after a write, so what Nort says about who is on a job is what the
+ * database holds and never what he asked for (2026-11-16: he said a crew was on three jobs that had
+ * no day). The crew is the JOB's, on every one of its days.
+ */
+async function crewNow(supabase: Db, jobId: string): Promise<string> {
+  const { data: row, error } = await supabase.from("jobs").select("assigned_to").eq("id", jobId).maybeSingle();
+  if (error || !row) return "I couldn't read the job's crew back.";
+  const ids = (((row as { assigned_to?: string[] | null }).assigned_to ?? []) as string[]).map(String).filter(Boolean);
+  if (!ids.length) return "Nobody is on the job yet.";
+  const { data: people, error: pErr } = await supabase.from("profiles").select("id, full_name").in("id", ids);
+  if (pErr) return "I couldn't read the crew's names back.";
+  const byId = new Map(((people ?? []) as { id: string; full_name: string | null }[]).map((p) => [String(p.id), String(p.full_name ?? "").trim()]));
+  const names = ids.map((id) => byId.get(id) || "someone whose name I can't read");
+  return `Crew on the job now: ${andList(names)}.`;
+}
+
+/** Every crew name resolved BEFORE anything is written: the first that fails asks, with its own words. */
+async function resolveCrew(supabase: Db, crew: string[] | null | undefined): Promise<{ ids: string[] } | { error: string }> {
+  const ids: string[] = [];
+  for (const raw of crew ?? []) {
+    if (!String(raw ?? "").trim()) continue;
+    const person = await resolveProfileId(supabase, raw);
+    if ("error" in person) return { error: person.error };
+    if (!person.id) return { error: "Which crew member should I add?" };
+    ids.push(person.id);
+  }
+  return { ids: Array.from(new Set(ids)) };
+}
+
+/**
+ * THE DAY'S HOURS AS NORT PASSED THEM, checked before anything is written. `start` is 24-hour HH:MM on
+ * the company's wall clock; the length is ONE of full_day, end_time (needs start) or minutes; end_time
+ * and minutes together only when they agree. Nothing given = the door's own default.
+ */
+function readDayHoursInput(i: {
+  start?: string | null;
+  end_time?: string | null;
+  minutes?: number | null;
+  full_day?: boolean | null;
+}): { start?: string; length?: JobLength } | { error: string } {
+  const start = i.start == null || i.start === "" ? undefined : String(i.start).trim();
+  const startMin = start === undefined ? null : hmToMinutes(start);
+  if (start !== undefined && startMin == null) return { error: "start must be a 24-hour HH:MM time, like 13:30." };
+  const endGiven = i.end_time != null && i.end_time !== "";
+  const minutesGiven = i.minutes != null;
+  const fullGiven = i.full_day === true;
+  let fromEnd: number | undefined;
+  if (endGiven) {
+    if (startMin == null) return { error: "An end time needs a start time: pass start too." };
+    const endMin = hmToMinutes(String(i.end_time).trim());
+    if (endMin == null) return { error: "end_time must be a 24-hour HH:MM time, like 15:30." };
+    if (endMin <= startMin) return { error: "The end time must be after the start time." };
+    fromEnd = endMin - startMin;
+  }
+  const given = [endGiven, minutesGiven, fullGiven].filter(Boolean).length;
+  if (given > 1 && !(given === 2 && endGiven && minutesGiven && fromEnd === i.minutes)) {
+    return { error: "Give one of end_time, minutes or full_day: they don't agree." };
+  }
+  const length: JobLength | undefined = fullGiven ? "full" : fromEnd !== undefined ? fromEnd : minutesGiven ? Number(i.minutes) : undefined;
+  // "7:30" is stored as "07:30": the writers read and keep the two-digit form.
+  return { ...(startMin != null ? { start: minutesToHm(startMin) } : {}), ...(length !== undefined ? { length } : {}) };
 }
 
 export const jobActions: Record<string, ActionDef> = {
@@ -181,6 +273,23 @@ export const jobActions: Record<string, ActionDef> = {
           error: "Finishing a job bills its work first, so it goes through Finish Job, not a status change. Use job.finish on this job — it drafts the bill, never sends it, and asks them to confirm.",
         };
       }
+      if (i.status === "scheduled") {
+        /* A STATUS IS NOT A DAY (2026-11-16): Nort set a job to Scheduled and said it was on the
+           schedule while it still sat under Waiting for a Day. The write is the same; when the job has
+           no day, `recorded` says so and names the door that gives one. */
+        const r = await setJobStatus(i.id, i.status);
+        if (!r.ok) return r;
+        const supabase = await createClient();
+        const { data } = await supabase.from("jobs").select("scheduled_start").eq("id", i.id).maybeSingle();
+        if (data && (data as { scheduled_start?: string | null }).scheduled_start == null) {
+          return {
+            ...r,
+            recorded:
+              "Its status says Scheduled, but it has no day yet, so it is still under Waiting for a Day. A job gets its day from job.scheduleDay.",
+          };
+        }
+        return r;
+      }
       // ON HOLD GOES THROUGH THE HOLD (NY-hold, 0366): its reason and its day, the same write the
       // schedule's Hold It makes. Every other status is the plain status write.
       if (i.status !== "on_hold") return setJobStatus(i.id, i.status);
@@ -276,8 +385,19 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Schedule job on a day",
     description:
-      "Schedule a job's work window (YYYY-MM-DD). Pass date alone for a one-day job, or date + end for a MULTI-DAY span — 'schedule the Miller job June 10 through 13'. Replaces the planned window, EXCEPT days already worked (time logged, or a visit closed out as done) — those stay on the calendar as history, while the job's listed start date follows the new window. When the result's `recorded` says which days were kept, tell the user.",
-    input: z.object({ id: z.string(), date: z.string(), end: z.string().optional() }),
+      "THE way a job's work gets a day on the schedule. One call carries the day, the start, how long, and who: date (YYYY-MM-DD), start (24-hour HH:MM on this company's wall clock, e.g. 07:30), then ONE of end_time (HH:MM, needs start), minutes, or full_day: true (left out, the job's own length, else 2 hours, said), and crew (names or ids). The crew is the JOB's crew on every one of its days (there is no per-day crew), and crew ADDS people: nobody already on the job is taken off. Without replace or end, the call ADDS that day: the days of the job's live plan are kept, while a job on hold, or one with no day, starts a fresh plan with this day and only the days already worked stay. That call also takes a job on hold off hold, and a job waiting for a day becomes Scheduled. A job already on that day has its hours there changed to what was passed and the crew added, and `recorded` says the hours as stored. replace: true, or date + end for a MULTI-DAY window ('June 10 through 13'; end is the last day, never before date), REPLACES the planned days not yet worked (days already worked stay as history), takes no hours in the same call, and does NOT take a job off hold. If it fails because a date-pick link is out to the customer, ask the user whether to withdraw it, then retry with cancel_proposals: true. NEVER use appointment.create for a job's work: a visit is not the job's day. Say `recorded` back and claim nothing it does not say (the day, the hours, who is on the job).",
+    input: z.object({
+      id: z.string(),
+      date: z.string(),
+      end: z.string().optional(),
+      replace: z.boolean().optional(),
+      start: z.string().nullable().optional(),
+      end_time: z.string().nullable().optional(),
+      minutes: z.number().int().positive().nullable().optional(),
+      full_day: z.boolean().nullable().optional(),
+      crew: z.array(z.string()).max(12).nullable().optional(),
+      cancel_proposals: z.boolean().optional(),
+    }),
     auth: "staff", // jobs are staff-only in RLS — the registry gate now matches (Phase C)
     effect: "write",
     handler: async (i) => {
@@ -286,17 +406,114 @@ export const jobActions: Record<string, ActionDef> = {
       const job = await resolveJobId(supabase, i.id);
       if ("error" in job) return { ok: false, error: job.error };
       if (!job.id) return { ok: false, error: "Which job should I schedule?" };
-      const r = await scheduleJobWindow(job.id, i.date, i.end || i.date);
-      // ANNOUNCE THE DEED: a kept worked day is part of what happened, so it rides on `recorded`; so
-      // does the two-hour default a job with no length lands with (lib/schedule/job-block), said
-      // from the write's own answer, never guessed.
-      const said = [
-        r.note,
-        r.defaulted
-          ? "It has no length, so it went down as 2 hours from the start of the work day. The length can be changed on the job or by tapping it on the schedule."
-          : null,
-      ].filter(Boolean).join(" ");
-      return said ? { ...r, recorded: said } : r;
+      // An end before the start would have become a one-day REPLACE of the whole plan: refused first.
+      if (i.end && YMD.test(i.end) && YMD.test(i.date) && i.end < i.date) {
+        return { ok: false, error: "The end day is before the start day: pass date as the first day and end as the last." };
+      }
+      // Every crew name is settled before anything is written: a name that asks writes nothing.
+      const crew = await resolveCrew(supabase, i.crew);
+      if ("error" in crew) return { ok: false, error: crew.error };
+      const hoursGiven = (i.start != null && i.start !== "") || (i.end_time != null && i.end_time !== "") || i.minutes != null || i.full_day === true;
+
+      /* THE WINDOW ROUTE: a replaced plan, or a span of several days. Exactly the write it always was
+         (Needs You's Schedule tap sends replace: true, so a person's tap does what it did). */
+      if (i.replace === true || (i.end && i.end !== i.date)) {
+        if (hoursGiven) {
+          return {
+            ok: false,
+            error: "A multi-day window or a replaced plan takes no hours in this call. Put the job on each day with its own call (date, start, and end_time or minutes).",
+          };
+        }
+        const r = await scheduleJobWindow(job.id, i.date, i.end || i.date);
+        // ANNOUNCE THE DEED: a kept worked day is part of what happened, so it rides on `recorded`; so
+        // does the two-hour default a job with no length lands with (lib/schedule/job-block), said
+        // from the write's own answer, never guessed.
+        const said = [
+          r.note,
+          r.defaulted
+            ? "It has no length, so it went down as 2 hours from the start of the work day. The length can be changed on the job or by tapping it on the schedule."
+            : null,
+        ].filter(Boolean).join(" ");
+        if (!r.ok) return said ? { ...r, recorded: said } : r;
+        // The window's writer never lifts a hold (only the day route's door does): said, never implied.
+        const { data: after } = await supabase.from("jobs").select("status").eq("id", job.id).maybeSingle();
+        const held =
+          (after as { status?: string | null } | null)?.status === "on_hold"
+            ? "It is still on hold: take it off hold with job.setStatus, or put it on a day without replace."
+            : null;
+        if (!crew.ids.length) {
+          const all = [said, held].filter(Boolean).join(" ");
+          return all ? { ...r, recorded: all } : r;
+        }
+        const c = await addToJobCrew(supabase, job.id, crew.ids);
+        const crewSaid = [c.ok ? null : `The crew did not change: ${c.error ?? "the write was refused"}.`, await crewNow(supabase, job.id)]
+          .filter(Boolean)
+          .join(" ");
+        return { ...r, recorded: [said, held, crewSaid].filter(Boolean).join(" ") };
+      }
+
+      /* THE DAY ROUTE (2026-11-16). Nort booked a day of three jobs as three visits with nobody on them
+         and gave no job a day, because this verb took a date only and replaced the plan. A day is ADDED
+         now through the app's own door, Add to Schedule (addJobDay): its hours, the crew, a hold lifted,
+         a job waiting for a day made Scheduled, and the job's other days left as they are. */
+      const hours = readDayHoursInput(i);
+      if ("error" in hours) return { ok: false, error: hours.error };
+      const r = await addJobDay(
+        job.id,
+        { day: i.date, start: hours.start, length: hours.length, crew: crew.ids.length ? { add: crew.ids } : undefined },
+        { cancelProposals: i.cancel_proposals },
+      );
+      if (r.ok) {
+        // The door's own note says a two-hour default ("(2 hours; change it on its block)"): not said twice.
+        const said = [r.note, await crewNow(supabase, job.id)].filter(Boolean).join(" ");
+        return { ...r, recorded: said };
+      }
+      // Teach the agent the recovery path: confirm with the user, then retry with the flag (job.move's).
+      if (r.needsProposalConfirm) {
+        return { ...r, error: `${r.error} Ask the user whether to withdraw it, then retry with cancel_proposals: true.` };
+      }
+      if (!r.alreadyOnDay) return r;
+
+      /* ALREADY ON THAT DAY is not a failure here: what was passed is made true there. The start first,
+         then the length from that start, as two writes, because one day's writer applies a start OR a
+         length to a day of a longer plan (nextDayHours), never both at once. What is SAID is the day as
+         read back after the writes (the calendar's own rule, lib/schedule/job-day-read), never the asked
+         values: the writer clamps a day at 23:59, so "22:00 for 5 hours" stores 22:00 to 23:59. */
+      if (hours.start === undefined && hours.length === undefined && !crew.ids.length) {
+        return { ok: true, id: job.id, recorded: `The job is already on ${i.date}. Nothing changed.` };
+      }
+      const notChanged: string[] = [];
+      let stored = false;
+      if (hours.start !== undefined) {
+        const t = await setJobDayTimes(job.id, i.date, { start: hours.start });
+        if (!t.ok) return { ok: false, error: `The job is already on ${i.date}, and its start there did not change: ${t.error ?? "the write was refused"}` };
+        stored = true;
+      }
+      if (hours.length !== undefined) {
+        const t = await setJobDayTimes(job.id, i.date, { length: hours.length });
+        if (!t.ok) {
+          // Nothing stored yet: a plain refusal. A start already stored is a half-write, said as one.
+          if (!stored) return { ok: false, error: `The job is already on ${i.date}, and its length there did not change: ${t.error ?? "the write was refused"}` };
+          notChanged.push(`The start there was changed, but its length did NOT change: ${t.error ?? "the write was refused"}`);
+        } else {
+          stored = true;
+        }
+      }
+      if (crew.ids.length) {
+        const c = await addToJobCrew(supabase, job.id, crew.ids);
+        if (!c.ok) notChanged.push(`The crew did not change: ${c.error ?? "the write was refused"}.`);
+      }
+      const said: string[] = [`The job was already on ${i.date}.`];
+      if (stored) {
+        const back = await readJobDay(supabase, job.id, i.date);
+        said.push(
+          back.ok && back.block
+            ? `On that day it is now ${back.block.start} to ${back.block.end}${back.block.all_day ? " (the whole work day)" : ""}.`
+            : `The hours were sent, but the day could not be read back: schedule_overview for ${i.date} has the truth.`,
+        );
+      }
+      said.push(...notChanged, await crewNow(supabase, job.id));
+      return { ok: true, id: job.id, recorded: said.join(" ") };
     },
   },
   "job.move": {
@@ -304,7 +521,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Move job to a day",
     description:
-      "Move ONE day/range of a job's schedule to a new day, keeping every other scheduled range — use for 'push the <job> job to Friday'. (job.scheduleDay REPLACES the planned schedule; this SHIFTS one range.) Days of that range already worked (time logged, or a visit closed out as done) stay where they happened and only the days not yet worked move, so a 3-day range with 2 days worked lands as 1 day; `recorded` says so — tell the user. to_date is YYYY-MM-DD; pass from_date (the day it currently sits on) when the job has multiple ranges so the right one moves. If it fails because a date-pick link is out to the customer, ask the user whether to withdraw the link, then retry with cancel_proposals true.",
+      "Move ONE day/range of a job's schedule to a new day, keeping every other scheduled range — use for 'push the <job> job to Friday'. (job.scheduleDay ADDS a day, or REPLACES the planned schedule with replace: true; this SHIFTS one range.) Days of that range already worked (time logged, or a visit closed out as done) stay where they happened and only the days not yet worked move, so a 3-day range with 2 days worked lands as 1 day; `recorded` says so — tell the user. to_date is YYYY-MM-DD; pass from_date (the day it currently sits on) when the job has multiple ranges so the right one moves. If it fails because a date-pick link is out to the customer, ask the user whether to withdraw the link, then retry with cancel_proposals true.",
     input: z.object({
       id: z.string(),
       to_date: z.string(),

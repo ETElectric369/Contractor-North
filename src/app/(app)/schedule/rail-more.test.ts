@@ -91,7 +91,8 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: 
 vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
 
 const { placeAppointmentOnDay, placeJobOnDay, undoPlaceJob, undoPlaceVisit, sizeAppointment } = await import("./actions");
-const { RailCardRows } = await import("./place-rail");
+const { RailCardRows, VisitWontHappenView } = await import("./place-rail");
+const { LangProvider } = await import("@/components/lang-provider");
 const { todayStrInTz } = await import("@/lib/tz");
 const { addDays } = await import("@/lib/come-back-days");
 
@@ -180,6 +181,57 @@ describe("a rail card: one ⋯, no status dropdown", () => {
     const lead = rows({ id: "l1", kind: "lead", name: "Rita Moss", address: null, city: null });
     expect(lead).toMatch(/<a[^>]*href="\/leads\?focus=l1"[^>]*>Open the Lead<\/a>/);
     expect(text(visit + lead)).not.toMatch(/Hold|Snooze|Why/);
+  });
+
+  it("a waiting visit's ⋯ has one more row, Won't Happen, under Open the Visit; a lead and a job have none (2026-11-16)", () => {
+    const visit = rows({ id: "a1", kind: "appointment", type: "job", name: "Larkspur", address: null, city: null });
+    const t = text(visit);
+    expect(t.indexOf("Open the Visit")).toBeGreaterThan(-1);
+    expect(t.indexOf("Won't Happen")).toBeGreaterThan(t.indexOf("Open the Visit"));
+    // Its label never says Hold, Snooze or Why (the pin above), and it is a 44px door.
+    expect(t).not.toMatch(/Hold|Snooze|Why/);
+    for (const d of visit.match(/<(button|a)\b[^>]*>/g) ?? []) expect(d, d).toMatch(/min-h-\[44px\]|\bh-11\b|min-h-11/);
+    expect(text(rows({ id: "l1", kind: "lead", name: "Larkspur", address: null, city: null }))).not.toContain("Won't Happen");
+    expect(text(rows(job()))).not.toContain("Won't Happen");
+    expect(text(rows(job({ onHold: true, holdReason: "x", status: "on_hold" })))).not.toContain("Won't Happen");
+  });
+
+  it("Won't Happen asks first, in the sheet: the question, the deed in red and Keep It; nothing is written on the first tap", () => {
+    const view = (asking: boolean, pending = false) =>
+      renderToStaticMarkup(createElement(VisitWontHappenView, { asking, pending, onAsk: () => {}, onDo: () => {}, onKeep: () => {} }));
+    const resting = view(false);
+    expect(text(resting).trim()).toBe("Won't Happen");
+    const asking = view(true);
+    expect(text(asking)).toContain(
+      "This visit won't happen? It is deleted if nothing is on it. If anything is (notes, an estimate, an invoice, a time-pick link), it is cancelled and kept on file.",
+    );
+    expect(asking).toMatch(/<button[^>]*text-red-600[^>]*>Won&#x27;t Happen<\/button>/);
+    expect(text(asking)).toContain("Keep It");
+    // While the deed is out both buttons wait, and the deed says Working… (true whether the visit ends
+    // deleted or cancelled; nothing is saved), Procesando… to a Spanish reader.
+    const out = view(true, true);
+    expect(out.match(/<button[^>]*disabled=""/g)?.length).toBe(2);
+    expect(out).toMatch(/<button[^>]*text-red-600[^>]*>Working…<\/button>/);
+    expect(text(out)).not.toContain("Saving");
+    const outEs = renderToStaticMarkup(
+      createElement(LangProvider, {
+        lang: "es",
+        children: createElement(VisitWontHappenView, { asking: true, pending: true, onAsk: () => {}, onDo: () => {}, onKeep: () => {} }),
+      }),
+    );
+    expect(outEs).toMatch(/<button[^>]*text-red-600[^>]*>Procesando…<\/button>/);
+    expect(railWords.en.ag_rail_btn_working).toBe("Working…");
+    expect(railWords.es.ag_rail_btn_working).toBe("Procesando…");
+    // The second tap is the visit page's own action through the Inspections row's deed (the words,
+    // the Undo on a cancel, a refusal said); the first tap only asks. Never the browser's confirm().
+    const rail = code("src/app/(app)/schedule/place-rail.tsx");
+    const piece = rail.slice(rail.indexOf("export function VisitWontHappen("), rail.indexOf("function prettyTime("));
+    expect(piece).toContain("onAsk={() => setAsking(true)}");
+    expect(piece).toContain("await deleteTheVisit(id, io);");
+    expect(piece).not.toMatch(/confirm\(/);
+    expect(read("src/app/(app)/schedule/place-rail.tsx")).toContain('import { deleteTheVisit, type DoorIo } from "../inspections/inspection-row-menu";');
+    expect(railWords.en.ag_rail_btn_wontHappen).toBe("Won't Happen");
+    expect(railWords.es.ag_rail_btn_wontHappen).toBe("No Se Hará");
   });
 
   it("every row is a 44px door", () => {

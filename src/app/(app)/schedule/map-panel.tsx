@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { JobsMap } from "@/components/jobs-map";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
+import { jobAddressLine } from "@/lib/timeclock/job-coordinates";
+import { storedCoord } from "@/lib/schedule/map-pin";
 
 /** Map view of the unified Schedule hub (was /map). */
 export async function MapPanel() {
@@ -11,7 +13,7 @@ export async function MapPanel() {
   const [{ data: jobs }, { data: me }] = await Promise.all([
     supabase
       .from("jobs")
-      .select("id, name, address, customers(name)")
+      .select("id, name, address, city, state, zip, geo_lat, geo_lng, customers(name)") // PROJECTION LAW: every column read below
       .not("address", "is", null)
       .neq("address", "")
       .in("status", ACTIVE_JOB_STATUSES)
@@ -23,8 +25,12 @@ export async function MapPanel() {
   const mapJobs = (jobs ?? []).map((j: any) => ({
     id: j.id,
     name: j.name,
-    address: j.address,
+    // THE WHOLE ADDRESS, NOT THE STREET LINE (2026-11-16, lib/schedule/map-pin): the same one line the
+    // fence's lookup sends, so the map and the fence cannot put one job in two places.
+    address: jobAddressLine(j),
     customer: j.customers?.name ?? null,
+    lat: storedCoord(j.geo_lat),
+    lng: storedCoord(j.geo_lng),
   }));
 
   return <JobsMap jobs={mapJobs} homeAddress={me?.home_address ?? null} />;

@@ -118,6 +118,57 @@ describe("the rail and the sheets speak Spanish to a Spanish reader", () => {
     expect(t).not.toMatch(/waiting|No Address Yet|On Hold/);
   });
 
+  it("the rail in both languages (2026-11-16): one On Hold group last, a held job out of its town, a visit of type job says Job Visit", () => {
+    // Three held jobs (the biggest group by size) and one in Catbird: held, it is not under Catbird.
+    const items = [
+      { id: "j1", kind: "job", name: "12 Thistlewood Ln", address: "12 Thistlewood Ln", city: "Catbird", status: "on_hold", onHold: true, holdReason: "el permiso", holdUntil: "2026-11-20" },
+      { id: "j2", kind: "job", name: "4 Snowbell Dr", address: "4 Snowbell Dr", city: "Larkspur", status: "on_hold", onHold: true, holdReason: null, holdUntil: null },
+      { id: "j3", kind: "job", name: "9 Bayberry Ct", address: "9 Bayberry Ct", city: "Larkspur", status: "on_hold", onHold: true, holdReason: null, holdUntil: "2026-11-18" },
+      { id: "j4", kind: "job", name: "7 Wren Way", address: "7 Wren Way", city: "Larkspur", status: "to_be_scheduled" },
+      { id: "a1", kind: "appointment", type: "job", name: "Visit: 7 Wren Way", address: "7 Wren Way", city: "Larkspur", customer: "Sam Tillery", crew: [] },
+    ];
+    const render = (lang: "en" | "es") =>
+      renderToStaticMarkup(
+        createElement(LangProvider, {
+          lang,
+          children: createElement(PlacementProvider, {
+            items: items as never,
+            todayISO: "2026-11-16",
+            workDay: WORK_DAY,
+            children: createElement(PlaceRail, { items: items as never, todayStr: "2026-11-16" }),
+          }),
+        }),
+      );
+    const headings = (html: string) => [...html.matchAll(/<h3[^>]*>([^<]*)<\/h3>/g)].map((m) => m[1]);
+    const groupOf = (html: string, heading: string) => {
+      const at = html.indexOf(`>${heading}</h3>`);
+      const next = html.indexOf("<h3", at + 1);
+      return text(html.slice(at, next === -1 ? undefined : next));
+    };
+    for (const [lang, held, n3, jobVisit, job] of [
+      ["en", "On Hold", "3 waiting", "Job Visit", "Job"],
+      ["es", "En Pausa", "3 esperando", "Visita de Trabajo", "Trabajo"],
+    ] as const) {
+      const html = render(lang);
+      // Larkspur first (two waiting), the held group last though it holds three; no Catbird group.
+      expect(headings(html), lang).toEqual(["Larkspur", held]);
+      const heldGroup = groupOf(html, held);
+      expect(heldGroup, lang).toContain(n3);
+      // Inside: no come-back day first, then the soonest.
+      const order = ["4 Snowbell Dr", "9 Bayberry Ct", "12 Thistlewood Ln"].map((nm) => heldGroup.indexOf(nm));
+      expect(order.every((x) => x > -1), lang).toBe(true);
+      expect([...order].sort((a, b) => a - b), lang).toEqual(order);
+      // A held job is under its town no more.
+      const town = groupOf(html, "Larkspur");
+      for (const nm of ["4 Snowbell Dr", "9 Bayberry Ct", "12 Thistlewood Ln"]) expect(town, `${lang} ${nm}`).not.toContain(nm);
+      // The pills: the visit of type job says it is a visit; the real job keeps its word.
+      expect(html, lang).toMatch(new RegExp(`Visit: 7 Wren Way</span><span[^>]*>${jobVisit}</span>`));
+      expect(html, lang).toMatch(new RegExp(`>7 Wren Way</span><span[^>]*>${job}</span>`));
+    }
+    const es = render("es");
+    expect(text(es)).not.toMatch(/On Hold|Job Visit|waiting/);
+  });
+
   it("Add to Schedule: its title and doors, and the day said with its slot", () => {
     const jobs = [{ id: "j1", name: "12 Thistlewood Ln", status: "in_progress", address: "12 Thistlewood Ln", assigned_to: [] }];
     const t = text(es(createElement(AddToScheduleSheet, { at: { day: "2026-11-05", minute: null }, jobs, team: [], workDay: WORK_DAY, onClose: () => {} })));

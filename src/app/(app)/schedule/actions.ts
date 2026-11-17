@@ -1265,7 +1265,7 @@ export async function addJobDay(
   jobId: string,
   p: { day: string; start?: string; length?: JobLength; crew?: { add?: string[]; remove?: string[] } },
   opts?: { cancelProposals?: boolean; reopen?: boolean },
-): Promise<Result & { needsProposalConfirm?: boolean; note?: string; defaulted?: boolean }> {
+): Promise<Result & { needsProposalConfirm?: boolean; note?: string; defaulted?: boolean; alreadyOnDay?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const ws = wordsOf(ctx.supabase, ctx.userId);
@@ -1322,7 +1322,7 @@ export async function addJobDay(
      plan) takes the add: that day becomes a planned day at these hours. Refusing it would send the
      office to a block whose sheet says the time belongs to the plan: a dead end. */
   if (plan && day >= plan.start && day <= plan.end && coversDay(segments, day)) {
-    return { ok: false, error: await ws.say("ag_srv_alreadyOnDay", { job: await called(), day: dayWords(day, await ws.lang()) }) };
+    return { ok: false, alreadyOnDay: true, error: await ws.say("ag_srv_alreadyOnDay", { job: await called(), day: dayWords(day, await ws.lang()) }) };
   }
 
   // THE DAY'S HOURS, as the sheet showed them: the start (the tapped time, else the work day's start)

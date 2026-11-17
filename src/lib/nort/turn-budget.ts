@@ -25,6 +25,13 @@ import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
  * has no screen), twenty customers' phone numbers rewritten, twenty jobs cancelled or their crews
  * cleared, an estimate emptied line by line. Nothing that was three is more than three now.
  *
+ * WHY A CREW IS COUNTED PERSON BY PERSON (cn-v1165, the same evening). job.scheduleDay now takes the
+ * day's people in the same call, so one write can put a dozen people on a job, and each one newly
+ * added is rung about it. Counted as one, twenty such writes could have rung every employee about
+ * twenty jobs on the word of a line Nort only read. So a write costs what it changes (writeCost): a
+ * day booked with three people is four, which is what the same day cost when a crew went on one
+ * person a call, and the turn must have room for the whole of it.
+ *
  * WHY THERE IS A CLOCK. The platform cuts the route at its maxDuration (120 seconds), mid-stream,
  * with nothing said and nothing saved to the transcript. A turn of three changes never came near
  * that; a turn of twenty can. So the first three writes of a turn are never refused for its age
@@ -75,13 +82,29 @@ export const DAY_BOOKING_WRITES: ReadonlySet<string> = new Set([
  *  - job.setStatus books only when it keeps the job in flight (to be scheduled, scheduled, in
  *    progress, on hold). Cancelling is not booking; finishing has its own door and its own card.
  *  - job.assign books only when it ADDS a person. An empty assignee clears the whole crew.
+ *  - nothing that carries cancel_proposals: true is booking, whichever action carries it (job.move,
+ *    job.scheduleDay): it withdraws a date-pick link a CUSTOMER was sent, and the link stops working.
  */
 export function isDayBookingWrite(action: string, input: unknown): boolean {
   if (!DAY_BOOKING_WRITES.has(action)) return false;
   const i = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
   if (action === "job.setStatus") return typeof i.status === "string" && (ACTIVE_JOB_STATUSES as readonly string[]).includes(i.status);
   if (action === "job.assign") return typeof i.assignee === "string" && i.assignee.trim() !== "";
+  if (i.cancel_proposals === true) return false;
   return true;
+}
+
+/**
+ * What one write costs against the turn's twenty. One, except a day booked with people on it: each
+ * person named for the job is a change of their own, so a crew of three rides as four. Counted from
+ * what the model asked for, before a name is looked up, and strict: a name that turns out to be
+ * nobody was still counted.
+ */
+export function writeCost(action: string, input: unknown): number {
+  if (action !== "job.scheduleDay") return 1;
+  const i = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const crew = Array.isArray(i.crew) ? i.crew.filter((c) => typeof c === "string" && c.trim() !== "").length : 0;
+  return 1 + crew;
 }
 
 export type TurnBudget = "ok" | "changes_spent" | "time_spent";
@@ -90,10 +113,13 @@ export type TurnBudget = "ok" | "changes_spent" | "time_spent";
  * May this turn make one more write? `writes` is how many it has made the attempt of, all kinds
  * together, and `others` how many of those were not booking a day. A write a handler refuses or
  * fails still counts (the count goes up before it runs); one this budget turns away, or one held
- * behind a pending confirm card, never ran and does not. `elapsedMs` is the request's age.
+ * behind a pending confirm card, never ran and does not. `elapsedMs` is the request's age. `cost` is
+ * what this write would spend (writeCost; one when it is not given): the turn must have room for
+ * all of it, so the twenty is never passed by the last write's crew.
  */
-export function turnBudget(p: { writes: number; others: number; booking: boolean; elapsedMs: number }): TurnBudget {
-  if (p.writes >= MAX_WRITES_PER_TURN) return "changes_spent";
+export function turnBudget(p: { writes: number; others: number; booking: boolean; elapsedMs: number; cost?: number }): TurnBudget {
+  const cost = Math.max(1, Math.floor(p.cost ?? 1));
+  if (p.writes + cost > MAX_WRITES_PER_TURN) return "changes_spent";
   if (!p.booking && p.others >= MAX_OTHER_WRITES_PER_TURN) return "changes_spent";
   if (p.writes >= MAX_OTHER_WRITES_PER_TURN && p.elapsedMs >= WRAP_UP_AFTER_MS) return "time_spent";
   return "ok";

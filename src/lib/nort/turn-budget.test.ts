@@ -14,6 +14,7 @@ import {
   TIME_SPENT_SAID,
   turnBudget,
   WRAP_UP_AFTER_MS,
+  writeCost,
 } from "./turn-budget";
 import { REGISTRY } from "@/lib/actions/registry";
 import { AGENT_WRITE_ALLOWED } from "@/lib/actions/agent-tools";
@@ -29,10 +30,11 @@ function runTurn(asks: { action: string; input?: unknown; atMs?: number }[]) {
   const out: string[] = [];
   for (const a of asks) {
     const booking = isDayBookingWrite(a.action, a.input ?? {});
-    const spent = turnBudget({ writes, others, booking, elapsedMs: a.atMs ?? 0 });
+    const cost = writeCost(a.action, a.input ?? {});
+    const spent = turnBudget({ writes, others, booking, elapsedMs: a.atMs ?? 0, cost });
     out.push(spent);
     if (spent === "ok") {
-      writes++;
+      writes += cost;
       if (!booking) others++;
     }
   }
@@ -237,6 +239,54 @@ describe("the walls the budget sits under", () => {
   });
 });
 
+describe("a crew booked with the day is counted person by person (cn-v1165)", () => {
+  const crew = ["Dana Rook", "Theo Vance", "Casey Loam"];
+
+  it("one write costs one, and a day booked with three people costs four", () => {
+    expect(writeCost("job.assign", { id: "j", assignee: "Dana Rook" })).toBe(1);
+    expect(writeCost("job.scheduleDay", { id: "j", date: "2026-11-17" })).toBe(1);
+    expect(writeCost("job.scheduleDay", { id: "j", date: "2026-11-17", crew })).toBe(4);
+    expect(writeCost("job.scheduleDay", { id: "j", date: "2026-11-17", crew: ["Dana Rook", "", "  ", 7] })).toBe(2);
+    expect(writeCost("job.scheduleDay", { id: "j", date: "2026-11-17", crew: null })).toBe(1);
+    expect(writeCost("job.scheduleDay", "not an object")).toBe(1);
+    expect(writeCost("task.create", { crew })).toBe(1);
+  });
+
+  it("the owner's day through the new door runs in one turn: a job made, then three jobs each with its hours and a crew of three", () => {
+    const day = runTurn([
+      { action: "job.create", input: { name: "Larkspur" } },
+      ...["a", "b", "c"].map((id) => ({ action: "job.scheduleDay", input: { id, date: "2026-11-17", start: "09:00", minutes: 90, crew } })),
+    ]);
+    expect(day.out).toEqual(["ok", "ok", "ok", "ok"]);
+    expect(day.writes).toBe(13);
+    expect(day.others).toBe(0);
+  });
+
+  it("the turn must have room for the whole of a write, so the twenty is never passed", () => {
+    expect(turnBudget({ writes: 16, others: 0, booking: true, elapsedMs: 0, cost: 4 })).toBe("ok");
+    expect(turnBudget({ writes: 17, others: 0, booking: true, elapsedMs: 0, cost: 4 })).toBe("changes_spent");
+    expect(turnBudget({ writes: 19, others: 0, booking: true, elapsedMs: 0, cost: 0 })).toBe("ok"); // a cost is never under one
+    // Five days with a crew of three fill the turn; the sixth is turned away whole.
+    const six = runTurn(Array.from({ length: 6 }, (_, n) => ({ action: "job.scheduleDay", input: { id: `j${n}`, date: "2026-11-17", crew } })));
+    expect(six.out).toEqual(["ok", "ok", "ok", "ok", "ok", "changes_spent"]);
+    expect(six.writes).toBe(20);
+    // What the review of this change named: a dozen people on every job. One such write, then no room.
+    const dozen = Array.from({ length: 12 }, (_, k) => `Person ${k}`);
+    const flood = runTurn([0, 1, 2].map((n) => ({ action: "job.scheduleDay", input: { id: `j${n}`, date: "2026-11-17", crew: dozen } })));
+    expect(flood.out).toEqual(["ok", "changes_spent", "changes_spent"]);
+    expect(flood.writes).toBe(13);
+  });
+
+  it("withdrawing a customer's date-pick link is not booking, whichever action carries the flag", () => {
+    expect(isDayBookingWrite("job.move", { id: "j", to_date: "2026-11-18" })).toBe(true);
+    expect(isDayBookingWrite("job.move", { id: "j", to_date: "2026-11-18", cancel_proposals: true })).toBe(false);
+    expect(isDayBookingWrite("job.scheduleDay", { id: "j", date: "2026-11-18", cancel_proposals: true })).toBe(false);
+    expect(isDayBookingWrite("job.scheduleDay", { id: "j", date: "2026-11-18", cancel_proposals: false })).toBe(true);
+    const four = runTurn(Array.from({ length: 4 }, (_, n) => ({ action: "job.move", input: { id: `j${n}`, to_date: "2026-11-18", cancel_proposals: true } })));
+    expect(four.out).toEqual(["ok", "ok", "ok", "changes_spent"]);
+  });
+});
+
 describe("the chat route asks the budget and holds no number of its own", () => {
   it("starts the request's clock first thing, before anything is awaited", () => {
     const post = route.slice(route.indexOf("export async function POST(req: Request) {"));
@@ -246,9 +296,10 @@ describe("the chat route asks the budget and holds no number of its own", () => 
   });
 
   it("asks before every registry write, with what the model asked for, this turn's counts and this request's age", () => {
-    expect(route).toContain('import { budgetRefusal, isDayBookingWrite, outOfTimeSaid, roundsOutOfTime, turnBudget } from "@/lib/nort/turn-budget";');
+    expect(route).toContain('import { budgetRefusal, isDayBookingWrite, outOfTimeSaid, roundsOutOfTime, turnBudget, writeCost } from "@/lib/nort/turn-budget";');
     expect(route).toContain("const booking = isDayBookingWrite(actionName, tu.input);");
-    expect(route).toContain('const spent = readOnlyAction ? "ok" : turnBudget({ writes: writeCount, others: otherWriteCount, booking, elapsedMs: Date.now() - turnStartedAt });');
+    expect(route).toContain("const cost = writeCost(actionName, tu.input);");
+    expect(route).toContain('const spent = readOnlyAction ? "ok" : turnBudget({ writes: writeCount, others: otherWriteCount, booking, elapsedMs: Date.now() - turnStartedAt, cost });');
     expect(route).toContain("out = budgetRefusal(spent);");
     expect(route).not.toMatch(/MAX_WRITES\s*=/);
     expect(route).not.toContain("writeCount >= ");
@@ -256,16 +307,17 @@ describe("the chat route asks the budget and holds no number of its own", () => 
 
   it("a read spends nothing, and a write is counted once, before it runs", () => {
     const ask = route.indexOf("const spent = readOnlyAction");
-    const count = route.indexOf("writeCount++;");
+    const count = route.indexOf("writeCount += cost;");
     const other = route.indexOf("if (!booking) otherWriteCount++;");
     const run = route.indexOf('const res = await executeAction(actionName, switched.input, { source: "agent" });');
     expect(ask).toBeGreaterThan(0);
     expect(count).toBeGreaterThan(ask);
     expect(other).toBeGreaterThan(count);
     expect(run).toBeGreaterThan(other);
-    expect(route.split("writeCount++").length - 1).toBe(1);
+    expect(route.split("writeCount += cost").length - 1).toBe(1);
+    expect(route).not.toContain("writeCount++");
     expect(route.split("otherWriteCount++").length - 1).toBe(1);
-    expect(route).toContain("if (!readOnlyAction) {\n                  writeCount++;");
+    expect(route).toContain("if (!readOnlyAction) {\n                  writeCount += cost;");
   });
 
   it("only one place in the route runs a registry action for the model", () => {

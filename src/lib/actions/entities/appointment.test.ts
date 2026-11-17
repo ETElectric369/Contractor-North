@@ -111,14 +111,14 @@ describe("appointment.create — a spoken local time is stored as that local tim
   });
 });
 
-describe("appointment.create books one of the four kinds a person picks (W2-06)", () => {
+describe("appointment.create books the kinds a person picks, and never a job's work (W2-06, 2026-11-16)", () => {
   it("no type books Other, never an inspection or the old 'appointment'", async () => {
     await create({ title: "Dentist", starts_at: "2026-09-25T10:00" });
     expect((createAppointment.mock.calls[0][0] as FormData).get("type")).toBe("other");
   });
 
-  it("each of the four goes through as given; a kind nobody picks any more is refused before anything is written", async () => {
-    for (const type of ["inspection", "job", "call", "other"]) {
+  it("inspection, call and other go through as given; a kind nobody picks any more is refused before anything is written", async () => {
+    for (const type of ["inspection", "call", "other"]) {
       createAppointment.mockClear();
       await create({ title: "x", type, starts_at: "2026-09-25T10:00" });
       expect((createAppointment.mock.calls[0][0] as FormData).get("type"), type).toBe(type);
@@ -128,9 +128,25 @@ describe("appointment.create books one of the four kinds a person picks (W2-06)"
     }
   });
 
-  it("the description names the five, sends the city's inspection to the permit, and books a meeting as Other", () => {
+  it("type 'job' is refused in words that name job.scheduleDay, and no writer is called", async () => {
+    const supa = await import("@/lib/supabase/server");
+    (supa.createClient as unknown as { mockClear: () => void }).mockClear();
+    const r = await create({ title: "Larkspur", type: "job", starts_at: "2026-11-17T07:30", job_id: "Larkspur" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe(
+      "A job's work is not booked as a visit. Put the job on its day with job.scheduleDay (date, start, end_time or minutes, crew). If the job does not exist yet, make it with job.create first.",
+    );
+    expect(createAppointment).not.toHaveBeenCalled();
+    // Refused before anything is read either: no database client was even made.
+    expect(supa.createClient).not.toHaveBeenCalled();
+  });
+
+  it("the description names the three it books, says why 'job' is refused, sends the city's inspection to the permit, and books a meeting as Other", () => {
     const d = appointmentActions["appointment.create"].description;
-    for (const k of ["'inspection' is an Inspection", "'job'", "'service_call'", "'call'", "'other'"]) expect(d).toContain(k);
+    for (const k of ["'inspection' is an Inspection", "'call'", "'other'", "type 'job' is refused here", "job.scheduleDay"]) expect(d).toContain(k);
+    // The kind that is no longer offered anywhere is not named as one to book.
+    expect(d).not.toContain("service_call");
+    expect(d).not.toContain("one of five kinds");
     // The site visit and the city's share a word in English, so the sentence tells them apart by
     // the TYPE: Nort books 'inspection' here and sends 'final_inspection' to the job's permit.
     expect(d).toContain("THE CITY'S INSPECTION IS NOT THIS: it is the separate type 'final_inspection'");

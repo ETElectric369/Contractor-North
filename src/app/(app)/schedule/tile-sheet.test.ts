@@ -143,6 +143,26 @@ describe("a visit's sheet", () => {
     for (const d of doors(html)) expect(d, d).toMatch(/\b(min-)?h-11\b/);
   });
 
+  it("Won't Happen beside Clear the Date, for a visit that is scheduled or proposed, never for one that is done or for the crew (2026-11-16)", () => {
+    expect(text(html)).toContain("Won't Happen");
+    expect(text(html).indexOf("Clear the Date")).toBeLessThan(text(html).indexOf("Won't Happen"));
+    const proposed = render({ ...visit, visit: { ...(visit as Extract<TileTarget, { kind: "visit" }>).visit, status: "proposed" } } as TileTarget);
+    expect(text(proposed)).toContain("Won't Happen");
+    const done = render({ ...visit, visit: { ...(visit as Extract<TileTarget, { kind: "visit" }>).visit, status: "completed" } } as TileTarget);
+    expect(text(done)).not.toContain("Won't Happen");
+    expect(text(render(visit, false))).not.toContain("Won't Happen");
+    // A job's sheet has no such door.
+    expect(text(render(siskin()))).not.toContain("Won't Happen");
+    // Never the browser's own dialog.
+    const rail = readFileSync(join(process.cwd(), "src/app/(app)/schedule/place-rail.tsx"), "utf8");
+    const piece = rail.slice(rail.indexOf("export function VisitWontHappen("), rail.indexOf('/** "13:30" is a database.'));
+    expect(piece).not.toMatch(/confirm\(/);
+    expect(piece).toContain("await deleteTheVisit(id, io);");
+    // While the deed is out it says Working… / Procesando… (deleted or cancelled, nothing is saved).
+    expect(piece).toContain('{pending ? t("ag_rail_btn_working") : t("ag_rail_btn_wontHappen")}');
+    expect(piece).not.toContain("ag_btn_saving");
+  });
+
   it("a visit over several days is one span: Starts and ends, no End box, no length chips, never 'each day' (the rail's 3 days bucket)", () => {
     const span: TileTarget = {
       kind: "visit",
@@ -363,7 +383,9 @@ describe("nothing said to a sheet nobody can see", () => {
     expect(sheet).toContain("holdOpen={busy > 0}");
     expect(sheet).toMatch(/<DayRow [^>]*voice=\{voice\}/);
     expect(sheet.match(/<ClearTheDate [^>]*voice=\{voice\}/g)?.length).toBe(2);
-    expect(sheet.match(/onPending=\{voice\?\.pending\}/g)?.length).toBe(2);
+    // The two time boxes, and the visit's Won't Happen (2026-11-16), which holds the sheet open while its write is out.
+    expect(sheet.match(/onPending=\{voice\?\.pending\}/g)?.length).toBe(3);
+    expect(sheet).toContain("<VisitWontHappen id={visit.id} close={onClose} as=\"button\" onPending={voice?.pending} />");
     expect(sheet.match(/onRefusal=\{voice\?\.refusal\}/g)?.length).toBe(2);
     const controls = readFileSync(join(process.cwd(), "src/components/block-time-controls.tsx"), "utf8");
     // Said before the transition starts, so the backdrop click of the same tap finds the sheet held.

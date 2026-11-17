@@ -92,11 +92,23 @@ export type Placeable = {
 };
 
 export type TownGroup = {
+  /** What the group's heading says: the town, "No town yet", or "On Hold" for the held group. */
   town: string;
+  /**
+   * A stable id for the group, never a display name: two groups can be spelled the same (a town
+   * named like the held group's heading, or like the townless one). "town:" + the bucket's lowercased
+   * key for a town, "held" for the held group.
+   */
+  key: string;
   items: Placeable[];
   /** True for the "no town yet" bucket — the UI should say why it can't be routed. */
   unlocatable: boolean;
+  /** True for the ONE group of held jobs at the bottom of the rail (2026-11-16); false on every town. */
+  held: boolean;
 };
+
+/** The held group's stable key. */
+export const HELD_GROUP_KEY = "held";
 
 /** The bucket for anything with no town yet. Named, not hidden, and NOT demoted. */
 export const NO_TOWN = "No town yet";
@@ -167,12 +179,25 @@ const key = (s: string | null | undefined): string => norm(s).toLowerCase();
  *
  * Ties break alphabetically so the rail doesn't reshuffle between renders — a list that reorders
  * under your thumb is worse than one sorted slightly wrong.
+ *
+ * EVERYTHING ON HOLD IS ONE GROUP, AT THE BOTTOM (2026-11-16). The owner, the evening a held job sat
+ * among the work he was booking: "i want to move everything on hold into one category on the board at
+ * the bottom". A held job is parked: it is not what a day is filled with, so it leaves its town and
+ * joins one last group, "On Hold", after every town whatever its size. Inside it the job coming back
+ * soonest is first, and a job with no come-back day before all of them (nothing will wake it, so it
+ * is the one to look at), then by name. No group is drawn empty. The rail's picked cards are placed in
+ * this same order (placement-context), so held jobs picked with others are placed last.
  */
 export function groupByTown(items: Placeable[], lang: Lang = "en", words?: Words): TownGroup[] {
   // The townless bucket's name in the reader's language (agenda wave); its key stays the English one.
   const noTown = say(lang, words, "ag_noTownYet", NO_TOWN);
   const buckets = new Map<string, { town: string; items: Placeable[] }>();
+  const held: Placeable[] = [];
   for (const it of items) {
+    if (it.onHold) {
+      held.push(it);
+      continue;
+    }
     const found = townOf(it);
     const k = key(found) || NO_TOWN.toLowerCase();
     const town = found || noTown;
@@ -181,9 +206,11 @@ export function groupByTown(items: Placeable[], lang: Lang = "en", words?: Words
     buckets.set(k, b);
   }
 
-  const groups: TownGroup[] = [...buckets.values()].map((b) => ({
+  const groups: TownGroup[] = [...buckets.entries()].map(([k, b]) => ({
     town: b.town,
+    key: `town:${k}`,
     unlocatable: b.town === noTown,
+    held: false,
     items: [...b.items].sort(
       (a, z) => Number(!!z.urgent) - Number(!!a.urgent) || a.name.localeCompare(z.name),
     ),
@@ -192,7 +219,31 @@ export function groupByTown(items: Placeable[], lang: Lang = "en", words?: Words
   // ONE RULE FOR EVERY GROUP — size, then name. The townless bucket is NOT forced anywhere: it
   // takes its place by the same measure as Truckee, and says what it needs instead of being
   // punished for it. (See the fragment-first note above; forcing it last was the bug.)
-  return groups.sort((a, z) => z.items.length - a.items.length || a.town.localeCompare(z.town));
+  groups.sort((a, z) => z.items.length - a.items.length || a.town.localeCompare(z.town));
+
+  // The held group is the one exception to size, by the owner's ask: always last.
+  if (held.length) {
+    groups.push({
+      town: say(lang, words, "ag_stateOnHold", "On Hold"),
+      key: HELD_GROUP_KEY,
+      unlocatable: false,
+      held: true,
+      items: held.sort(byComeBack),
+    });
+  }
+  return groups;
+}
+
+/** A held job's come-back day, or "" when it has none (null: held before the day existed; undefined:
+ *  the database has no such column yet). */
+const comeBackOf = (i: Placeable): string => String(i.holdUntil ?? "").trim();
+
+/** Inside the held group: no come-back day first of all, then the soonest day, then name A–Z. */
+function byComeBack(a: Placeable, z: Placeable): number {
+  const da = comeBackOf(a);
+  const dz = comeBackOf(z);
+  if (!da !== !dz) return da ? 1 : -1;
+  return da.localeCompare(dz) || a.name.localeCompare(z.name);
 }
 
 /**

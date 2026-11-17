@@ -264,13 +264,18 @@ describe("Add to Schedule: the day joins the job, at its own hours", () => {
 
   it("refused in words: a day it's already on, a finished job, a job that isn't there", async () => {
     honeysuckle();
+    // This refusal says WHICH refusal it is in a flag as well as in words (cn-v1165): Nort's
+    // job.scheduleDay reads the flag and changes that day's hours and crew, where a person is told
+    // to tap the block. No other refusal carries it.
     expect(await actions.addJobDay("j011", { day: "2026-09-24", start: "12:00" })).toEqual({
       ok: false,
+      alreadyOnDay: true,
       error: "Honeysuckle is already on Thu, Sep 24. Tap its block there to change its time or crew.",
     });
     job("j011").status = "complete";
     const done = await actions.addJobDay("j011", { day: "2026-09-29" });
     expect(done.ok).toBe(false);
+    expect("alreadyOnDay" in done).toBe(false);
     expect(done.error).toMatch(/^Honeysuckle is .+, so it can't take another day\. Change its status on the job page first\.$/);
     expect((await actions.addJobDay("nope", { day: "2026-09-29" })).error).toBe("That job isn't available. It may have been deleted.");
     expect((await actions.addJobDay("j011", { day: "Monday" })).error).toBe("Pick a day.");

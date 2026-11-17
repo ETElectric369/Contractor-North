@@ -5,13 +5,10 @@ import { Loader2, Route } from "lucide-react";
 import { loadGoogleMaps } from "@/lib/google-maps";
 import { useLang } from "@/components/lang-provider";
 import { translator, fillText } from "@/lib/i18n";
+import { pinCard, storedPoint, type MapPin } from "@/lib/schedule/map-pin";
 
-interface MapJob {
-  id: string;
-  name: string;
-  address: string | null;
-  customer: string | null;
-}
+/** A job as the map is handed it: see lib/schedule/map-pin for what `address`, `lat` and `lng` are. */
+type MapJob = MapPin;
 
 export function JobsMap({ jobs, homeAddress }: { jobs: MapJob[]; homeAddress?: string | null }) {
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -46,16 +43,20 @@ export function JobsMap({ jobs, homeAddress }: { jobs: MapJob[]; homeAddress?: s
         const info = new g.maps.InfoWindow();
 
         for (const j of jobs) {
-          if (!j.address) continue;
+          // THE POINT THE JOB KEEPS, ELSE ITS WHOLE ADDRESS (2026-11-16, lib/schedule/map-pin): a
+          // street line with no town in it was answered with the same street name in another country.
+          const kept = storedPoint(j);
+          if (!kept && !j.address) continue;
           try {
-            const res = await geocoder.geocode({ address: j.address });
-            const loc = res.results?.[0]?.geometry?.location;
+            let loc: any = kept ? new g.maps.LatLng(kept.lat, kept.lng) : null;
+            if (!loc) {
+              const res = await geocoder.geocode({ address: j.address });
+              loc = res.results?.[0]?.geometry?.location;
+            }
             if (!loc) continue;
             const marker = new g.maps.Marker({ map, position: loc, title: j.name });
             marker.addListener("click", () => {
-              info.setContent(
-                `<div style="font-size:13px"><strong>${j.name}</strong><br/>${j.customer ?? ""}<br/><a href="/jobs/${j.id}">${t("ag_cal_btn_openJob")} →</a></div>`,
-              );
+              info.setContent(pinCard(document, j, t("ag_cal_btn_openJob")));
               info.open(map, marker);
             });
             bounds.extend(loc);

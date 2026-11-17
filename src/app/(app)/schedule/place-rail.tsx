@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Phone, Mail, Check } from "lucide-react";
+import { MapPin, Phone, Mail, Check, Ban } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PhoneInput } from "@/components/ui/phone-input";
@@ -14,6 +14,7 @@ import { clock12, type Words } from "@/lib/lang-words";
 import { setLeadContact, sizeLead } from "../leads/actions";
 import { setJobContact, setJobHold, sizeAppointment, sizeJob, snoozeJobHold } from "./actions";
 import { usePlacement } from "./placement-context";
+import { deleteTheVisit, type DoorIo } from "../inspections/inspection-row-menu";
 import { WorkShapeControls } from "@/components/work-shape-controls";
 import { ComeBackPicker } from "@/components/come-back-picker";
 import { RowMoreSheet, SheetLink, SHEET_ROW } from "@/components/row-more-sheet";
@@ -138,6 +139,9 @@ export function RailCardRows({ i, todayStr, close }: { i: Placeable; todayStr?: 
   return (
     <>
       <SheetLink href={open.href}>{open.label}</SheetLink>
+      {/* A WAITING VISIT CAN BE ENDED HERE (2026-11-16): the visit page's own Won't Happen, behind the
+          sheet's own ask. Leads and jobs get no such row. */}
+      {i.kind === "appointment" && <VisitWontHappen id={i.id} close={close} />}
       {i.kind === "job" && !i.onHold && (
         mode === "hold" ? (
           <ComeBackPicker
@@ -228,6 +232,102 @@ export function RailCardRows({ i, todayStr, close }: { i: Placeable; todayStr?: 
   );
 }
 
+/**
+ * WON'T HAPPEN, FOR A VISIT THAT WAITS (2026-11-16). The owner had three visits of type Job sent back
+ * to this rail with nothing to end them but a trip to each visit's page. This is that page's door
+ * (wontHappenAppointment: a visit with nothing on it is deleted, one with anything on it is cancelled
+ * and kept), said through the Inspections row's own deed (deleteTheVisit: the visit page's words, an
+ * Undo when it ended as cancelled, a refusal said in red and the sheet closed before the re-read).
+ *
+ * IT ASKS FIRST, IN PLACE: the house's two taps (the schedule sheet's Clear the Date, the Inspections
+ * row's Delete…). The first tap swaps the row for the question, the deed in red and Keep It; nothing
+ * is written until the second. Never the browser's confirm(). The same piece sits on the calendar's
+ * visit sheet (tile-sheet), drawn there as a button beside Clear the Date (`as="button"`), where it
+ * tells the sheet around it while its write is out (`onPending`, so the sheet holds itself open).
+ */
+export function VisitWontHappen({
+  id,
+  close,
+  as = "row",
+  onPending,
+}: {
+  id: string;
+  /** Closes whatever holds this door (the ⋯ sheet, the calendar's sheet) once the deed has an answer. */
+  close: () => void;
+  as?: "row" | "button";
+  onPending?: (busy: boolean) => void;
+}) {
+  const router = useRouter();
+  const toast = useToast();
+  const lang = useLang();
+  const t = translator(lang);
+  const [asking, setAsking] = useState(false);
+  const [pending, start] = useTransition();
+  const io: DoorIo = { toast, refresh: () => router.refresh(), close, lang, t };
+  return (
+    <VisitWontHappenView
+      as={as}
+      asking={asking}
+      pending={pending}
+      onAsk={() => setAsking(true)}
+      onKeep={() => setAsking(false)}
+      onDo={() => {
+        onPending?.(true);
+        start(async () => {
+          try {
+            await deleteTheVisit(id, io);
+          } finally {
+            onPending?.(false);
+          }
+        });
+      }}
+    />
+  );
+}
+
+/** The door's two faces, drawn from what they are handed (so a test reads the asking face a tap opens). */
+export function VisitWontHappenView({
+  as = "row",
+  asking,
+  pending,
+  onAsk,
+  onDo,
+  onKeep,
+}: {
+  as?: "row" | "button";
+  asking: boolean;
+  pending: boolean;
+  onAsk: () => void;
+  onDo: () => void;
+  onKeep: () => void;
+}) {
+  const t = translator(useLang());
+  if (!asking) {
+    return as === "button" ? (
+      <Button type="button" variant="outline" onClick={onAsk}>
+        <Ban className="h-4 w-4" /> {t("ag_rail_btn_wontHappen")}
+      </Button>
+    ) : (
+      <button type="button" className={SHEET_ROW} onClick={onAsk}>
+        {t("ag_rail_btn_wontHappen")}
+      </button>
+    );
+  }
+  return (
+    <div className="w-full rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
+      <p>{t("ag_rail_wontHappenAsk")}</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <Button type="button" variant="outline" className="text-red-600" disabled={pending} onClick={onDo}>
+          {pending ? t("ag_rail_btn_working") : t("ag_rail_btn_wontHappen")}
+        </Button>
+        <Button type="button" variant="ghost" disabled={pending} onClick={onKeep}>
+          {t("vp_btn_keepIt")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /** "13:30" is a database. "1:30pm" is a person. The footer reads back what will happen, so it
  *  speaks the second one ("1:30 p. m." to a Spanish reader, lib/lang-words clock12). */
 function prettyTime(hm: string, lang?: string): string {
@@ -313,8 +413,10 @@ export function PlaceRail({
 
   return (
     <div className="space-y-4">
+      {/* Each group by its stable key, never its name: a town can be spelled like another group's
+          heading (lib/schedule/place-by-town TownGroup.key). The held group is last (2026-11-16). */}
       {groups.map((g) => (
-        <div key={g.town}>
+        <div key={g.key}>
           <div className="mb-1.5 flex items-baseline gap-2">
             <h3 className="text-sm font-semibold text-slate-900">{g.town}</h3>
             <span className="text-xs text-slate-400">
@@ -374,7 +476,14 @@ export function PlaceRail({
                           {/* THE TAG AND THE CLOCK — Erik: "a tag showing service call, job,
                               inspection/walk through, or office … and how much time they are going
                               to take". Between them a day is plannable by eye. */}
-                          <Badge tone={KIND_TONE[workKind(i)]}>{kindLabel(workKind(i), lang, t)}</Badge>
+                          {/* A WAITING VISIT OF TYPE JOB IS A VISIT, NOT THE JOB'S DAY (2026-11-16). The
+                              owner, seeing one beside the job it was made for: "a phantom of the job on
+                              the left while it is scheduled on the right". Its pill says Job Visit; a
+                              real job's stays Job (workKind and APPT_KIND are not changed: six other
+                              readers use them). */}
+                          <Badge tone={KIND_TONE[workKind(i)]}>
+                            {i.kind === "appointment" && workKind(i) === "job" ? t("ag_rail_kindJobVisit") : kindLabel(workKind(i), lang, t)}
+                          </Badge>
                           <span
                             className={`font-mono text-xs tabular-nums ${
                               i.planned_minutes ? "text-slate-600" : "text-slate-300"

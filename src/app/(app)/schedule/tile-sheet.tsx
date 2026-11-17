@@ -27,6 +27,7 @@ import type { DayHours } from "@/lib/schedule-math";
 import { shiftApptToDay } from "@/lib/appt-time";
 import { initials } from "@/lib/utils";
 import { GhostSheetBody, ghostTitle, type GhostTarget } from "./ghost-sheet";
+import { VisitWontHappen } from "./place-rail";
 import { todayStrInTz } from "@/lib/tz";
 import { useLang } from "@/components/lang-provider";
 import { translator, fillText } from "@/lib/i18n";
@@ -694,6 +695,9 @@ function VisitSheet({ day, visit, tz, workDay, team, canEdit, onClose, voice }: 
           {t("ag_btn_openTheVisit")}
         </Link>
         {canEdit && open && <ClearTheDate what="visit" clear={clear} voice={voice} />}
+        {/* Won't Happen (2026-11-16): the rail's own piece, asked the way Clear the Date asks, calling the
+            visit page's own action; it tells the sheet while its write is out, so the sheet holds open. */}
+        {canEdit && open && <VisitWontHappen id={visit.id} close={onClose} as="button" onPending={voice?.pending} />}
       </div>
     </div>
   );

@@ -151,7 +151,7 @@ export const appointmentActions: Record<string, ActionDef> = {
     group: "appointment",
     label: "Add appointment",
     description:
-      "Create an appointment or inspection with a title and a start time (starts_at). Its type is one of five kinds: 'inspection' is an Inspection (the site visit before a price), 'job' is the work itself on a day, 'service_call' a service call, 'call' a phone call somebody has to make, and 'other' anything else (the default; a meeting books as other). THE CITY'S INSPECTION IS NOT THIS: it is the separate type 'final_inspection' and it goes on the job's permit, never here. Title a site visit \"Inspection: <customer or place>\". Optionally capture whatever else was given: job_id (resolve with list_jobs), customer_id (resolve with list_customers), location, ends_at, notes. " +
+      "Create an appointment or inspection with a title and a start time (starts_at). Its type is one of three kinds you can book: 'inspection' is an Inspection (the site visit before a price), 'call' a phone call somebody has to make, and 'other' anything else (the default; a meeting books as other). A JOB'S WORK IS NOT A VISIT: type 'job' is refused here, because a visit put on the calendar for a job gives the job no day, no hours and no crew; put the job on its day with job.scheduleDay (date, start, end_time or minutes, crew), and make the job with job.create first if it does not exist. THE CITY'S INSPECTION IS NOT THIS: it is the separate type 'final_inspection' and it goes on the job's permit, never here. Title a site visit \"Inspection: <customer or place>\". Optionally capture whatever else was given: job_id (resolve with list_jobs), customer_id (resolve with list_customers), location, ends_at, notes. " +
       LOCAL_TIME_RULE +
       " When the person isn't in the contacts yet, book it without a customer; if you then add them with customer.create, it links this visit in the same action when it's the one visit booked for that name (its result says `linked`), and otherwise offers the link.",
     // Fragment-first: the columns are nullable and createAppointment already reads every
@@ -159,8 +159,9 @@ export const appointmentActions: Record<string, ActionDef> = {
     // Only starts_at stays required (an appointment without a time isn't schedulable).
     input: z.object({
       title: z.string().trim().min(1),
-      // THE FIVE A PERSON PICKS (W2-06, statuses.ts): spine-derived, so Nort can book exactly what the
+      // THE KINDS A PERSON PICKS (W2-06, statuses.ts): spine-derived, so the schema takes exactly what the
       // New Appointment form offers and createAppointment accepts. No kind is Other, never an inspection.
+      // 'job' still parses, so the handler can refuse it in words that name the right door (2026-11-16).
       type: z.enum(PICKABLE_APPOINTMENT_TYPES).default("other"),
       starts_at: z.string().min(1),
       ends_at: nullableText(),
@@ -176,6 +177,17 @@ export const appointmentActions: Record<string, ActionDef> = {
     // (the browser computes it), so the model's wall-clock time is converted HERE first: handing
     // it "2026-09-25T10:00" stored 10:00 UTC, 3 AM Pacific (Tom Goodman, 2026-09-24).
     handler: async (i) => {
+      /* A JOB'S WORK IS THE JOB'S OWN DAY (2026-11-16). Asked to book a day of three jobs, Nort made
+         three visits of type 'job' with nobody on them, and every job stayed under Waiting for a Day while
+         the calendar showed a visit beside it ("a phantom of the job on the left while it is scheduled on
+         the right"). Refused before anything is read or written; the person's own form keeps its Job type. */
+      if (i.type === "job") {
+        return {
+          ok: false,
+          error:
+            "A job's work is not booked as a visit. Put the job on its day with job.scheduleDay (date, start, end_time or minutes, crew). If the job does not exist yet, make it with job.create first.",
+        };
+      }
       const supabase = await createClient();
       const tz = await orgTimezone(supabase);
       const span = convertSpan(i.starts_at, i.ends_at, tz);

@@ -144,7 +144,9 @@ describe("the mappings that matter", () => {
   });
 
   it("a won estimate's day goes on its job; with no job, there is no day to set here", () => {
-    expect(map("quote_accepted", "schedule", "quote-1", "job-9")).toEqual({ name: "job.scheduleDay", input: { id: "job-9", date: "2026-10-03" } });
+    // replace: true keeps the tap's write the window it always was (Nort's call without it adds a day).
+    expect(map("quote_accepted", "schedule", "quote-1", "job-9")).toEqual({ name: "job.scheduleDay", input: { id: "job-9", date: "2026-10-03", replace: true } });
+    expect(map("job_to_schedule", "schedule", "job-1")).toEqual({ name: "job.scheduleDay", input: { id: "job-1", date: "2026-10-03", replace: true } });
     expect(map("quote_accepted", "schedule", "quote-1")).toBeNull();
   });
 

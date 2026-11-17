@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1165", date: "2026-11-16", line: "Nort books a job's day in one change: day, start, length and crew, never as a visit. On-hold jobs are one group at the bottom of Waiting for a Day. The job map pins by the whole address." },
   { version: "cn-v1164", date: "2026-11-16", line: "Nort can book a whole day in one turn: up to twenty scheduling changes (it was three). The weather row says when it can't get your location, with Try Again. A tech asking Nort for pay is shown Clock." },
   { version: "cn-v1163", date: "2026-11-12", line: "Inspections is drawn as tiles: Write Up, Coming Up, Needs a Day, Didn't Happen?; under Filed: Completed, Lost, Cancelled. Each row has one small ⋯ in place of the two big buttons." },
   { version: "cn-v1162", date: "2026-11-12", line: "Needs You: amber now means a real day is close or just passed, and reads Due; every row has a picture of what there is to do; the tiles are Get Paid, Sales, Operations, Bookkeeping, each in a colour." },

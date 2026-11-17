@@ -248,7 +248,10 @@ describe("only five kinds can ever be NOW", () => {
             expect(lv(kind, { urgency, when: clock, since: ago(400), clock: when }), `${kind} ${urgency} ${clock} ${when}`).not.toBe("now");
           }
     }
-  });
+    // EXHAUSTIVE ON PURPOSE, SO IT IS GIVEN ROOM (2026-11-16): about twenty-six thousand checks. In a
+    // full run on a loaded machine it took 5.8 seconds against the default five, and the failure
+    // said "timed out", which says nothing about the rule.
+  }, 30_000);
 
   it("only DUE_KINDS can ever be amber, whatever the age, the urgency or the days", () => {
     for (const kind of KINDS) {
@@ -256,7 +259,7 @@ describe("only five kinds can ever be NOW", () => {
       for (const urgency of [0, 1, 2] as const)
         for (const when of DAYS) for (const clock of DAYS) expect(lv(kind, { urgency, when, since: when, clock }), `${kind} ${urgency} ${when} ${clock}`).not.toBe("soon");
     }
-  });
+  }, 30_000); // exhaustive too: the same room as the one above
 
   it("a Couldn't Check line is never marked, whatever its kind and dates", () => {
     for (const kind of KINDS) {
