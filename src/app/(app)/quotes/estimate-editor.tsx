@@ -66,6 +66,7 @@ import { JobSiteLine, type JobSiteData } from "./[id]/job-site-line";
 import { StatusControl } from "./[id]/status-control";
 import { QuoteTypeToggle } from "./[id]/quote-type-toggle";
 import { DuplicateQuoteButton } from "./[id]/duplicate-quote-button";
+import { KeepBothButton } from "./[id]/keep-both-button";
 import { CircuitScheduleCard } from "./[id]/circuit-schedule-card";
 import { IntakeFiles } from "../leads/intake-files";
 import { LineDescInput, TaskBreakdown, type PersonOption, type PriceItemLite } from "./task-breakdown";
@@ -249,8 +250,8 @@ export interface SavedEstimate {
   /** What this estimate has already become (idempotent doors: View … instead of a twin). */
   existing: { invoice: string | null; workOrder: string | null; materialList: string | null };
   /** The revision chain (0391), both ways. */
-  revises: { id: string; quote_number: string | null; status: string | null } | null;
-  supersededBy: { id: string; quote_number: string | null } | null;
+  revises: { id: string; quote_number: string | null; status: string | null; /** Where it would come back to if this revision were un-linked (the page works it out by the deed's own rule). */ comeback?: "accepted" | "sent" } | null;
+  supersededBy: { id: string; quote_number: string | null; /** It revises THIS estimate itself (lib/estimate/revision revisionOf): Keep Both is drawn only then. */ direct?: boolean; /** Where THIS estimate would come back to. */ comeback?: "accepted" | "sent" } | null;
   /** The visit this was written up from (capture.quote_id). */
   visitBehind: { id: string; starts_at: string | null } | null;
   /** The circuit schedule card (cn-v1160): shown when the estimate HAS circuits, never just because
@@ -942,6 +943,23 @@ export function EstimateEditor(props: EstimateEditorProps) {
         : status === "draft" || status === "sent"
           ? ` ${t("qe_revisesAcceptingSupersedes")}`
           : ".";
+  /** KEEP BOTH on a revision's own page (cn-v1168), and what un-linking it here would bring back: nothing
+   *  while it is not accepted yet (its pointer only says what accepting it WILL replace); the estimate it
+   *  replaced, back to where it stood (the page's comeback), once it is; and an original that still
+   *  stands as accepted (a supersede that failed) goes on counting. Null = no door: nothing this pointer
+   *  decides is left (a declined or expired revision, or an accepted one whose original was declined or
+   *  never sent, so there is no "both" to keep). */
+  const keepBothHere: { comeback: "accepted" | "sent" | null } | null = !revises
+    ? null
+    : status === "draft" || status === "sent"
+      ? { comeback: null }
+      : status !== "accepted"
+        ? null
+        : revises.status === "superseded"
+          ? { comeback: revises.comeback ?? "accepted" }
+          : revises.status === "accepted"
+            ? { comeback: "accepted" }
+            : null;
 
   return (
     <div>
@@ -971,6 +989,17 @@ export function EstimateEditor(props: EstimateEditorProps) {
                 )}
               </p>
             )}
+            {/* KEEP BOTH (cn-v1168), where the mark is read: on the estimate that was replaced, when the
+                one that stands revises THIS estimate itself (a revision of a revision is un-linked on
+                its own page, where the pointer it carries is named). */}
+            {supersededBy?.direct && (
+              <KeepBothButton
+                revisionId={supersededBy.id}
+                revision={supersededBy.quote_number ?? t("qe_itsRevision")}
+                original={number || t("qe_thisEstimate")}
+                comeback={supersededBy.comeback ?? "accepted"}
+              />
+            )}
             {revises && (
               <p className="mt-1 text-sm text-slate-600">
                 {aroundLink(
@@ -981,6 +1010,20 @@ export function EstimateEditor(props: EstimateEditorProps) {
                 )}
                 {revisesWords}
               </p>
+            )}
+            {/* …and on the revision itself, while its pointer still decides anything: before it is
+                accepted (so accepting it replaces nothing) and once it is and the estimate it revises
+                was replaced by it (so that one comes back) or still stands as accepted (so both go on
+                counting). A declined or expired revision replaces nothing, an accepted one whose
+                original was declined or never sent has nothing to bring back, and one that was itself
+                replaced has the door above. */}
+            {revises && keepBothHere && (
+              <KeepBothButton
+                revisionId={savedId}
+                revision={number || t("qe_thisEstimate")}
+                original={revises.quote_number ?? t("qe_anEarlierEstimate")}
+                comeback={keepBothHere.comeback}
+              />
             )}
             {/* Provenance backlinks — the lead, the visit. */}
             {savedPage?.lead && (
@@ -1028,7 +1071,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
             <PreviewButton doc="quote" id={savedId} />
             <StatusControl id={savedId} status={status} />
             {(catalog.estimatesOn || lock) && <DuplicateQuoteButton id={savedId} />}
-            {(catalog.estimatesOn || lock) && (status === "sent" || status === "accepted") && <DuplicateQuoteButton id={savedId} revision />}
+            {(catalog.estimatesOn || lock) && (status === "sent" || status === "accepted") && <DuplicateQuoteButton id={savedId} revision number={number || null} />}
             {tree && <SectionActionsMenu tree={tree} />}
           </div>
         </div>

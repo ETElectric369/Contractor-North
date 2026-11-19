@@ -62,7 +62,8 @@ import { bornWithTasks } from "@/lib/estimate/born-with-tasks";
 import { jobTakesScope, scopeForJob } from "@/lib/estimate/job-scope";
 import { estimateLines, retitleDismissal, retitleLineTask, syncJobTasks, syncWords } from "@/lib/estimate/sync-job-tasks";
 import { materialsWords, syncJobMaterials } from "@/lib/estimate/sync-job-materials";
-import { revisionOf, supersedeRevised, supersededWords } from "@/lib/estimate/revision";
+import { planKeepBoth, revisionFamily, revisionOf, supersedeRevised, supersededWords } from "@/lib/estimate/revision";
+import { findRevisedOriginalBilled, type RevisedBilled } from "@/lib/billing/revision-billed";
 import { taskBookFromRows, taskModeDraft, taskModePrompt, type TaskModeParsed } from "@/lib/estimate/task-mode";
 import { laborRateFor } from "@/lib/pricing/labor-rate";
 import { priceMaterial } from "@/lib/pricing/price-material";
@@ -2579,8 +2580,9 @@ export async function updateQuoteStatus(id: string, status: string) {
       // The job was made and something it should carry (its tasks) could not be listed: said, not sunk.
       else if (jobRes?.note) jobWarn = jobRes.note;
       if (jobRes?.said) said = jobRes.said;
-      // A REVISION accepted: the original it revises stopped counting — said first, it is the news.
-      if (jobRes?.superseded?.length) said = [supersededWords(jobRes.superseded), said].filter(Boolean).join(" ");
+      // A REVISION accepted: the original it revises stopped counting — said first, it is the news,
+      // with the one way back beside it (Keep Both, cn-v1168): the door is in this page's own header.
+      if (jobRes?.superseded?.length) said = [supersededWords(jobRes.superseded), await ws.say("qs_keepBothHint"), said].filter(Boolean).join(" ");
     } catch (e) {
       jobWarn = await ws.say("qs_jobNotCreated");
       reportError("updateQuoteStatus:createJob", e, { quoteId: id });
@@ -2597,6 +2599,188 @@ export async function updateQuoteStatus(id: string, status: string) {
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
   return { ok: true as const, ...(said ? { said } : {}) };
+}
+
+/**
+ * KEEP BOTH (cn-v1168): THIS ESTIMATE IS NOT A REPLACEMENT. IT STANDS ON ITS OWN, AND WHAT ITS
+ * ACCEPTANCE RETIRED COUNTS AGAIN.
+ *
+ * Erik, 2026-11-19, with a duplex: "I made them into 2 different quotes for each unit of the duplex and
+ * the customer accepted both of them then one got locked and dissapeared to the bottom of the list, if
+ * i wanted it gone i would have deleted it". The second quote had been made with Revise on the first
+ * (the copy that opens for editing looks like any copy), so it carried revises_quote_id, and the
+ * customer's Accept on it moved the first from accepted to superseded: half the work stopped counting,
+ * and the only doors were a status select that refuses a replaced estimate and a walk-back that leaves
+ * it replaced. This is the door that was missing, on the revision's page and on the page of the
+ * estimate it replaced.
+ *
+ * `revisionId` is always the REVISION (the one that carries the pointer). In order, and nothing
+ * written before everything is read:
+ *   1. the plan (lib/estimate/revision planKeepBoth, pure): which estimates stand superseded only
+ *      because of this pointer, and where each comes back to (accepted when it was accepted, else
+ *      sent). One an accepted estimate still replaces stays, and is said. ONLY A REVISION THAT WAS
+ *      ACCEPTED RETIRED ANYTHING, so only then is there a plan: for a draft or a sent one the pointer
+ *      goes and nothing else is read or moved, which is what that page's own sentence says;
+ *   2. the figure of every job an estimate comes back onto as accepted, read BEFORE any write, so the
+ *      job's size, each task's minutes and each part's count follow by the one rule (sync-job-tasks);
+ *   3. whether what it revises is ALREADY BILLED, read while the pointer still stands (below);
+ *   4. the pointer is cleared, compare-and-set on the pointer as read (the silent-write law);
+ *   5. each estimate comes back, guarded on its still being superseded; its accepted_at is not
+ *      touched: the day it was won is the day it was won, and nobody is rung, because nothing was
+ *      accepted today;
+ *   6. the job catches up BY ITS TWO RULES ALONE (jobFollows: its tasks, then its buy list).
+ * A failure after the pointer is cleared is said with its one next step: the estimate is no longer
+ * replaced by anything, so its own status select can set it back.
+ *
+ * NEVER THE ACCEPTANCE DOOR (skeptic #71, the blocker). The first cut caught the job up through
+ * createJobFromQuote, the door a re-accept takes, and that door runs the take-off. A revision's
+ * acceptance had ADOPTED the crew's list from the estimate it replaced (take-off-from-quote), so the
+ * estimate coming back holds no list, revises nothing, and would have been given a NEW one: the newest
+ * list on a job is the one every reader shows, and the crew's own list, bought marks and all, would
+ * have gone out of sight behind it. So no take-off, no work order (the one made when it was first
+ * accepted is still there) and no job is made here. WHAT THAT LEAVES IS SAID: a list is one
+ * estimate's (0388), so the parts of an estimate that comes back with no list of its own are on no
+ * list, and the note names where to add them. An estimate that comes back with no job says where its
+ * job is made.
+ *
+ * THE BILLING GUARD GOES WITH THE POINTER, AND THAT IS SAID. A revision cannot be billed beside an
+ * invoice cut from what it revises (lib/billing/revision-billed); that guard reads this pointer, so
+ * clearing it lets the two be billed side by side. Right for separate work, which is what this door
+ * is for (a duplex whose first unit is already invoiced), so it is never a refusal: the invoice is
+ * named in the result, once, with the one judgment that is the person's.
+ *
+ * WORK ALREADY DONE STAYS WHERE IT IS. When the revision was accepted, the tasks of the estimate it
+ * replaced were matched to its lines by name and are the revision's now, done marks and photos
+ * included. Coming back, the first estimate's lines get new, open tasks. Harmless on a job nobody has
+ * started; on a job with progress it is said, once.
+ *
+ * Staff only, as every status change on an estimate is. Not on the assistant's list: it changes
+ * what a job is worth, and nothing was added to what it may write.
+ */
+export async function keepBothEstimates(revisionId: string): Promise<{ ok: boolean; error?: string; said?: string; warning?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
+
+  // PROJECTION LAW: every column read below is in the list.
+  const { data: revRow, error: revErr } = await supabase.from("quotes").select("id, quote_number, status, revises_quote_id, job_id").eq("id", revisionId).maybeSingle();
+  if (revErr) return { ok: false, error: dbError(revErr) };
+  if (!revRow) return { ok: false, error: await ws.say("qs_estimateNotFound") };
+  const rev = revRow as { id: string; quote_number: string | null; status: string | null; revises_quote_id: string | null; job_id: string | null };
+  const revName = rev.quote_number || (await ws.say("qs_thisEstimate"));
+  const originalId = rev.revises_quote_id ?? null;
+  if (!originalId) return { ok: false, error: await ws.say("qs_notARevision", { quote: revName }) };
+
+  // 1. THE PLAN, from the whole family as it stands. Accepted now, or superseded itself since: the two
+  //    states a revision that WAS accepted can be in, and the two revisionOf names one by, which is
+  //    when the retired estimate's own page draws this door and promises it will count again.
+  const retired = rev.status === "accepted" || rev.status === "superseded";
+  let plan: ReturnType<typeof planKeepBoth> = { restore: [], still: [] };
+  if (retired) {
+    const fam = await revisionFamily(supabase, { originalId, leaveOut: rev.id, orgId: ctx.orgId });
+    if (fam.error) return { ok: false, error: await ws.say("qs_revisionCheckFailed", { why: fam.error }) };
+    plan = planKeepBoth(fam.family, originalId);
+  }
+
+  // 2. THE FIGURE BEFORE, per job an estimate comes back onto as accepted.
+  const before = new Map<string, FigureBefore>();
+  for (const r of plan.restore) {
+    if (r.to !== "accepted" || !r.job_id || before.has(r.job_id)) continue;
+    before.set(r.job_id, figureBefore(await estimateLines(supabase, { jobId: r.job_id, orgId: ctx.orgId })));
+  }
+
+  // 3. IS WHAT IT REVISES BILLED? The guard's own read, while the pointer it reads still stands.
+  let billed: RevisedBilled | null;
+  try {
+    billed = await findRevisedOriginalBilled(supabase, { revises_quote_id: originalId, job_id: rev.job_id });
+  } catch (e) {
+    billed = { unread: e instanceof Error ? e.message : String(e) };
+  }
+
+  // 4. THE POINTER IS CLEARED, on the pointer as read: a zero-row write is "it changed meanwhile".
+  const { data: cut, error: cutErr } = await supabase.from("quotes").update({ revises_quote_id: null }).eq("id", rev.id).eq("revises_quote_id", originalId).select("id");
+  if (cutErr) return { ok: false, error: dbError(cutErr) };
+  if (!cut?.length) return { ok: false, error: await ws.say("qs_keepBothChanged") };
+
+  const said: string[] = [await ws.say("qs_keptBothAlone", { revision: revName })];
+  const notes: string[] = [];
+  const earlier = await ws.say("qs_theEstimateRevised");
+  /** The numbers of the estimates whose comeback did not land: nothing below calls one of them a replacer. */
+  const notBack = new Set<string>();
+  /** Back as accepted, with a job: the job catches up below, once per job, after every comeback is written. */
+  const backOnJob: Array<{ jobId: string; id: string; name: string }> = [];
+  for (const r of plan.restore) {
+    const name = r.quote_number || earlier;
+    // 5. IT COMES BACK, only from superseded: an estimate somebody moved meanwhile is theirs.
+    const { data: back, error } = await supabase.from("quotes").update({ status: r.to }).eq("id", r.id).eq("status", "superseded").select("id");
+    if (error || !back?.length) {
+      reportError("keepBothEstimates:restore", error ?? new Error("zero rows"), { revisionId: rev.id, quoteId: r.id });
+      notes.push(await ws.say("qs_keptBothNotBack", { quote: name, why: error ? dbError(error) : await ws.say("qs_changedMeanwhile") }));
+      if (r.quote_number) notBack.add(r.quote_number);
+      continue;
+    }
+    said.push(await ws.say(r.to === "accepted" ? "qs_keptBothAccepted" : "qs_keptBothSent", { quote: name }));
+    revalidatePath(`/quotes/${r.id}`);
+    if (r.to !== "accepted") continue;
+    // No job to catch up (it was deleted, or was never made): said, with the door that makes one.
+    if (!r.job_id) notes.push(await ws.say("qs_keptBothNoJob", { quote: name }));
+    else backOnJob.push({ jobId: r.job_id, id: r.id, name });
+  }
+
+  // 6. THE JOB CATCHES UP, by its two rules alone. Never createJobFromQuote (see above).
+  for (const jobId of new Set(backOnJob.map((r) => r.jobId))) {
+    const here = backOnJob.filter((r) => r.jobId === jobId);
+    const fig = before.get(jobId);
+    // The job's tasks as they stand, for the one caution about work already done.
+    const { data: was } = await supabase.from("tasks").select("id, status").eq("job_id", jobId);
+    let follow: { said?: string; note?: string };
+    try {
+      follow = await jobFollows(supabase, { jobId, sizeBefore: fig?.sizeBefore, tasksBefore: fig?.tasksBefore, partsBefore: fig?.partsBefore }, ctx);
+    } catch (e) {
+      reportError("keepBothEstimates:job", e, { revisionId: rev.id, jobId });
+      notes.push(await ws.say("qs_followTasksFailed", { why: e instanceof Error ? e.message : String(e) }));
+      continue;
+    }
+    if (follow.said) said.push(follow.said);
+    if (follow.note) notes.push(follow.note);
+    // A LIST IS ONE ESTIMATE'S (0388): the buy-list rule brings each accepted estimate's OWN list in step
+    // and makes none. One that came back holding no list has its parts on no list: said, with the place.
+    for (const r of here) {
+      const { data: own, error: ownErr } = await supabase.from("material_lists").select("id").eq("quote_id", r.id).limit(1).maybeSingle();
+      if (ownErr) reportError("keepBothEstimates:list", ownErr, { revisionId: rev.id, quoteId: r.id });
+      else if (!own) notes.push(await ws.say("qs_keptBothPartsNote", { quote: r.name }));
+    }
+    // WORK ALREADY DONE STAYS WHERE IT IS: said only on a job that has progress AND got new tasks now.
+    const { data: now } = await supabase.from("tasks").select("id").eq("job_id", jobId);
+    const wasIds = new Set(((was ?? []) as Array<{ id: string }>).map((t) => t.id));
+    const hadProgress = ((was ?? []) as Array<{ status?: string | null }>).some((t) => t.status !== "open");
+    const gotNew = ((now ?? []) as Array<{ id: string }>).some((t) => !wasIds.has(t.id));
+    if (hadProgress && gotNew) notes.push(await ws.say("qs_keptBothTasksNote", { quote: here.map((r) => r.name).join(", ") }));
+  }
+
+  // NOTHING SILENT: an estimate that stays replaced says by what. Not when the comeback of the one
+  // that replaces it did not land: that one's own note above says what to do, and this would be false.
+  for (const st of plan.still) {
+    if (st.by && notBack.has(st.by)) continue;
+    said.push(await ws.say("qs_keptBothStill", { quote: st.quote_number || earlier, by: st.by || (await ws.say("qs_aRevision")) }));
+  }
+
+  // THE INVOICE, BY NAME (3): the pointer is gone, so the guard no longer stands between this estimate
+  // and a bill of its own. A read that failed is said too, never guessed either way, and filed.
+  if (billed && "unread" in billed) {
+    reportError("keepBothEstimates:billed", new Error(billed.unread), { revisionId: rev.id });
+    notes.push(await ws.say("qs_keptBothBilledUnread", { revision: revName }));
+  } else if (billed) {
+    notes.push(await ws.say("qs_keptBothBilled", { original: billed.quoteNumber || earlier, invoice: billed.invoiceNumber || (await ws.say("qs_anInvoice")), revision: revName }));
+  }
+
+  revalidatePath("/planner");
+  revalidatePath("/schedule");
+  revalidatePath("/quotes");
+  revalidatePath(`/quotes/${rev.id}`);
+  revalidatePath(`/quotes/${originalId}`);
+  return { ok: true, said: said.join(" "), ...(notes.length ? { warning: notes.join(" ") } : {}) };
 }
 
 /** What an estimator run hands back: the draft, or the model's decline (ai-refusal `refused`) — said

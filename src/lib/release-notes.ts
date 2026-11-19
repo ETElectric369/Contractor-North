@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1168", date: "2026-11-19", line: "Keep Both: when a revision was really separate work, like a second unit, one tap un-links it and the estimate it replaced counts again. Revise now says what it does before it makes anything." },
   { version: "cn-v1167", date: "2026-11-18", line: "A location notice could cover the whole screen while you were clocked in with no location stamped. It is a small strip under the top bar now, and Got It puts it away for that clock-in." },
   { version: "cn-v1166", date: "2026-11-16", line: "The door that ends a visit is Dismiss everywhere, and it does one thing. A tech sees their own pay periods under the clock: hours, pay, what is paid and what is left." },
   { version: "cn-v1165", date: "2026-11-16", line: "Nort books a job's day in one change: day, start, length and crew, never as a visit. On-hold jobs are one group at the bottom of Waiting for a Day. The job map pins by the whole address." },

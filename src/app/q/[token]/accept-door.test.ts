@@ -150,6 +150,27 @@ describe("acceptPublicQuote", () => {
     expect(s.events).toEqual(["rpc:anon", "estimateLines", "supersede", "syncTasks", "workOrder", "takeOff", "syncMaterials", "closeVisits", "bell", "push"]);
   });
 
+  it("WHAT THE ACCEPTANCE REPLACED IS THE BELL'S FIRST NEWS (cn-v1168): a revision accepted on the link retires the estimate it revises, and the office is told which, with the one way back", async () => {
+    // The owner, 2026-11-19: a customer accepted two quotes for the two units of a duplex, the second
+    // made with Revise on the first; the first "got locked and dissapeared to the bottom of the list"
+    // and the bell had said only "accepted — schedule the job".
+    rules.supersedeRevised.mockImplementationOnce(async () => (s.events.push("supersede"), { superseded: ["Q-0041"] }) as never);
+    expect(await acceptPublicQuote("tok-1")).toEqual({ ok: true });
+    expect(rules.createNotifications).toHaveBeenCalledWith(
+      "org-1",
+      ["u1"],
+      expect.objectContaining({
+        body: "E-001 was accepted from Larkspur — schedule the job. Q-0041 is now superseded by this estimate. If they are separate work, open this estimate and tap Keep Both. The crew's list is this estimate's now: 1 line added.",
+      }),
+    );
+    // An acceptance that replaced nothing says nothing about it (the first test's body), and one whose
+    // supersede failed moved nothing: no claim that it did.
+    rules.createNotifications.mockClear();
+    rules.supersedeRevised.mockImplementationOnce(async () => (s.events.push("supersede"), { superseded: [], error: "the row is locked" }) as never);
+    expect(await acceptPublicQuote("tok-1")).toEqual({ ok: true });
+    expect(rules.createNotifications).toHaveBeenCalledWith("org-1", ["u1"], expect.objectContaining({ body: "E-001 was accepted from Larkspur — schedule the job. The crew's list is this estimate's now: 1 line added." }));
+  });
+
   it("what the list did on the link reaches the bell's body in the office door's own words (S5): a rebuilt estimate's re-counted or renamed row is said, never silent", async () => {
     rules.syncJobMaterials.mockImplementationOnce(
       async () =>

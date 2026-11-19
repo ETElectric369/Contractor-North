@@ -235,6 +235,10 @@ export const words: WordCatalog = {
     qt_btn_duplicating: "Duplicating…",
     qt_btn_revise: "Revise",
     qt_btn_duplicate: "Duplicate",
+    // REVISE SAYS WHAT IT DOES FIRST (cn-v1168): its first tap is this sentence and these two buttons.
+    qt_reviseAsk: "A revision replaces {number} when it is accepted, and {number} stops counting. For separate work, like a second unit, use Duplicate.",
+    qt_btn_makeTheRevision: "Make the Revision",
+    qt_btn_duplicateInstead: "Duplicate Instead",
     qt_laborPartsOnPaper: "Labor and Parts on the Paper",
     // ONE CONTROL, FOUR SEGMENTS (cn-v1158; Erik, 2026-11-10: "an option to list out all the materials shown as it is
     // now and an option to group the materials into one materials line"). The first says what the company's default
@@ -479,6 +483,9 @@ export const words: WordCatalog = {
     qt_btn_duplicating: "Duplicando…",
     qt_btn_revise: "Crear Revisión",
     qt_btn_duplicate: "Duplicar",
+    qt_reviseAsk: "Una revisión reemplaza a {number} cuando se acepta, y {number} deja de contar. Para un trabajo aparte, como una segunda unidad, usa Duplicar.",
+    qt_btn_makeTheRevision: "Crear la Revisión",
+    qt_btn_duplicateInstead: "Mejor Duplicar",
     qt_laborPartsOnPaper: "Mano de Obra y Piezas en el Papel",
     // The four segments (cn-v1158): pieza, as the catalog says a part; "Una" opens its own name, and its segment after
     // the dot, so it is capital in both. ONE name per format, the same three keys in all three places: Cada Pieza,

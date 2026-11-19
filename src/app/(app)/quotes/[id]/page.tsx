@@ -1,4 +1,4 @@
-import { revisionOf } from "@/lib/estimate/revision";
+import { comebackOf, revisionOf } from "@/lib/estimate/revision";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { smsReadiness } from "@/lib/sms";
@@ -186,11 +186,16 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   // revision that replaced it (newest, if ever two).
   const revisesId = q.revises_quote_id ?? null;
   const [{ data: revisesRow }, { data: supersededRow }] = await Promise.all([
-    revisesId ? supabase.from("quotes").select("id, quote_number, status").eq("id", revisesId).maybeSingle() : Promise.resolve({ data: null }),
+    revisesId ? supabase.from("quotes").select("id, quote_number, status, accepted_at").eq("id", revisesId).maybeSingle() : Promise.resolve({ data: null }),
     q.status === "superseded" ? revisionOf(supabase, { quoteId: q.id, orgId: null }).then((r) => ({ data: r })) : Promise.resolve({ data: null }),
   ]);
-  const revises = revisesRow as { id: string; quote_number: string | null; status: string | null } | null;
-  const supersededBy = supersededRow as { id: string; quote_number: string | null } | null;
+  // KEEP BOTH ASKS BY THE DEED'S OWN RULE (cn-v1168; lib/estimate/revision comebackOf): where the estimate
+  // that was replaced would come back to, accepted or an open offer, is worked out here for both pages
+  // that draw the door, so its first sentence never promises "will count again" for one only sent.
+  const revisesRead = revisesRow as { id: string; quote_number: string | null; status: string | null; accepted_at: string | null } | null;
+  const revises = revisesRead ? { id: revisesRead.id, quote_number: revisesRead.quote_number, status: revisesRead.status, comeback: comebackOf(revisesRead.accepted_at) } : null;
+  const supersededRead = supersededRow as { id: string; quote_number: string | null; direct: boolean } | null;
+  const supersededBy = supersededRead ? { ...supersededRead, comeback: comebackOf((q as { accepted_at?: string | null }).accepted_at) } : null;
 
   // The lead's own plan PDFs (intake uploads): one-tap take-off on this page too, no re-upload.
   const leadPlans = q.inquiry

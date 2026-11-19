@@ -75,7 +75,7 @@ describe("the doors", () => {
     expect(fn).toContain("valid_until: revision ? null : quote.valid_until ?? null,");
     // cn-v1132: the door lives on the one editor now; the page only reads the row and mounts it.
     const page = src("src/app/(app)/quotes/estimate-editor.tsx");
-    expect(page).toContain('(status === "sent" || status === "accepted") && <DuplicateQuoteButton id={savedId} revision />');
+    expect(page).toContain('(status === "sent" || status === "accepted") && <DuplicateQuoteButton id={savedId} revision number={number || null} />');
     expect(page).toContain('t("qe_supersededBy")'); // the caller's words (cn-v1145); the English is the catalog's
     expect(dict("en").qe_supersededBy).toBe("Superseded by {link} — that estimate is the price for this work now.");
     expect(page).toContain('t("qe_revises")');
@@ -83,7 +83,15 @@ describe("the doors", () => {
     const button = src("src/app/(app)/quotes/[id]/duplicate-quote-button.tsx");
     expect(button).toContain('revision ? t("qt_btn_revise") : t("qt_btn_duplicate")'); // the caller's words (cn-v1145)
     expect([dict("en").qt_btn_revise, dict("en").qt_btn_duplicate]).toEqual(["Revise", "Duplicate"]);
-    expect(button).toContain("duplicateQuote(id, revision ? { revision: true } : undefined)");
+    // cn-v1168: Revise's first tap makes nothing. It says what a revision does and offers the copy that
+    // stands on its own; only one of the sentence's two buttons calls the action.
+    expect(button).toContain("duplicateQuote(id, asRevision ? { revision: true } : undefined)");
+    expect(button).toContain("if (revision) setAsking(true);\n          else make(false);");
+    expect(button).toContain('<Button disabled={pending} onClick={() => make(true)}>');
+    expect(button).toContain('<Button variant="outline" disabled={pending} onClick={() => make(false)}>');
+    expect(dict("en").qt_reviseAsk).toBe("A revision replaces {number} when it is accepted, and {number} stops counting. For separate work, like a second unit, use Duplicate.");
+    expect([dict("en").qt_btn_makeTheRevision, dict("en").qt_btn_duplicateInstead]).toEqual(["Make the Revision", "Duplicate Instead"]);
+    expect([dict("es").qt_btn_makeTheRevision, dict("es").qt_btn_duplicateInstead]).toEqual(["Crear la Revisión", "Mejor Duplicar"]);
   });
   it("accepting a revision supersedes the original on BOTH office branches, before the follow / the birth; a failed supersede skips the follow; the revision takes the original's job", () => {
     const create = body(actions, "export async function createJobFromQuote(");
@@ -107,7 +115,9 @@ describe("the doors", () => {
     expect(status).toContain('ws.say("qs_revisionReplacedChange"');
     expect(dict("en").qs_revisionReplacedChange).toContain("replaced this estimate — change that one instead."); // leaving superseded by hand while the revision stands
     expect(status).toContain('QUOTE_STATUSES.filter((s) => s !== "superseded").join(", ")');
-    expect(status).toContain("if (jobRes?.superseded?.length) said = [supersededWords(jobRes.superseded), said].filter(Boolean).join(\" \");");
+    // cn-v1168: the news is still said first, with the one way back (Keep Both) right after it.
+    expect(status).toContain("if (jobRes?.superseded?.length) said = [supersededWords(jobRes.superseded), await ws.say(\"qs_keepBothHint\"), said].filter(Boolean).join(\" \");");
+    expect(dict("en").qs_keepBothHint).toBe("If they are separate work, tap Keep Both.");
   });
   it("a revision of a BILLED estimate is not billed whole again: both invoice doors refuse, naming the invoice", () => {
     const guard = src("src/lib/billing/revision-billed.ts"); // a lib rule, never a server action

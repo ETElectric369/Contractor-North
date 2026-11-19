@@ -7,7 +7,7 @@ import { revalidatePath } from "next/cache";
 import { reportError } from "@/lib/observe";
 import { estimateLines, syncJobTasks } from "@/lib/estimate/sync-job-tasks";
 import { materialsWords, syncJobMaterials } from "@/lib/estimate/sync-job-materials";
-import { supersedeRevised } from "@/lib/estimate/revision";
+import { KEEP_BOTH_BELL_HINT, supersedeRevised, supersededWords } from "@/lib/estimate/revision";
 import { FINISH_WINDOW_MS } from "@/lib/estimate/finish-window";
 import { workOrderFromQuote } from "@/lib/estimate/work-order-from-quote";
 import { takeOffFromQuote, takeOffWords } from "@/lib/estimate/take-off-from-quote";
@@ -79,6 +79,12 @@ async function notifyQuoteAccepted(token: string, /** What the crew's list did o
 async function finishPublicAcceptance(token: string): Promise<string | null> {
   /** The crew's list followed this acceptance (a revision's plain rows re-counted, removed, kept): the office hears it. */
   let listSaid: string | null = null;
+  /** WHAT THIS ACCEPTANCE REPLACED (cn-v1168). A customer's Accept on a revision retired the estimate it
+   *  revises and the bell said only "accepted — schedule the job": an accepted estimate left the money
+   *  with no word to anyone (Erik, 2026-11-19: "one got locked and dissapeared to the bottom of the
+   *  list"). The office door has always said it under the status; now the link's bell says it first,
+   *  with the one way back. English, as the rest of this bell is. */
+  let replaced: string | null = null;
   try {
     if (!token) return null;
     const sb = createServiceClient();
@@ -102,6 +108,9 @@ async function finishPublicAcceptance(token: string): Promise<string | null> {
     // original's hours are what the box held, so the size can follow), before the sync (so the job's
     // accepted estimates are one price for the work when its tasks and list are brought in step).
     const sup = await supersedeRevised(sb, { revisionId: q.id, orgId: who.orgId });
+    // What it moved (none on a failure) is the bell's first sentence, with the one way back.
+    const moved = supersededWords(sup.superseded);
+    if (moved) replaced = `${moved} ${KEEP_BOTH_BELL_HINT}`;
     if (sup.error) {
       // The original still counts as accepted: a sync now would double the job's tasks and hours. The
       // paperwork below is per estimate (safe); the office's Accept runs the sync when it retries.
@@ -149,6 +158,8 @@ async function finishPublicAcceptance(token: string): Promise<string | null> {
   } catch (e) {
     reportError("finishPublicAcceptance", e);
   }
+  // What it replaced is said first (it is the news), then what the list did.
+  if (replaced) listSaid = listSaid ? `${replaced} ${listSaid}` : replaced;
   return listSaid;
 }
 
