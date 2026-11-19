@@ -19,8 +19,9 @@ export const metadata: Metadata = {
  *   location       src/lib/geo.ts (first request rides a tap), components/geofence-monitor.tsx
  *                  (org setting geofence_logout, DEFAULT ON in lib/org-settings.ts, mounted by
  *                  (app)/layout.tsx), timeclock/actions.ts adoptGeofenceAnchor (backfills gps_in
- *                  within timeclock/adopt-window.ts: 15 min after clock-in, 45 after a job switch;
- *                  the job-page and My Day punches carry gps:null), app/api/weather/route.ts
+ *                  within timeclock/adopt-window.ts: 15 min after the clock-in is made, 45 after a
+ *                  job switch; every clock-in door asks for a fix at the tap and punches without one
+ *                  when the phone has not answered in a few seconds), app/api/weather/route.ts
  *                  (rounded), Info.plist has WhenInUse only and no UIBackgroundModes location
  *   public files   lead-uploads is a PUBLIC bucket (0099) written only by api/site-chat/upload;
  *                  the intake form's files go to the PRIVATE intake-uploads bucket (0186)

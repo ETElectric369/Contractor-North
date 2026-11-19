@@ -18,7 +18,13 @@ import { fillText, translator } from "@/lib/i18n";
  *  made the second quote of a duplex with Revise, the customer accepted both, and the first was
  *  retired ("if i wanted it gone i would have deleted it"). So Revise's first tap makes nothing: it
  *  says, in this estimate's own number, that the revision REPLACES it when accepted, and offers the
- *  copy that stands on its own right beside the revision. Duplicate is one tap, as it always was. */
+ *  copy that stands on its own right beside the revision. Duplicate is one tap, as it always was.
+ *
+ *  WHERE REVISE IS DRAWN (cn-v1169): only inside the editor's "These line items are locked" notice on
+ *  an accepted estimate, never on the toolbar. His words, the same day: "yes to hiding the revise
+ *  button inside locked quotes for good reason". An estimate that is not locked is revised by editing
+ *  it. This component renders a fragment (the button, the sentence's full-width panel, an error line),
+ *  so whoever mounts it gives it a row that wraps. */
 export function DuplicateQuoteButton({ id, revision = false, number = null }: { id: string; revision?: boolean; /** This estimate's number, for the sentence Revise says first. */ number?: string | null }) {
   const router = useRouter();
   const toast = useToast();

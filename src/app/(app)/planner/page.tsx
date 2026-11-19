@@ -30,6 +30,9 @@ import { smsReadiness } from "@/lib/sms";
 import { SupplierPaperDoneTrail, SUPPLIER_PAPERS_SCOPE } from "@/components/supplier-paper-cards";
 import type { ApptValue } from "../appointments/appointment-button";
 import { AgendaRowMenu } from "./agenda-move";
+import { DoTodayButton } from "./do-today-button";
+import { loadCarriedOver, needsYouWithoutCarried } from "@/lib/schedule/carried-over";
+import { shortDay } from "@/lib/come-back-days";
 import { NowTasks } from "./now-tasks";
 import { QuickCostButton } from "@/components/quick-cost-button";
 import { MarkReportReviewedButton } from "./mark-report-reviewed-button";
@@ -94,6 +97,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     { data: jobs }, { data: segJobs }, { data: appts }, { data: openRows },
     { data: customers }, { data: staff }, { data: jobOptRows }, { data: me }, { data: todayCrewRows },
     { data: everyone },
+    carriedR,
   ] = await Promise.all([
     // The block's end, its size and its crew and town ride along: every agenda row says where, when
     // (start to end) and who (lib/schedule/block-info), for the crew as for the office. No money.
@@ -132,7 +136,15 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
        profiles.active (settings/actions setMemberActive); nothing strips jobs.assigned_to, so the id
        stays on the job. Names only: no role, no rate, nothing a tech may not see. */
     supabase.from("profiles").select("id, full_name").limit(1000),
+    // CARRIED OVER (cn-v1169, lib/schedule/carried-over): the jobs this person is on that were booked
+    // for a day in the last week and went unworked, with nothing ahead of them. The day view's only
+    // (the week view lists days, and a missed day is not one of this week's rows). The loader never
+    // throws; a read that failed is filed below and the group is left out.
+    view === "day"
+      ? loadCarriedOver<any>(supabase, { userId: user?.id ?? null, todayStr, tz, dayStartIso: dayStart.toISOString() })
+      : Promise.resolve({ rows: [], error: null }),
   ]);
+  if (carriedR.error) reportError("planner-carried-over", new Error(carriedR.error));
 
   const openEntry = (openRows ?? [])[0] as any | undefined;
   const isStaff = isStaffRole((me as any)?.role ?? "");
@@ -509,6 +521,11 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     town?: string | null;
     span?: string | null;
     crew?: CrewChip[] | null;
+    /** A CARRIED-OVER job (cn-v1169): the day it was booked for and missed. Its row says that day
+     *  where a time would be (`dayLabel`), carries Do Today for the office, and its Move moves the
+     *  range that day sits in. */
+    carried?: { bookedDay: string };
+    dayLabel?: string;
   };
   const agenda: Agenda[] = [
     ...todayJobs
@@ -573,6 +590,39 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     next: nextAgenda,
     later: laterAgenda,
   } = splitAgenda(agenda, new Date());
+
+  /* CARRIED OVER (cn-v1169): a job this person is on that was booked for a day that went by with
+     nobody on it (lib/schedule/carried-over has the rule and why). It is not a time of today, so it
+     is not in the split above: it is its own group, last in the Today card. The job on the clock is
+     the Now card's and is never listed twice; a job that reached today's list some other way keeps
+     that row. The crew chips are TODAY's (who is off today matters to doing it today). WHICH DAY:
+     the short weekday where a time would be ("Tue"), and the date on the line under the place
+     ("Booked Nov 17"). A weekday alone is not enough: a job booked a week ago today would read
+     "Booked Wednesday" on a Wednesday. No money. */
+  const carriedAgenda: Agenda[] = (carriedR.rows as { job: any; bookedDay: string }[])
+    .filter((c) => c.job.id !== currentJob?.id && !jobMap.has(c.job.id))
+    .map(({ job: j, bookedDay }) => ({
+      key: `c-${j.id}`,
+      kind: "job" as const,
+      time: null,
+      dayLabel: new Date(`${bookedDay}T12:00:00Z`).toLocaleDateString(localeOf(lang), { weekday: "short", timeZone: "UTC" }),
+      title: jobLabel(j),
+      sub: [j.customers?.name, j.address].filter(Boolean).join(" · ") || null,
+      address: directionsTarget(j.address, j.name) || null,
+      href: `/jobs/${j.id}`,
+      status: j.status,
+      jobId: j.id as string,
+      phone: j.customers?.phone ?? null,
+      ...jobRowInfo(j, todayStr, null),
+      span: fillText(t("md_bookedDay"), { day: shortDay(bookedDay, lang) }),
+      carried: { bookedDay },
+    }));
+
+  /* ONE ROW PER JOB (lib/schedule/carried-over needsYouWithoutCarried has the rule and why): a job
+     drawn under Carried Over is left off the Needs You board below, unless its row there also says
+     lines to buy. The list as drawn, on this page only: the shell's badge reads the same fan-out
+     untouched and still counts it. */
+  const needsNow = needsYouWithoutCarried(needsYou.now, new Set(carriedAgenda.map((c) => c.jobId).filter((id): id is string => !!id)));
 
   /* RUNNING LATE? TEXT THEM — Andrew's co-pilot idea, the honest v1. When the NEXT visit is
      inside twenty minutes (or already started) and the person waiting has a phone, the row grows
@@ -756,8 +806,11 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const fmtTime = (iso: string) => formatTime(iso, tz); // the company's clock, never the server's
   const agendaRows = (items: Agenda[], day: string) =>
     items.map((i) => (
-      <li key={i.key} className="flex items-center gap-3 px-5 py-3">
-        <div className="w-14 shrink-0 text-sm font-medium text-slate-700">{i.time ? fmtTime(i.time) : "—"}</div>
+      // A CARRIED-OVER ROW AT PHONE WIDTH (skeptic #72): Do Today keeps its words, and with Navigate
+      // and the ⋯ beside it the three would leave the job's name about sixty pixels at 375. Below
+      // `sm` that row wraps and its buttons take a line of their own; every other row is unchanged.
+      <li key={i.key} className={`flex items-center gap-3 px-5 py-3${i.carried ? " flex-wrap sm:flex-nowrap" : ""}`}>
+        <div className="w-14 shrink-0 text-sm font-medium text-slate-700">{i.dayLabel ?? (i.time ? fmtTime(i.time) : "—")}</div>
         {/* 44px to the thumb (py-1 over the row's own padding), the row's height unchanged. The
             title has its own line, so the verbs on the right can never squeeze it to nothing at
             375px; the kind badge sits with the where. Under it, the block's own words (the same the
@@ -803,7 +856,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
             items on the Today view." A shrink-0 no-wrap cluster of up to four 44px buttons ate the
             row's text at 375px. Wrapping keeps every verb reachable and the words readable; below
             sm the Navigate label drops to the icon so the common case never wraps at all. */}
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+        <div className={`flex shrink-0 flex-wrap items-center justify-end gap-1${i.carried ? " basis-full sm:basis-auto" : ""}`}>
           {i.key === lateNudge && i.phone && (
             <a
               // The text goes to the CUSTOMER, so its body is English whatever the tech reads (cn-v1138).
@@ -814,6 +867,11 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               <MessageSquare className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">{t("md_runningLate")}</span>
             </a>
           )}
+          {/* DO TODAY, on a carried-over job (cn-v1169): the day it was booked for moves to today,
+              through the schedule's own move. The office's door (the move is staff-only); a tech's
+              row keeps Navigate and the job itself. Its words stay at every width: it is the one
+              door this row exists for. */}
+          {isStaff && i.carried && i.jobId && <DoTodayButton jobId={i.jobId} bookedDay={i.carried.bookedDay} todayStr={todayStr} className={navBtnCls} />}
           {i.address && (
             <NavLink address={i.address} className={navBtnCls}>
               <Navigation className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">{t("md_navigate")}</span>
@@ -827,10 +885,12 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           {isStaff && (i.appt || i.jobId) && (
             <AgendaRowMenu
               title={i.title}
-              subline={[i.time ? fmtTime(i.time) : null, i.sub].filter(Boolean).join(" · ") || null}
+              // A carried-over row says its day in full here ("Booked Nov 17"): a bare "Tue" names nothing.
+              subline={[i.carried ? i.span : i.time ? fmtTime(i.time) : null, i.sub].filter(Boolean).join(" · ") || null}
               appt={i.appt}
               jobId={i.jobId}
-              fromDate={day}
+              // A carried-over row's own day is the day it was booked for, not the day it is listed under.
+              fromDate={i.carried?.bookedDay ?? day}
               tz={tz}
               jobs={jobOpts}
               customers={custOpts}
@@ -1172,6 +1232,15 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               )}
             </>
           )}
+          {/* CARRIED OVER, last (cn-v1169): what was booked for a day gone by and is still this
+              person's to do. Under today's own rows, or under the line that says today is empty:
+              an empty day with a job left over from Tuesday is not a day with nothing on it. */}
+          {carriedAgenda.length > 0 && (
+            <>
+              <div className="border-t border-slate-100 bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{t("md_carriedOver")}</div>
+              <ul className="divide-y divide-slate-100">{agendaRows(carriedAgenda, todayStr)}</ul>
+            </>
+          )}
         </Card>
       )}
 
@@ -1201,12 +1270,12 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       {/* A supplier paper filed from the LAST card leaves no "Supplier Bills" line to hold its
           sentence and Undo; they land here instead, until he leaves the page. */}
       <SupplierPaperDoneTrail scope={SUPPLIER_PAPERS_SCOPE} />
-      {(needsYou.now.length > 0 || needsYou.waiting.length > 0) && (
+      {(needsNow.length > 0 || needsYou.waiting.length > 0) && (
         <Card className="mb-4 overflow-hidden" data-tour="needs-you">
           {/* THE BOARD (cn-v1161): the title and its counts, Act Today, the four tiles and the open
               tile's rows are all the list's own; the page hands it the title and its words. */}
           <ActionList
-            items={needsYou.now}
+            items={needsNow}
             people={people}
             todayStr={todayStr}
             tz={tz}

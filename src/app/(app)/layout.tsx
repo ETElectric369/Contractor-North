@@ -301,6 +301,9 @@ export default async function AppLayout({
     id: string;
     gps_in: GeoPoint | null;
     clock_in: string;
+    /** When the row was MADE (the tap) and how: where the fence's clock-in window opens (cn-v1169). */
+    created_at?: string | null;
+    source?: string | null;
     job_id: string | null;
     job: { job_number: string; name: string } | null;
     /** 0288: a Switch Job's piece points at the shift's first entry and says 'live'. */
@@ -308,9 +311,10 @@ export default async function AppLayout({
     split_how?: string | null;
   };
   // Geofence: if the user is on the clock, mount the exit monitor. The clock-in GPS
-  // is the fence anchor when it exists; entries WITHOUT one mount too (My Day and the
-  // job-page clock buttons punch with gps:null, and the timeclock punch can outrun the
-  // iOS permission dialog) — the monitor adopts an anchor from its first good fix near
+  // is the fence anchor when it exists; entries WITHOUT one mount too (every clock-in
+  // door asks the phone for a fix but caps the wait at a few seconds, so a phone that
+  // has not answered yet is punched without one, and the assistant's clock-in never
+  // carries one) — the monitor adopts an anchor from its first good fix near the
   // clock-in. Requiring gps_in here is what silently disabled the geofence for most
   // punches (the 30-hour open shift).
   let openEntry: OpenEntry | null = null;
@@ -323,7 +327,7 @@ export default async function AppLayout({
     try {
       const { data: oe } = await supabase
         .from("time_entries")
-        .select("id, gps_in, clock_in, job_id, split_from, split_how, job:job_id(job_number, name)")
+        .select("id, gps_in, clock_in, created_at, source, job_id, split_from, split_how, job:job_id(job_number, name)")
         .eq("profile_id", user.id)
         .eq("status", "open")
         .maybeSingle();
@@ -470,6 +474,10 @@ export default async function AppLayout({
             entryId={openEntry.id}
             gpsIn={openEntry.gps_in}
             clockInIso={openEntry.clock_in}
+            // When the row was made and how (cn-v1169): a missing anchor's window opens at the tap,
+            // not at a start that was typed or rounded back (timeclock/adopt-window adoptOpensAtMs).
+            madeAtIso={openEntry.created_at ?? null}
+            source={openEntry.source ?? null}
             radiusM={settings.geofence_radius_m}
             // The entry's CURRENT job — a job-less start re-points on a switch, and the monitor
             // must retire the old site's anchor + trip state instead of fencing on it.

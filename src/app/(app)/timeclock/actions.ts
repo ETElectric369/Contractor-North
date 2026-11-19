@@ -44,7 +44,7 @@ import {
   type LunchPart,
 } from "./close-math";
 import { loadShiftChains, type ShiftInfo } from "@/lib/shift-chain";
-import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS } from "./adopt-window";
+import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS, adoptOpensAtMs } from "./adopt-window";
 import { closedPickable, whichJobLabel, type ChoiceJob } from "./which-job-choices";
 import { punchJobLabel, unreadJobLabel, type AppPickSource, type PunchJob } from "./clock-told";
 import { billedPartMoved, claimedMoveRefusal, claimedPersonRefusal, type ClaimHolder, type ClaimIndex } from "./claim-words";
@@ -93,6 +93,11 @@ export type ClockResult = {
    *  sentence naming the job and offers one tap to move it (clock-told: tellAppChose). Never infer
    *  this from job_id being present: a person-picked punch carries one too. */
   jobPick?: PunchJob;
+  /** THE FENCE'S ADOPTION WINDOW IS OVER for this entry (adoptGeofenceAnchor, cn-v1169): a terminal
+   *  refusal, said as a flag so the phone stops asking in any language. The server's window is the
+   *  authority: the phone's own count can be wider (a job picked after clock-in looks like a switch
+   *  to it and leaves no breadcrumb here), and without this it would go on asking once a minute. */
+  windowClosed?: boolean;
 };
 
 /** The shift 0360's overlap refusal names in its DETAIL ("time_entry:<uuid>"), or null. */
@@ -1351,17 +1356,21 @@ export async function clockOutCurrent(input: {
 
 /**
  * Backfill the geofence anchor for the caller's OPEN entry when clock-in couldn't
- * capture GPS — My Day and the job-page clock button punch with gps:null, and the
- * timeclock punch races a short GPS cap that loses to the iOS permission dialog on
- * first use. Without an anchor the geofence was silently dead for those shifts.
+ * capture GPS. Every clock-in door asks the phone for a fix at the tap (the Time Clock,
+ * My Day, the job page and the visit page each cap the wait at a few seconds so the punch
+ * is never held up), and a phone that has not answered inside that cap is punched without
+ * one; the assistant's clock-in never carries one. Without an anchor the geofence was
+ * silently dead for those shifts.
  * Tightly guarded: self-scoped to the caller's own OPEN entry, only while gps_in is
- * still empty, only within 15 minutes of clock-in (a reopen-from-home hours later can
+ * still empty, only within 15 minutes of the clock-in (a reopen-from-home hours later can
  * never become "where the job is"), and only with a usable fix. The capture time is
  * stored alongside the coords so a backfilled anchor is distinguishable from a true
  * clock-in stamp when someone audits the entry.
  *
  * The two adoption windows (clock-in vs after a mid-shift switch) are the SHARED
- * constants in ./adopt-window, imported by the client monitor too so the two can't drift.
+ * constants in ./adopt-window, imported by the client monitor too so the two can't drift,
+ * and so is WHERE the clock-in window opens (adoptOpensAtMs, cn-v1169): at the tap, which
+ * is the row's own created_at, and not at a start that was typed or rounded back.
  */
 export async function adoptGeofenceAnchor(entryId: string, gps: GeoPoint): Promise<ClockResult> {
   const supabase = await createClient();
@@ -1381,7 +1390,7 @@ export async function adoptGeofenceAnchor(entryId: string, gps: GeoPoint): Promi
 
   const { data: open } = await supabase
     .from("time_entries")
-    .select("id, clock_in, gps_in, notes, split_how")
+    .select("id, clock_in, created_at, source, gps_in, notes, split_how")
     .eq("id", entryId)
     .eq("profile_id", user.id)
     .eq("status", "open")
@@ -1399,14 +1408,25 @@ export async function adoptGeofenceAnchor(entryId: string, gps: GeoPoint): Promi
   // only for a re-point). So a live piece is itself the "after a switch" case, timed from its own
   // clock-in; before this, every cut switch got the 15-minute window and a switch with no fix (every
   // Nort switch) left the fence off for the rest of the day.
+  //
+  // THE CLOCK-IN WINDOW OPENS AT THE TAP (cn-v1169, adoptOpensAtMs): a start typed or rounded back
+  // is when the work began, not when the phone was in the person's hand, and counted from it the
+  // window could be over before the row existed. Which of the two windows applies is still read
+  // from the start, as it was; only where the clock-in one opens moved.
   const ciMs = Date.parse((open as { clock_in: string }).clock_in);
+  const opensMs = adoptOpensAtMs({
+    clockInMs: ciMs,
+    madeAtMs: Date.parse(String((open as { created_at?: string | null }).created_at ?? "")),
+    source: (open as { source?: string | null }).source ?? null,
+  });
   const swMs = lastSwitchMs((open as { notes: string | null }).notes);
   const livePiece = (open as { split_how?: string | null }).split_how === "live";
-  const openedAt = Math.max(isNaN(ciMs) ? 0 : ciMs, swMs ?? 0);
+  const openedAt = Math.max(opensMs, swMs ?? 0);
   const windowMs =
     livePiece || (swMs != null && swMs >= (isNaN(ciMs) ? 0 : ciMs)) ? ADOPT_AFTER_SWITCH_MS : ADOPT_AFTER_CLOCK_IN_MS;
   if (!openedAt || Date.now() - openedAt > windowMs) {
-    return { ok: false, error: t("cs_tooLongToBackfill") };
+    // Terminal, and said as a flag: the phone's monitor stops asking on it (ClockResult.windowClosed).
+    return { ok: false, error: t("cs_tooLongToBackfill"), windowClosed: true };
   }
 
   const { data: anchored, error } = await supabase

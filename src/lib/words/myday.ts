@@ -13,7 +13,7 @@ import type { WordCatalog } from "./types";
  */
 export const words: WordCatalog = {
   prefix: "md_",
-  files: ["src/app/(app)/planner/page.tsx", "src/app/(app)/planner/now-card.tsx", "src/app/(app)/planner/now-tasks.tsx", "src/app/(app)/planner/your-list.tsx"],
+  files: ["src/app/(app)/planner/page.tsx", "src/app/(app)/planner/now-card.tsx", "src/app/(app)/planner/now-tasks.tsx", "src/app/(app)/planner/your-list.tsx", "src/app/(app)/planner/do-today-button.tsx"],
   sameInBoth: [],
   en: {
     // ── the page ──
@@ -50,6 +50,16 @@ export const words: WordCatalog = {
     md_earlierToday: "Earlier today",
     md_next: "Next",
     md_later: "Later",
+    // ── carried over (cn-v1169): a job the reader is on, booked for a day that went by unworked ──
+    md_carriedOver: "Carried over",
+    md_bookedDay: "Booked {day}",
+    md_doToday: "Do Today",
+    md_doingToday: "Moving…",
+    md_doTodayTitle: "Move this job's day to today",
+    md_movedToToday: "Moved to today.",
+    md_doTodayDidntGo: "That didn't go through, so nothing moved. Try again.",
+    md_doTodayLinkOut: "A date-pick link is out to the customer for this job. Moving the job to today withdraws that link.",
+    md_moveAndWithdraw: "Move It and Withdraw the Link",
     md_needsYou: "Needs You",
     md_nothingNeedsYou: "Nothing needs you right now.",
     // ── the Now card ──
@@ -198,6 +208,15 @@ export const words: WordCatalog = {
     md_earlierToday: "Más temprano hoy",
     md_next: "Siguiente",
     md_later: "Más tarde",
+    md_carriedOver: "De días anteriores",
+    md_bookedDay: "Agendado el {day}",
+    md_doToday: "Hacer Hoy",
+    md_doingToday: "Moviendo…",
+    md_doTodayTitle: "Mueve el día de este trabajo a hoy",
+    md_movedToToday: "Se movió a hoy.",
+    md_doTodayDidntGo: "No se pudo, así que no se movió nada. Intenta de nuevo.",
+    md_doTodayLinkOut: "El cliente tiene un enlace para elegir fecha de este trabajo. Mover el trabajo a hoy retira ese enlace.",
+    md_moveAndWithdraw: "Mover y Retirar el Enlace",
     md_needsYou: "Te Necesita",
     md_nothingNeedsYou: "Nada te necesita ahora mismo.",
     // ── the Now card ──

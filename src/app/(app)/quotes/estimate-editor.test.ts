@@ -130,19 +130,22 @@ describe("birth without litter", () => {
 });
 
 describe("the saved page's doors, on the editor", () => {
-  it("the header: the number, the status, the type, share, the title; the verbs: Email, the status select, Duplicate, Revise (sent/accepted), the ⋯ menu", () => {
+  it("the header: the number, the status, the type, share, the title; the verbs: Email, the status select, Duplicate, the ⋯ menu; and no Revise (it is drawn inside the lock notice alone)", () => {
     const html = saved({ status: "sent", title: "Larkspur panel" }, [task]);
     const t = text(html);
     expect(t).toContain("E-001");
     expect(t).toContain("sent");
     expect(t).toContain("Larkspur panel");
     expect(t).toContain("Duplicate");
-    expect(t).toContain("Revise");
+    // REVISE IS OFF THE HEADER (cn-v1169): it was drawn here for a sent or an accepted estimate. It is
+    // drawn in one place now, inside the notice of an accepted estimate that a signed contract or a
+    // billed scheduled payment has locked (quotes/revise-door.test.tsx renders every state).
+    expect(t).not.toContain("Revise");
     expect(html).toContain('aria-label="Share"');
     expect(html).toContain('aria-label="Actions"');
     // The status select offers the statuses, sent chosen.
     expect(html).toMatch(/<option value="sent" selected="">/);
-    // A draft has no Revise door.
+    // A draft never had the door, and still has none.
     expect(text(saved({ status: "draft" }, [task]))).not.toContain("Revise");
   });
 

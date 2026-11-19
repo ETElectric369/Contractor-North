@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Loader2, MapPin } from "lucide-react";
 import { adoptGeofenceAnchor, geoClockOut, notifyGeofenceExit } from "@/app/(app)/timeclock/actions";
-import { adoptWindowMs } from "@/app/(app)/timeclock/adopt-window";
+import { adoptOpensAtMs, adoptTick, adoptWindowMs } from "@/app/(app)/timeclock/adopt-window";
 import { ClockStartPicker } from "@/app/(app)/timeclock/clock-start-picker";
 import { isLongOpenShift, pickWithinCeiling, stopWindow } from "@/lib/long-shift";
 import { splitClock } from "@/lib/split-preview";
@@ -288,10 +288,13 @@ export function shouldPushExit(s: { sentFor: string | null; entryId: string; alr
  * Layered, honest-within-web-physics design — an iOS PWA gets NO background
  * geolocation, so everything here runs while the app is foregrounded:
  *
- *  1. ANCHOR — the entry's clock-in GPS. When clock-in couldn't capture one (My Day /
- *     job-page punches, a punch that outran the iOS permission dialog), the first good
- *     fix within 15 min of clock-in is adopted and persisted (adoptGeofenceAnchor), so
- *     the fence works for EVERY clock-in surface, not just the GPS-stamped one.
+ *  1. ANCHOR — the entry's clock-in GPS. When clock-in couldn't capture one (a phone that
+ *     did not answer inside the punch's few-second cap, a punch that outran the iOS
+ *     permission dialog, the assistant's clock-in), the first good fix within 15 min of
+ *     the clock-in is adopted and persisted (adoptGeofenceAnchor), so the fence works for
+ *     EVERY clock-in, not just the GPS-stamped one. The 15 minutes count from the TAP
+ *     (the row's made-at time), not from a start that was typed or rounded back, and
+ *     while they run the phone is asked again once a minute (cn-v1169).
  *  2. LIVE WATCH — while the app is open, watchPosition tracks the fence. Confirmed
  *     at-site → outside past the grace window ⇒ the prompt sheet opens. If it sits
  *     unanswered 5 min with GPS still outside, the entry closes at the time they were
@@ -311,6 +314,8 @@ export function GeofenceMonitor({
   entryId,
   gpsIn,
   clockInIso,
+  madeAtIso = null,
+  source = null,
   radiusM,
   graceMin = 4,
   jobLabel: jobLabelProp,
@@ -323,6 +328,12 @@ export function GeofenceMonitor({
   entryId: string;
   gpsIn: GeoPoint | null;
   clockInIso: string;
+  /** When the entry's row was MADE (the tap) and how it was made (time_entries.source). A missing
+   *  anchor's clock-in window opens at the tap, not at a start that was typed or rounded back, except
+   *  for an offline punch, whose row is made wherever the phone found a signal again (cn-v1169,
+   *  adoptOpensAtMs). Left out, the window opens at the start, as it did. */
+  madeAtIso?: string | null;
+  source?: string | null;
   radiusM: number;
   graceMin?: number;
   jobLabel?: string;
@@ -808,8 +819,51 @@ export function GeofenceMonitor({
     let cancelled = false;
     let inFlightStamp = 0; // this effect's not-yet-finished check's throttle stamp
 
+    /**
+     * A MISSING ANCHOR'S WINDOW: where it opens and how long it runs. One reading for the check and
+     * for the timer below.
+     *
+     * A mid-shift switch opened this trip iff tripStart is AFTER clock-in (a plain clock-in leaves
+     * tripStart == clock-in). Switched ⇒ the wider 45-min window so a switch-cleared anchor can
+     * actually be re-armed after the drive to the new site — the client used to cap every adoption
+     * at 15 min, making the server's post-switch window dead code.
+     *
+     * SINCE 0288 A CUT SWITCH IS A NEW ENTRY (audit v994 SW2): the layout remounts this monitor per
+     * entry, so tripStart equals the new piece's clock-in and the test above is never true. The
+     * piece says it began at a switch (startedBySwitch), which is what the server reads too.
+     *
+     * THE CLOCK-IN WINDOW OPENS AT THE TAP (cn-v1169, adoptOpensAtMs, the server's own rule): the
+     * owner's clock with a start typed eighty-one minutes back had its fifteen minutes spent before
+     * the entry existed. tripStart itself is NOT moved to the tap: `switched` reads it against the
+     * start, and a tap later than a typed start would then pass for a switch and claim the 45
+     * minutes the server would refuse.
+     */
+    const adoptWindow = () => {
+      const ciMs = Date.parse(clockInIso);
+      const switched = startedBySwitch || (!isNaN(ciMs) && tripStartMsRef.current > ciMs);
+      const opensMs = adoptOpensAtMs({ clockInMs: ciMs, madeAtMs: madeAtIso ? Date.parse(madeAtIso) : null, source });
+      return { fromMs: Math.max(opensMs, tripStartMsRef.current || 0), windowMs: adoptWindowMs(switched) };
+    };
+    /** NOTHING SILENT: the window closed with no anchor, so the fence is off for this clock-in, and
+     *  that is said (unless nothing is known about when the window opened: then there is nothing to say). */
+    const windowClosed = (known = true) => {
+      trace("fence window closed");
+      if (known && !cancelled) setAnchorLost(true);
+    };
+    /**
+     * THE SERVER'S WINDOW IS THE AUTHORITY (cn-v1169, skeptic #72). This phone's count can be WIDER
+     * than the server's: a job picked on the Which Job sheet after clock-in, or an office move of the
+     * punch, changes the job on the SAME entry, which reads here as a switch (45 minutes) and leaves
+     * no breadcrumb for the server (15 minutes from the tap). Asked once a minute, the phone would
+     * then read its location and be refused some thirty times and say the fence is off half an hour
+     * late. So the server's refusal carries a flag (ClockResult.windowClosed): on it the line is said
+     * at once, and neither the check nor the timer asks again for this effect's life (an anchor that
+     * arrives, or a new trip, re-runs the effect and starts clean).
+     */
+    let serverClosed = false;
+
     const check = async () => {
-      if (cancelled || doneRef.current) return;
+      if (cancelled || doneRef.current || serverClosed) return;
       if (typeof document === "undefined" || document.visibilityState !== "visible") return;
       if (phaseRef.current !== "idle") return; // sheet already up (or saving)
       const now = Date.now();
@@ -833,22 +887,9 @@ export function GeofenceMonitor({
         // only near clock-in. Past the window the fence stays honestly quiet for this
         // shift — the evening sweep still flags a forgotten entry.
         if (typeof anchorLat !== "number" || typeof anchorLng !== "number") {
-          const ciMs = Date.parse(clockInIso);
-          // A mid-shift switch opened this trip iff tripStart is AFTER clock-in (a plain
-          // clock-in leaves tripStart == clock-in). Switched ⇒ the wider 45-min window so a
-          // switch-cleared anchor can actually be re-armed after the drive to the new site —
-          // the client used to cap every adoption at 15 min, making the server's post-switch
-          // window dead code.
-          //
-          // SINCE 0288 A CUT SWITCH IS A NEW ENTRY (audit v994 SW2): the layout remounts this monitor
-          // per entry, so tripStart equals the new piece's clock-in and the test above is never true.
-          // The piece says it began at a switch (startedBySwitch), which is what the server reads too.
-          const switched = startedBySwitch || (!isNaN(ciMs) && tripStartMsRef.current > ciMs);
-          const fromMs = Math.max(isNaN(ciMs) ? 0 : ciMs, tripStartMsRef.current || 0);
-          if (!fromMs || now - fromMs > adoptWindowMs(switched)) {
-            // NOTHING SILENT: the window closed with no anchor, so the fence is off for this shift.
-            trace("fence window closed");
-            if (fromMs && !cancelled) setAnchorLost(true);
+          const { fromMs, windowMs } = adoptWindow();
+          if (!fromMs || now - fromMs > windowMs) {
+            windowClosed(!!fromMs);
             return;
           }
           const r = await getPosition({ enableHighAccuracy: true, timeout: 4_000, maximumAge: 30_000 });
@@ -856,8 +897,13 @@ export function GeofenceMonitor({
           if (cancelled || doneRef.current || r.status !== "ok" || (r.accuracy ?? 0) > 150) return;
           const fix = { lat: r.coords.lat, lng: r.coords.lng, accuracy: r.accuracy };
           const res = await adoptGeofenceAnchor(entryId, fix);
-          trace("fence adopt", res.ok ? "ok" : "refused");
-          if (!cancelled && res.ok) setAnchor(fix); // arms the live watch
+          trace("fence adopt", res.ok ? "ok" : res.windowClosed ? "window closed" : "refused");
+          if (cancelled) return;
+          if (res.ok) setAnchor(fix); // arms the live watch
+          else if (res.windowClosed) {
+            serverClosed = true;
+            windowClosed();
+          }
           return;
         }
 
@@ -893,8 +939,39 @@ export function GeofenceMonitor({
     // Mount IS a wake — iOS discards the suspended page, so reopening the app lands
     // here with fresh state (this is the moment that catches a drove-off shift).
     void check();
+
+    // WHILE THERE IS NO ANCHOR AND ITS WINDOW IS OPEN, THE PHONE IS ASKED AGAIN (cn-v1169; the
+    // decision is adoptTick's, pure and tested). A check ran only on a wake, so a first read that
+    // came back empty was never repeated for someone who left the app on one page, and a window that
+    // then closed went unsaid until the next wake. The timer asks once a throttle's length (never
+    // inside a minute of another check), and when the window closes it says so once, through the
+    // same gate the check uses (a phone whose location cannot be read has its own line, and a wake
+    // is not a gesture), then stops. An anchor that arrives re-runs this effect, which clears it.
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    const tick = () => {
+      retry = null;
+      if (cancelled || doneRef.current || serverClosed) return;
+      const w = adoptWindow();
+      const next = adoptTick({ nowMs: Date.now(), fromMs: w.fromMs, windowMs: w.windowMs, lastCheckMs: lastWakeCheckRef.current, throttleMs: WAKE_THROTTLE_MS });
+      if (next.kind === "stop") return;
+      if (next.kind === "closed") {
+        void mayReadLocation().then((may) => {
+          if (may && !cancelled && !doneRef.current) windowClosed();
+        });
+        return;
+      }
+      if (next.check) void check();
+      retry = setTimeout(tick, next.againInMs);
+    };
+    if (typeof anchorLat !== "number" || typeof anchorLng !== "number") {
+      const w = adoptWindow();
+      // The mount check above is this minute's ask, so the first tick only waits.
+      const first = adoptTick({ nowMs: Date.now(), fromMs: w.fromMs, windowMs: w.windowMs, lastCheckMs: Date.now(), throttleMs: WAKE_THROTTLE_MS });
+      if (first.kind === "wait") retry = setTimeout(tick, first.againInMs);
+    }
     return () => {
       cancelled = true;
+      if (retry) clearTimeout(retry);
       // A check dying mid-fix (effect re-run: remount, anchor arrival, entry change)
       // must give its throttle slot back SYNCHRONOUSLY — before the successor effect
       // runs — or the successor's mount check is silently muted for 60s.
@@ -902,7 +979,7 @@ export function GeofenceMonitor({
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("focus", onFocus);
     };
-  }, [tripKey, anchorLat, anchorLng, radiusM, clockInIso, startedBySwitch]);
+  }, [tripKey, anchorLat, anchorLng, radiusM, clockInIso, startedBySwitch, madeAtIso, source]);
 
   // Route changes are wakes too (throttled inside check).
   useEffect(() => {

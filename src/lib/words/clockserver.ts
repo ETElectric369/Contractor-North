@@ -214,6 +214,7 @@ export const words: WordCatalog = {
     cs_whereYouWorkedLast: "Where you worked last",
     cs_onTodaysSchedule: "On today's schedule",
     cs_onHoldWhy: "On hold: picking it takes it off hold",
+    cs_bookedDay: "Booked {day}",
     // How far a nearby job is (lib/timeclock/nearest-job distanceWords): feet and miles in English.
     cs_distNear: "{n} ft away",
     cs_distFar: "{n} mi away",
@@ -470,6 +471,7 @@ export const words: WordCatalog = {
     cs_whereYouWorkedLast: "Donde trabajaste la última vez",
     cs_onTodaysSchedule: "En el calendario de hoy",
     cs_onHoldWhy: "En pausa: elegirlo lo saca de pausa",
+    cs_bookedDay: "Agendado el {day}",
     cs_distNear: "a {n} m",
     cs_distFar: "a {n} km",
     cs_punchGoneOfficeTimecards: "Esa marcación ya no está. La oficina puede verla en Tarjetas de Tiempo.",

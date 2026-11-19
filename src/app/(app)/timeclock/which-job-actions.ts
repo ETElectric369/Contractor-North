@@ -11,8 +11,10 @@ import { callerLang } from "@/lib/lang-of";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { jobsNearFix } from "@/lib/timeclock/job-coordinates";
 import { reportError } from "@/lib/observe";
+import { loadCarriedOver } from "@/lib/schedule/carried-over";
 import {
   LAST_JOB_LOOKBACK_MS,
+  WHICH_JOB_CARRIED_COLUMNS,
   WHICH_JOB_COLUMNS,
   choicesUnavailable,
   closedPickable,
@@ -67,8 +69,9 @@ export async function whichJobChoices(entryId: string, fromJobId?: string | null
   const codesOn = settings.timeclock_job_codes;
   const { todayStr, dayStart, dayEnd } = todayBoundsInTz(tz);
 
-  // Four reads at once: the job he punched on last (three days back), today's schedule segments,
-  // the jobs in progress, and the jobs whose own window reaches today.
+  // Reads at once: the job he punched on last (three days back), today's schedule segments, the jobs
+  // in progress, and the jobs whose own window reaches today (the near and the carried-over reads
+  // ride beside them, below).
   //
   // NO CAP ON EITHER JOB LIST (build for millions). My Day learned it first: a .limit on the
   // in-progress read hid the oldest long-running jobs, the very ones a crew is on. The window read
@@ -93,7 +96,16 @@ export async function whichJobChoices(entryId: string, fromJobId?: string | null
     reportError("timeclock.whichJobChoices.near", e);
     return [];
   });
-  const [lastR, segR, goingR, windowR, near] = await Promise.all([
+  // The sixth: HIS OWN jobs carried over (cn-v1169, lib/schedule/carried-over): booked for a day in
+  // the last week that went by unworked. A job that is only Scheduled for a day gone by is in none of
+  // the reads above, and it is exactly the job a crew is standing on the morning after a day slipped.
+  // Like the near read it never sinks the sheet: the loader does not throw, a failure is filed, and
+  // the list is the one without them.
+  const carriedP = loadCarriedOver<ChoiceJob>(supabase, { userId: user.id, todayStr, tz, dayStartIso, columns: WHICH_JOB_CARRIED_COLUMNS }).then((r) => {
+    if (r.error) reportError("timeclock.whichJobChoices.carried", new Error(r.error));
+    return r.rows;
+  });
+  const [lastR, segR, goingR, windowR, near, carried] = await Promise.all([
     supabase
       .from("time_entries")
       .select("job_id, clock_in")
@@ -114,6 +126,7 @@ export async function whichJobChoices(entryId: string, fromJobId?: string | null
       .lt("scheduled_start", dayEnd.toISOString())
       .or(`scheduled_start.gte.${dayStartIso},scheduled_end.gte.${dayStartIso}`),
     nearP,
+    carriedP,
   ]);
   // A MOVE'S PUNCH ALREADY HAS A JOB, so it is not in Hours on No Job and the office is never
   // prompted about it: the line must not promise that they will pick it (which-job-choices).
@@ -127,7 +140,12 @@ export async function whichJobChoices(entryId: string, fromJobId?: string | null
     ? await supabase.from("jobs").select(WHICH_JOB_COLUMNS).in("id", missing).in("status", ACTIVE_JOB_STATUSES)
     : { data: [] };
 
-  const all = [...((goingR.data ?? []) as ChoiceJob[]), ...((windowR.data ?? []) as ChoiceJob[]), ...(((extraR as { data?: unknown }).data ?? []) as ChoiceJob[])];
+  const all = [
+    ...((goingR.data ?? []) as ChoiceJob[]),
+    ...((windowR.data ?? []) as ChoiceJob[]),
+    ...(((extraR as { data?: unknown }).data ?? []) as ChoiceJob[]),
+    ...carried.map((c) => c.job),
+  ];
 
   // A GAP DAY IS NOT A JOB DAY. A job whose window reaches today but has day rows (segments) on
   // other days only is not on today's schedule: its window is just their first-to-last mirror. So
@@ -152,6 +170,7 @@ export async function whichJobChoices(entryId: string, fromJobId?: string | null
     excludeJobId: moving ? entry.job_id : null,
     lang,
     near,
+    carried: carried.map((c) => ({ id: c.job.id, bookedDay: c.bookedDay })),
   });
   return { ok: true, isStaff, jobs };
 }

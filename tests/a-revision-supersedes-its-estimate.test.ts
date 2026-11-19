@@ -75,7 +75,12 @@ describe("the doors", () => {
     expect(fn).toContain("valid_until: revision ? null : quote.valid_until ?? null,");
     // cn-v1132: the door lives on the one editor now; the page only reads the row and mounts it.
     const page = src("src/app/(app)/quotes/estimate-editor.tsx");
-    expect(page).toContain('(status === "sent" || status === "accepted") && <DuplicateQuoteButton id={savedId} revision number={number || null} />');
+    // cn-v1169: Revise left the toolbar ("yes to hiding the revise button inside locked quotes for good
+    // reason"). It is drawn once, under the lock notice's own sentence, on an accepted estimate; an
+    // estimate that is not locked is revised by editing it (quotes/revise-door.test.tsx renders both).
+    expect(page).not.toContain('(status === "sent" || status === "accepted") && <DuplicateQuoteButton');
+    expect(page.split("<DuplicateQuoteButton id={savedId} revision number={number || null} />")).toHaveLength(2);
+    expect(page).toContain('{savedId && status === "accepted" && (\n                      <div className="mt-2 flex flex-wrap items-center gap-2">\n                        <DuplicateQuoteButton id={savedId} revision number={number || null} />');
     expect(page).toContain('t("qe_supersededBy")'); // the caller's words (cn-v1145); the English is the catalog's
     expect(dict("en").qe_supersededBy).toBe("Superseded by {link} — that estimate is the price for this work now.");
     expect(page).toContain('t("qe_revises")');
@@ -111,7 +116,8 @@ describe("the doors", () => {
     expect(create).toContain("revises_quote_id: revises }, { jobId: job.id, outcome: \"won\", orgId: ctx.orgId }"); // the visit behind the original closes too, the company named (S6)
     const status = body(actions, "export async function updateQuoteStatus(");
     expect(status).toContain('if (status === "superseded") return { ok: false as const, error: await ws.say("qs_supersededByAccepting") };');
-    expect(dict("en").qs_supersededByAccepting).toBe("Superseded is set by accepting a revision — Revise this estimate instead.");
+    // cn-v1169: the sentence named Revise as the way, and Revise is no longer on an unlocked estimate.
+    expect(dict("en").qs_supersededByAccepting).toBe("Superseded is set when a revision of an estimate is accepted, never by hand. To retire this estimate, set its status to Declined.");
     expect(status).toContain('ws.say("qs_revisionReplacedChange"');
     expect(dict("en").qs_revisionReplacedChange).toContain("replaced this estimate — change that one instead."); // leaving superseded by hand while the revision stands
     expect(status).toContain('QUOTE_STATUSES.filter((s) => s !== "superseded").join(", ")');

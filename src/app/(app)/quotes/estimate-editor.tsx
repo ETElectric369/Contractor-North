@@ -1065,13 +1065,17 @@ export function EstimateEditor(props: EstimateEditorProps) {
               LAST. PREVIEW STANDS BESIDE SEND AT EVERY STATUS (Erik, 2026-11-10: "a preview button on
               the top bar next to send … so i dont have to search for it"): the estimate as its real
               PDF, the door the ⋯'s Print / PDF row was. This header is drawn only once there is a row,
-              so an estimate nobody has saved offers no Preview. The row wraps; Send stays first. */}
+              so an estimate nobody has saved offers no Preview. The row wraps; Send stays first.
+              NO REVISE HERE (cn-v1169). It stood in this row beside Duplicate on every sent or accepted
+              estimate, two buttons that both make a copy, and the one time it was used in production it
+              retired an estimate nobody meant to retire. An estimate is revised by editing it, and its
+              job follows; Revise is drawn in ONE place now, inside the notice that says the lines are
+              locked (below), which is the one situation where editing is refused. */}
           <div className="flex flex-wrap items-center gap-2">
             <SendButton kind="quote" id={savedId} number={mode.kind === "saved" ? mode.number : null} textReady={catalog.textReady} label={t("qt_btn_send")} />
             <PreviewButton doc="quote" id={savedId} />
             <StatusControl id={savedId} status={status} />
             {(catalog.estimatesOn || lock) && <DuplicateQuoteButton id={savedId} />}
-            {(catalog.estimatesOn || lock) && (status === "sent" || status === "accepted") && <DuplicateQuoteButton id={savedId} revision number={number || null} />}
             {tree && <SectionActionsMenu tree={tree} />}
           </div>
         </div>
@@ -1411,6 +1415,21 @@ export function EstimateEditor(props: EstimateEditorProps) {
                   <li className="mt-3 rounded-lg bg-slate-50/60 px-4 py-3">
                     <div className="text-sm font-medium text-slate-800">{t("qe_theseAreLocked")}</div>
                     <p className="mt-0.5 text-sm text-slate-600">{lock?.reason}</p>
+                    {/* REVISE LIVES HERE AND NOWHERE ELSE (cn-v1169). Erik, 2026-11-19, once it was
+                        explained what the button is for: "yes to hiding the revise button inside locked
+                        quotes for good reason". The sentence above is the server's own refusal, and for
+                        an accepted estimate it ends "Revise it instead": a signed contract or a billed
+                        scheduled payment stands on this price, so the price changes on a new paper that
+                        replaces this one when the customer accepts it. The door is under the words that
+                        send a person to it. The other lock is a superseded estimate's (its revision is
+                        the paper to edit), and that one gets no Revise: the server would refuse it.
+                        Its first tap still makes nothing and says what a revision does (cn-v1168). The
+                        button draws its own panel and its own error line, so the row wraps. */}
+                    {savedId && status === "accepted" && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <DuplicateQuoteButton id={savedId} revision number={number || null} />
+                      </div>
+                    )}
                   </li>
                 </ul>
               ) : (

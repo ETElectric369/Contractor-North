@@ -71,8 +71,7 @@ describe("a saved estimate: Preview beside Send, in the header", () => {
       "SendButton",
       "PreviewButton",
       "StatusControl",
-      "DuplicateQuoteButton",
-      "DuplicateQuoteButton",
+      "DuplicateQuoteButton", // one: Revise left this row for the lock notice (cn-v1169, quotes/revise-door.test.tsx)
       "SectionActionsMenu",
     ]);
     expect(row).toContain('label={t("qt_btn_send")} />\n            <PreviewButton doc="quote" id={savedId} />\n');

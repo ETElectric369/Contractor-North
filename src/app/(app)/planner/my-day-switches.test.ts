@@ -363,13 +363,16 @@ describe("My Day's cards (structural: the page is a server component over the da
 
   it("Needs You is whole (no five-row cut, no Show All), with the Waiting fold under it (Wave 1, NY-list)", () => {
     expect(pageCode).toMatch(
-      /<ActionList\s+items=\{needsYou\.now\}\s+people=\{people\}\s+todayStr=\{todayStr\}\s+tz=\{tz\}\s+leadsOn=\{leadsOn\}\s+isStaff=\{isStaff\}\s+textReady=\{textReady\}/,
+      /<ActionList\s+items=\{needsNow\}\s+people=\{people\}\s+todayStr=\{todayStr\}\s+tz=\{tz\}\s+leadsOn=\{leadsOn\}\s+isStaff=\{isStaff\}\s+textReady=\{textReady\}/,
     );
     expect(pageCode).toContain("<WaitingFold items={needsYou.waiting} />");
     for (const gone of ["slice(0, 5)", "actions=all", "Show All", "visibleActions", "showAllActions"]) expect(pageCode, gone).not.toContain(gone);
     // The card is drawn when either list has something. Its amber pill is gone (cn-v1161): the board's
-    // header says the counts with its marks, and amber means SOON and nothing else.
-    expect(pageCode).toContain("{(needsYou.now.length > 0 || needsYou.waiting.length > 0) && (");
+    // header says the counts with its marks, and amber means SOON and nothing else. The Now list is
+    // the whole list less a job already drawn under Carried Over (cn-v1169: one row per job; the rule
+    // and its tests are lib/schedule/carried-over needsYouWithoutCarried).
+    expect(pageCode).toContain("{(needsNow.length > 0 || needsYou.waiting.length > 0) && (");
+    expect(pageCode).toContain("const needsNow = needsYouWithoutCarried(needsYou.now, ");
     const card = pageCode.slice(pageCode.indexOf('data-tour="needs-you"'), pageCode.indexOf("<WaitingFold items={needsYou.waiting} />"));
     expect(card).toContain("<ActionList");
     expect(card).not.toContain("bg-amber-100");

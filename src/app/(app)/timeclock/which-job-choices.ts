@@ -11,9 +11,13 @@
  *      ("120 ft away"; the owner, 2026-11-04: the clock never asked where he was);
  *   1. the job he last punched on in the past three days, while it is still going;
  *   2. the jobs on today's schedule (anyone's: he may be helping a crewmate);
- *   3. the rest of the jobs in progress, newest first.
- * Nothing else: a job scheduled for another day, or finished, is the office's to pick. A job ON HOLD
- * that lands in 1 or 2 goes LAST instead, its why saying picking it takes it off hold (0366).
+ *   3. HIS OWN jobs carried over (cn-v1169, lib/schedule/carried-over): booked for a day in the last
+ *      week that went by unworked, with nothing ahead of them, each saying the day ("Booked Nov 17").
+ *      The owner's crew, 2026-11-18, stood on a job booked for the day before; it was only Scheduled,
+ *      so it was in none of the groups here and the sheet could not be answered truthfully;
+ *   4. the rest of the jobs in progress, newest first.
+ * Nothing else: any other job scheduled for another day, or finished, is the office's to pick. A job
+ * ON HOLD that lands in 1 or 2 goes LAST instead, its why saying picking it takes it off hold (0366).
  *
  * WHAT A ROW CARRIES: the job's id, the one label the Timeclock uses (codes on: the job's name;
  * codes off: customer · street), and a short reason. Never a price: the read behind it selects no
@@ -23,6 +27,7 @@ import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 import { todayStrInTz } from "@/lib/tz";
 import { fillText, translator, type Lang } from "@/lib/i18n";
+import { shortDay } from "@/lib/come-back-days";
 import { distanceWords } from "@/lib/timeclock/nearest-job";
 
 /**
@@ -54,6 +59,9 @@ export type WhichJobChoices =
 
 /** The columns the sheet's job read selects: labels and schedule, nothing that costs money. */
 export const WHICH_JOB_COLUMNS = "id, job_number, name, address, status, scheduled_start, scheduled_end, created_at, customers(name)";
+/** The same, plus the three the carried-over rule reads (lib/schedule/carried-over): who is on the
+ *  job and whether it is waiting on somebody else. Still labels and schedule, still no money. */
+export const WHICH_JOB_CARRIED_COLUMNS = "id, job_number, name, address, status, scheduled_start, scheduled_end, created_at, customers(name), assigned_to, blocked_on, blocked_since";
 
 /** How far back "the job he last punched on" looks. */
 export const LAST_JOB_LOOKBACK_MS = 3 * 86_400_000;
@@ -138,6 +146,9 @@ export function orderWhichJobChoices(input: {
   /** The jobs near the punch's fix (lib/timeclock/job-coordinates jobsNearFix), nearest first:
    *  they go first, each row's why its distance. Omitted or empty: the order without a fix. */
   near?: readonly { id: string; distanceM: number }[] | null;
+  /** The caller's carried-over jobs and the day each was booked for (lib/schedule/carried-over), in
+   *  that rule's order: after today's schedule, each row's why its day. Their rows ride in `jobs`. */
+  carried?: readonly { id: string; bookedDay: string }[] | null;
 }): WhichJobOption[] {
   const t = translator(input.lang);
   const byId = new Map<string, ChoiceJob>();
@@ -164,6 +175,12 @@ export function orderWhichJobChoices(input: {
     .filter((j) => onToday(j, input.segToday, input.hasSegments, input.todayStr, input.tz))
     .sort((a, b) => String(a.scheduled_start ?? "").localeCompare(String(b.scheduled_start ?? "")));
   for (const j of today) add(j, t("cs_onTodaysSchedule"));
+
+  // Booked for a day gone by and still his to do: offered, with the day, never picked for him.
+  for (const c of input.carried ?? []) {
+    const j = byId.get(c.id);
+    if (j && active(j)) add(j, fillText(t("cs_bookedDay"), { day: shortDay(c.bookedDay, input.lang ?? "en") }));
+  }
 
   const going = all
     .filter((j) => j.status === "in_progress")

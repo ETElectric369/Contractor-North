@@ -25,7 +25,7 @@ vi.mock("../schedule/actions", () => ({ setJobCrew: vi.fn(async () => ({ ok: tru
 
 import { clockIn, clockOut } from "./actions";
 import { putPunchOnJob, whichJobChoices } from "./which-job-actions";
-import { CLOSED_PICK_WINDOW_MS, WHICH_JOB_COLUMNS, closedPickable } from "./which-job-choices";
+import { CLOSED_PICK_WINDOW_MS, WHICH_JOB_CARRIED_COLUMNS, WHICH_JOB_COLUMNS, closedPickable } from "./which-job-choices";
 
 type Q = {
   table: string;
@@ -300,12 +300,53 @@ describe("the jobs the sheet offers", () => {
     expect(has(last, "gte", "clock_in", new Date(NOW - 3 * 86_400_000).toISOString())).toBe(true);
   });
 
+  it("HIS OWN JOB CARRIED OVER (cn-v1169): booked for yesterday, nobody on it, only Scheduled: offered after today's with the day it was booked for", async () => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+    // Friday Sep 25, 2:00 to 4:00 PM Pacific, and he is on its crew. No day rows, no hours, no visit.
+    const slipped = { ...job("slipped", { status: "scheduled", scheduled_start: "2026-09-25T21:00:00Z", scheduled_end: "2026-09-25T23:00:00Z" }), assigned_to: ["user-1"], blocked_on: null, blocked_since: null, job_schedule_segments: [] };
+    const carriedRoute = (worked: unknown[]) => (q: Q): Reply => {
+      if (q.table === "jobs" && q.filters.some((f) => f[0] === "contains")) return { data: [slipped] };
+      if (q.table === "time_entries" && q.filters.some((f) => f[0] === "in" && f[1] === "job_id")) return { data: worked };
+      if (q.table === "appointments") return { data: [] };
+      return route(q);
+    };
+    state.client = fakeSupabase(carriedRoute([]), calls);
+    const r = await whichJobChoices(PUNCH);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.jobs.map((j) => j.id)).toEqual(["last", "window", "seg", "slipped", "newer", "older"]);
+    expect(r.jobs[3]).toEqual({ id: "slipped", label: "slipped site", why: "Booked Sep 25" });
+    // The read is his own crew's jobs, on his own session, for the days before today.
+    const read = calls.find((c) => c.table === "jobs" && c.filters.some((f) => f[0] === "contains"))!;
+    expect(has(read, "contains", "assigned_to", ["user-1"])).toBe(true);
+    expect(has(read, "in", "status", ["to_be_scheduled", "scheduled", "in_progress"])).toBe(true);
+    expect(has(read, "lt", "scheduled_start", "2026-09-26T07:00:00.000Z")).toBe(true);
+
+    // Somebody clocked in on it that Friday (as far as this session can see): it ran as planned, so
+    // it is not carried over and the sheet is the list it was.
+    calls.length = 0;
+    state.client = fakeSupabase(carriedRoute([{ job_id: "slipped", clock_in: "2026-09-25T21:10:00Z" }]), calls);
+    const worked = await whichJobChoices(PUNCH);
+    expect(worked.ok && worked.jobs.map((j) => j.id)).toEqual(["last", "window", "seg", "newer", "older"]);
+  });
+
+  it("the carried-over read never sinks the sheet: when it fails the list is the one without it, and the failure is filed", async () => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+    const { reportError } = await import("@/lib/observe");
+    vi.mocked(reportError).mockClear();
+    state.client = fakeSupabase((q) => (q.table === "jobs" && q.filters.some((f) => f[0] === "contains") ? { error: { message: "timeout" } } : route(q)), calls);
+    const r = await whichJobChoices(PUNCH);
+    expect(r.ok && r.jobs.map((j) => j.id)).toEqual(["last", "window", "seg", "newer", "older"]);
+    expect(vi.mocked(reportError).mock.calls.map((c) => c[0])).toContain("timeclock.whichJobChoices.carried");
+  });
+
   it("reads every job in progress and every job whose own window covers today, with no cap to drop today's job", async () => {
     vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
     state.client = fakeSupabase(route, calls);
     await whichJobChoices(PUNCH);
     const going = calls.find((c) => c.table === "jobs" && has(c, "eq", "status", "in_progress"))!;
-    const window = calls.find((c) => c.table === "jobs" && c.filters.some((f) => f[0] === "lt" && f[1] === "scheduled_start"))!;
+    // (The carried-over read, cn-v1169, also asks for a start before a day: it is the one that names the crew.)
+    const window = calls.find((c) => c.table === "jobs" && c.filters.some((f) => f[0] === "lt" && f[1] === "scheduled_start") && !c.filters.some((f) => f[0] === "contains"))!;
     // A cap on either one once let an org with many jobs lose the oldest long-running job, or
     // today's own job, from the list (My Day's in-progress read carries no cap for the same reason).
     for (const q of [going, window]) expect(q.filters.some((f) => f[0] === "limit")).toBe(false);
@@ -321,8 +362,13 @@ describe("the jobs the sheet offers", () => {
     const r = await whichJobChoices(PUNCH);
     const jobReads = calls.filter((c) => c.table === "jobs");
     expect(jobReads.length).toBeGreaterThan(0);
-    for (const q of jobReads) expect(q.cols).toBe(WHICH_JOB_COLUMNS);
-    expect(WHICH_JOB_COLUMNS).not.toMatch(/price|rate|amount|total|cost|budget|contract|markup|paid|bill/i);
+    // One read is the caller's own carried-over jobs (cn-v1169): the same columns, plus who is on the
+    // job and whether it waits on somebody, and its day rows. Every other read is the sheet's own list.
+    const carriedCols = `${WHICH_JOB_CARRIED_COLUMNS}, job_schedule_segments(start_date, end_date)`;
+    expect(WHICH_JOB_CARRIED_COLUMNS).toBe(`${WHICH_JOB_COLUMNS}, assigned_to, blocked_on, blocked_since`);
+    expect(jobReads.filter((q) => q.cols === carriedCols)).toHaveLength(1);
+    for (const q of jobReads) expect([WHICH_JOB_COLUMNS, carriedCols]).toContain(q.cols);
+    for (const cols of [WHICH_JOB_COLUMNS, carriedCols]) expect(cols).not.toMatch(/price|rate|amount|total|cost|budget|contract|markup|paid|bill/i);
     expect(JSON.stringify(r)).not.toMatch(/\$|price|rate|amount|total/i);
   });
 

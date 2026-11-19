@@ -47,7 +47,7 @@ export const SCREENS: Screen[] = [
       { name: "now-card", say: "the Now card: the clock and the job they're on" },
       { name: "tasks-reminders", say: "Tasks & Reminders" },
       { name: "needs-you", say: "Needs You (only while something needs them)" },
-      { name: "agenda", say: "the day (Earlier / Next / Later) or a tech's week" },
+      { name: "agenda", say: "the day (Earlier / Next / Later, then Carried Over: their jobs booked for a day gone by and not worked) or a tech's week" },
     ],
   },
   {

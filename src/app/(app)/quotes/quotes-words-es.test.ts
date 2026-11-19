@@ -126,7 +126,7 @@ describe("a Spanish-reading office hears the estimates' refusals in Spanish", ()
 
   it("the duplicate cleanup and the status door", async () => {
     expect(await resolveDuplicateDrafts("q1", ["q1"])).toEqual({ ok: false, error: "No hay nada que eliminar." });
-    expect(await updateQuoteStatus("q1", "superseded")).toEqual({ ok: false, error: "Reemplazado se pone al aceptar una revisión — usa Crear Revisión en este presupuesto en su lugar." });
+    expect(await updateQuoteStatus("q1", "superseded")).toEqual({ ok: false, error: "Reemplazado se pone cuando se acepta una revisión de un presupuesto, nunca a mano. Para retirar este presupuesto, pon su estado en Rechazado." });
   });
 
   it("the estimator's gate: a blank scope and the AI ceiling, in the language the gate read once", async () => {

@@ -79,7 +79,8 @@ describe("the row's ⋯", () => {
 
   it("a job's Move starts from the ROW's day: today in the day view, that day in the week view", () => {
     expect(code).toContain("const agendaRows = (items: Agenda[], day: string) =>");
-    expect(code).toContain("fromDate={day}");
+    // A carried-over row (cn-v1169) is listed under today but its own day is the day it was booked for.
+    expect(code).toContain("fromDate={i.carried?.bookedDay ?? day}");
     expect(code).toContain("{agendaRows(d.items, d.dayStr)}");
     for (const g of ["earlierAgenda", "nextAgenda", "laterAgenda"]) expect(code).toContain(`{agendaRows(${g}, todayStr)}`);
     expect(code).not.toContain("fromDate={todayStr}");

@@ -60,9 +60,10 @@ interface JobOption {
 // silently forever after. Don't add awaits ahead of this call.
 //
 // `capMs` caps how long the PUNCH waits on GPS. The clock-in punch passes a short cap so the field crew
-// isn't held hostage by an 8s highAccuracy fix on bad reception (the other two clock-in surfaces punch
-// instantly with no GPS at all) — if the fix lands inside the window it's stamped, otherwise we punch
-// now and warn that the punch isn't location-stamped. Clock-out caps too (3s) — the button used to sit
+// isn't held hostage by an 8s highAccuracy fix on bad reception (My Day's, the job page's and the visit
+// page's clock-ins ask too, each with a short cap of its own) — if the fix lands inside the window it's
+// stamped, otherwise we punch now and warn that the punch isn't location-stamped, and the site fence
+// asks again for the next fifteen minutes (geofence-monitor, timeclock/adopt-window). Clock-out caps too (3s) — the button used to sit
 // disabled and silent for the full 8s fix.
 async function getGps(capMs?: number): Promise<GeoPoint | null> {
   // NEVER REJECTS (v800). Every caller awaits this OUTSIDE its try — so a rejected geolocation
