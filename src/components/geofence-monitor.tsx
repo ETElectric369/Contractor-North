@@ -61,6 +61,7 @@ export function GeofenceIdleLine({
   onTurnOn,
   canOpenSettings = false,
   onOpenSettings,
+  onGotIt,
 }: {
   watchOff: boolean;
   waitingGrant: boolean;
@@ -74,6 +75,8 @@ export function GeofenceIdleLine({
   /** The shell has GeofencePlugin.openSettings (native-geofence canOpenLocationSettings). */
   canOpenSettings?: boolean;
   onOpenSettings?: () => void;
+  /** Puts the lost-anchor line away for this clock-in (2026-11-18). Without it the words stand alone. */
+  onGotIt?: () => void;
 }) {
   // The person's language (cn-v1138): every line is a gf_ key; outside a provider (a test) it is English.
   const t = translator(useLang());
@@ -115,9 +118,46 @@ export function GeofenceIdleLine({
     if (fenceDark === "unavailable") return <div className={line}>{words}</div>;
     return withSettings(words);
   }
-  if (anchorLost && !anchorKnown) return <div className={line}>{fillText(t("gf_couldntGetLocationAt"), { label: jobLabel })}</div>;
+  if (anchorLost && !anchorKnown) {
+    const words = fillText(t("gf_couldntGetLocationAt"), { label: jobLabel });
+    // GOT IT (2026-11-18): this line is about ONE clock-in (its anchor window closed), there is
+    // nothing on the phone to turn on for it, and it stood for the whole shift. It is said until the
+    // person says they read it; the tap puts it away for this entry, and the next entry says its own.
+    if (!onGotIt) return <div className={line}>{words}</div>;
+    return (
+      <div className={line}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span>{words}</span>
+          <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={onGotIt}>
+            {t("cs_gotIt")}
+          </Button>
+        </div>
+      </div>
+    );
+  }
   return null;
 }
+
+/**
+ * WHERE THE IDLE LINE IS DRAWN: a strip in the page's own column, under the top bar (2026-11-18).
+ *
+ * The line above is an ordinary block. From 2026-08-18 the monitor was mounted as a child of the
+ * shell's ROOT, which is a flex ROW (the dock beside the page's column), so the line was laid out
+ * as a third COLUMN: stretched to the full height of the screen and as wide as its sentence. On a
+ * phone that is every pixel but the dock. Every sentence belongs to a state a set-up phone is rarely
+ * in (location off, not asked yet, While Using, a phone that cannot watch regions, no anchor), which
+ * is how it stood unseen for three months. Some of them end at a button; the lost-anchor one never
+ * does and lasts the shift, and on 2026-11-18 it covered the owner's phone from his clock-in on.
+ * Nothing had crashed: the page was under it.
+ *
+ * So the layout mounts the monitor INSIDE the column, above <main> (tests/fence-line-in-the-column
+ * pins that), and the line sits in this strip: the page's own gutters and the page's own tint (the
+ * same wash <main> wears, so it reads as the top of the page and not a band under the bar), never
+ * printed, and no box at all while there is no line (`empty:hidden`, so an idle fence costs the page
+ * no pixel). The sheet the monitor draws when it has a question is `position: fixed` and does not
+ * care where it is mounted.
+ */
+export const IDLE_STRIP = "no-print bg-slate-50/70 px-4 pt-3 empty:hidden shell:px-6";
 
 /** Great-circle distance in meters. */
 function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -165,6 +205,24 @@ function setSnooze(entryId: string, until: number) {
     localStorage.setItem(SNOOZE_KEY, JSON.stringify({ entryId, until }));
   } catch {
     /* private mode etc. — snooze just won't survive a reload */
+  }
+}
+
+// "Got It" on the lost-anchor line survives the reload for the same reason, and names ONE entry:
+// the next clock-in says its own line.
+const LOST_SEEN_KEY = "cn-geofence-lost-seen";
+export function lostSeenFor(entryId: string): boolean {
+  try {
+    return localStorage.getItem(LOST_SEEN_KEY) === entryId;
+  } catch {
+    return false;
+  }
+}
+export function markLostSeen(entryId: string) {
+  try {
+    localStorage.setItem(LOST_SEEN_KEY, entryId);
+  } catch {
+    /* private mode etc. — the line just comes back after a reload */
   }
 }
 
@@ -369,6 +427,9 @@ export function GeofenceMonitor({
   /** The shell has the Open Settings door (2026-11-16); read after mount, so the first render is the server's. */
   const [canSettings, setCanSettings] = useState(false);
   useEffect(() => setCanSettings(canOpenLocationSettings()), []);
+  /** He tapped Got It on the lost-anchor line for THIS entry (read after mount, kept on the phone). */
+  const [lostSeen, setLostSeen] = useState(false);
+  useEffect(() => setLostSeen(lostSeenFor(entryId)), [entryId]);
 
   // The fence anchor. Depend on PRIMITIVE lat/lng everywhere — the layout re-renders on
   // every navigation and hands us a fresh gpsIn object ref, which would otherwise tear
@@ -935,19 +996,25 @@ export function GeofenceMonitor({
 
   if (phase === "idle")
     return (
-      <GeofenceIdleLine
-        watchOff={watchOff}
-        waitingGrant={waitingGrant}
-        grantBusy={grantBusy}
-        grantNote={grantNote}
-        fenceDark={fenceDark}
-        anchorLost={anchorLost}
-        anchorKnown={typeof anchorLat === "number"}
-        jobLabel={jobLabel}
-        onTurnOn={turnOnLocation}
-        canOpenSettings={canSettings}
-        onOpenSettings={() => void openLocationSettings()}
-      />
+      <div className={IDLE_STRIP}>
+        <GeofenceIdleLine
+          watchOff={watchOff}
+          waitingGrant={waitingGrant}
+          grantBusy={grantBusy}
+          grantNote={grantNote}
+          fenceDark={fenceDark}
+          anchorLost={anchorLost && !lostSeen}
+          anchorKnown={typeof anchorLat === "number"}
+          jobLabel={jobLabel}
+          onTurnOn={turnOnLocation}
+          canOpenSettings={canSettings}
+          onOpenSettings={() => void openLocationSettings()}
+          onGotIt={() => {
+            markLostSeen(entryId);
+            setLostSeen(true);
+          }}
+        />
+      </div>
     );
 
   const closedTime = closedAt ? splitClock(closedAt, tz) : "";

@@ -455,6 +455,34 @@ export default async function AppLayout({
             {graceLeft} more day{graceLeft === 1 ? "" : "s"}.
           </div>
         )}
+        {/* THE SITE FENCE, while an entry is open. Mounted HERE, in the column and above <main>, because
+            what it says while nothing is happening is one line in the flow (location is off, turn it
+            on, set it to Always, or "I couldn't get a location at this job"), and in the column that
+            line is a strip under the top bar. It was mounted on the root row from 2026-08-18 and the
+            line was laid out there as a full-height column: on a phone it covered the whole page
+            (2026-11-18, the owner's phone, all afternoon). The sheet it opens is `position: fixed`
+            and is the same wherever this sits. tests/fence-line-in-the-column pins the place. */}
+        {openEntry && (
+          <GeofenceMonitor
+            // A Switch Job closes the running entry and opens the next one (0288): a new entry is a
+            // new fence, so the monitor starts fresh instead of carrying the old site's trip state.
+            key={openEntry.id}
+            entryId={openEntry.id}
+            gpsIn={openEntry.gps_in}
+            clockInIso={openEntry.clock_in}
+            radiusM={settings.geofence_radius_m}
+            // The entry's CURRENT job — a job-less start re-points on a switch, and the monitor
+            // must retire the old site's anchor + trip state instead of fencing on it.
+            jobId={openEntry.job_id ?? null}
+            jobLabel={openEntry.job ? jobLabel(openEntry.job) : "the job site"}
+            // The piece began at a Switch Job (0288 cut): its anchor window is the wider post-switch
+            // one (audit v994 SW2), and "long" counts from the shift's first piece (SW1).
+            startedBySwitch={openEntry.split_how === "live"}
+            shiftStartIso={openShiftStart}
+            tz={tz}
+            notify={!isStaff}
+          />
+        )}
         {/* `turn-host`: on a screen declared in lib/screens-that-turn.ts, this is the rectangle of
             glass BETWEEN the chrome — and when the phone is turned sideways it is the frame the page
             is drawn into a quarter turn. The top bar above and the dock below are not transformed at
@@ -530,27 +558,10 @@ export default async function AppLayout({
       <Suspense fallback={null}>
         <OrgPlaceBiasSlot org={org} />
       </Suspense>
-      {openEntry && (
-        <GeofenceMonitor
-          // A Switch Job closes the running entry and opens the next one (0288): a new entry is a
-          // new fence, so the monitor starts fresh instead of carrying the old site's trip state.
-          key={openEntry.id}
-          entryId={openEntry.id}
-          gpsIn={openEntry.gps_in}
-          clockInIso={openEntry.clock_in}
-          radiusM={settings.geofence_radius_m}
-          // The entry's CURRENT job — a job-less start re-points on a switch, and the monitor
-          // must retire the old site's anchor + trip state instead of fencing on it.
-          jobId={openEntry.job_id ?? null}
-          jobLabel={openEntry.job ? jobLabel(openEntry.job) : "the job site"}
-          // The piece began at a Switch Job (0288 cut): its anchor window is the wider post-switch
-          // one (audit v994 SW2), and "long" counts from the shift's first piece (SW1).
-          startedBySwitch={openEntry.split_how === "live"}
-          shiftStartIso={openShiftStart}
-          tz={tz}
-          notify={!isStaff}
-        />
-      )}
+      {/* THE SITE FENCE's monitor is mounted in the page's column, above <main>: see there. THIS ELEMENT
+          IS A FLEX ROW (the dock beside the column), so anything mounted here that draws a box in the
+          flow is laid out as a COLUMN OF ITS OWN, full height (2026-11-18: the fence's one line
+          covered the phone). What is mounted at this level draws fixed, in a portal, or nothing. */}
       {/* NO OPEN ENTRY: the fence stands down. The monitor's unmount disarms only when this page saw
           the clock-out; a close from the office, another device or the sweep left iOS's region armed
           until the next clock-in (audit v1120, class 6). */}

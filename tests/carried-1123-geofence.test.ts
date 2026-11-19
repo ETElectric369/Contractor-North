@@ -200,7 +200,7 @@ describe("Turn On Location: the fence says it is waiting, and the tap is the ges
     expect(idle(door)).toBe("");
     // The monitor reads the door after mount and hands the plugin's call to the line.
     expect(g).toContain("useEffect(() => setCanSettings(canOpenLocationSettings()), []);");
-    expect(g).toContain("canOpenSettings={canSettings}\n        onOpenSettings={() => void openLocationSettings()}");
+    expect(g).toContain("canOpenSettings={canSettings}\n          onOpenSettings={() => void openLocationSettings()}"); // two deeper since 2026-11-18: the line sits in its strip
   });
 
   it("arm() sets the waiting state from the one unasked rule (denied is never it), and the monitor draws the idle line", () => {
