@@ -5,13 +5,11 @@ import { useRouter } from "next/navigation";
 import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
-import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { PhoneInput } from "@/components/ui/phone-input";
-import { StateSelect } from "@/components/ui/state-select";
+import { CustomerFields, customerFormValue, type CustomerFormValue } from "@/components/customer-fields";
 import { updateCustomer } from "../actions";
 import type { Customer } from "@/lib/types";
 import { useLang } from "@/components/lang-provider";
-import { fillText, translator } from "@/lib/i18n";
+import { translator } from "@/lib/i18n";
 
 export function EditCustomerButton({
   customer,
@@ -26,13 +24,28 @@ export function EditCustomerButton({
 }) {
   // Shared (crm/[id], jobs/[id], the estimate's customer card): it reads the language itself.
   const t = translator(useLang());
-  const markup = (pct: number) => fillText(t("cu_markupPct"), { pct: String(pct) });
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
   const c = customer;
-  const [stateVal, setStateVal] = useState(c.state ?? "");
+  // THE ONE CUSTOMER FORM (cn-v1171, components/customer-fields), the same New Customer draws.
+  const [form, setForm] = useState<CustomerFormValue>(() => customerFormValue(c));
+  const [formKey, setFormKey] = useState(0);
+
+  /** Opened, it starts from the customer as they are now: the page re-reads them after every save,
+   *  and the phone and the street inside the person block show a new value only on a remount. The
+   *  fields are re-seeded BEFORE the sheet opens; the sheet itself is never remounted. */
+  function openSheet() {
+    setError(null);
+    const fresh = customerFormValue(c);
+    // Remounted only when something differs (a save elsewhere, or words left by a Cancel).
+    if (JSON.stringify(fresh) !== JSON.stringify(form)) {
+      setForm(fresh);
+      setFormKey((k) => k + 1);
+    }
+    setOpen(true);
+  }
 
   function onSubmit(formData: FormData) {
     setError(null);
@@ -49,7 +62,7 @@ export function EditCustomerButton({
 
   return (
     <>
-      <Button variant="outline" onClick={() => setOpen(true)}>
+      <Button variant="outline" onClick={openSheet}>
         <Pencil className="h-4 w-4" /> {label ?? t("cu_btn_edit")}
       </Button>
 
@@ -66,75 +79,7 @@ export function EditCustomerButton({
           {error && (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
           )}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <Label htmlFor="name">{t("cu_nameRequired")}</Label>
-              <Input id="name" name="name" autoComplete="name" required defaultValue={c.name} />
-            </div>
-            <div className="col-span-2">
-              <Label htmlFor="company_name">{t("cu_company")}</Label>
-              <Input id="company_name" name="company_name" autoComplete="organization" defaultValue={c.company_name ?? ""} />
-            </div>
-            <div>
-              <Label htmlFor="type">{t("cu_type")}</Label>
-              <Select id="type" name="type" defaultValue={c.type}>
-                <option value="residential">{t("cu_btn_typeResidential")}</option>
-                <option value="commercial">{t("cu_btn_typeCommercial")}</option>
-                <option value="industrial">{t("cu_btn_typeIndustrial")}</option>
-                <option value="contractor">{t("cu_btn_typeContractor")}</option>
-                <option value="subcontractor">{t("cu_btn_typeSubcontractor")}</option>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="status">{t("cu_status")}</Label>
-              <Select id="status" name="status" defaultValue={c.status}>
-                <option value="lead">{t("cu_btn_statusInquiry")}</option>
-                <option value="active">{t("cu_btn_statusActive")}</option>
-                <option value="inactive">{t("cu_btn_statusInactive")}</option>
-              </Select>
-            </div>
-            {pricingLevels.length > 0 && (
-              <div className="col-span-2">
-                <Label htmlFor="pricing_level_id">{t("cu_pricingLevel")}</Label>
-                <Select id="pricing_level_id" name="pricing_level_id" defaultValue={(c as any).pricing_level_id ?? ""}>
-                  <option value="">{t("cu_optDefault")}</option>
-                  {pricingLevels.map((l) => (
-                    <option key={l.id} value={l.id}>{l.name} ({markup(Number(l.markup_pct))})</option>
-                  ))}
-                </Select>
-              </div>
-            )}
-            <div>
-              <Label htmlFor="email">{t("cu_email")}</Label>
-              <Input id="email" name="email" type="email" autoComplete="email" defaultValue={c.email ?? ""} />
-            </div>
-            <div>
-              <Label htmlFor="phone">{t("cu_phone")}</Label>
-              <PhoneInput id="phone" name="phone" defaultValue={c.phone ?? ""} />
-            </div>
-            <div className="col-span-2">
-              <Label htmlFor="address">{t("cu_address")}</Label>
-              <Input id="address" name="address" defaultValue={c.address ?? ""} />
-            </div>
-            <div>
-              <Label htmlFor="city">{t("cu_city")}</Label>
-              <Input id="city" name="city" defaultValue={c.city ?? ""} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="state">{t("cu_state")}</Label>
-                <StateSelect id="state" name="state" value={stateVal} onChange={setStateVal} />
-              </div>
-              <div>
-                <Label htmlFor="zip">{t("cu_zip")}</Label>
-                <Input id="zip" name="zip" defaultValue={c.zip ?? ""} />
-              </div>
-            </div>
-            <div className="col-span-2">
-              <Label htmlFor="notes">{t("cu_notes")}</Label>
-              <Textarea id="notes" name="notes" rows={2} defaultValue={c.notes ?? ""} />
-            </div>
-          </div>
+          <CustomerFields key={formKey} mode="edit" value={form} onChange={(p) => setForm((f) => ({ ...f, ...p }))} pricingLevels={pricingLevels} />
           </div>
         </Modal>
       </form>

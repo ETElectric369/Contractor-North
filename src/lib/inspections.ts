@@ -9,21 +9,23 @@
  *     verb: Create Estimate.
  *   • upcoming — scheduled/proposed visits that are still ahead (or today), and a visit with no day.
  *   • missed — a visit still 'scheduled' on a day before today with NO capture and nothing written
- *     from it: it may never have happened, so the page asks (its Didn't Happen? tile).
- *   • filed — everything settled, behind the ?view=completed toggle, under three headings by ONE
- *     rule (filedUnder): completed and written up, lost (by OUTCOME, whatever the status), cancelled.
+ *     from it: it may never have happened, so its row says Day Passed and asks.
+ *   • filed — everything settled, by ONE rule (filedUnder): completed and written up, lost (by
+ *     OUTCOME, whatever the status), cancelled. It is found in its person's file; the page shows only
+ *     the few that hang on nobody (filedWithNobody), in a fold.
  *
  * The tags a row wears live here too (inspectionRowTags), for the same reason: one rule, one place.
  *
- * THE PAGE DRAWS THE PILES AS TILES (tileInspections): Write Up, Coming Up, Needs a Day and Didn't
- * Happen? for open work; Completed, Lost and Cancelled for what is filed. Which tile a visit sits
- * under, which tile opens first and what a row says (inspectionRowWords) are decided here, so the
- * page and its tests read one rule.
+ * THE PAGE IS ONE LIST (cn-v1171, inspectionList): every open visit once, in one state (Coming Up,
+ * Needs a Day, Needs an Estimate, Day Passed). tileInspections stays as the rule under it (which pile
+ * a visit is in); what a row says (inspectionRowWords) is decided here too, so the page and its tests
+ * read one rule.
  */
 import { appointmentTypeLabel } from "@/lib/statuses";
 import type { Lang } from "@/lib/locale";
 import { say, type Words } from "@/lib/lang-words";
 import { isStockBookingTitle } from "@/lib/schedule/work-shape";
+import { pickWentUnanswered } from "@/lib/leads/new-intake";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 
 export interface InspectionBucketRow {
@@ -76,8 +78,7 @@ export interface InspectionRowTag {
  * is [a customer] tagged Done while it sits in the open box." The green pill was drawn from
  * `status === "completed"` alone, so every row of the write-up pile — the OPEN pile, each row carrying
  * a Create Estimate button — advertised itself as finished work. BADGES AND TAGS SHOW ONLY WHAT IS
- * OPEN. Nothing is lost by dropping it: every tile on the page already says the pile (Write Up,
- * Completed, Lost, Cancelled).
+ * OPEN. Nothing is lost by dropping it: every row already says its state, and a filed one its ending.
  */
 export function inspectionRowTags(
   row: { type?: string | null; status: string; capture?: unknown },
@@ -156,12 +157,12 @@ export interface InspectionBuckets<T> {
   /** A visit still 'scheduled' on a day BEFORE today with nothing captured and nothing written from
    *  it: it may never have happened. Newest first. Never joins My Day's pile. */
   missed: T[];
-  /** Everything settled: written up, won, lost, cancelled. Newest first (the ?view=completed pile);
-   *  the page draws it under three headings, each row under the one filedUnder names. */
+  /** Everything settled: written up, won, lost, cancelled. Newest first; each row's ending is the one
+   *  filedUnder names (the page's fold shows only the ones filed under nobody). */
   filed: T[];
 }
 
-/** The three headings of the filed pile, in the order /inspections draws them. */
+/** The three endings of the filed pile (the fold's words: Completed, Not Sold, Cancelled). */
 export type FiledUnder = "completed" | "lost" | "cancelled";
 
 /**
@@ -169,7 +170,7 @@ export type FiledUnder = "completed" | "lost" | "cancelled";
  *
  * The owner's standing rule: a visit that did not become work is LOST, everywhere. The page split the
  * filed pile on status alone (cancelled, or else "Completed & written up"), so a visit that never
- * happened and was answered Lost from the Didn't Happen? group (still 'scheduled', nothing captured,
+ * happened and was answered Lost from the page's day-passed group (still 'scheduled', nothing captured,
  * no estimate) was filed as completed and written up. It was neither.
  *
  *   lost        the outcome is lost or no_bid. no_bid is 0205's other word for the same ending: a few
@@ -254,22 +255,15 @@ export function bucketInspections<T extends InspectionBucketRow>(
   return out;
 }
 
-/* ── THE PAGE'S TILES ───────────────────────────────────────────────────────────────────────────── */
+/* ── THE PILES (the page drew them as tiles until cn-v1171; inspectionList draws one list over them) ── */
 
-/** The four piles of open work, in the order the page draws their tiles. An id is never shown. */
+/** The four piles of open work. An id is never shown. */
 export const OPEN_TILES = ["write_up", "coming_up", "needs_day", "missed"] as const;
-/** The filed pile's three headings as tiles: filedUnder's own words, in the order they are drawn. */
+/** The filed pile's three endings: filedUnder's own words. */
 export const FILED_TILES = ["completed", "lost", "cancelled"] as const satisfies readonly FiledUnder[];
 export type OpenTile = (typeof OPEN_TILES)[number];
 export type FiledTile = (typeof FILED_TILES)[number];
 export type InspectionTile = OpenTile | FiledTile;
-/** The page's two views: open work, and what is filed (the URL still says ?view=completed for it). */
-export type InspectionsView = "open" | "filed";
-
-/** The tiles of a view, in the order they are drawn. */
-export function tilesOf(view: InspectionsView): readonly InspectionTile[] {
-  return view === "filed" ? FILED_TILES : OPEN_TILES;
-}
 
 /**
  * EVERY INSPECTION UNDER EXACTLY ONE TILE, from the buckets bucketInspections made (which My Day's
@@ -314,23 +308,91 @@ export function tileInspections<T extends InspectionBucketRow & { created_at?: s
   return out;
 }
 
+/* ── THE ONE LIST (cn-v1171) ────────────────────────────────────────────────────────────────────── */
+
+/** The states a row on the Inspections list can be in, in the order the list is drawn. */
+export const INSPECTION_LIST_ORDER = ["coming_up", "needs_day", "write_up", "missed"] as const satisfies readonly OpenTile[];
+export type InspectionListState = (typeof INSPECTION_LIST_ORDER)[number];
+
 /**
- * WHICH TILE IS OPEN TO BEGIN WITH. The one asked for (the address's ?tile=, so Back from an
- * inspection lands on the tile it was opened from) when it is a tile of this view and still has rows;
- * else the first tile that has any; else none. Anything else in the address is ignored.
+ * THE INSPECTIONS PAGE IS ONE LIST (the meeting's notes, 2026-11-19: "Just a list of people/leads
+ * that Need Inspections"). The tiles are gone. What a row IS is still decided by the rule the tiles
+ * had (tileInspections over bucketInspections, which Needs You reads too), so the page and My Day
+ * cannot disagree about what is open. A row's state is the open pile it sits in:
+ *
+ *   coming_up   booked for today or later, or waiting on the customer's pick: soonest first.
+ *   needs_day   on the books with no day: the one that has waited longest first.
+ *   write_up    inspected, and nothing written from it yet: oldest first. It stays on the list, so
+ *               nobody falls between Inspections and Estimates.
+ *   missed      its day went by with nothing captured: newest first.
+ *
+ * In that order: who to go and inspect, who is waiting on a day, who is waiting on a price, and last
+ * the ones that need an answer.
+ *
+ * ONE LIST PER LEAD. A pick-a-time request whose first time went by with no answer no longer stands
+ * (lib/leads/new-intake): its lead is back on the Leads list, and that row says the times were sent.
+ * It is left off this list, or the same person would be on both with two sets of buttons. A request
+ * like that with NO lead has no other list to be on, so it stays here.
+ *
+ * Nothing filed is on it. A finished, Not Sold or cancelled inspection is found in its person's file
+ * (the lead's, the customer's, the job's); the few that hang on nobody are filedWithNobody's.
  */
-export function openFirstTile(view: InspectionsView, counts: Readonly<Record<InspectionTile, number>>, wanted?: string | null): InspectionTile | null {
-  const tiles = tilesOf(view);
-  const asked = tiles.find((t) => t === wanted);
-  if (asked && counts[asked] > 0) return asked;
-  return tiles.find((t) => counts[t] > 0) ?? null;
+export function inspectionList<T extends InspectionBucketRow & { created_at?: string | null }>(
+  b: InspectionBuckets<T>,
+  now: Date = new Date(),
+  tz: string = "UTC",
+): { row: T; state: InspectionListState }[] {
+  const piles = tileInspections(b, now, tz);
+  const nowMs = now.getTime();
+  const out: { row: T; state: InspectionListState }[] = [];
+  for (const state of INSPECTION_LIST_ORDER) {
+    for (const row of piles[state]) {
+      const ranOut = pickWentUnanswered({ status: row.status, outcome: row.outcome ?? null, starts_at: row.starts_at }, nowMs);
+      if (ranOut && row.inquiry_id) continue;
+      out.push({ row, state });
+    }
+  }
+  return out;
+}
+
+/**
+ * FILED, AND FILED UNDER NOBODY. The page's Filed side is gone (cn-v1171): a finished inspection is
+ * found in its person's file. One with no lead, no customer and no job has no such file, so the page
+ * keeps those in one quiet fold, and nothing that could be reached stops being reachable. The order
+ * is the filed pile's own (newest first).
+ *
+ * `customer_id` is REQUIRED on the row: a read that left the column out would call every customer's
+ * inspection nobody's.
+ */
+export function filedWithNobody<T extends InspectionBucketRow & { customer_id: string | null }>(filed: readonly T[]): T[] {
+  return filed.filter((r) => !r.inquiry_id && !r.job_id && !r.customer_id);
+}
+
+/**
+ * WHERE A ROW'S NAME LEADS: the person's file, where all of their information is kept (Erik,
+ * 2026-11-19: "on the inspections page lets have just the lead which will be where all of their info
+ * is stored"). The lead's file while there is a lead; else the customer's page; else the job. The
+ * city's Final Inspection is about a job's permit, so it leads to its job first. null: the visit
+ * hangs on nobody, the name is plain words, and the row's button still opens the visit.
+ */
+export function inspectionFileHref(r: {
+  type?: string | null;
+  inquiry_id?: string | null;
+  customer_id?: string | null;
+  job_id?: string | null;
+}): string | null {
+  if (r.type === "final_inspection" && r.job_id) return `/jobs/${r.job_id}`;
+  if (r.inquiry_id) return `/leads/${r.inquiry_id}`;
+  if (r.customer_id) return `/crm/${r.customer_id}`;
+  if (r.job_id) return `/jobs/${r.job_id}`;
+  return null;
 }
 
 /**
  * THE TAGS A ROW WOULD WEAR, AS PLAIN WORDS, in order: the page says them in the row's phrase and
  * draws no pill. The same rule as inspectionRowTags (no "done" tag, ever); "no field notes" is said
- * under Write Up only, and "cancelled" is left out under the Cancelled tile, whose name already says it
- * (a cancelled visit filed under Lost still says so).
+ * under Write Up only, and "cancelled" is left out of a row whose ending already says Cancelled (a
+ * cancelled visit filed under Not Sold still says so).
  *
  * EVERY KIND BUT THE PLAIN INSPECTION SAYS WHICH IT IS. The page holds three kinds of visit
  * (ESTIMATE_VISIT_TYPES). The city's Final Inspection has always had its tag; a Quote / Estimate visit

@@ -12,7 +12,8 @@ import { checkSendMessage, copyMeAddress, type PreviewResult, type SendMessage }
 import { logSend, senderEmail } from "@/lib/sent-messages";
 import { PORTAL_EMAIL_BODY, portalSubject, portalEmailTail, sendWhyKey } from "@/lib/send-words";
 import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
-import { findDuplicateGroups, normPhone, type DupCustomer, type DupGroup } from "@/lib/crm/duplicates";
+import { findCustomerMatch, findDuplicateGroups, sureCustomerMatch, type CustomerMatch, type DupCustomer, type DupGroup } from "@/lib/crm/duplicates";
+import { readCustomerBook } from "@/lib/crm/new-customer";
 import { visibleCustomerIdOrNull } from "@/lib/job-visibility";
 import { callerLang } from "@/lib/lang-of";
 import { translator } from "@/lib/i18n";
@@ -274,7 +275,7 @@ export async function setPortalEnabled(
   return { ok: true, link };
 }
 
-export async function createCustomer(formData: FormData): Promise<ActionResult> {
+export async function createCustomer(formData: FormData): Promise<ActionResult & { duplicate?: CustomerMatch }> {
   const guard = await requireStaff();
   if ("error" in guard) return { ok: false, error: guard.error };
   const supabase = await createClient();
@@ -289,6 +290,27 @@ export async function createCustomer(formData: FormData): Promise<ActionResult> 
   let name = String(formData.get("name") ?? "").trim();
   if (!name && phone) name = phone;
   if (!name) return { ok: false, error: await ws.say("cu_srv_nameRequired") };
+  const email = emptyToNull(formData.get("email"));
+
+  // ASK THE BOOK FIRST (cn-v1171). Every door that makes a customer (this form, the quick pickers,
+  // the assistant) came through here and inserted without looking. The one matcher answers on what
+  // will be STORED (the name a bare phone defaults to included), and on a match nothing is made: the
+  // screen asks, and only "Add Anyway" (allow_duplicate=1) makes a second one. A book that cannot be
+  // read is a refusal, never a blind insert.
+  //
+  // sure_match_only=1 is a door that cannot ask (the assistant, cn-v1171 skeptic #74): a same-name
+  // record whose phone or email disagrees is another person, so it is not a match and the customer is
+  // made. A screen that asks keeps the doubtful hit and lets the person decide.
+  if (String(formData.get("allow_duplicate") ?? "") !== "1") {
+    const { rows: book, error: bookErr } = await readCustomerBook(supabase);
+    if (bookErr) return { ok: false, error: await ws.say("cu_srv_bookUnread") };
+    const sureOnly = String(formData.get("sure_match_only") ?? "") === "1";
+    const match = (sureOnly ? sureCustomerMatch : findCustomerMatch)({ name, phone, email }, book);
+    if (match) {
+      const said = await ws.say(`cu_srv_alreadyCustomer_${match.reason}`, { name: match.name || name });
+      return { ok: false, error: said, duplicate: match };
+    }
+  }
 
   const { data, error } = await supabase
     .from("customers")
@@ -297,7 +319,7 @@ export async function createCustomer(formData: FormData): Promise<ActionResult> 
       company_name: emptyToNull(formData.get("company_name")),
       type: String(formData.get("type") ?? "residential"),
       status: String(formData.get("status") ?? "active"),
-      email: emptyToNull(formData.get("email")),
+      email,
       phone,
       address: emptyToNull(formData.get("address")),
       city: orNull(titleCase(String(formData.get("city") ?? ""))),
@@ -345,7 +367,11 @@ export async function updateCustomer(
       state: orNull(formatState(String(formData.get("state") ?? ""))),
       zip: orNull(formatZip(String(formData.get("zip") ?? ""))),
       notes: emptyToNull(formData.get("notes")),
-      pricing_level_id: emptyToNull(formData.get("pricing_level_id")),
+      // ONLY WHEN THE FORM DREW THE SELECT (cn-v1171, skeptic #74). Edit Customer from the job page or
+      // the estimate's card draws no Pricing Level, and an absent field cleared the customer's level
+      // in silence; a hidden copy of the level as loaded would undo a change made since. Posted,
+      // "" included, it is written (the Default choice clears it); absent, the column is not touched.
+      ...(formData.has("pricing_level_id") ? { pricing_level_id: emptyToNull(formData.get("pricing_level_id")) } : {}),
     })
     .eq("id", id)
     // THE SILENT-WRITE LAW (audit v921): a zero-row update is a 204, not an error — editing a
@@ -411,8 +437,8 @@ export interface CustomerImportRow {
   notes?: string;
 }
 
-/** Bulk-import customers from a CSV (skips rows with no name; dedupes on
- *  exact name+phone already present). */
+/** Bulk-import customers from a CSV (skips rows with no name, and every row the one matcher finds
+ *  already in the book). */
 export async function bulkImportCustomers(rows: CustomerImportRow[]): Promise<ActionResult & { imported?: number; skipped?: number }> {
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -437,13 +463,20 @@ export async function bulkImportCustomers(rows: CustomerImportRow[]): Promise<Ac
   if (!clean.length) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("cu_srv_noRowsToImport") };
   if (clean.length > 2000) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("cu_srv_maxRows") };
 
-  // Skip exact duplicates already in the book.
-  const { data: existing } = await supabase.from("customers").select("name, phone");
-  // Key on the phone's DIGITS, not its formatted string: rows stored as "1 (916) ..." before the
-  // one formatter dropped the leading 1 must still match today's "(916) ..." (review 2026-09-24).
-  const dupKey = (name: string | null | undefined, phone: string | null | undefined) => `${(name ?? "").toLowerCase()}|${normPhone(phone)}`;
-  const seen = new Set((existing ?? []).map((c: any) => dupKey(c.name, c.phone)));
-  const fresh = clean.filter((r) => !seen.has(dupKey(r.name, r.phone)));
+  // SKIP EVERYONE ALREADY IN THE BOOK, BY THE ONE MATCHER (cn-v1171). It skipped only an exact name
+  // AND phone, so a person on file under the same phone or email with another spelling was imported a
+  // second time. The book is read once; a row taken in is in the book for the rows after it, so a
+  // file that lists one person twice makes one customer. A book that cannot be read imports nothing.
+  // A same-name row with another phone or email is another person and is imported (sureCustomerMatch,
+  // cn-v1171 skeptic #74): an import never asks, so it never takes a doubtful hit.
+  const { rows: existing, error: bookErr } = await readCustomerBook(supabase);
+  if (bookErr) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("cu_srv_bookUnreadImport") };
+  const book: DupCustomer[] = [...existing];
+  const fresh = clean.filter((r, i) => {
+    if (sureCustomerMatch(r, book)) return false;
+    book.push({ id: `import-${i}`, name: r.name, company_name: r.company_name, email: r.email, phone: r.phone });
+    return true;
+  });
   const skipped = clean.length - fresh.length;
 
   if (fresh.length) {

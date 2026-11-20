@@ -12,7 +12,7 @@ import { DRAW_KINDS, isDrawKind } from "@/lib/invoice-math";
 import { BRING_IN_NEW_WORK, openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
 import { emptyToNull } from "@/lib/forms";
 import { notifyJobCrewAdded } from "@/lib/crew-notify";
-import { matchOrCreateCustomer, typedNewCustomer } from "@/lib/crm/new-customer";
+import { matchOrCreateCustomer, readCustomerBook, typedNewCustomer } from "@/lib/crm/new-customer";
 import { visibleJobIdOrNull, visiblePoIdOnJobOrNull, visibleTemplateIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
 import { isStaffRole } from "@/lib/actions/perms";
@@ -25,7 +25,8 @@ import { translator } from "@/lib/i18n";
 import { callerLang } from "@/lib/lang-of";
 import { isCostableCategory, NOT_A_COST_CATEGORY, type PaperTie } from "@/lib/job-photos";
 import { RECEIPT_TIE_COLUMNS, receiptsNotOnABill, tieReadFilters, type ReceiptDoc } from "@/lib/action-items/receipts-not-on-a-bill";
-import { escapeLike, formatCurrency, formatPhone } from "@/lib/utils";
+import { formatCurrency, formatPhone } from "@/lib/utils";
+import { findCustomerMatch, normName, sureCustomerMatch, type DupCustomer } from "@/lib/crm/duplicates";
 import { estimateIsTheContract, shouldImportActuals } from "@/lib/invoice-import-rule";
 import { revalidateMoney } from "@/lib/revalidate-money";
 import { claimedSourcesOnJob, unbilledWorkForJob } from "@/lib/unbilled-work";
@@ -2609,33 +2610,60 @@ export async function importJobs(
   // ONE READ FOR THE WHOLE IMPORT, not one per row: the answer cannot change mid-file.
   const usualBilling = await readUsualBillingKind(supabase);
 
+  // THE BOOK, READ ONCE, ASKED BY THE ONE MATCHER (cn-v1171). Each row used to look its customer up by
+  // the exact name alone (narrowed by email), so a person on file under the same phone or email with
+  // another spelling was made again, and of two people with one name the first the database returned
+  // was taken. A phone or an email is one person; a name only when it is unique (findCustomerMatch). A
+  // customer this import makes is in the book for the rows after it. A book that cannot be read
+  // imports nothing, never a blind insert. RLS scopes the read to the caller's org.
+  // An import never asks, so it takes only the SURE match (cn-v1171, skeptic #74): a same-name card
+  // whose phone or email disagrees is another person, and a new customer is made.
+  type BookRow = DupCustomer & { type?: string | null };
+  const { rows: bookRows, error: bookErr } = await readCustomerBook<BookRow>(supabase, "id, name, company_name, email, phone, type");
+  if (bookErr) return { ok: false, error: "Couldn't check your customer list just now, so nothing was imported. Try again." };
+  const book: BookRow[] = [...bookRows];
+  // THE CUSTOMERS THIS IMPORT MADE, by name (skeptic #74). A name two cards in the book already share
+  // matches nobody, so five rows for one new person made five customers; the one this import made for
+  // that name is taken first, unless the row's phone or email says it is somebody else.
+  const madeHere = new Map<string, BookRow>();
+
   for (const r of (rows ?? []).slice(0, 200)) {
     const cname = (r.customer || "").trim();
     if (!cname && !(r.job_name || "").trim()) {
       results.push({ name: "(blank)", status: "failed", reason: "Missing customer and job name." });
       continue;
     }
-    // Find-or-create the customer (match by name, narrowed by email when given) — RLS
-    // already scopes this to the caller's org.
     let customerId: string | null = null;
     // Who the job is named for (below): the matched card as stored (its company, its type).
     type Who = { name?: string | null; company_name?: string | null; type?: string | null };
     let who: Who | null = null;
+    // Said on the row: the job landed on somebody already in the book, by the name on file.
+    let customerNote = "";
     if (cname) {
-      const email = (r.email || "").trim().toLowerCase();
-      let q = supabase.from("customers").select("id, name, company_name, type").ilike("name", escapeLike(cname)).limit(1);
-      if (email) q = q.ilike("email", escapeLike(email));
-      const { data: hit } = await q.maybeSingle();
-      if (hit) {
+      const phone = formatPhone(r.phone ?? "") || null; // the one formatter
+      const candidate = { name: cname, email: r.email?.trim() || null, phone };
+      const made = madeHere.get(normName(cname));
+      const madeHit = made ? sureCustomerMatch(candidate, [made]) : null;
+      const doubt = madeHit ? null : findCustomerMatch(candidate, book);
+      const hit = madeHit ?? (doubt && !doubt.disagrees ? doubt : null);
+      if (madeHit) {
+        customerId = madeHit.id;
+        who = { company_name: cname };
+      } else if (hit) {
         customerId = hit.id;
-        who = hit as Who;
+        who = book.find((c) => c.id === hit.id) ?? null;
+        customerNote = ` — for ${hit.name || cname}, already a customer`;
       } else {
+        // Why a new one was made when the book holds the name (said on the row, never silent).
+        const sameName = book.filter((c) => normName(c.name) === normName(cname)).length;
+        if (doubt?.disagrees) customerNote = ` — a new customer: the ${doubt.name || cname} on file has another phone or email`;
+        else if (normName(cname) && sameName >= 2) customerNote = ` — a new customer: ${sameName} customers on file are named ${cname}`;
         const { data: nc, error: ce } = await supabase
           .from("customers")
           .insert({
             name: cname,
             email: r.email?.trim() || null,
-            phone: formatPhone(r.phone ?? "") || null, // the one formatter
+            phone,
             address: r.address?.trim() || null,
             city: r.city?.trim() || null,
             state: r.state?.trim() || null,
@@ -2653,6 +2681,9 @@ export async function importJobs(
         // The sheet says nothing of the kind of customer, so the name stays whole ("Acme Property
         // Management", "Rita Moss"): never cut down to a last word that may be "Management" or "Inc".
         who = { company_name: cname };
+        const row: BookRow = { id: nc.id, name: cname, company_name: null, email: r.email?.trim() || null, phone };
+        book.push(row);
+        if (normName(cname)) madeHere.set(normName(cname), row);
       }
     }
 
@@ -2722,7 +2753,7 @@ export async function importJobs(
         valueNote = " — value not saved, add it manually";
       }
     }
-    results.push({ name: `${job.job_number} · ${jobName}${valueNote}`, status: "created" });
+    results.push({ name: `${job.job_number} · ${jobName}${customerNote}${valueNote}`, status: "created" });
   }
   revalidatePath("/jobs");
   revalidatePath("/planner"); // a status/finish change moves a job on/off today's My Day

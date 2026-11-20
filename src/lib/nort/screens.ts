@@ -109,7 +109,8 @@ export const SCREENS: Screen[] = [
   { name: "Customers", word: "sh_dock_sl-customers", path: "/crm", say: "?q=<search>; one customer is /crm/<id>", staffOnly: true },
   // cn-v1170: the list is new intake only; one lead's page (its file) is its own route.
   { name: "Leads", word: "sh_dock_sl-leads", path: "/leads", say: "one lead's page is /leads/<id>; /leads/<id>?schedule=1 opens its Schedule sheet", staffOnly: true },
-  { name: "Inspections", word: "sh_dock_sl-inspections", path: "/inspections", staffOnly: true },
+  // cn-v1171: one list, no Filed view (a finished inspection is in its person's file).
+  { name: "Inspections", word: "sh_dock_sl-inspections", path: "/inspections", say: "one list of everyone waiting on an inspection, each with Start Inspection; a finished one is in its person's file", staffOnly: true },
   {
     name: "An inspection (the visit sheet)",
     // One visit's sheet: the visit-type badge's word (Inspection / Inspección).

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findDuplicateGroups, findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
+import { findCustomerMatch, findDuplicateGroups, findMatchingCustomerId, sureCustomerMatch, type DupCustomer } from "@/lib/crm/duplicates";
 
 const c = (id: string, o: Partial<DupCustomer> = {}): DupCustomer => ({
   id, name: null, company_name: null, email: null, phone: null, created_at: `2026-01-${id.padStart(2, "0")}`, ...o,
@@ -78,5 +78,75 @@ describe("findMatchingCustomerId", () => {
   it("does NOT match on a too-short (<7 digit) phone or blank signals", () => {
     expect(findMatchingCustomerId({ name: "", phone: "1212", email: "" }, book)).toBeNull();
     expect(findMatchingCustomerId({ name: null, phone: null, email: null }, book)).toBeNull();
+  });
+});
+
+// cn-v1171: the same answer, with the reason and the name ON FILE, so a screen can ask in words.
+describe("findCustomerMatch: the one matcher says who, and why", () => {
+  const book: DupCustomer[] = [
+    c("A", { name: "  Sam Tillery ", phone: "(530) 555-0145", email: "sam@x.com" }),
+    c("B", { name: "Dana Rook", phone: "5305550111" }),
+    c("C", { name: "Theo Vance" }),
+    c("D", { name: "Theo Vance" }),
+  ];
+
+  it("a phone is one person, whatever was typed for the name: the name on file comes back", () => {
+    expect(findCustomerMatch({ name: "Sam Tilery", phone: "530.555.0145" }, book)).toEqual({ id: "A", name: "Sam Tillery", reason: "phone" });
+  });
+  it("an email is one person", () => {
+    expect(findCustomerMatch({ name: "Somebody Else", email: "SAM@X.COM" }, book)).toEqual({ id: "A", name: "Sam Tillery", reason: "email" });
+  });
+  it("a phone or an email on ANY record wins before a name is looked at", () => {
+    expect(findCustomerMatch({ name: "Dana Rook", phone: "5305550145" }, book)?.id).toBe("A");
+  });
+  it("a name links only when it is the one such name in the book", () => {
+    expect(findCustomerMatch({ name: "dana  rook" }, book)).toEqual({ id: "B", name: "Dana Rook", reason: "name" });
+    expect(findCustomerMatch({ name: "Theo Vance" }, book)).toBeNull();
+  });
+  it("nothing to go on is nobody", () => {
+    expect(findCustomerMatch({ name: "", phone: "0145", email: "" }, book)).toBeNull();
+    expect(findCustomerMatch({ name: "Casey Loam", phone: "5305559999" }, book)).toBeNull();
+  });
+  it("findMatchingCustomerId is the sure match's id and nothing else", () => {
+    for (const typed of [{ name: "Sam Tilery", phone: "530.555.0145" }, { name: "Theo Vance" }, { name: "dana rook" }, { name: "Casey Loam" }, { name: "Dana Rook", phone: "5305557777" }]) {
+      expect(findMatchingCustomerId(typed, book)).toBe(sureCustomerMatch(typed, book)?.id ?? null);
+    }
+  });
+});
+
+// Skeptic #74: the same name with another phone is very likely another person. A screen that asks
+// still shows it; a door that acts without asking must not take it.
+describe("a name that the phone or the email contradicts", () => {
+  const book: DupCustomer[] = [
+    c("A", { name: "Sam Tillery", phone: "(530) 555-0145", email: "sam@x.com" }),
+    c("B", { name: "Dana Rook" }),
+    c("C", { name: "Casey Loam", email: "casey@x.com" }),
+  ];
+
+  it("another phone under the same name: the ask sees the hit marked, the silent doors see nobody", () => {
+    const typed = { name: "Sam Tillery", phone: "530-555-0199" };
+    expect(findCustomerMatch(typed, book)).toEqual({ id: "A", name: "Sam Tillery", reason: "name", disagrees: true });
+    expect(sureCustomerMatch(typed, book)).toBeNull();
+    expect(findMatchingCustomerId(typed, book)).toBeNull();
+  });
+  it("another email under the same name is the same doubt", () => {
+    const typed = { name: "casey loam", email: "other@x.com" };
+    expect(findCustomerMatch(typed, book)?.disagrees).toBe(true);
+    expect(sureCustomerMatch(typed, book)).toBeNull();
+  });
+  it("nothing to contradict is no doubt: one side has no phone and no email", () => {
+    // Typed with a phone, on file with none.
+    expect(sureCustomerMatch({ name: "Dana Rook", phone: "5305550111" }, book)).toEqual({ id: "B", name: "Dana Rook", reason: "name" });
+    // Typed with nothing but the name, on file with both.
+    expect(sureCustomerMatch({ name: "Sam Tillery" }, book)).toEqual({ id: "A", name: "Sam Tillery", reason: "name" });
+    // A phone typed against a record that only holds an email: nothing to compare.
+    expect(sureCustomerMatch({ name: "Casey Loam", phone: "5305550122" }, book)?.id).toBe("C");
+  });
+  it("a phone or an email that MATCHES is never in doubt, whatever the other one says", () => {
+    expect(sureCustomerMatch({ name: "Sam Tillery", phone: "5305550145", email: "new@x.com" }, book)).toEqual({ id: "A", name: "Sam Tillery", reason: "phone" });
+    expect(sureCustomerMatch({ name: "Sam Tillery", phone: "5305550199", email: "sam@x.com" }, book)).toEqual({ id: "A", name: "Sam Tillery", reason: "email" });
+  });
+  it("a phone too short to be one contradicts nothing", () => {
+    expect(sureCustomerMatch({ name: "Sam Tillery", phone: "0199" }, book)?.id).toBe("A");
   });
 });

@@ -85,6 +85,15 @@ describe("setAppointmentOutcome marks the lead Not Sold in the same deed", () =>
     expect(leadWrites()).toEqual([]);
   });
 
+  it("another visit from the lead was marked Won: it no longer stands, and the lead is still not marked (cn-v1171, skeptic #74)", async () => {
+    db.visits = [
+      { inquiry_id: "l1", status: "completed", outcome: "lost" },
+      { inquiry_id: "l1", status: "completed", outcome: "won" },
+    ];
+    expect(await setAppointmentOutcome("a1", "lost")).toEqual({ ok: true });
+    expect(leadWrites()).toEqual([]);
+  });
+
   it("a lead already converted or already Not Sold, or a visit with no lead: nothing to mark", async () => {
     db.lead = { id: "l1", status: "won", converted_at: "2026-11-02T00:00:00Z" };
     expect(await setAppointmentOutcome("a1", "lost")).toEqual({ ok: true });

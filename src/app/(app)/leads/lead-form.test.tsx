@@ -21,7 +21,8 @@ vi.mock("./actions", () => ({ createInquiry: vi.fn(), updateInquiry: vi.fn(), de
 vi.mock("./lead-sources-actions", () => ({ readLeadSources: vi.fn(async () => ({ ok: true, sources: [] })) }));
 
 import { LangProvider } from "@/components/lang-provider";
-import { InquiryFields, inquiryFormValue, leadSourceOptions, townBoxesFilled, type InquiryFormValue } from "./inquiry-fields";
+import { InquiryFields, inquiryFormValue, leadSourceOptions, type InquiryFormValue } from "./inquiry-fields";
+import { townBoxesFilled } from "@/components/person-fields";
 import { InquiryModal } from "./inquiry-modal";
 import { words } from "@/lib/words/leads";
 import type { Inquiry } from "@/lib/types";

@@ -163,7 +163,7 @@ describe("an inspection row's Dismiss… asks in its sheet, never in the browser
     // The door as the list mounts it is the one ⋯, and its sheet starts at rest (it opens closed).
     const mounted = renderToStaticMarkup(
       createElement(InspectionRowMenu, {
-        row: { id: "a1", who: "Dana Rook", what: "", menu: { move: false, happened: false, lost: true, del: true }, startsAt: null, endsAt: null },
+        row: { id: "a1", who: "Dana Rook", what: "", doors: ["lost", "del"], visitHref: "/appointments/a1", startsAt: null, endsAt: null, happenedSaid: "Marked as happened." },
         tz: "America/Los_Angeles",
       }),
     );

@@ -12,6 +12,8 @@ import type { Customer, Inquiry } from "@/lib/types";
 import { setQuoteCustomer } from "../actions";
 import { commitCustomerPick } from "./customer-pick";
 import { createCustomer } from "../../crm/actions";
+import { DuplicateCustomerAsk } from "@/components/duplicate-customer-ask";
+import type { CustomerMatch } from "@/lib/crm/duplicates";
 import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
 import { useSaveInFlight } from "@/lib/saves-in-flight";
@@ -78,25 +80,45 @@ export function CustomerSelect({
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [newAddr, setNewAddr] = useState("");
+  // ALREADY IN THE BOOK (cn-v1171): createCustomer made nothing and said who. Use This Customer
+  // attaches the customer on file through the same step a new one goes through; Add Anyway makes the
+  // typed one with allow_duplicate=1. The typed name and address stay on screen under the ask.
+  const [dup, setDup] = useState<{ match: CustomerMatch; sentence: string } | null>(null);
 
-  function createAndAttach() {
+  function createAndAttach(allowDuplicate = false) {
     if (!newName.trim()) return setError(t("qt_nameRequired"));
     setError(null);
     start(async () => {
       const fd = new FormData();
       fd.set("name", newName.trim());
       if (newAddr.trim()) fd.set("address", newAddr.trim());
+      if (allowDuplicate) fd.set("allow_duplicate", "1");
       const made = await createCustomer(fd);
+      if (!made.ok && made.duplicate) return setDup({ match: made.duplicate, sentence: made.error ?? "" });
+      setDup(null);
       if (!made.ok || !made.id) return setError(made.error ?? t("qt_couldntCreateCustomer"));
-      // ATTACH IN THE SAME BREATH. A created-but-unattached customer is the same dead end one
-      // step further along, and it's the step somebody walks away from.
-      const res = await commitCustomerPick(quoteId, made.id, { setQuoteCustomer, fallbackError: t("qt_createdNotAttached") });
-      if (!res.ok) return setError(res.error ?? t("qt_createdNotAttached"));
-      setCreating(false);
-      setEditing(false);
-      setNewName("");
-      setNewAddr("");
-      router.refresh();
+      await attachMade(made.id);
+    });
+  }
+
+  // ATTACH IN THE SAME BREATH. A created-but-unattached customer is the same dead end one step
+  // further along, and it's the step somebody walks away from. The customer on file, when the ask
+  // was answered Use This Customer, is attached the same way.
+  async function attachMade(id: string) {
+    const res = await commitCustomerPick(quoteId, id, { setQuoteCustomer, fallbackError: t("qt_createdNotAttached") });
+    if (!res.ok) return setError(res.error ?? t("qt_createdNotAttached"));
+    setCreating(false);
+    setEditing(false);
+    setDup(null);
+    setNewName("");
+    setNewAddr("");
+    router.refresh();
+  }
+
+  function attachExisting(c: { id: string }) {
+    setError(null);
+    start(async () => {
+      await attachMade(c.id);
     });
   }
 
@@ -126,16 +148,28 @@ export function CustomerSelect({
       <div className="space-y-2">
         <div>
           <Label htmlFor="qc-name">{t("qt_name")}</Label>
-          <Input id="qc-name" autoComplete="name" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={t("qt_customerName")} />
+          <Input id="qc-name" autoComplete="name" value={newName} onChange={(e) => (setNewName(e.target.value), setDup(null))} placeholder={t("qt_customerName")} />
         </div>
         <div>
           <Label htmlFor="qc-addr">{t("qt_address")}</Label>
           {/* The one field that made him stuck — it is what prints on the estimate. */}
-          <Input id="qc-addr" autoComplete="street-address" value={newAddr} onChange={(e) => setNewAddr(e.target.value)} placeholder={t("qt_jobAddress")} />
+          <Input id="qc-addr" autoComplete="street-address" value={newAddr} onChange={(e) => (setNewAddr(e.target.value), setDup(null))} placeholder={t("qt_jobAddress")} />
         </div>
+        {/* Use This Customer attaches the card on file, and the address typed here is not written
+            anywhere: said, never dropped in silence (cn-v1171, skeptic #74). */}
+        {dup && (
+          <DuplicateCustomerAsk
+            match={dup.match}
+            sentence={dup.sentence}
+            note={newAddr.trim() ? t("qt_addressOnFilePrints") : null}
+            onUse={attachExisting}
+            onAddAnyway={() => createAndAttach(true)}
+            pending={pending}
+          />
+        )}
         <div className="flex items-center gap-2">
-          <Button size="sm" onClick={createAndAttach} disabled={pending}>{t("qt_btn_createAndAttach")}</Button>
-          <Button size="sm" variant="outline" onClick={() => { setCreating(false); setError(null); }} disabled={pending}>{t("qt_btn_cancel")}</Button>
+          <Button size="sm" onClick={() => createAndAttach()} disabled={pending}>{t("qt_btn_createAndAttach")}</Button>
+          <Button size="sm" variant="outline" onClick={() => { setCreating(false); setError(null); setDup(null); }} disabled={pending}>{t("qt_btn_cancel")}</Button>
         </div>
         <p className="text-xs text-slate-400">{t("qt_restFromContact")}</p>
         {error && <p className="text-sm text-red-600">{error}</p>}

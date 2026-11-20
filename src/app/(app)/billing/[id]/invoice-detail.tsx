@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { NewCustomerInline } from "@/components/new-customer-inline";
+import { NewCustomerInline, addedOnce } from "@/components/new-customer-inline";
 import { useRouter } from "next/navigation";
 import { taxFieldShown } from "@/lib/sales-tax-switch";
 import Link from "next/link";
@@ -1715,7 +1715,7 @@ export function InvoiceDetail({
               <NewCustomerInline
                 className="mt-1.5"
                 onCreated={(c) => {
-                  setAddedCustomers((prev) => [c, ...prev]);
+                  setAddedCustomers((prev) => addedOnce(prev, customers, c));
                   setLinkCustomer(c.id);
                 }}
               />

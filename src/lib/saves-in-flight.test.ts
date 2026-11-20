@@ -141,7 +141,11 @@ describe("who feeds the count, and who asks it", () => {
   it("the estimate's customer pick counts its own transition (the pick, and New Customer's create-and-attach)", () => {
     const body = feedsItsTransition("src/app/(app)/quotes/[id]/customer-select.tsx", "CustomerSelect");
     expect(body).toContain("commitCustomerPick(quoteId, next");
-    expect(body).toContain("commitCustomerPick(quoteId, made.id");
+    // cn-v1171: the attach is one step (attachMade) for a customer just made and for the one on file
+    // that the already-a-customer ask's Use This Customer hands back; both run inside the transition.
+    expect(body).toContain("commitCustomerPick(quoteId, id, { setQuoteCustomer");
+    expect(body).toMatch(/start\(async \(\) => \{[\s\S]*?await attachMade\(made\.id\);/);
+    expect(body).toMatch(/function attachExisting[\s\S]*?start\(async \(\) => \{\s*await attachMade\(c\.id\);/);
   });
 
   // A FOURTH SAVER (cn-v1158): the estimate's Job Site line, drawn under the customer card. The job

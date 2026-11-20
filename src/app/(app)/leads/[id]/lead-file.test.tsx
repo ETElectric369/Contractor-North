@@ -32,7 +32,10 @@ vi.mock("../actions", () => ({
 vi.mock("../lead-sources-actions", () => ({ readLeadSources: vi.fn() }));
 vi.mock("@/app/(app)/appointments/actions", () => ({ createInspectionNow: vi.fn(), openLeadInspection: vi.fn() }));
 
-import { LeadFile, visitStateKey, visitWhen, type LeadFileProps } from "./lead-file";
+import { LeadFile, type LeadFileProps } from "./lead-file";
+// cn-v1171: the visit's state and its when are the shared pieces both files draw.
+import { visitStateKey } from "@/lib/appointments/file-visit";
+import { visitWhen } from "@/components/file/visit-list";
 import { FileEstimates } from "./file-estimates";
 import { startLeadEstimate } from "./file-doors";
 import { LEAD_FILE_COLUMNS, FILE_VISIT_COLUMNS, FILE_ESTIMATE_COLUMNS, FILE_JOB_COLUMNS, type FileLead, type FileVisit } from "./file-reads";
@@ -170,6 +173,18 @@ describe("a pick-a-time request nobody answered (cn-v1170)", () => {
   });
 });
 
+describe("an inspection marked Won with no job picked (cn-v1171, skeptic #74)", () => {
+  const won = visit({ status: "completed", outcome: "won" });
+  it("the lead is back on the list and its file says what is left, in both languages", () => {
+    expect(draw("open", "en", { visits: [won] })).toContain("Its inspection was marked Won and no job was picked. Open the inspection to pick the job.");
+    expect(draw("open", "es", { visits: [won] })).toContain("Su inspección se marcó como Ganada y no se eligió un trabajo.");
+  });
+  it("not while another visit stands, and not without a Won visit", () => {
+    expect(draw("standing", "en", { visits: [won, visit({ id: "v2" })] })).not.toContain("marked Won and no job");
+    expect(draw("open", "en", { visits: [visit({ status: "cancelled" })] })).not.toContain("marked Won and no job");
+  });
+});
+
 describe("the bucket and the customer's own visit request (kept from the old row)", () => {
   it("the bucket's letter and words, the blurb on hover", () => {
     const html = draw("open", "en", { lead: lead({ lead_bucket: "B" }) });
@@ -237,11 +252,27 @@ describe("a visit's state words", () => {
     [{ status: "completed", outcome: "won" }, "ld_btn_fileVisitWon", "Won", "Ganada"],
     [{ status: "completed", outcome: "lost" }, "ld_btn_fileVisitNotSold", "Not Sold", "No Vendida"],
     [{ status: "completed", outcome: "no_bid" }, "ld_btn_fileVisitNotSold", "Not Sold", "No Vendida"],
+    [{ status: "cancelled" }, "ld_btn_fileVisitCancelled", "Cancelled", "Cancelada"],
   ];
   it.each(cases)("%o reads %s", (over, key, en, es) => {
     expect(visitStateKey({ status: null, outcome: null, ...over })).toBe(key);
     expect(translator("en")(key)).toBe(en);
     expect(translator("es")(key)).toBe(es);
+  });
+  it("a cancelled inspection is listed on the file (cn-v1171) and is not taken for one that stands", () => {
+    const html = draw("open", "en", { visits: [visit({ status: "cancelled" })] });
+    expect(html).toContain('href="/appointments/v1"');
+    expect(html).toContain("Cancelled");
+    // The header still says the lead is on the list: a cancelled visit stands for nothing.
+    expect(html).toContain("On the Leads List");
+    expect(draw("open", "es", { visits: [visit({ status: "cancelled" })] })).toContain("Cancelada");
+  });
+  it("the file's read keeps cancelled visits, and the file draws the shared list", () => {
+    const reads = readFileSync(join(process.cwd(), "src/app/(app)/leads/[id]/file-reads.ts"), "utf8");
+    expect(reads).not.toContain('.neq("status", "cancelled")');
+    const file = readFileSync(join(process.cwd(), "src/app/(app)/leads/[id]/lead-file.tsx"), "utf8");
+    expect(file).toContain("<FileVisitList");
+    expect(file).toContain("leadStageWords(stage,");
   });
   it("a state it was not taught reads as its stored word", () => {
     expect(visitStateKey({ status: "mystery", outcome: null })).toBeNull();

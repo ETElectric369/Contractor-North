@@ -133,6 +133,26 @@ describe("customer.create — the yes to adding him is the yes to his booking", 
     expect(r).toEqual({ ok: false, error: "Name is required." });
     expect(linkAppointmentTo).not.toHaveBeenCalled();
   });
+
+  it("cn-v1171: somebody already in the book is refused in one sentence naming the customer on file", async () => {
+    createCustomer.mockResolvedValue({ ok: false, error: "Sam Tillery ya es cliente (mismo teléfono).", duplicate: { id: "cust-sam", name: "Sam Tillery", reason: "phone" } });
+    const r = await create({ name: "Sam Tilery", phone: "530 555 0100" });
+    expect(r).toEqual({ ok: false, error: '"Sam Tillery" is already a customer (same phone). Use that customer.', data: { existing_customer_id: "cust-sam" } });
+    expect(linkAppointmentTo).not.toHaveBeenCalled();
+    createCustomer.mockResolvedValue({ ok: false, error: "x", duplicate: { id: "cust-dana", name: "", reason: "email" } });
+    expect((await create({ name: "Dana Rook", email: "dana@example.test" })).error).toBe('"Dana Rook" is already a customer (same email). Use that customer.');
+    // No Add Anyway for the assistant: nothing it sends can carry allow_duplicate.
+    const fd = createCustomer.mock.calls.at(-1)![0] as FormData;
+    expect(fd.has("allow_duplicate")).toBe(false);
+  });
+
+  it("cn-v1171 (skeptic #74): it takes only a sure match, and a name hit names the place to add another person", async () => {
+    createCustomer.mockResolvedValue({ ok: false, error: "x", duplicate: { id: "cust-dana", name: "Dana Rook", reason: "name" } });
+    const r = await create({ name: "Dana Rook" });
+    expect(r.error).toBe('"Dana Rook" is already a customer (same name). Use that customer; for a different person with the same name, add them from Customers, New Customer.');
+    const fd = createCustomer.mock.calls.at(-1)![0] as FormData;
+    expect(fd.get("sure_match_only")).toBe("1");
+  });
 });
 
 describe("customer.update — an open offer survives an answer that isn't a yes", () => {

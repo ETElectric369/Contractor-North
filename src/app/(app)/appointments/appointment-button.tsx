@@ -198,8 +198,6 @@ export function AppointmentButton({
   defaultDate,
   defaultCustomerId,
   defaultJobId,
-  defaultType,
-  buttonLabel,
   compact = false,
   editLabel,
   afterDeleteHref,
@@ -225,12 +223,8 @@ export function AppointmentButton({
   /** Preselect a job in create mode (e.g. mounted on that job's page) — prefills the location from
    *  the job address, books the kind Job, and suggests the job's own name as the title. */
   defaultJobId?: string;
-  /** Preselect a TYPE in create mode (e.g. "inspection" on the Inspections tab) — one of the five
-   *  PICKABLE_APPOINTMENT_TYPES. (The old fromLead prop this superseded, and the never-passed
-   *  dayStarts suggest-a-slot input, were removed in the 2026-07-16 churn audit.) */
-  defaultType?: string;
-  /** Create-button copy override ("Book an Inspection" on the Inspections tab). */
-  buttonLabel?: string;
+  // cn-v1171: the preset-kind and trigger-words props went with the Inspections page's Book an
+  // Inspection, their last caller; a door that books a kind says it with ?type= (urlSeed).
   /** Tight card-header variant: small button that stays on one line. */
   compact?: boolean;
   /** Edit-mode trigger as a LABELED outline button ("Edit Details") instead of the
@@ -277,10 +271,8 @@ export function AppointmentButton({
   const [zoneNote, setZoneNote] = useState<string | null>(null);
 
   // THE TYPE SELECT'S OPTIONS (W2-06): the five a person picks, plus the row's OWN old kind when it
-  // carries one, so an edit shows what it is and a Save never silently rewrites it. (A caller's
-  // defaultType is always one of the five; were it not, it shows as itself and the save says so,
-  // rather than the select quietly booking its first option.)
-  const typeOptions = appointmentTypeOptions(appointment?.type ?? defaultType ?? null);
+  // carries one, so an edit shows what it is and a Save never silently rewrites it.
+  const typeOptions = appointmentTypeOptions(appointment?.type ?? null);
 
   /** The title this form would suggest for these fields: follows the type (W2-06), the job's own
    *  name when a job is picked, "Inspection: <customer or place>" for an inspection (lib/statuses). */
@@ -305,11 +297,10 @@ export function AppointmentButton({
     const st = appointment ? toLocal(appointment.starts_at, tz) : { date, time: urlSeed.current.time ?? "08:00" };
     const en = appointment ? toLocal(appointment.ends_at, tz) : { date: "", time: "" };
     const base = {
-      // Default TYPE (W2-06): the door's own word first (?type=, the + menu's New Inspection), then
-      // the caller's explicit defaultType (the Inspections tab passes "inspection"); booked from a
-      // job, a Job (the work on that job's day); anywhere else Other, today's plain appointment,
-      // with no write-up nag after it.
-      type: appointment?.type ?? urlSeed.current.type ?? defaultType ?? (defaultJobId ? "job" : "other"),
+      // Default TYPE (W2-06): the door's own word first (?type=, the + menu's New Inspection); booked
+      // from a job, a Job (the work on that job's day); anywhere else Other, today's plain
+      // appointment, with no write-up nag after it.
+      type: appointment?.type ?? urlSeed.current.type ?? (defaultJobId ? "job" : "other"),
       customer_id: appointment?.customer_id ?? defaultCustomerId ?? "",
       job_id: appointment?.job_id ?? defaultJobId ?? "",
       new_customer_name: "",
@@ -325,7 +316,7 @@ export function AppointmentButton({
       ...base,
       assigned_to: appointment?.assigned_to ?? "",
       // The title FOLLOWS THE TYPE (W2-06): the job's name from a job, the customer's name for Other,
-      // "Inspection: <customer or place>" on the Inspections tab. An edit keeps its own.
+      // "Inspection: <customer or place>" for an inspection. An edit keeps its own.
       title: appointment?.title ?? suggestFor(base),
       date,
       start_time: st.time || "08:00",
@@ -534,6 +525,8 @@ export function AppointmentButton({
         const res = await createAppointmentProposal(formData);
         if (!res.ok || !res.token) return setError(res.error ?? t("vp_couldNotCreateTheLink"));
         if (res.warning) toast(res.warning, "info", undefined, { sticky: true }); // must be READ: the form closes
+        // cn-v1171: the typed person was already in the book, so the visit is theirs: said by the name on file.
+        if (res.notice) toast(res.notice, "info", undefined, { sticky: true });
         draft.clear();
         setLinkToken(res.token);
         router.refresh();
@@ -567,6 +560,8 @@ export function AppointmentButton({
         : await createAppointment(formData);
       if (!res.ok) return setError(res.error ?? t("vp_couldNotSave"));
       if (res.warning) toast(res.warning, "info", undefined, { sticky: true }); // must be READ: the form closes
+      // cn-v1171: the typed person was already in the book, so the visit is theirs: said by the name on file.
+      if (res.notice) toast(res.notice, "info", undefined, { sticky: true });
       // Saved — drop the draft. New mode resets so reopening doesn't offer a
       // duplicate; edit mode keeps the just-saved values as the new baseline.
       draft.clear();
@@ -592,9 +587,9 @@ export function AppointmentButton({
   // The BUSINESS's domain, not the browser's — see useOrgPublicBase.
   const origin = useOrgPublicBase();
   // The door's words: the live Type box decides (a New Inspection door seeds it; an edit shows the
-  // row's own kind); the closed trigger reads the caller's default kind.
+  // row's own kind); the closed trigger says New Appointment.
   const words = apptFormWords({ kind: form.type, editing, mode, linkReady: !!linkToken }, t);
-  const triggerWords = apptFormWords({ kind: defaultType ?? "", editing, mode: "set", linkReady: false }, t);
+  const triggerWords = apptFormWords({ kind: "", editing, mode: "set", linkReady: false }, t);
   const pickLink = linkToken && origin ? `${origin}/pick/${linkToken}` : null;
 
   async function copyLink() {
@@ -658,7 +653,7 @@ export function AppointmentButton({
         )
       ) : (
         <Button onClick={openModal} size={compact ? "sm" : undefined} className="shrink-0 whitespace-nowrap">
-          <Plus className="h-4 w-4" /> {buttonLabel ?? triggerWords.trigger}
+          <Plus className="h-4 w-4" /> {triggerWords.trigger}
         </Button>
       )}
 

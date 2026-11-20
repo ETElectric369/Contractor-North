@@ -298,7 +298,11 @@ describe("every door that inserts a job names it with jobNameFrom", () => {
     const named = body.indexOf("const jobName = jobNameFrom({ typed: r.job_name,");
     expect(named).toBeGreaterThan(body.indexOf('.from("customers")'));
     expect(named).toBeLessThan(body.indexOf('.from("jobs")'));
-    expect(body).toMatch(/select\("id, name, company_name, type"\)/);
+    // cn-v1171: the book is read once, whole (readCustomerBook pages it), for the one matcher, with the
+    // card's company and type for the namer.
+    expect(body).toContain('readCustomerBook<BookRow>(supabase, "id, name, company_name, email, phone, type")');
+    expect(body.indexOf("readCustomerBook<BookRow>")).toBeLessThan(named);
+    expect(body).toContain("who = book.find((c) => c.id === hit.id) ?? null;");
     expect(body).toMatch(/who = \{ company_name: cname \}/);
   });
 

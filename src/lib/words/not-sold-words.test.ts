@@ -46,7 +46,8 @@ describe("Not Sold replaces Lost in every catalog WORD owns", () => {
     const doors: [string, string, string][] = [
       ["vp_btn_lost", "Not Sold", "No Vendida"],
       ["ip_btn_lost", "Not Sold", "No Vendida"],
-      ["ip_btn_tileLost", "Not Sold", "No Vendidas"],
+      // cn-v1171: the Inspections tile went; a filed inspection's ending in the fold says it.
+      ["ip_endedNotSold", "Not Sold", "No Vendida"],
     ];
     for (const [k, e, s] of doors) {
       expect(en(k), k).toBe(e);

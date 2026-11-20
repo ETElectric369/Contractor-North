@@ -100,6 +100,7 @@ export default async function InquiriesPage({
               nowMs={nowMs}
               visitsUnread={intake.unread.has(i.id)}
               pickPending={intake.pickPending.has(i.id)}
+              wonPending={intake.wonPending.has(i.id)}
             />
           ))}
         </ul>

@@ -56,7 +56,8 @@ function fake() {
         single: async () => ({ data: verb === "insert" ? { id: "c-made" } : (rows()[0] ?? null), error: null }),
         then: (res: (v: unknown) => unknown) => res({ data: error() ? null : rows(), error: error() }),
       };
-      for (const m of ["limit", "in", "is", "order"]) chain[m] = () => chain;
+      // range: the book is read page by page (cn-v1171, lib/crm/new-customer readCustomerBook).
+      for (const m of ["limit", "in", "is", "order", "range"]) chain[m] = () => chain;
       return chain;
     },
   };

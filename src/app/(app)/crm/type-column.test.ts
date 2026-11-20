@@ -82,10 +82,12 @@ describe("the page reads the ends of the type list beside the list, ignoring the
   });
 
   it("the Type field stays in New Customer and Edit Customer, with Contractor in both", () => {
-    for (const f of ["new-customer-button.tsx", "[id]/edit-customer-button.tsx"]) {
-      // The option's words moved to the catalog (cn-v1146): the key, whose English is still Contractor.
-      expect(src(f), f).toContain('<option value="contractor">{t("cu_btn_typeContractor")}</option>');
-    }
+    // cn-v1171: both doors draw the one customer form (components/customer-fields), which lists the types.
+    for (const f of ["new-customer-button.tsx", "[id]/edit-customer-button.tsx"]) expect(src(f), f).toContain("<CustomerFields ");
+    const fields = readFileSync(join(process.cwd(), "src/components/customer-fields.tsx"), "utf8");
+    // The option's words moved to the catalog (cn-v1146): the key, whose English is still Contractor.
+    expect(fields).toContain('["contractor", "cu_btn_typeContractor"]');
+    expect(fields).toMatch(/TYPES\.map\(\(\[v, k\]\) => \(\s*<option key=\{v\} value=\{v\}>\{t\(k\)\}<\/option>/);
     expect(dict("en").cu_btn_typeContractor).toBe("Contractor");
     expect(dict("es").cu_btn_typeContractor).toBe("Contratista");
     // 'contractor' has been in the enum since 0151, and in the type now.

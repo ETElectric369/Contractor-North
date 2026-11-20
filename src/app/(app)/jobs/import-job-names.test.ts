@@ -12,8 +12,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * Synthetic people and streets.
  */
 const db = vi.hoisted(() => ({
-  book: [] as { id: string; name: string; company_name: string | null; type: string | null }[],
+  book: [] as { id: string; name: string; company_name: string | null; type: string | null; phone?: string | null; email?: string | null }[],
   jobs: [] as any[],
+  made: [] as any[],
 }));
 
 vi.mock("@/lib/staff-guard", () => ({
@@ -30,11 +31,12 @@ function client() {
       const q: { op: string; payload?: any; ilike: [string, string][] } = { op: "select", ilike: [] };
       const run = async () => {
         if (table === "organizations") return { data: { settings: { timezone: "America/Los_Angeles" } }, error: null };
-        if (table === "customers" && q.op === "select") {
-          const name = q.ilike.find(([c]) => c === "name")?.[1] ?? "";
-          return { data: db.book.find((c) => c.name.toLowerCase() === name.toLowerCase()) ?? null, error: null };
+        // cn-v1171: the import reads the whole book once and asks the one matcher (lib/crm/duplicates).
+        if (table === "customers" && q.op === "select") return { data: db.book, error: null };
+        if (table === "customers" && q.op === "insert") {
+          db.made.push(q.payload);
+          return { data: { id: `cust-new-${db.made.length}` }, error: null };
         }
-        if (table === "customers" && q.op === "insert") return { data: { id: `cust-new-${db.book.length}` }, error: null };
         if (table === "jobs" && q.op === "insert") {
           db.jobs.push(q.payload);
           return { data: { id: `job-${db.jobs.length}`, job_number: `J-${db.jobs.length}` }, error: null };
@@ -47,6 +49,8 @@ function client() {
         ilike: (c: string, v: string) => (q.ilike.push([c, v]), chain),
         eq: () => chain,
         limit: () => chain,
+        order: () => chain,
+        range: () => chain,
         single: run,
         maybeSingle: run,
         then: (ok: any, bad: any) => run().then(ok, bad),
@@ -64,6 +68,54 @@ beforeEach(() => {
     { id: "cust-rita", name: "Rita Moss", company_name: null, type: "residential" },
   ];
   db.jobs = [];
+  db.made = [];
+});
+
+describe("importJobs asks the one matcher before it makes a customer (cn-v1171)", () => {
+  it("a person on file under the same phone is that person, said on the row by the name on file", async () => {
+    db.book.push({ id: "cust-sam", name: "Sam Tillery", company_name: null, type: "residential", phone: "(530) 555-0100" });
+    const res = await importJobs([{ ...row("Sam Tilery", "Back porch"), phone: "5305550100" }]);
+    expect(db.made).toEqual([]);
+    expect(db.jobs[0].customer_id).toBe("cust-sam");
+    expect(res.results?.[0].name).toBe("J-1 · Back porch — for Sam Tillery, already a customer");
+    expect(res).not.toHaveProperty("customersMatched");
+  });
+
+  it("one new person listed twice in the file is made once", async () => {
+    const res = await importJobs([{ ...row("Dana Rook", "Deck"), email: "dana@example.test" }, { ...row("Dana Rook", "Fence"), email: "dana@example.test" }]);
+    expect(db.made).toHaveLength(1);
+    expect(db.jobs.map((j) => j.customer_id)).toEqual(["cust-new-1", "cust-new-1"]);
+    // The second row lands on the one this import made: not "already a customer", which it was not.
+    expect(res.results?.[1].name).toBe("J-2 · Fence");
+  });
+
+  it("a same-name card with another phone is another person: a new customer, and the row says why (cn-v1171, skeptic #74)", async () => {
+    db.book.push({ id: "cust-sam", name: "Sam Tillery", company_name: null, type: "residential", phone: "(530) 555-0100" });
+    const res = await importJobs([{ ...row("Sam Tillery", "Deck"), phone: "5305550199" }]);
+    expect(db.made).toHaveLength(1);
+    expect(db.jobs[0].customer_id).toBe("cust-new-1");
+    expect(res.results?.[0].name).toBe("J-1 · Deck — a new customer: the Sam Tillery on file has another phone or email");
+  });
+
+  it("a name two cards already share: five rows for one new person make ONE customer, and the first row says why", async () => {
+    db.book.push(
+      { id: "cust-casey-1", name: "Casey Loam", company_name: null, type: "residential" },
+      { id: "cust-casey-2", name: "Casey Loam", company_name: null, type: "residential" },
+    );
+    const res = await importJobs(["Deck", "Fence", "Gate", "Porch", "Shed"].map((j) => row("Casey Loam", j)));
+    expect(db.made).toHaveLength(1);
+    expect(db.jobs.map((j) => j.customer_id)).toEqual(Array(5).fill("cust-new-1"));
+    expect(res.results?.[0].name).toBe("J-1 · Deck — a new customer: 2 customers on file are named Casey Loam");
+  });
+
+  it("a book that cannot be read imports nothing", async () => {
+    const { requireStaff } = await import("@/lib/staff-guard");
+    const broken = { from: () => { const c: any = { select: () => c, limit: () => c, eq: () => c, order: () => c, range: () => c, maybeSingle: async () => ({ data: null, error: null }), then: (ok: any) => Promise.resolve({ data: null, error: { message: "down" } }).then(ok) }; return c; } };
+    vi.mocked(requireStaff).mockResolvedValueOnce({ supabase: broken, userId: "user-1", orgId: "org-1" } as any);
+    const res = await importJobs([row("Theo Vance", "Deck")]);
+    expect(res.ok).toBe(false);
+    expect(db.jobs).toEqual([]);
+  });
 });
 
 describe("importJobs: the sheet's name as typed, else the street, else the card it lands on", () => {

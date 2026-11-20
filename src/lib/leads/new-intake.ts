@@ -50,10 +50,10 @@ export function isOpenLead(lead: LeadStageRow): boolean {
 
 const STANDING_STATUSES: ReadonlySet<string> = new Set(["scheduled", "proposed", "completed"]);
 
-/** Not ended Not Sold (`lost`, or the older `no_bid`). An ending the rule was never taught is not this. */
-function undecidedOrWon(outcome: string | null | undefined): boolean {
-  const o = outcome ?? "";
-  return o === "" || o === "won";
+/** Nobody has said how it ended. Won, Not Sold (`lost`, or the older `no_bid`) and an ending the rule
+ *  was never taught are all answers, and an answered visit keeps nobody off the list. */
+function undecided(outcome: string | null | undefined): boolean {
+  return (outcome ?? "") === "";
 }
 
 /** The times were sent to the customer and no pick came back before the first one went by. */
@@ -64,10 +64,16 @@ function pickRanOut(visit: Pick<LeadVisitRow, "status" | "starts_at">, nowMs: nu
 }
 
 /**
- * A VISIT STANDS while it is on the books and has not ended Not Sold: booked, waiting for a day, or
- * done and not yet written up (or won). It does not stand once it is cancelled or its ending was Not
- * Sold. A status or an ending the rule has not been taught stands for nothing (see the header:
- * offered, never hidden).
+ * A VISIT STANDS while it is on the books and nobody has said how it ended: booked, waiting for a day,
+ * or done and not yet written up. It does not stand once it is cancelled or has an ending. A status or
+ * an ending the rule has not been taught stands for nothing (see the header: offered, never hidden).
+ *
+ * WON IS AN ENDING, AND IT DOES NOT STAND (cn-v1171, skeptic #74). The win is finished by picking its
+ * job, which converts the lead, and a converted lead is on no list whatever its visits say. A visit
+ * marked Won with no job picked (the ending card closed early, or the assistant's outcome door) left
+ * its lead open, kept off the Leads list by this rule and filed off the Inspections list by its
+ * ending: on no list at all. Now that lead is back on the Leads list, named in `wonPending` so its row
+ * can say what is left to do. In doubt a lead is offered, never hidden.
  *
  * A VISIT WAITING ON THE CUSTOMER'S PICK STANDS ONLY UNTIL THE FIRST TIME OFFERED GOES BY (skeptic
  * #73). While the customer has times to choose from there is nothing for the office to do, so the
@@ -79,8 +85,14 @@ function pickRanOut(visit: Pick<LeadVisitRow, "status" | "starts_at">, nowMs: nu
  */
 export function visitStands(visit: Pick<LeadVisitRow, "status" | "outcome" | "starts_at">, nowMs: number): boolean {
   if (!STANDING_STATUSES.has(String(visit.status ?? ""))) return false;
-  if (!undecidedOrWon(visit.outcome)) return false;
+  if (!undecided(visit.outcome)) return false;
   return !pickRanOut(visit, nowMs);
+}
+
+/** A visit on the books that was marked Won: what `wonPending` collects. Its lead is converted when
+ *  the job is picked; until then nothing else would say the win is unfinished. */
+export function visitWasWon(visit: Pick<LeadVisitRow, "status" | "outcome">): boolean {
+  return STANDING_STATUSES.has(String(visit.status ?? "")) && visit.outcome === "won";
 }
 
 /** A pick-a-time request that ran out with no answer and no ending: what `pickPending` collects. */
@@ -129,6 +141,9 @@ export type StandingRead = {
   /** Leads with nothing standing whose pick-a-time request ran out unanswered: on the list, and
    *  their row says the times were sent. */
   pickPending: ReadonlySet<string>;
+  /** Leads with nothing standing that have a visit marked Won: on the list (they are still open, so
+   *  no job was picked), and their row says so. */
+  wonPending: ReadonlySet<string>;
 };
 
 /**
@@ -143,6 +158,7 @@ export async function readStanding(
   const standing = new Set<string>();
   const unread = new Set<string>();
   const unanswered = new Set<string>();
+  const won = new Set<string>();
   const unique = [...new Set(ids.filter(Boolean))];
   const batches: string[][] = [];
   for (let i = 0; i < unique.length; i += STANDING_IDS_PER_REQUEST) {
@@ -169,11 +185,13 @@ export async function readStanding(
         if (!row.inquiry_id) continue;
         if (visitStands(row, nowMs)) standing.add(row.inquiry_id);
         else if (pickWentUnanswered(row, nowMs)) unanswered.add(row.inquiry_id);
+        else if (visitWasWon(row)) won.add(row.inquiry_id);
       }
     });
   }
   const pickPending = new Set([...unanswered].filter((id) => !standing.has(id)));
-  return { standing, unread, pickPending };
+  const wonPending = new Set([...won].filter((id) => !standing.has(id)));
+  return { standing, unread, pickPending, wonPending };
 }
 
 /** `readStanding` over a Supabase client. `orgId` is for a client that row-level security does not
@@ -208,6 +226,8 @@ export type NewIntake<T> = {
   unread: ReadonlySet<string>;
   /** Ids in `leads` whose pick-a-time request ran out unanswered (see `visitStands`). */
   pickPending: ReadonlySet<string>;
+  /** Ids in `leads` that have a visit marked Won and no job picked (see `visitStands`). */
+  wonPending: ReadonlySet<string>;
   /** The lead read's own failure. `leads` is then empty and the caller must say it could not load:
    *  an empty list and a failed read are not the same answer. */
   error: unknown | null;
@@ -246,6 +266,7 @@ export async function loadNewIntake<T extends { id: string }>(
       leads: [],
       unread: new Set(),
       pickPending: new Set(),
+      wonPending: new Set(),
       error: error ?? new Error("leads: no rows returned"),
       capped: false,
     };
@@ -260,7 +281,7 @@ export async function loadNewIntake<T extends { id: string }>(
   const leads = newIntakeOnly(open, read);
   const kept = new Set(leads.map((l) => l.id));
   const among = (ids: ReadonlySet<string>) => new Set([...ids].filter((id) => kept.has(id)));
-  return { leads, unread: among(read.unread), pickPending: among(read.pickPending), error: null, capped };
+  return { leads, unread: among(read.unread), pickPending: among(read.pickPending), wonPending: among(read.wonPending), error: null, capped };
 }
 
 /** The most open leads the badge reads. Past this the number is the count among the newest thousand,

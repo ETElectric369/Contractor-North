@@ -5,10 +5,10 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Plus, Contact } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
-import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { PhoneInput } from "@/components/ui/phone-input";
-import { AddressAutocomplete } from "@/components/address-autocomplete";
-import { StateSelect } from "@/components/ui/state-select";
+import { CustomerFields, customerFormValue, type CustomerFormValue } from "@/components/customer-fields";
+import { DuplicateCustomerAsk } from "@/components/duplicate-customer-ask";
+import { personValue } from "@/components/person-fields";
+import type { CustomerMatch } from "@/lib/crm/duplicates";
 import { parseVCards, type VCardContact } from "@/lib/vcard";
 import { createCustomer } from "./actions";
 import { useLang } from "@/components/lang-provider";
@@ -26,21 +26,22 @@ function aroundSlot(words: string, slot: string, piece: React.ReactNode) {
   );
 }
 
-const EMPTY = { name: "", company_name: "", email: "", phone: "", address: "" };
-
 export function NewCustomerButton() {
   const t = translator(useLang());
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  // City/state/zip are controlled (the address autocomplete fills them); the rest prefill
-  // via defaultValue + a remount key so importing a contact populates the whole form.
-  const [city, setCity] = useState("");
-  const [state, setState] = useState("");
-  const [zip, setZip] = useState("");
-  const [prefill, setPrefill] = useState(EMPTY);
+  // THE ONE CUSTOMER FORM (cn-v1171, components/customer-fields): its value lives here. The phone and
+  // the street are uncontrolled inside the person block, so a filled-in card or a reset remounts the
+  // fields (formKey) to show; the sheet itself is never remounted.
+  const [form, setForm] = useState<CustomerFormValue>(() => customerFormValue());
   const [formKey, setFormKey] = useState(0);
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  // ALREADY IN THE BOOK (cn-v1171): createCustomer made nothing and said who. The typed fields stay
+  // on screen under the ask; Add Anyway posts the same form again with allow_duplicate=1.
+  const [dup, setDup] = useState<{ match: CustomerMatch; sentence: string } | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const addAnyway = useRef(false);
 
   const [hasPicker, setHasPicker] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -75,32 +76,29 @@ export function NewCustomerButton() {
 
   const hadContent = useRef(false);
   function openFresh() {
-    setPrefill(EMPTY);
-    setCity("");
-    setState("");
-    setZip("");
+    setForm(customerFormValue());
     setImportMsg(null);
     setError(null);
-    // Remount the defaultValue fields ONLY when a previous session left content behind —
-    // remounting on every open raced Safari's form scan (see the form-level note below).
+    setDup(null);
+    // Remount the fields ONLY when a previous session left content behind — remounting on every
+    // open raced Safari's form scan (see the form-level note below).
     if (hadContent.current) setFormKey((k) => k + 1);
     hadContent.current = false;
     setOpen(true);
   }
 
+  /** A typed change: there is content to clear next time, and an ask about the old words is stale. */
+  function change(patch: Partial<CustomerFormValue>) {
+    hadContent.current = true;
+    setDup(null);
+    setForm((f) => ({ ...f, ...patch }));
+  }
+
   function applyContact(c: Partial<VCardContact>) {
     hadContent.current = true;
-    setPrefill({
-      name: c.name ?? "",
-      company_name: c.company_name ?? "",
-      email: c.email ?? "",
-      phone: c.phone ?? "",
-      address: c.address ?? "",
-    });
-    setCity(c.city ?? "");
-    setState(c.state ?? "");
-    setZip(c.zip ?? "");
-    setFormKey((k) => k + 1); // remount the fields so defaultValues pick up
+    setDup(null);
+    setForm((f) => ({ ...f, ...personValue(c) }));
+    setFormKey((k) => k + 1); // remount the fields so the phone and the street pick up
     setImportMsg(c.name ? fillText(t("cu_filledIn"), { name: c.name }) : null);
   }
 
@@ -152,8 +150,15 @@ export function NewCustomerButton() {
 
   function onSubmit(formData: FormData) {
     setError(null);
+    if (addAnyway.current) formData.set("allow_duplicate", "1");
+    addAnyway.current = false;
     startTransition(async () => {
       const res = await createCustomer(formData);
+      if (!res.ok && res.duplicate) {
+        setDup({ match: res.duplicate, sentence: res.error ?? "" });
+        return;
+      }
+      setDup(null);
       if (!res.ok) {
         setError(res.error ?? t("cu_somethingWrong"));
         return;
@@ -161,6 +166,12 @@ export function NewCustomerButton() {
       setOpen(false);
       if (res.id) router.push(`/crm/${res.id}`);
     });
+  }
+
+  /** Add Anyway: the SAME form, as it stands on screen, posted again with allow_duplicate=1. */
+  function submitAnyway() {
+    addAnyway.current = true;
+    formRef.current?.requestSubmit();
   }
 
   return (
@@ -174,7 +185,7 @@ export function NewCustomerButton() {
           culprit for weeks of "glitchy popup" — the blue button attaching to a half-scanned form,
           occasionally winning the race ("worked that one time"). The remount now happens only
           when a card actually fills the fields, never on plain open. */}
-      <form action={onSubmit} autoComplete="on">
+      <form ref={formRef} action={onSubmit} autoComplete="on">
         <Modal
           open={open}
           onClose={() => setOpen(false)}
@@ -231,73 +242,8 @@ export function NewCustomerButton() {
                 {error}
               </div>
             )}
-            <div key={formKey} className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <Label htmlFor="name">{t("cu_nameRequired")}</Label>
-                <Input id="name" name="name" autoComplete="name" required placeholder={t("cu_namePlaceholder")} defaultValue={prefill.name} />
-              </div>
-              <div className="col-span-2">
-                <Label htmlFor="company_name">{t("cu_company")}</Label>
-                <Input id="company_name" name="company_name" autoComplete="organization" placeholder={t("cu_optional")} defaultValue={prefill.company_name} />
-              </div>
-              <div>
-                <Label htmlFor="type">{t("cu_type")}</Label>
-                <Select id="type" name="type" defaultValue="residential">
-                  <option value="residential">{t("cu_btn_typeResidential")}</option>
-                  <option value="commercial">{t("cu_btn_typeCommercial")}</option>
-                  <option value="industrial">{t("cu_btn_typeIndustrial")}</option>
-                  <option value="contractor">{t("cu_btn_typeContractor")}</option>
-                <option value="subcontractor">{t("cu_btn_typeSubcontractor")}</option>
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="status">{t("cu_status")}</Label>
-                <Select id="status" name="status" defaultValue="active">
-                  <option value="active">{t("cu_btn_statusActive")}</option>
-                  <option value="inactive">{t("cu_btn_statusInactive")}</option>
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="email">{t("cu_email")}</Label>
-                <Input id="email" name="email" type="email" autoComplete="email" defaultValue={prefill.email} />
-              </div>
-              <div>
-                <Label htmlFor="phone">{t("cu_phone")}</Label>
-                <PhoneInput id="phone" name="phone" autoComplete="tel" defaultValue={prefill.phone} />
-              </div>
-              <div className="col-span-2">
-                <Label htmlFor="address">{t("cu_address")}</Label>
-                <AddressAutocomplete
-                  id="address"
-                  name="address"
-                  streetOnly
-                  defaultValue={prefill.address}
-                  onResolved={(p) => {
-                    setCity(p.city);
-                    setState(p.state);
-                    setZip(p.zip);
-                  }}
-                />
-              </div>
-              <div>
-                <Label htmlFor="city">{t("cu_city")}</Label>
-                <Input id="city" name="city" autoComplete="address-level2" value={city} onChange={(e) => setCity(e.target.value)} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label htmlFor="state">{t("cu_state")}</Label>
-                  <StateSelect id="state" name="state" value={state} onChange={setState} />
-                </div>
-                <div>
-                  <Label htmlFor="zip">{t("cu_zip")}</Label>
-                  <Input id="zip" name="zip" autoComplete="postal-code" value={zip} onChange={(e) => setZip(e.target.value)} />
-                </div>
-              </div>
-              <div className="col-span-2">
-                <Label htmlFor="notes">{t("cu_notes")}</Label>
-                <Textarea id="notes" name="notes" rows={2} />
-              </div>
-            </div>
+            {dup && <DuplicateCustomerAsk match={dup.match} sentence={dup.sentence} onAddAnyway={submitAnyway} pending={pending} />}
+            <CustomerFields key={formKey} mode="new" value={form} onChange={change} />
           </div>
         </Modal>
       </form>

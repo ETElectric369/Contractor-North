@@ -26,6 +26,7 @@ export function InquiryRow({
   nowMs,
   visitsUnread = false,
   pickPending = false,
+  wonPending = false,
 }: {
   inquiry: Inquiry;
   /** The company's clock: the arrival time is said in it. */
@@ -39,6 +40,8 @@ export function InquiryRow({
   /** Its pick-a-time request ran out unanswered (lib/leads/new-intake `pickPending`): it is back on
    *  the list, and the row says the times were sent. */
   pickPending?: boolean;
+  /** Its inspection was marked Won and no job was picked (lib/leads/new-intake `wonPending`). */
+  wonPending?: boolean;
 }) {
   const lang = useLang();
   const t = translator(lang);
@@ -131,6 +134,9 @@ export function InquiryRow({
       {visitsUnread && <p role="status" className="text-xs text-amber-700">{t("ld_visitsUnread")}</p>}
       {/* The times went out and the first one went by with no pick: the list is the reminder. */}
       {pickPending && <p role="status" className="text-xs text-amber-700">{t("ld_pickPending")}</p>}
+      {/* Its inspection was marked Won and no job was picked (cn-v1171, skeptic #74): the win is
+          finished on the visit, so the row says where. */}
+      {wonPending && <p role="status" className="text-xs text-amber-700">{t("ld_wonPending")}</p>}
 
       {/* ── LINE 4: THE DOORS (lead-doors.tsx), the same set the lead's file draws. Every lead on this
           list is open: one with a standing visit is not on it. ── */}

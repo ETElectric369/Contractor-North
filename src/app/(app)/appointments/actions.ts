@@ -34,6 +34,7 @@ import { clearInapplicable } from "@/lib/playbook/resolve";
 import { runOnce } from "@/lib/offline/run-once";
 import { createInquiry } from "../leads/actions";
 import { customerForInquiry } from "@/lib/actions/win-customer";
+import { matchOrCreateCustomer } from "@/lib/crm/new-customer";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_JOB_MINUTES } from "@/lib/schedule/job-block";
 import { putBackPlan, wontHappenVerdict } from "@/lib/appointments/wont-happen";
@@ -102,7 +103,16 @@ async function resolveIso(
 
 /** `refused`: the database said no to WHO is asking, so trying again won't change it (the
  *  inspection's autosave stops retrying and says so instead). */
-export type Result = { ok: boolean; error?: string; id?: string; refused?: boolean; /** Landed, with something to say (a lead that could not be marked). */ warning?: string };
+export type Result = {
+  ok: boolean;
+  error?: string;
+  id?: string;
+  refused?: boolean;
+  /** Landed, with something to say (a lead that could not be marked). */
+  warning?: string;
+  /** Landed on somebody already in the book: who, by the name on file (cn-v1171, resolveCustomer). */
+  notice?: string;
+};
 
 /** The one refusal for a kind nobody can pick (W2-06), in the picker's own words: its catalog key
  *  (ag_srv_pickAKind), said by the caller in the caller's language. (Not exported: a "use server"
@@ -131,12 +141,17 @@ function resolveType(
 
 /** Resolve the customer for an appointment form: an existing id, or create a new
  *  customer on the fly from a typed name (the "+ New customer" path). Surfaces
- *  errors instead of silently saving an appointment with no customer. */
+ *  errors instead of silently saving an appointment with no customer.
+ *
+ *  THE TYPED PERSON GOES THROUGH THE ONE MATCH-THEN-INSERT DOOR (cn-v1171, lib/crm/new-customer, the
+ *  job forms' own). It inserted without looking, so a visit booked for somebody already in the book
+ *  made a twin. When the book already has them the visit is theirs, and `notice` says so by the name
+ *  on file (a phone typed under another spelling is that person). */
 async function resolveCustomer(
   supabase: any,
   formData: FormData,
   userId: string,
-): Promise<{ customerId: string | null; error?: string; lead?: { name: string; phone: string | null } }> {
+): Promise<{ customerId: string | null; error?: string; lead?: { name: string; phone: string | null }; notice?: string }> {
   const ws = wordsOf(supabase);
   const customerId = emptyToNull(formData.get("customer_id"));
   const newName = emptyToNull(formData.get("new_customer_name"));
@@ -149,13 +164,10 @@ async function resolveCustomer(
   }
   if (customerId === "__new__" || (!customerId && newName)) {
     if (!newName) return { customerId: null, error: await ws.say("ag_srv_customerNameFirst") };
-    const { data: c, error } = await supabase
-      .from("customers")
-      .insert({ name: newName, phone: formatPhone(String(formData.get("new_customer_phone") ?? "")) || null, created_by: userId })
-      .select("id")
-      .single();
-    if (error || !c) return { customerId: null, error: error?.message ?? (await ws.say("ag_srv_customerNotMade")) };
-    return { customerId: c.id };
+    const made = await matchOrCreateCustomer(supabase, userId, { name: newName, phone: String(formData.get("new_customer_phone") ?? "") });
+    if (!made.ok) return { customerId: null, error: made.error || (await ws.say("ag_srv_customerNotMade")) };
+    if (!made.matched) return { customerId: made.id };
+    return { customerId: made.id, notice: await ws.say("cu_srv_visitForOnFile", { name: made.name }) };
   }
   return { customerId };
 }
@@ -238,7 +250,7 @@ export async function createAppointment(formData: FormData): Promise<Result> {
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
-  return { ok: true, id: data.id, ...(warning ? { warning } : {}) };
+  return { ok: true, id: data.id, ...(warning ? { warning } : {}), ...(cust.notice ? { notice: cust.notice } : {}) };
 }
 
 /** The parts a pick in the Location box resolved, when the form sent them; nothing for a typed line
@@ -291,7 +303,9 @@ async function dropReplacedCustomer(ws: Said, appointmentId: string, leadId: str
 }
 
 /** "Start an Inspection" (it was "Inspect now") — the already-onsite path (Erik: "sometimes we're
- *  onsite already — too many steps today"). Creates a type='inspection' appointment starting NOW (status
+ *  onsite already — too many steps today"). Among its callers (cn-v1171): New Estimate's Start an
+ *  Inspection, a lead's Start Now (leads/convert-menu) and Quick Measure; the Inspections list's Start
+ *  Inspection opens a visit that is already booked and makes none. Creates a type='inspection' appointment starting NOW (status
  *  'scheduled'; filling in the capture is what makes it *done*), linked to the lead when
  *  launched from one, so the caller can route STRAIGHT to /appointments/<id> and start
  *  collecting field data. One tap from lead → capturing. */
@@ -424,7 +438,7 @@ export async function openLeadInspection(inquiryId: string): Promise<Result> {
  *  time options). The appointment shows as "proposed" until they tap a slot. */
 export async function createAppointmentProposal(
   formData: FormData,
-): Promise<{ ok: boolean; error?: string; token?: string; warning?: string }> {
+): Promise<{ ok: boolean; error?: string; token?: string; warning?: string; notice?: string }> {
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const ws = wordsOf(ctx.supabase, ctx.userId);
@@ -478,7 +492,7 @@ export async function createAppointmentProposal(
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
-  return { ok: true, token: res.token, ...(warning ? { warning } : {}) };
+  return { ok: true, token: res.token, ...(warning ? { warning } : {}), ...(cust.notice ? { notice: cust.notice } : {}) };
 }
 
 /** The on-site inspection field capture (notes / measurements / materials +
@@ -1425,7 +1439,7 @@ export async function updateAppointment(id: string, formData: FormData): Promise
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
   revalidatePath(`/appointments/${id}`); // the capture page hosts Edit Details — show the save
-  return { ok: true, ...(warning ? { warning } : {}) };
+  return { ok: true, ...(warning ? { warning } : {}), ...(cust.notice ? { notice: cust.notice } : {}) };
 }
 
 /**

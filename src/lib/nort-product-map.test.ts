@@ -343,9 +343,11 @@ describe("Nort's product map after the shell wave", () => {
     expect(enums.length).toBe(2); // customer.create and customer.update
     for (const e of enums) expect(e).toContain('"contractor"');
     for (const p of ["src/app/(app)/crm/new-customer-button.tsx", "src/app/(app)/crm/[id]/edit-customer-button.tsx"]) {
-      // The option's words live in lib/words/customers since cn-v1146: the key, whose English is Contractor.
-      expect(readFileSync(join(process.cwd(), p), "utf8"), p).toContain('<option value="contractor">{t("cu_btn_typeContractor")}</option>');
+      // cn-v1171: both doors draw the one customer form, which lists the types.
+      expect(readFileSync(join(process.cwd(), p), "utf8"), p).toContain("<CustomerFields ");
     }
+    // The option's words live in lib/words/customers since cn-v1146: the key, whose English is Contractor.
+    expect(readFileSync(join(process.cwd(), "src/components/customer-fields.tsx"), "utf8")).toContain('["contractor", "cu_btn_typeContractor"]');
     expect(dict("en").cu_btn_typeContractor).toBe("Contractor");
   });
 });

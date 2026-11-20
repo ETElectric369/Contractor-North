@@ -43,7 +43,7 @@ const PAGES: Page[] = [
     file: "inspections/page.tsx",
     slug: "inspections",
     title: "Inspections",
-    desc: "Site visits before you price the work — fill in the inspection, then write it up into an estimate.",
+    desc: "Everyone waiting on an inspection: start it here, then write it up into an estimate.",
     es: "Inspecciones",
   },
   {

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Inquiry } from "@/lib/types";
+import type { FileVisitRow } from "@/lib/appointments/file-visit";
 
 /**
  * WHAT THE LEAD'S FILE READS (cn-v1170, /leads/<id>). Erik, 2026-11-19: "lets make everything staged
@@ -19,7 +20,8 @@ export const FILE_ESTIMATE_COLUMNS = "id, quote_number, title, status, created_a
 export const FILE_JOB_COLUMNS = "id, job_number, name, status";
 
 export type FileLead = Inquiry & { referrer?: { full_name?: string | null } | null };
-export type FileVisit = { id: string; type: string | null; status: string | null; outcome: string | null; starts_at: string | null; title: string | null };
+/** One shape for a visit on any person's file (cn-v1171): lib/appointments/file-visit. */
+export type FileVisit = FileVisitRow;
 export type FileEstimate = { id: string; quote_number: string | null; title: string | null; status: string; created_at: string };
 export type FileJob = { id: string; job_number: string | null; name: string | null; status: string | null };
 
@@ -49,11 +51,14 @@ export async function readLeadFile(supabase: SupabaseClient, id: string): Promis
   const row = lead as unknown as FileLead;
 
   const [visits, estimates, jobs, customer] = await Promise.all([
+    // Cancelled ones too (cn-v1171): the Inspections page's Filed side is gone, so the person's file is
+    // where a cancelled inspection is found. Nothing here takes one for a visit that stands
+    // (visitStands refuses a cancelled status). Read soonest first, so the header names the soonest
+    // visit that stands, as before; the list is drawn in the file's own order (fileVisitOrder).
     supabase
       .from("appointments")
       .select(FILE_VISIT_COLUMNS)
       .eq("inquiry_id", id)
-      .neq("status", "cancelled")
       .order("starts_at", { ascending: true, nullsFirst: false }),
     supabase.from("quotes").select(FILE_ESTIMATE_COLUMNS).eq("inquiry_id", id).order("created_at", { ascending: false }),
     supabase.from("jobs").select(FILE_JOB_COLUMNS).eq("inquiry_id", id).order("created_at", { ascending: false }),

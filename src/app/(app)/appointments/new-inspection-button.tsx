@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ClipboardCheck } from "lucide-react";
@@ -11,41 +11,22 @@ import { translator } from "@/lib/i18n";
 
 /**
  * THE shared "new inspection" affordance (Erik: "sometimes we're onsite already — too many
- * steps today"). Mounted on the Inspections tab header, the lead row's convert menu, and the
- * estimate builder header. Two modes:
+ * steps today"). Mounted on the estimate builder's header (the Inspections page's header and the lead
+ * row no longer draw it: cn-v1171 removed the header's buttons, and a lead's Schedule sheet has its
+ * own Start Now). Two modes:
  *   • START AN INSPECTION — one tap: creates the type='inspection' appointment starting now
  *     (linked to the lead when launched from one) and routes STRAIGHT to /appointments/<id> capture.
- *   • BOOK — opens the EXISTING scheduling flow, never a fork: pass a `schedule` node
- *     (e.g. an <AppointmentButton defaultType="inspection">, whose modal has Set a Time |
- *     Propose Times) or fall back to the schedule page's create door. `nowOnly` hides the
- *     booking half where an existing schedule affordance already sits alongside (lead row).
+ *   • BOOK — the schedule page's create door.
  * One word for the site visit, and it is the stored one: Inspection (src/lib/statuses.ts says so).
  * The CITY'S is the separate type final_inspection, "Final Inspection", on the job's permit.
  */
 export function NewInspectionButton({
-  label,
-  title,
-  iconClassName,
   inquiryId,
-  nowOnly = false,
-  schedule,
   size,
   variant,
 }: {
   /** Lead context: links the inspection to this inquiry (provenance + capture → estimate threading). */
   inquiryId?: string;
-  /** Override the button's word. The lead row uses a bare "Inspection" so the three verbs read as
-   *  one set (Inspection · Schedule · Estimate); everywhere else keeps "Start an Inspection",
-   *  where "Start" is doing real work distinguishing it from booking one. */
-  label?: string;
-  /** The hover line: what the one tap does, where the bare word leaves it out. */
-  title?: string;
-  /** The icon's own classes: the lead row drops it on a phone so its three verbs fit one line. */
-  iconClassName?: string;
-  /** Render only the one-tap "Start an Inspection" button (the lead row already has schedule options). */
-  nowOnly?: boolean;
-  /** Custom schedule-mode affordance (the existing flow); defaults to the schedule page's create door. */
-  schedule?: ReactNode;
   size?: "sm";
   variant?: "outline";
 }) {
@@ -69,22 +50,16 @@ export function NewInspectionButton({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Button size={size} variant={variant} onClick={inspectNow} disabled={busy} title={title} className="shrink-0 whitespace-nowrap">
-        <ClipboardCheck className={iconClassName ?? "h-4 w-4"} /> {busy ? t("qt_btn_starting") : (label ?? t("qt_btn_startAnInspection"))}
+      <Button size={size} variant={variant} onClick={inspectNow} disabled={busy} className="shrink-0 whitespace-nowrap">
+        <ClipboardCheck className="h-4 w-4" /> {busy ? t("qt_btn_starting") : t("qt_btn_startAnInspection")}
       </Button>
-      {!nowOnly &&
-        (schedule ?? (
-          // FALLBACK CAVEAT: the schedule page's generic create modal defaults type to
-          // "other" — a record that never shows on /inspections unless the user flips
-          // the Type select. Prefer passing a `schedule` node with an
-          // <AppointmentButton defaultType="inspection"> wherever pickers are available
-          // (the /inspections header AND empty state both do now).
-          <Link href="/schedule?new=appointment">
-            <Button size={size} variant="outline" className="shrink-0 whitespace-nowrap">
-              {t("qt_btn_bookAnInspection")}
-            </Button>
-          </Link>
-        ))}
+      {/* CAVEAT, as before: the schedule page's generic create modal defaults its type to "other",
+          a record that never shows on /inspections unless the Type select is flipped. */}
+      <Link href="/schedule?new=appointment">
+        <Button size={size} variant="outline" className="shrink-0 whitespace-nowrap">
+          {t("qt_btn_bookAnInspection")}
+        </Button>
+      </Link>
       {error && <p className="w-full text-xs text-red-600">{error}</p>}
     </div>
   );

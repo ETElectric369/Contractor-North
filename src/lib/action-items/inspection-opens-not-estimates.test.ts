@@ -46,17 +46,19 @@ describe("an inspection_writeup row never points at /quotes/new", () => {
 });
 
 describe("every other link to /quotes/new?capture= is an explicit button, never a row body", () => {
-  it("the Inspections list: the link is the row's own labelled verb, beside the row's own link to the visit", () => {
+  it("the Inspections list: the link is the row's own labelled boxed button; the row's name opens the person's file", () => {
     const page = src("src/app/(app)/inspections/page.tsx");
-    // The row's body opens the visit; the capture link is only ever the verb Create Estimate.
-    expect(page).toContain("href: `/appointments/${a.id}`,");
+    // The capture link is only ever the boxed button Create Estimate; every other boxed button and the
+    // ⋯'s Open Inspection go to the visit (cn-v1171: the one list).
+    expect(page).toContain("const visitHref = `/appointments/${a.id}`;");
     expect(page).toMatch(/\{ label: t\("ip_btn_createEstimate"\), href: `\/quotes\/new\?capture=\$\{a\.id\}/);
-    // The board draws the row's link around who/what/edge, and the verb as its own link holding its
-    // label and nothing else.
-    const board = src("src/app/(app)/inspections/inspections-board.tsx");
-    expect(board).toMatch(/<Link href=\{row\.href\} [^>]*>/);
-    expect(board).toMatch(/<Link href=\{row\.verb\.href\} [^>]*>\s*\{row\.verb\.label\}\s*<\/Link>/);
-    expect(board.indexOf("<Link href={row.verb.href}")).toBeGreaterThan(board.indexOf("</Link>", board.indexOf("<Link href={row.href}")));
+    expect(page).toContain("whoHref: inspectionFileHref(a),");
+    // The card draws the name as its own link, and the boxed button as its own link holding its label
+    // and nothing else, after the name's link has closed.
+    const list = src("src/app/(app)/inspections/inspection-list.tsx");
+    expect(list).toMatch(/<Link href=\{row\.whoHref\} [^>]*>/);
+    expect(list).toMatch(/<Link href=\{row\.primary\.href\} [^>]*>\s*\{row\.primary\.label\}\s*<\/Link>/);
+    expect(list.indexOf("<Link href={row.primary.href}")).toBeGreaterThan(list.indexOf("</Link>", list.indexOf("<Link href={row.whoHref}")));
   });
 
   it("the visit page hands the Inspector the href for its Start the Estimate button; nothing else on it links there", () => {

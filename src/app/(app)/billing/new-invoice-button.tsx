@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { NewCustomerInline } from "@/components/new-customer-inline";
+import { NewCustomerInline, addedOnce } from "@/components/new-customer-inline";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Plus, Briefcase, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -214,7 +214,7 @@ export function NewInvoiceButton({
             setRefusal(null);
           }}
           onCustomerCreated={(c) => {
-            setAddedCustomers((prev) => [c, ...prev]);
+            setAddedCustomers((prev) => addedOnce(prev, customers, c));
             setPick({ kind: "customer", id: c.id, label: c.name });
           }}
           salesTax={salesTax}

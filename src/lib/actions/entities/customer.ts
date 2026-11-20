@@ -123,7 +123,23 @@ export const customerActions: Record<string, ActionDef> = {
       if (i.zip) fd.set("zip", i.zip);
       if (i.notes) fd.set("notes", i.notes);
       if (i.type) fd.set("type", i.type);
+      // The assistant cannot ask, so it takes only a SURE match (cn-v1171, skeptic #74): a same-name
+      // card whose phone or email disagrees is another person, and the customer is made. A form
+      // field, not an input of the action.
+      fd.set("sure_match_only", "1");
       const r = await createCustomer(fd);
+      // ALREADY IN THE BOOK (cn-v1171): createCustomer asks the one matcher and makes nothing on a
+      // match. The assistant has no Add Anyway (no new input: its write list is pinned), so it refuses
+      // in one sentence that names the customer on file and the one thing to do; on a name, where the
+      // person may be another with the same name, the one place that can add them anyway.
+      if (!r.ok && r.duplicate) {
+        const who = quotedData(r.duplicate.name || i.name);
+        const error =
+          r.duplicate.reason === "name"
+            ? `${who} is already a customer (same name). Use that customer; for a different person with the same name, add them from Customers, New Customer.`
+            : `${who} is already a customer (${r.duplicate.reason === "phone" ? "same phone" : "same email"}). Use that customer.`;
+        return { ok: false, error, data: { existing_customer_id: r.duplicate.id } };
+      }
       if (!r.ok || !r.id) return r;
       const supabase = await createClient();
       const stored = await customerRecorded(supabase, r.id, "Saved");

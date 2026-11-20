@@ -155,6 +155,15 @@ describe("A. the row: who, how to reach them, the Scope, the doors (cn-v1170)", 
     expect(es).toContain("Se enviaron los horarios y no ha elegido ninguno.");
   });
 
+  it("an inspection marked Won with no job picked: the row says where to finish it (cn-v1171, skeptic #74)", () => {
+    expect(row(lead(), { wonPending: true })).toContain("Its inspection was marked Won and no job was picked. Open the inspection to pick the job.");
+    expect(row(lead())).not.toContain("no job was picked");
+    const es = renderToStaticMarkup(
+      createElement(LangProvider, { lang: "es", children: createElement(InquiryRow, { inquiry: lead(), tz: "America/Los_Angeles", nowMs: ARRIVED_MS, wonPending: true }) }),
+    );
+    expect(es).toContain("Abre la inspección para elegir el trabajo.");
+  });
+
   it("kept from the old row: the bucket's mark and the customer's own Needs a Visit", () => {
     const html = row(lead({ lead_bucket: "A", site_inspection_required: true }));
     expect(html).toMatch(/<span[^>]*title="Has plans — straight to a firm estimate\."[^>]*><span aria-hidden="true" class="[^"]*bg-emerald-500[^"]*"><\/span>A · Ready to quote<\/span>/);
@@ -305,6 +314,7 @@ describe("F. the page is the one rule's list (cn-v1170)", () => {
     expect(page).not.toContain("<Card>");
     expect(page).toContain("visitsUnread={intake.unread.has(i.id)}");
     expect(page).toContain("pickPending={intake.pickPending.has(i.id)}");
+    expect(page).toContain("wonPending={intake.wonPending.has(i.id)}");
   });
 
   it("the Not Sold fold: unconverted Not Sold leads, most recently updated first, fifty and a cut", () => {

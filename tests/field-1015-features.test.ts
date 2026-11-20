@@ -20,7 +20,10 @@ describe("New Inspection in the + menu (33b28e4b)", () => {
     expect(page).toContain('if (sp.new === "appointment" || sp.new === "inspection" || (sp.new === "1" && (sp.view !== "day" || !date))) {');
     expect(page).toContain("redirect(`/schedule?view=day&date=${date ?? todayStrInTz(tz)}&new=1${type ? `&type=${type}` : \"\"}${time ? `&time=${time}` : \"\"}`);");
     const form = read("src/app/(app)/appointments/appointment-button.tsx");
-    expect(form).toContain("type: appointment?.type ?? urlSeed.current.type ?? defaultType ?? (defaultJobId ? \"job\" : \"other\"),");
+    // cn-v1171: the form's `defaultType` prop left with the Inspections header's Book an Inspection, its
+    // last caller. The + menu's New Inspection never used it: the type rides in the address (urlSeed).
+    expect(form).toContain("type: appointment?.type ?? urlSeed.current.type ?? (defaultJobId ? \"job\" : \"other\"),");
+    expect(form).not.toContain("defaultType");
     expect(form).toContain('{ date, time: urlSeed.current.time ?? "08:00" }');
     expect(form).toMatch(/if \(!newParam\.take\(claimant\)\) return;\s*const type = searchParams\.get\("type"\) \?\? "";/);
     expect(form).toContain('params.delete("type");');

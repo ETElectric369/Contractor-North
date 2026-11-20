@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { DropTarget } from "@/components/drop-target";
 import { taxFieldShown } from "@/lib/sales-tax-switch";
-import { NewCustomerInline } from "@/components/new-customer-inline";
+import { NewCustomerInline, addedOnce } from "@/components/new-customer-inline";
 import { applyPriceBookReview } from "../price-list/actions";
 import type { BookUpdate, BookAddition } from "@/lib/pricing/book-review";
 import { Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight, Check, X, FileUp, ListPlus } from "lucide-react";
@@ -1638,7 +1638,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                   <NewCustomerInline
                     className="mt-1.5"
                     onCreated={(c) => {
-                      setAddedCustomers((prev) => [{ id: c.id, name: c.name, company_name: null }, ...prev]);
+                      setAddedCustomers((prev) => addedOnce(prev, seedCustomers, { id: c.id, name: c.name, company_name: null }));
                       session.typeHeader({ customerId: c.id });
                       void session.commitHeader("customerId");
                     }}

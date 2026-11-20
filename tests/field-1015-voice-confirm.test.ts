@@ -122,8 +122,9 @@ describe("the appointment writers: a new lead goes through the visit page's own 
     expect(acts).toContain("const warning = cust.lead ? await attachNewLead(ws, id, cust.lead, !!row?.customer_id) : undefined;");
     expect(acts).toContain("const warning = cust.lead ? await attachNewLead(ws, res.appointmentId, cust.lead) : undefined;");
     expect(acts).toContain('if (phone) fd.set("phone", phone);');
-    expect(acts).toContain("return { ok: true, id: data.id, ...(warning ? { warning } : {}) };");
-    expect(acts).toContain("return { ok: true, ...(warning ? { warning } : {}) };");
+    // cn-v1171: the answer also carries who a typed new customer turned out to be (resolveCustomer's notice).
+    expect(acts).toContain("return { ok: true, id: data.id, ...(warning ? { warning } : {}), ...(cust.notice ? { notice: cust.notice } : {}) };");
+    expect(acts).toContain("return { ok: true, ...(warning ? { warning } : {}), ...(cust.notice ? { notice: cust.notice } : {}) };");
     expect(acts).toContain('return [made.note, kept].filter(Boolean).join(" ") || undefined;');
     // One lead per visit.
     expect(acts).toContain('if (cust.lead && row?.inquiry_id) return { ok: false, error: await ws.say("ag_srv_visitHasLead") };');

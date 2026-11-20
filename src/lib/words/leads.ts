@@ -61,6 +61,11 @@ export const words: WordCatalog = {
     "src/app/(app)/leads/[id]/lead-file.tsx",
     "src/app/(app)/leads/[id]/file-doors.tsx",
     "src/app/(app)/leads/[id]/file-estimates.tsx",
+    // cn-v1171 (CUST): a person's file, drawn on the lead's file and the customer's page.
+    "src/components/file/visit-list.tsx",
+    "src/components/file/lead-stage.ts",
+    // cn-v1171 (PEOPLE): the one person block, drawn by the lead form and the customer form.
+    "src/components/person-fields.tsx",
   ],
   sameInBoth: [],
   en: {
@@ -259,6 +264,10 @@ export const words: WordCatalog = {
     ld_file_linkedTo: "Linked to {name}",
     ld_file_couldntMakeContact: "Couldn't make a contact from this lead.",
     ld_btn_fileOpen: "Open",
+    // cn-v1171 (CUST)
+    ld_btn_fileVisitCancelled: "Cancelled",
+    // cn-v1171 (fixer, skeptic #74)
+    ld_wonPending: "Its inspection was marked Won and no job was picked. Open the inspection to pick the job.",
   },
   es: {
     ld_status_new: "nuevo",
@@ -447,5 +456,9 @@ export const words: WordCatalog = {
     ld_file_linkedTo: "Enlazado a {name}",
     ld_file_couldntMakeContact: "No se pudo crear un contacto con este prospecto.",
     ld_btn_fileOpen: "Abrir",
+    // cn-v1171 (CUST)
+    ld_btn_fileVisitCancelled: "Cancelada",
+    // cn-v1171 (fixer, skeptic #74)
+    ld_wonPending: "Su inspección se marcó como Ganada y no se eligió un trabajo. Abre la inspección para elegir el trabajo.",
   },
 };

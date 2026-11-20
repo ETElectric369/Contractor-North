@@ -392,18 +392,16 @@ describe("inspectionLabel", () => {
   });
 });
 
-/* ── The page's tiles ────────────────────────────────────────────────────────────────────────── */
-import { FILED_TILES, OPEN_TILES, inspectionRowWords, openFirstTile, rowTagWords, tileInspections, tilesOf, type InspectionTile } from "./inspections";
+/* ── The piles under the one list (tileInspections; the page's tiles went in cn-v1171) ─────────── */
+import { FILED_TILES, OPEN_TILES, inspectionRowWords, rowTagWords, tileInspections, type InspectionTile } from "./inspections";
 
-describe("the seven tiles: every inspection under exactly one", () => {
+describe("the seven piles: every inspection in exactly one", () => {
   type R = { id: string; status: string; starts_at: string | null; inquiry_id: string | null; job_id: string | null; outcome?: string | null; created_at?: string | null };
   const row = (id: string, o: Partial<R> = {}): R => ({ id, status: "scheduled", starts_at: null, inquiry_id: null, job_id: null, ...o });
 
-  it("names the tiles of each view in drawn order", () => {
+  it("names the open piles and the filed endings", () => {
     expect([...OPEN_TILES]).toEqual(["write_up", "coming_up", "needs_day", "missed"]);
     expect([...FILED_TILES]).toEqual(["completed", "lost", "cancelled"]);
-    expect(tilesOf("open")).toBe(OPEN_TILES);
-    expect(tilesOf("filed")).toBe(FILED_TILES);
   });
 
   it("splits upcoming by a start and by whether that start is before today, and orders the waiting ones by the day they were made", () => {
@@ -452,18 +450,6 @@ describe("the seven tiles: every inspection under exactly one", () => {
     const late = { toWriteUp: [], upcoming: [row("p", { starts_at: "2026-03-10T06:30:00Z", status: "proposed" })], missed: [], filed: [] };
     expect(tileInspections(late, now, "America/Los_Angeles").missed.map((r) => r.id)).toEqual(["p"]);
     expect(tileInspections(late, now, "UTC").coming_up.map((r) => r.id)).toEqual(["p"]);
-  });
-
-  it("opens the tile asked for when it is this view's and has rows, else the first with rows, else none", () => {
-    const counts = (o: Partial<Record<InspectionTile, number>>): Record<InspectionTile, number> => ({ write_up: 0, coming_up: 0, needs_day: 0, missed: 0, completed: 0, lost: 0, cancelled: 0, ...o });
-    expect(openFirstTile("open", counts({ coming_up: 2, missed: 1 }))).toBe("coming_up");
-    expect(openFirstTile("open", counts({ coming_up: 2, missed: 1 }), "missed")).toBe("missed");
-    expect(openFirstTile("open", counts({ coming_up: 2 }), "missed")).toBe("coming_up"); // asked for, but empty
-    expect(openFirstTile("open", counts({ coming_up: 2, lost: 4 }), "lost")).toBe("coming_up"); // another view's tile
-    expect(openFirstTile("open", counts({ coming_up: 2 }), "'; drop")).toBe("coming_up");
-    expect(openFirstTile("filed", counts({ write_up: 9, lost: 4 }))).toBe("lost");
-    expect(openFirstTile("filed", counts({ lost: 4, cancelled: 1 }), "cancelled")).toBe("cancelled");
-    expect(openFirstTile("open", counts({ lost: 4 }))).toBeNull();
   });
 });
 

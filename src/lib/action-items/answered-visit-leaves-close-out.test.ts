@@ -219,9 +219,9 @@ describe("the outcome is tested IN THE QUERY, so the pile's count is the read's 
  * function they share (lib/inspections bucketInspections: any outcome settles a visit whose time has
  * passed). Pinned here because it holds only while their SELECT lists name the column: a projection
  * that drops `outcome` would hand bucketInspections a row with no answer on it, and the lost visit
- * would be back under Inspections to Write Up, or under Didn't Happen?, with nothing failing.
+ * would be back under Inspections to Write Up, or on the Inspections list, with nothing failing.
  */
-describe("the write-up feeder and the Didn't Happen? group read the outcome column", () => {
+describe("the write-up feeder and the Inspections page read the outcome column", () => {
   /** The columns of the first select in a piece of source, as a list. */
   const selected = (source: string) => (/\.select\(\s*"([^"]*)"/.exec(source)?.[1] ?? "").split(/,\s*/);
   /** What bucketInspections decides a row's pile from: drop one from a select and it decides blind. */
@@ -234,11 +234,16 @@ describe("the write-up feeder and the Didn't Happen? group read the outcome colu
     expect(q).toMatch(/const \{ toWriteUp \} = bucketInspections\(\s*\(inspR\.data \?\? \[\]\) as any\[\],/);
   });
 
-  it("the Inspections page (the Didn't Happen? group's source) selects outcome and buckets with the same function", () => {
+  // cn-v1171: the page is one list now (lib/inspections inspectionList over the buckets); the two facts
+  // pinned are the same: its read selects outcome, and its rows go through bucketInspections.
+  it("the Inspections page selects outcome and buckets with the same function", () => {
     const page = readFileSync(join(process.cwd(), "src/app/(app)/inspections/page.tsx"), "utf8");
     const cols = selected(page.slice(page.indexOf('.from("appointments")')));
     for (const c of BUCKET_READS) expect(cols, c).toContain(c);
-    expect(page).toMatch(/const \{ toWriteUp, upcoming, missed, filed \} = bucketInspections\(/);
+    expect(page).toMatch(/const buckets = bucketInspections\(\s*rows,/);
+    expect(page).toContain("inspectionList(buckets, now, tz)");
+    // The rows handed over are the read's own: nothing filters the outcome in between.
+    expect(page).toMatch(/const rows = \(apptData \?\? \[\]\) as any\[\];/);
   });
 
   it("driven: an answered visit with field notes is not a write-up row, whatever its status", async () => {

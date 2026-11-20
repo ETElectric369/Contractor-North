@@ -32,12 +32,17 @@ import type { WordCatalog } from "./types";
  * are gone with their keys.
  * cn-v1170: Lost reads Not Sold (Erik: "Not Sold" replaces "Lost" everywhere). The tile is No Vendidas,
  * the row's button No Vendida; the key ids keep their old names.
+ * cn-v1171: THE TILES ARE GONE: one list, the Open / Filed switch and the header's two buttons removed
+ * with their keys. A row's boxed button is Start Inspection (Empezar Inspección, qt_btn_'s verb) or
+ * Open Inspection (Abrir Inspección); its state words are plain keys in Title Case, Falta el Día as
+ * before. The fold of filed inspections with nobody to file under: No Están a Nombre de Nadie. A
+ * filed one's ending is singular and feminine (la inspección): Terminada, No Vendida, Cancelada.
  */
 export const words: WordCatalog = {
   prefix: "ip_",
   files: [
     "src/app/(app)/inspections/page.tsx",
-    "src/app/(app)/inspections/inspections-board.tsx",
+    "src/app/(app)/inspections/inspection-list.tsx",
     "src/app/(app)/inspections/inspection-row-menu.tsx",
   ],
   sameInBoth: [],
@@ -47,31 +52,11 @@ export const words: WordCatalog = {
     ip_lib_cancelled: "cancelled",
     ip_lib_noFieldNotes: "no field notes",
 
-    // ── The page (inspections/page.tsx): the switch, the tiles, the empty states ──
-    ip_btn_open: "Open",
-    ip_btn_filed: "Filed",
-    ip_btn_tileWriteUp: "Write Up",
-    ip_btn_tileComingUp: "Coming Up",
-    ip_btn_tileNeedsADay: "Needs a Day",
-    ip_btn_tileMissed: "Didn't Happen?",
-    ip_btn_tileCompleted: "Completed",
-    ip_btn_tileLost: "Not Sold",
-    ip_btn_tileCancelled: "Cancelled",
-    ip_tileOldest: "Oldest: {age}",
-    ip_tileNext: "Next: {when}",
-    ip_tilePastNoNotes: "Past, no notes",
-    ip_tileWrittenUp: "Written up",
-    ip_tileDidntBecomeWork: "Didn't become work",
-    ip_tileCalledOff: "Called off",
-    ip_tileNothing: "{name}: nothing here",
-    ip_tileEmpty: "Nothing here now.",
+    // ── The page (inspections/page.tsx): the cap and the empty state ──
     ip_capped: "Showing the {n} latest inspections. Older ones are not listed.",
-    ip_nothingFiledTitle: "Nothing filed away yet",
-    ip_nothingFiledDesc: "Inspections land here once they're written up into an estimate (or called off).",
-    ip_noOpenInspections: "No open inspections",
-    ip_emptyDescLeadsOn: "Start one from a lead, book one, or tap Start an Inspection when you're already there.",
+    ip_noOpenInspections: "Nobody is waiting on an inspection",
+    ip_emptyDescLeadsOn: "An inspection is scheduled from a lead.",
     ip_emptyDescLeadsOff: "Nothing open right now.",
-    ip_btn_bookAnInspection: "Book an Inspection",
 
     // ── A row's own verb and its ⋯ (inspection-row-menu.tsx) ──
     ip_btn_createEstimate: "Create Estimate",
@@ -82,40 +67,36 @@ export const words: WordCatalog = {
     ip_btn_delete: "Dismiss…",
     ip_deleteAsk: "Dismiss this visit? It is deleted if nothing is on it. If anything is (notes, an estimate, an invoice, a time-pick link), it is cancelled and kept on file.",
     ip_btn_deleteIt: "Dismiss",
-    ip_movedToWriteUp: "Moved to Write Up.",
+    ip_movedToWriteUp: "Marked as happened. It needs an estimate now.",
     ip_movedToDay: "Moved to {day}.",
     ip_backWhereItWas: "Back where it was.",
+
+    // cn-v1171 (INSP): the one list, its row's words and buttons, the fold, the empty state's door
+    ip_btn_startInspection: "Start Inspection",
+    ip_btn_openInspection: "Open Inspection",
+    ip_needsADay: "Needs a Day",
+    ip_needsAnEstimate: "Needs an Estimate",
+    ip_dayPassed: "Day Passed",
+    ip_btn_notFiledFold: "Not Filed Under Anyone ({n})",
+    ip_notFiledLine: "Finished, Not Sold or cancelled inspections with no lead, customer or job to file them under.",
+    ip_endedCompleted: "Completed",
+    ip_endedNotSold: "Not Sold",
+    ip_endedCancelled: "Cancelled",
+    ip_btn_goToLeads: "Go to Leads",
+    // cn-v1171 (fixer, skeptic #74): with Estimates off, nothing says an estimate is needed
+    ip_inspected: "Inspected",
+    ip_markedHappened: "Marked as happened.",
   },
   es: {
     ip_lib_pendingPick: "por elegir",
     ip_lib_cancelled: "cancelada",
     ip_lib_noFieldNotes: "sin notas de campo",
 
-    // ── The page (inspections/page.tsx): the switch, the tiles, the empty states ──
-    ip_btn_open: "Abiertas",
-    ip_btn_filed: "Archivadas",
-    ip_btn_tileWriteUp: "Por Redactar",
-    ip_btn_tileComingUp: "Próximas",
-    ip_btn_tileNeedsADay: "Falta el Día",
-    ip_btn_tileMissed: "¿No Se Hizo?",
-    ip_btn_tileCompleted: "Terminadas",
-    ip_btn_tileLost: "No Vendidas",
-    ip_btn_tileCancelled: "Canceladas",
-    ip_tileOldest: "La más antigua: {age}",
-    ip_tileNext: "La próxima: {when}",
-    ip_tilePastNoNotes: "Ya pasaron, sin notas",
-    ip_tileWrittenUp: "Redactadas",
-    ip_tileDidntBecomeWork: "No se volvieron trabajo",
-    ip_tileCalledOff: "Se cancelaron",
-    ip_tileNothing: "{name}: nada aquí",
-    ip_tileEmpty: "No hay nada aquí por ahora.",
+    // ── The page (inspections/page.tsx): the cap and the empty state ──
     ip_capped: "Se muestran las {n} inspecciones más recientes. Las más antiguas no aparecen.",
-    ip_nothingFiledTitle: "Aún no hay nada archivado",
-    ip_nothingFiledDesc: "Las inspecciones llegan aquí una vez que se redactan en un presupuesto (o se cancelan).",
-    ip_noOpenInspections: "No hay inspecciones abiertas",
-    ip_emptyDescLeadsOn: "Empieza una desde un prospecto, agenda una, o toca Empezar una Inspección cuando ya estés ahí.",
+    ip_noOpenInspections: "Nadie está esperando una inspección",
+    ip_emptyDescLeadsOn: "Una inspección se agenda desde un prospecto.",
     ip_emptyDescLeadsOff: "No hay nada abierto ahora.",
-    ip_btn_bookAnInspection: "Agendar una Inspección",
 
     // ── A row's own verb and its ⋯ (inspection-row-menu.tsx) ──
     ip_btn_createEstimate: "Crear Presupuesto",
@@ -126,8 +107,24 @@ export const words: WordCatalog = {
     ip_btn_delete: "Descartar…",
     ip_deleteAsk: "¿Descartar esta visita? Se elimina si no tiene nada. Si tiene algo (notas, un presupuesto, una factura, un enlace para elegir hora), se cancela y se conserva en el archivo.",
     ip_btn_deleteIt: "Descartar",
-    ip_movedToWriteUp: "Pasó a Por Redactar.",
+    ip_movedToWriteUp: "Marcada como hecha. Ahora falta el presupuesto.",
     ip_movedToDay: "Se movió al {day}.",
     ip_backWhereItWas: "Volvió a donde estaba.",
+
+    // cn-v1171 (INSP): the one list, its row's words and buttons, the fold, the empty state's door
+    ip_btn_startInspection: "Empezar Inspección",
+    ip_btn_openInspection: "Abrir Inspección",
+    ip_needsADay: "Falta el Día",
+    ip_needsAnEstimate: "Falta el Presupuesto",
+    ip_dayPassed: "Ya Pasó el Día",
+    ip_btn_notFiledFold: "No Están a Nombre de Nadie ({n})",
+    ip_notFiledLine: "Inspecciones terminadas, no vendidas o canceladas sin prospecto, cliente ni trabajo donde archivarlas.",
+    ip_endedCompleted: "Terminada",
+    ip_endedNotSold: "No Vendida",
+    ip_endedCancelled: "Cancelada",
+    ip_btn_goToLeads: "Ir a Prospectos",
+    // cn-v1171 (fixer, skeptic #74): with Estimates off, nothing says an estimate is needed
+    ip_inspected: "Inspeccionada",
+    ip_markedHappened: "Marcada como hecha.",
   },
 };

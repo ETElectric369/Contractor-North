@@ -35,10 +35,8 @@ vi.mock("../appointments/actions", () => ({
 
 const { LangProvider } = await import("@/components/lang-provider");
 const { translator } = await import("@/lib/i18n");
-const { InspectionRowMenu, InspectionRowMenuView, menuDoors, markItHappened, markItLost, deleteTheVisit, moveTheVisit } = await import(
-  "./inspection-row-menu"
-);
-type MenuDoor = import("./inspection-row-menu").MenuDoor;
+const { InspectionRowMenu, InspectionRowMenuView, markItHappened, markItLost, deleteTheVisit, moveTheVisit } = await import("./inspection-row-menu");
+type MenuDoor = import("./list-rows").MenuDoor;
 
 const src = readFileSync(join(process.cwd(), "src/app/(app)/inspections/inspection-row-menu.tsx"), "utf8");
 const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
@@ -46,15 +44,16 @@ const decode = (s: string) => s.replace(/&#x27;|&#39;/g, "'").replace(/&amp;/g, 
 const text = (html: string) => decode(html.replace(/<[^>]+>/g, " "));
 const buttons = (html: string) => [...html.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)].map((m) => decode(m[1].replace(/<[^>]+>/g, "")));
 
-const ALL = { move: true, happened: true, lost: true, del: true };
-const NONE = { move: false, happened: false, lost: false, del: false };
+const ALL: MenuDoor[] = ["move", "happened", "lost", "del"];
 const row = {
   id: "a1",
   who: "Sam Tillery",
   what: "Panel swap · 12 Larkspur",
-  menu: ALL,
+  doors: ALL,
+  visitHref: "/appointments/a1",
   startsAt: "2026-11-03T17:00:00.000Z",
   endsAt: "2026-11-03T18:00:00.000Z",
+  happenedSaid: "Marked as happened. It needs an estimate now.",
 };
 const noop = () => {};
 const face = (doors: MenuDoor[], asking: boolean, lang: "en" | "es" = "en", pending = false) =>
@@ -62,6 +61,7 @@ const face = (doors: MenuDoor[], asking: boolean, lang: "en" | "es" = "en", pend
     <LangProvider lang={lang}>
       <InspectionRowMenuView
         doors={doors}
+        visitHref="/appointments/a1"
         asking={asking}
         pending={pending}
         onPickDay={async () => ({ ok: true })}
@@ -74,32 +74,46 @@ const face = (doors: MenuDoor[], asking: boolean, lang: "en" | "es" = "en", pend
     </LangProvider>,
   );
 
-describe("which moves a row's ⋯ holds", () => {
-  it("each tile's shape, in the sheet's order", () => {
-    expect(menuDoors(row)).toEqual(["move", "happened", "lost", "del"]); // Didn't Happen?
-    expect(menuDoors({ ...row, menu: { ...NONE, move: true, del: true } })).toEqual(["move", "del"]); // Coming Up
-    expect(menuDoors({ ...row, menu: { ...NONE, del: true } })).toEqual(["del"]); // Needs a Day
-    expect(menuDoors({ ...row, menu: { ...NONE, lost: true } })).toEqual(["lost"]); // Write Up
+describe("how a row's moves are drawn (which moves a row gets is list-rows rowDoors, tested beside the page)", () => {
+  it("nothing renders for a row with no moves (no ⋯, never an empty sheet)", () => {
+    expect(renderToStaticMarkup(createElement(InspectionRowMenu, { row: { ...row, doors: [] }, tz: "America/Los_Angeles" }))).toBe("");
   });
 
-  it("no Move without a start: there is no time of day to keep", () => {
-    expect(menuDoors({ ...row, startsAt: null })).toEqual(["happened", "lost", "del"]);
-    expect(menuDoors({ ...row, startsAt: null, menu: { ...NONE, move: true } })).toEqual([]);
-  });
-
-  it("nothing renders for a null menu or a menu with nothing in it (no ⋯, never an empty sheet)", () => {
-    expect(renderToStaticMarkup(createElement(InspectionRowMenu, { row: { ...row, menu: null }, tz: "America/Los_Angeles" }))).toBe("");
-    expect(renderToStaticMarkup(createElement(InspectionRowMenu, { row: { ...row, menu: NONE }, tz: "America/Los_Angeles" }))).toBe("");
-    expect(
-      renderToStaticMarkup(createElement(InspectionRowMenu, { row: { ...row, startsAt: null, menu: { ...NONE, move: true } }, tz: "America/Los_Angeles" })),
-    ).toBe("");
-  });
-
-  it("a row with moves gets the one 44px ⋯, titled with who it is for", () => {
+  it("a row with two or more moves gets the one 44px ⋯, titled with who it is for", () => {
     const html = renderToStaticMarkup(createElement(InspectionRowMenu, { row, tz: "America/Los_Angeles" }));
     expect(html).toMatch(/<button type="button" aria-label="More for Sam Tillery"[^>]*class="[^"]*h-11 w-11[^"]*"/);
     expect(html.match(/<button/g)).toHaveLength(1);
     expect(code).toContain("<RowMoreSheet title={row.who} subline={row.what || null}>");
+    const two = renderToStaticMarkup(createElement(InspectionRowMenu, { row: { ...row, doors: ["open", "lost"] }, tz: "America/Los_Angeles" }));
+    expect(two).toContain('aria-label="More for Sam Tillery"');
+    expect(two).not.toContain("Open Inspection");
+  });
+
+  it("ONE move is drawn as its own button in the row, no ⋯ (Erik: \"just say Edit Details instead of ...\")", () => {
+    const draw = (doors: MenuDoor[], lang: "en" | "es" = "en") =>
+      renderToStaticMarkup(<LangProvider lang={lang}>{createElement(InspectionRowMenu, { row: { ...row, doors }, tz: "America/Los_Angeles" })}</LangProvider>);
+    const open = draw(["open"]);
+    expect(open).not.toContain("More for");
+    expect(open).toMatch(/<a [^>]*href="\/appointments\/a1"[^>]*>Open Inspection<\/a>/);
+    expect(open).toMatch(/<a [^>]*class="[^"]*h-11[^"]*"[^>]*>Open Inspection<\/a>/);
+    expect(draw(["open"], "es")).toContain(">Abrir Inspección</a>");
+    const lost = draw(["lost"]);
+    expect(lost).not.toContain("More for");
+    expect(buttons(lost)).toEqual(["Not Sold"]);
+    expect(lost).toMatch(/<button[^>]*class="[^"]*h-11[^"]*border-slate-300/);
+    // A lone Dismiss… asks in the row itself (its first tap); nothing is written until the second.
+    expect(buttons(draw(["del"]))).toEqual(["Dismiss…"]);
+    // The rule lives in one place: the row's ⋯ component, by the count of its moves.
+    expect(code).toContain("if (doors.length === 1) return <InspectionRowDoors");
+    expect(code.match(/doors\.length === 1/g)).toHaveLength(1);
+  });
+
+  it("Open Inspection and Pick a Day are links in the sheet, not deeds", () => {
+    const html = face(["open", "pickDay", "del"], false);
+    expect(html).toMatch(/<a [^>]*href="\/appointments\/a1"[^>]*>Open Inspection<\/a>/);
+    expect(html).toMatch(/<a [^>]*href="\/schedule"[^>]*>Pick a Day<\/a>/);
+    expect(buttons(html)).toEqual(["Dismiss…"]);
+    expect(text(face(["open", "pickDay"], false, "es"))).toBe("Abrir Inspección Elegir un Día");
   });
 });
 
@@ -138,7 +152,7 @@ describe("the sheet's two faces", () => {
     expect(buttons(es)).toEqual(["Mover a Otro Día…", "Sí Se Hizo: Redactarla", "No Vendida", "Descartar…"]);
     for (const lang of ["en", "es"] as const) {
       const t = translator(lang);
-      for (const k of ["ip_btn_moveToAnotherDay", "ip_btn_itHappened", "ip_btn_lost", "ip_btn_delete", "ip_btn_deleteIt", "vp_btn_keepIt", "ag_btn_undo"]) {
+      for (const k of ["ip_btn_openInspection", "ip_btn_pickADay", "ip_btn_moveToAnotherDay", "ip_btn_itHappened", "ip_btn_lost", "ip_btn_delete", "ip_btn_deleteIt", "vp_btn_keepIt", "ag_btn_undo"]) {
         expect(titleCaseIn(t(k).replace(/…$/, ""), lang), `${lang} ${k}: ${t(k)}`).toBe(true);
       }
     }
@@ -186,13 +200,23 @@ const saidRefused = (io: Io, sentence: string) => {
   expect(io.log).toEqual([`toast:error:${sentence}`, "close", "refresh"]);
 };
 
+/** The row's own finished toast, as the page words it with Estimates on (list-rows happenedSaidKey). */
+const WRITE_UP_SAID = "Marked as happened. It needs an estimate now.";
+
 describe("It Happened: Write It Up", () => {
+  it("says the row's own sentence: with Estimates off, only that it was marked as happened (cn-v1171, skeptic #74)", async () => {
+    const io = rig();
+    await markItHappened("a1", io, "Marked as happened.", { setStatus: (async () => ({ ok: true, previousStatus: "scheduled" })) as any });
+    expect(io.log).toEqual(["close", "toast:success:Marked as happened.", "refresh"]);
+  });
+
   it("marks it done, closes, re-reads, and Undo puts back the status it had", async () => {
     const setStatus = vi.fn(async (_id: string, s: string) => ({ ok: true, previousStatus: s === "completed" ? "scheduled" : "completed" }));
     const io = rig();
-    await markItHappened("a1", io, { setStatus: setStatus as any });
+    await markItHappened("a1", io, WRITE_UP_SAID, { setStatus: setStatus as any });
     expect(setStatus).toHaveBeenCalledWith("a1", "completed");
-    expect(io.log).toEqual(["close", "toast:success:Moved to Write Up.", "refresh"]);
+    // cn-v1171: there is no Write Up tile to move to; the row now says it needs an estimate.
+    expect(io.log).toEqual(["close", "toast:success:Marked as happened. It needs an estimate now.", "refresh"]);
     expect(io.toast.mock.calls[0][2]).toMatchObject({ label: "Undo" });
     undoOf(io.toast)();
     await settle();
@@ -206,7 +230,7 @@ describe("It Happened: Write It Up", () => {
       s === "completed" ? { ok: true, previousStatus: "proposed", note: "The pick-a-time link was withdrawn." } : { ok: true },
     );
     const io = rig();
-    await markItHappened("a1", io, { setStatus: setStatus as any });
+    await markItHappened("a1", io, WRITE_UP_SAID, { setStatus: setStatus as any });
     expect(io.toast).toHaveBeenCalledWith("The pick-a-time link was withdrawn.", "info", undefined, { sticky: true });
     undoOf(io.toast)();
     await settle();
@@ -217,13 +241,13 @@ describe("It Happened: Write It Up", () => {
 
   it("a refusal is said in the server's sentence, then the sheet closes, then the list re-reads", async () => {
     const io = rig();
-    await markItHappened("a1", io, { setStatus: (async () => ({ ok: false, error: "That visit is gone." })) as any });
+    await markItHappened("a1", io, WRITE_UP_SAID, { setStatus: (async () => ({ ok: false, error: "That visit is gone." })) as any });
     saidRefused(io, "That visit is gone.");
   });
 
   it("no connection is said in the reader's language; the sheet stays open and nothing re-reads", async () => {
     const io = rig("es");
-    await markItHappened("a1", io, { setStatus: offline as any });
+    await markItHappened("a1", io, WRITE_UP_SAID, { setStatus: offline as any });
     saidOffline(io, "Eso no se guardó — inténtalo de nuevo.");
   });
 });

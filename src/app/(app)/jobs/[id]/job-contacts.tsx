@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { NewCustomerInline } from "@/components/new-customer-inline";
+import { NewCustomerInline, addedOnce } from "@/components/new-customer-inline";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plus, Trash2, HardHat } from "lucide-react";
@@ -92,7 +92,7 @@ export function JobContacts({
           {/* This line used to read "Add a contact to the book first (Contacts → New customer →
               type Subcontractor), then link them here" — an instruction to LEAVE, which is the
               missing button written down as prose. */}
-          <NewCustomerInline onCreated={(c) => { setAdded((p) => [{ ...c, type: null }, ...p]); setCustomerId(c.id); }} />
+          <NewCustomerInline onCreated={(c) => { setAdded((p) => addedOnce(p, options, { ...c, type: null })); setCustomerId(c.id); }} />
           <p className="text-[11px] text-slate-400">{t("jb_markSubLater")}</p>
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="outline" onClick={() => setAdding(false)}>{t("jb_cancel")}</Button>

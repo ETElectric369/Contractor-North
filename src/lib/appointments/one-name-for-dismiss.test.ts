@@ -16,7 +16,8 @@ import type { ActionItem } from "@/lib/action-items/types";
  * The key NAMES stayed (ids are never shown); only the words changed.
  */
 const DOOR_KEYS = ["vp_btn_wontHappen", "ag_rail_btn_wontHappen", "ny_btn_didntHappen", "ip_btn_deleteIt"] as const;
-const TILE_KEY = "ip_btn_tileMissed"; // "Didn't Happen?" / "¿No Se Hizo?": a tile asking a question, not the door
+// The Inspections tile "Didn't Happen?" was the one question let through here; it went with the tiles
+// (cn-v1171), and its row says Day Passed, so no value is let through now.
 
 describe("one name for the visit's Dismiss", () => {
   it("the four door keys say Dismiss in English and Descartar in Spanish; the Inspections row says it with its ellipsis", () => {
@@ -34,18 +35,16 @@ describe("one name for the visit's Dismiss", () => {
     expect(dict("es").ip_deleteAsk.startsWith("¿Descartar esta visita?")).toBe(true);
   });
 
-  it("no catalog value in either language still says the old names (the tile's question aside)", () => {
+  it("no catalog value in either language still says the old names", () => {
     const old = /Won't Happen|Won’t Happen|Didn't Happen|Didn’t Happen|No Se Hará|No Se Hizo|won't happen\?|no se hará\?/i;
     const said: string[] = [];
     for (const c of CATALOGS)
       for (const lang of ["en", "es"] as const)
         for (const [k, v] of Object.entries(c[lang] as Record<string, string>)) {
-          if (k === TILE_KEY) continue;
           if (typeof v === "string" && old.test(v)) said.push(`${lang} ${k}: ${v}`);
         }
     expect(said).toEqual([]);
-    expect(dict("en")[TILE_KEY]).toBe("Didn't Happen?");
-    expect(dict("es")[TILE_KEY]).toBe("¿No Se Hizo?");
+    expect(dict("en").ip_btn_tileMissed).toBeUndefined();
   });
 
   it("every visit Dismiss in Needs You runs the one deed, appointment.wontHappen", () => {

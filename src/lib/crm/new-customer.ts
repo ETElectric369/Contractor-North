@@ -5,6 +5,34 @@ import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
 
 export const NEW_CUSTOMER_NEEDS_A_NAME = "Type the new customer's name, or tap Pick Existing.";
 
+/** One page of the book; the API's own default cap, so a full page means there may be more. */
+export const CUSTOMER_BOOK_PAGE = 1000;
+
+/**
+ * THE WHOLE CUSTOMER BOOK, FOR THE MATCHER (cn-v1171, skeptic #74). The doors that ask the book before
+ * making a customer read it in one request with no limit, and the API answers at most 1,000 rows, so a
+ * bigger book was matched only in part and a person on file past the first thousand was made again.
+ * This reads it page by page, in id order, until a short page. Any failed page is the whole read's
+ * error: a book read in part is never matched as if it were whole. The caller's own client (RLS).
+ */
+export async function readCustomerBook<T = DupCustomer>(
+  supabase: SupabaseClient,
+  columns = "id, name, company_name, email, phone",
+): Promise<{ rows: T[]; error: unknown }> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += CUSTOMER_BOOK_PAGE) {
+    const { data, error } = await supabase
+      .from("customers")
+      .select(columns)
+      .order("id")
+      .range(from, from + CUSTOMER_BOOK_PAGE - 1);
+    if (error) return { rows: [], error };
+    const page = (data ?? []) as T[];
+    rows.push(...page);
+    if (page.length < CUSTOMER_BOOK_PAGE) return { rows, error: null };
+  }
+}
+
 /**
  * WHAT A JOB FORM TYPED FOR A NEW CUSTOMER, or null when it typed none. A form in "+ New Customer"
  * mode sends new_customer=1 (CustomerPicker's hidden marker); a caller without the marker counts as
@@ -50,9 +78,8 @@ export async function matchOrCreateCustomer(
   const phone = formatPhone(String(typed.phone ?? "").trim());
   const email = String(typed.email ?? "").trim();
 
-  const { data: book, error: bookErr } = await supabase.from("customers").select("id, name, company_name, email, phone");
+  const { rows, error: bookErr } = await readCustomerBook(supabase);
   if (bookErr) return { ok: false, error: "Couldn't check your customer list just now, so no customer was made. Try again." };
-  const rows = (book ?? []) as DupCustomer[];
   const match = findMatchingCustomerId({ name, phone, email }, rows);
   if (match) {
     const onFile = String(rows.find((c) => c.id === match)?.name ?? "").trim();

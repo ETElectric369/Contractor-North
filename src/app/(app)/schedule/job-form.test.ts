@@ -68,7 +68,8 @@ function builder(table: string) {
     single: async () => run(true),
     then: (ok: (v: unknown) => unknown, bad?: (e: unknown) => unknown) => Promise.resolve(run(false)).then(ok, bad),
   };
-  for (const m of ["neq", "in", "is", "not", "or", "order", "limit"]) b[m] = () => b;
+  // range: the customer book is read page by page (cn-v1171, lib/crm/new-customer readCustomerBook).
+  for (const m of ["neq", "in", "is", "not", "or", "order", "limit", "range"]) b[m] = () => b;
   return b;
 }
 const client = { from: (t: string) => builder(t), auth: { getUser: async () => ({ data: { user: { id: "office-1" } } }) } };

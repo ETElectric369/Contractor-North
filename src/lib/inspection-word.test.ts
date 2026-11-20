@@ -63,9 +63,11 @@ describe("the site visit is an Inspection", () => {
     const page = read("src/app/(app)/inspections/page.tsx");
     expect(page).toContain('title={t("nv_page_inspections")}');
     expect(nav.en.nv_page_inspections).toBe("Inspections");
-    // The button's words come from lib/words/inspections since cn-v1146; the catalog pins the English.
-    expect(page).toContain('buttonLabel={t("ip_btn_bookAnInspection")}');
-    expect(inspectionsWords.en.ip_btn_bookAnInspection).toBe("Book an Inspection");
+    // The row's boxed button's words come from lib/words/inspections; the catalog pins the English.
+    // (cn-v1171 removed the header's Book an Inspection: an inspection is booked from a lead.)
+    expect(page).toContain('"ip_btn_startInspection"');
+    expect(inspectionsWords.en.ip_btn_startInspection).toBe("Start Inspection");
+    expect(page).not.toContain("ip_btn_bookAnInspection");
     expect(FEATURES.find((f) => f.key === "leads")?.label).toBe("Leads & Inspections");
     expect(PILE_DEFS.inspections_to_write_up).toMatchObject({ label: "Inspections to Write Up", listLabel: "See All Inspections" });
   });
@@ -480,7 +482,7 @@ describe("the old word cannot come back", () => {
     // The bucket and the page that disagreed, the dock row above them, and the piles that feed them.
     // The page reads its empty state from lib/words/inspections (cn-v1146); the word is pinned in the catalog.
     expect(read("src/app/(app)/inspections/page.tsx")).toContain('t("ip_noOpenInspections")');
-    expect(inspectionsWords.en.ip_noOpenInspections).toBe("No open inspections");
+    expect(inspectionsWords.en.ip_noOpenInspections).toBe("Nobody is waiting on an inspection");
     expect(read("src/lib/dock.ts")).toContain('label: "Inspections"');
     // Settings' sheet — the SECOND sense, the questions carried on the visit.
     expect(read("src/app/(app)/settings/page.tsx")).toContain("These are the questions your inspection asks on site");

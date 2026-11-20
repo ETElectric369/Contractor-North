@@ -82,12 +82,11 @@ describe("the form's words follow its kind", () => {
 });
 
 describe("the closed form, rendered", () => {
-  it("the create trigger reads the caller's kind: New Inspection on the Inspections tab, New Appointment elsewhere, a caller's own words first", () => {
-    expect(html({ defaultType: "inspection" })).toContain("New Inspection");
-    expect(html({ defaultType: "inspection" })).not.toContain("New Appointment");
+  // cn-v1171: the Inspections page's Book an Inspection was the last caller of defaultType and
+  // buttonLabel; they are gone, and the closed trigger says New Appointment wherever it is drawn.
+  it("the create trigger says New Appointment", () => {
     expect(html({})).toContain("New Appointment");
-    expect(html({ defaultType: "job" })).toContain("New Appointment");
-    expect(html({ defaultType: "inspection", buttonLabel: "Book an Inspection" })).toContain("Book an Inspection");
+    expect(html({})).not.toContain("New Inspection");
   });
 
   it("the edit trigger is still the pencil titled Edit", () => {
@@ -99,14 +98,15 @@ describe("the closed form, rendered", () => {
 
 describe("the Modal reads the same function (a pin: the words cannot drift from the test above)", () => {
   const src = readFileSync(join(__dirname, "appointment-button.tsx"), "utf8");
-  it("title and Save from apptFormWords on the live Type box, in the reader's words; the trigger from the caller's default kind", () => {
+  it("title and Save from apptFormWords on the live Type box, in the reader's words; the trigger New Appointment", () => {
     // The reader's translator rides along (the visit-page-in-Spanish wave): English, byte for byte, without a provider.
     expect(src).toContain('const words = apptFormWords({ kind: form.type, editing, mode, linkReady: !!linkToken }, t);');
-    expect(src).toContain('const triggerWords = apptFormWords({ kind: defaultType ?? "", editing, mode: "set", linkReady: false }, t);');
+    expect(src).toContain('const triggerWords = apptFormWords({ kind: "", editing, mode: "set", linkReady: false }, t);');
     expect(src).toContain("const t = translator(lang);");
     expect(src).toContain("title={words.title}");
     expect(src).toContain("saveLabel={words.saveLabel}");
-    expect(src).toContain('{buttonLabel ?? triggerWords.trigger}');
+    expect(src).toContain("{triggerWords.trigger}");
+    expect(src).not.toMatch(/\bdefaultType\b|\bbuttonLabel\b/);
     for (const gone of ['"Edit appointment"', '"New appointment"', '"Save Appointment"', '"Text the customer these times"', "Set a Time", "Convert to Job"]) expect(src).not.toContain(gone);
   });
 });

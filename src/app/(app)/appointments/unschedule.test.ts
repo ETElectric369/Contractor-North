@@ -74,15 +74,15 @@ describe("Clear the Date", () => {
     expect(search).toContain(": `/appointments/${a.id}`");
     const walks = read("src/app/(app)/inspections/page.tsx");
     // The Inspections page reads its 500 with the waiting visits FIRST, so a visit waiting for a day is
-    // never the one the cap cuts; the order on screen is the tiles' own, not the read's.
+    // never the one the cap cuts; the order on screen is the list's own (cn-v1171), not the read's.
     expect(walks).toContain('.order("starts_at", { ascending: false, nullsFirst: true })');
-    expect(walks).toContain("tileInspections({ toWriteUp, upcoming, missed, filed }, now, tz)");
-    // It puts a waiting visit under its own tile, Needs a Day, and says how long it has waited since
-    // it was made: never a blank day and never 1970. A filed one with no day says none.
-    expect(walks).toContain('if (tile === "needs_day") return ageOf(a.created_at);');
+    expect(walks).toContain("const listed = inspectionList(buckets, now, tz);");
+    // A waiting visit's row says Needs a Day and how long it has waited since it was made: never a
+    // blank day and never 1970. A filed one with no day (the fold) says none.
+    expect(walks).toContain('if (state === "needs_day") return ageOf(a.created_at);');
     expect(walks).toMatch(/const ageOf = \(iso: string \| null \| undefined\): string \| null => \{\s*const day = dayOf\(iso\);/);
-    expect(walks).toContain("return dayWords(a.starts_at, todayStr, tz, lang);");
-    expect(translator("en")("ip_btn_tileNeedsADay")).toBe("Needs a Day");
+    expect(walks).toContain("day: dayWords(a.starts_at, todayStr, tz, lang),");
+    expect(translator("en")("ip_needsADay")).toBe("Needs a Day");
     expect(read("src/app/(app)/appointments/[id]/page.tsx")).toContain('<span>{t("vp_waitingForADay")}</span>');
     expect(translator("en")("vp_waitingForADay")).toBe("Waiting for a Day");
     expect(read("src/app/(app)/jobs/[id]/page.tsx")).toContain('a.starts_at ? formatDateTime(a.starts_at, undefined, lang) : t("jb_waitingForADay")');

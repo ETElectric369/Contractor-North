@@ -15,6 +15,7 @@ import {
   readStanding,
   standingFor,
   visitStands,
+  visitWasWon,
   type LeadVisitRow,
 } from "./new-intake";
 
@@ -34,7 +35,9 @@ describe("visitStands", () => {
     ["scheduled", null, true],
     ["proposed", null, true],
     ["completed", null, true],
-    ["completed", "won", true],
+    // Won is an ending: it keeps nobody off the list (the job, once picked, converts the lead)
+    ["completed", "won", false],
+    ["scheduled", "won", false],
     ["scheduled", "", true],
     ["completed", "lost", false],
     ["completed", "no_bid", false],
@@ -184,7 +187,7 @@ describe("readStanding", () => {
 describe("newIntakeOnly", () => {
   it("drops the standing leads and keeps the unread ones (offered, never hidden)", () => {
     const leads = [{ id: "a" }, { id: "b" }, { id: "c" }];
-    expect(newIntakeOnly(leads, { standing: new Set(["b"]), unread: new Set(["c"]), pickPending: new Set() })).toEqual([
+    expect(newIntakeOnly(leads, { standing: new Set(["b"]), unread: new Set(["c"]), pickPending: new Set(), wonPending: new Set() })).toEqual([
       { id: "a" },
       { id: "c" },
     ]);
@@ -334,5 +337,59 @@ describe("countNewIntake + standingFor", () => {
     const { client } = standIn({ appointments: { data: [visit("a", "scheduled"), visit("b", "completed", "no_bid")], error: null } });
     const read = await standingFor(client, ["a", "b"], { nowMs: NOW });
     expect([...read.standing]).toEqual(["a"]);
+  });
+});
+
+// cn-v1171, skeptic #74: a visit marked Won with no job picked left its lead on NO list (off Leads by
+// this rule, filed off Inspections by its ending).
+describe("a visit marked Won does not hide its lead", () => {
+  const rows = (list: Partial<LeadVisitRow>[]) => async () => ({
+    data: list.map((r) => ({ inquiry_id: "lead-1", status: "completed", outcome: null, starts_at: GONE_BY, ...r })) as LeadVisitRow[],
+    error: null,
+  });
+
+  it("visitWasWon is a visit on the books whose ending is Won, and nothing else", () => {
+    expect(visitWasWon({ status: "completed", outcome: "won" })).toBe(true);
+    expect(visitWasWon({ status: "scheduled", outcome: "won" })).toBe(true);
+    expect(visitWasWon({ status: "cancelled", outcome: "won" })).toBe(false);
+    expect(visitWasWon({ status: "completed", outcome: null })).toBe(false);
+    expect(visitWasWon({ status: "completed", outcome: "lost" })).toBe(false);
+  });
+
+  it("the lead is not standing, and is named in wonPending so its row can say what is left", async () => {
+    const read = await readStanding(["lead-1"], rows([{ outcome: "won" }]), NOW);
+    expect([...read.standing]).toEqual([]);
+    expect([...read.wonPending]).toEqual(["lead-1"]);
+    expect([...read.pickPending]).toEqual([]);
+  });
+
+  it("another visit that still stands keeps the lead off the list, and off wonPending", async () => {
+    const read = await readStanding(["lead-1"], rows([{ outcome: "won" }, { status: "scheduled", starts_at: AHEAD }]), NOW);
+    expect([...read.standing]).toEqual(["lead-1"]);
+    expect([...read.wonPending]).toEqual([]);
+  });
+
+  it("a Not Sold ending is not a win waiting on a job", async () => {
+    const read = await readStanding(["lead-1"], rows([{ outcome: "lost" }]), NOW);
+    expect([...read.standing]).toEqual([]);
+    expect([...read.wonPending]).toEqual([]);
+  });
+
+  it("loadNewIntake keeps the lead on the list and hands the mark through", async () => {
+    const supabase = {
+      from(table: string) {
+        const result =
+          table === "inquiries"
+            ? { data: [{ id: "lead-1" }, { id: "lead-2" }], error: null }
+            : { data: [{ inquiry_id: "lead-1", status: "completed", outcome: "won", starts_at: GONE_BY }, { inquiry_id: "lead-2", status: "scheduled", outcome: null, starts_at: AHEAD }], error: null };
+        const q: Record<string, unknown> = {};
+        for (const m of ["select", "is", "neq", "eq", "in", "order", "limit"]) q[m] = () => q;
+        q.then = (ok: (v: unknown) => unknown) => Promise.resolve(result).then(ok);
+        return q;
+      },
+    };
+    const res = await loadNewIntake<{ id: string }>(supabase as never, "id", { nowMs: NOW });
+    expect(res.leads.map((l) => l.id)).toEqual(["lead-1"]);
+    expect([...res.wonPending]).toEqual(["lead-1"]);
   });
 });

@@ -81,6 +81,14 @@ export const words: WordCatalog = {
     cu_srv_customerNotInBook: "That customer isn't in your book.",
     cu_srv_jobNotInBook: "That job isn't in your book.",
     cu_srv_pageCouldntOpen: "Their page couldn't be opened. Refresh and try again.",
+    // cn-v1171 (PEOPLE): the one matcher's answer (crm/actions createCustomer, bulkImportCustomers;
+    // appointments/actions resolveCustomer says the last one).
+    cu_srv_alreadyCustomer_phone: "{name} is already a customer (same phone).",
+    cu_srv_alreadyCustomer_email: "{name} is already a customer (same email).",
+    cu_srv_alreadyCustomer_name: "{name} is already a customer (same name).",
+    cu_srv_bookUnread: "Couldn't check your customer list just now, so no customer was made. Try again.",
+    cu_srv_bookUnreadImport: "Couldn't check your customer list just now, so nothing was imported. Try again.",
+    cu_srv_visitForOnFile: "{name} is already a customer, so this visit is theirs.",
   },
   es: {
     cu_srv_customerNotFound: "Cliente no encontrado.",
@@ -131,5 +139,12 @@ export const words: WordCatalog = {
     cu_srv_customerNotInBook: "Ese cliente no está en tu libreta de contactos.",
     cu_srv_jobNotInBook: "Ese trabajo no está en tu libreta de contactos.",
     cu_srv_pageCouldntOpen: "Su página no se pudo abrir. Recarga e inténtalo de nuevo.",
+    // cn-v1171 (PEOPLE)
+    cu_srv_alreadyCustomer_phone: "{name} ya es cliente (mismo teléfono).",
+    cu_srv_alreadyCustomer_email: "{name} ya es cliente (mismo correo).",
+    cu_srv_alreadyCustomer_name: "{name} ya es cliente (mismo nombre).",
+    cu_srv_bookUnread: "No se pudo revisar tu lista de clientes en este momento, así que no se creó ningún cliente. Inténtalo de nuevo.",
+    cu_srv_bookUnreadImport: "No se pudo revisar tu lista de clientes en este momento, así que no se importó nada. Inténtalo de nuevo.",
+    cu_srv_visitForOnFile: "{name} ya es cliente, así que esta visita es suya.",
   },
 };

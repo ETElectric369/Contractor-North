@@ -35,17 +35,41 @@ export const normName = (n: string | null | undefined) => (n ?? "").toLowerCase(
 // without being the same anyone — they must never link on name (audit v921 high).
 const isPlaceholderName = (n: string) => n === "unknowncaller" || /^[0-9]+$/.test(n);
 
-export function findMatchingCustomerId(
+/** Why two records are taken for one person: the key they share. */
+export type CustomerMatchReason = "phone" | "email" | "name";
+/** The customer already in the book, by the name ON FILE (never the one typed), and why. */
+export type CustomerMatch = {
+  id: string;
+  name: string;
+  reason: CustomerMatchReason;
+  /**
+   * Only on a NAME hit: what was typed carries a phone or an email, the customer on file has one too,
+   * and they are not the same. That is very likely another person with the same name (skeptic #74).
+   * A screen that ASKS still shows the hit, because the person decides. A door that acts without
+   * asking must not take it: see sureCustomerMatch.
+   */
+  disagrees?: true;
+};
+
+/**
+ * THE ONE MATCHER, AND IT SAYS WHY (cn-v1171). Every door that is about to make a customer asks this
+ * first: the win (customerForInquiry), a job form's new customer (matchOrCreateCustomer), and since
+ * this release the New Customer form, the quick name-and-phone pickers, the appointment form and the
+ * assistant, which used to insert without looking. The reason is what lets a screen ASK in words
+ * ("already a customer, same phone") where it used to guess or duplicate.
+ */
+export function findCustomerMatch(
   candidate: { name?: string | null; email?: string | null; phone?: string | null },
   existing: DupCustomer[],
-): string | null {
+): CustomerMatch | null {
   const p = normPhone(candidate.phone);
   const e = normEmail(candidate.email);
   const n = normName(candidate.name);
+  const hit = (c: DupCustomer, reason: CustomerMatchReason): CustomerMatch => ({ id: c.id, name: String(c.name ?? "").trim(), reason });
   // STRONG keys link on the first hit — a phone or an email identifies one person.
   for (const c of existing) {
-    if (p.length >= 7 && normPhone(c.phone) === p) return c.id;
-    if (e && normEmail(c.email) === e) return c.id;
+    if (p.length >= 7 && normPhone(c.phone) === p) return hit(c, "phone");
+    if (e && normEmail(c.email) === e) return hit(c, "email");
   }
   // NAME NEVER GUESSES BETWEEN TWO PEOPLE (matchKnownCustomer's law, finally applied to the win
   // path too). Two "Chris Taylor"s in the book are different customers; linking money to whichever
@@ -54,9 +78,38 @@ export function findMatchingCustomerId(
   // mints a fresh customer (and can surface a merge suggestion).
   if (n && !isPlaceholderName(n)) {
     const hits = existing.filter((c) => normName(c.name) === n);
-    if (hits.length === 1) return hits[0].id;
+    if (hits.length === 1) {
+      const onFilePhone = normPhone(hits[0].phone);
+      const onFileEmail = normEmail(hits[0].email);
+      const disagrees = (p.length >= 7 && onFilePhone.length >= 7 && onFilePhone !== p) || (!!e && !!onFileEmail && onFileEmail !== e);
+      return disagrees ? { ...hit(hits[0], "name"), disagrees: true } : hit(hits[0], "name");
+    }
   }
   return null;
+}
+
+/**
+ * THE MATCH A DOOR MAY ACT ON WITHOUT ASKING: a phone, an email, or a unique name that nothing
+ * contradicts. The win, a job form's typed customer, the appointment form, the two imports and the
+ * assistant all attach or skip silently, so a same-name record whose phone or email DISAGREES is not
+ * theirs to take: the visit, the job or the money would land on a stranger and the number typed would
+ * be thrown away. They make a new customer instead, and Find Duplicates still shows the pair by name
+ * for a person to merge. A screen that asks uses findCustomerMatch and lets the person decide.
+ */
+export function sureCustomerMatch(
+  candidate: { name?: string | null; email?: string | null; phone?: string | null },
+  existing: DupCustomer[],
+): CustomerMatch | null {
+  const m = findCustomerMatch(candidate, existing);
+  return m && !m.disagrees ? m : null;
+}
+
+/** The sure match's id alone (the older callers' shape: the win, the job contact). */
+export function findMatchingCustomerId(
+  candidate: { name?: string | null; email?: string | null; phone?: string | null },
+  existing: DupCustomer[],
+): string | null {
+  return sureCustomerMatch(candidate, existing)?.id ?? null;
 }
 
 const phoneKey = (c: DupCustomer) => { const p = normPhone(c.phone); return p.length >= 7 ? p : ""; };

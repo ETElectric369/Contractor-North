@@ -10,13 +10,13 @@ import { NavLink } from "@/components/nav-link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
-import { customerStatusLabel, estimateStatusLabel } from "@/lib/statuses";
+import { customerStatusLabel, estimateStatusLabel, ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
 import { fillText, translator } from "@/lib/i18n";
 import { currentLangFor } from "@/lib/current-lang";
 import { RowList } from "@/components/ui/row-list";
 import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/tabs";
-import { formatCurrency, formatCityStateZip, formatFullAddress } from "@/lib/utils";
+import { formatCurrency, formatCityStateZip, formatDate, formatFullAddress } from "@/lib/utils";
 import { InvoiceAmount, InvoiceAmountDetail } from "@/components/invoice-amount";
 import { EditCustomerButton } from "./edit-customer-button";
 import { MergeCustomerButton } from "./merge-customer-button";
@@ -33,6 +33,22 @@ import { deleteCustomer } from "../actions";
 import { customerTypeWord } from "../columns";
 import type { Customer, Job, Quote } from "@/lib/types";
 import { countOpen, isOpenInvoice, isOpenJob, isOpenQuote } from "@/lib/open-counts";
+// cn-v1171 (CUST): the customer's file keeps the request they came in with and every inspection.
+import { reportError } from "@/lib/observe";
+import { STANDING_IDS_PER_REQUEST, standingFor, visitStands, type StandingRead } from "@/lib/leads/new-intake";
+import { leadSourceChip } from "@/lib/inquiries/sources";
+import { fileVisitOrder, isOpenFileVisit, mergeVisits } from "@/lib/appointments/file-visit";
+import {
+  CUSTOMER_REQUEST_COLUMNS,
+  CUSTOMER_VISIT_COLUMNS,
+  isOpenRequest,
+  requestLine,
+  requestStages,
+  type CustomerRequest,
+  type CustomerVisit,
+} from "@/lib/crm/customer-file";
+import { FileVisitList } from "@/components/file/visit-list";
+import { leadStageWords } from "@/components/file/lead-stage";
 
 export const dynamic = "force-dynamic";
 
@@ -89,6 +105,8 @@ export default async function CustomerDetailPage({
     { data: portalRow },
     { data: portalDevices },
     usualBilling,
+    requestsRead,
+    ownVisitsRead,
   ] = await Promise.all([
     supabase
       .from("jobs")
@@ -150,7 +168,52 @@ export default async function CustomerDetailPage({
       : Promise.resolve({ data: null }),
     // New Job's Billing starts at the kind most of this company's jobs use (office only: New Job is).
     viewerIsStaff ? readUsualBillingKind(supabase) : Promise.resolve("tm" as const),
+    // cn-v1171: the Requests and Inspections tabs are the office's, so a tech's page reads neither.
+    viewerIsStaff
+      ? supabase.from("inquiries").select(CUSTOMER_REQUEST_COLUMNS).eq("customer_id", id).order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] as unknown[], error: null }),
+    viewerIsStaff
+      ? supabase.from("appointments").select(CUSTOMER_VISIT_COLUMNS).eq("customer_id", id).in("type", [...ESTIMATE_VISIT_TYPES])
+      : Promise.resolve({ data: [] as unknown[], error: null }),
   ]);
+
+  // ONE CLOCK for the page (cn-v1171), as on the lead's file: what stands and what is ahead read it.
+  const nowMs = Date.now();
+  const tz = getOrgSettings(orgSettingsRaw).timezone;
+  const requests = requestsRead.error ? null : ((requestsRead.data ?? []) as unknown as CustomerRequest[]);
+  if (requestsRead.error) reportError("crm:file:requests", requestsRead.error);
+  if (ownVisitsRead.error) reportError("crm:file:visits", ownVisitsRead.error);
+  // A won lead's visit often carries only its lead, so the visits made from this customer's leads are
+  // read too, and the Leads list's own rule says each lead's stage. Both only when there are leads.
+  const leadIds = (requests ?? []).map((r) => r.id);
+  // In batches of the Leads rule's own size (cn-v1171, skeptic #74): one .in() over every lead id
+  // grows the request past what the API takes. Any failed batch makes the whole list unread.
+  const readLeadVisits = async (): Promise<{ data: unknown[] | null; error: unknown }> => {
+    const batches: string[][] = [];
+    for (let i = 0; i < leadIds.length; i += STANDING_IDS_PER_REQUEST) batches.push(leadIds.slice(i, i + STANDING_IDS_PER_REQUEST));
+    const answers = await Promise.all(
+      batches.map((b) => supabase.from("appointments").select(CUSTOMER_VISIT_COLUMNS).in("inquiry_id", b).in("type", [...ESTIMATE_VISIT_TYPES])),
+    );
+    const failed = answers.find((a) => a.error);
+    return failed ? { data: null, error: failed.error } : { data: answers.flatMap((a) => (a.data ?? []) as unknown[]), error: null };
+  };
+  const [leadVisitsRead, standing] = leadIds.length
+    ? await Promise.all([readLeadVisits(), standingFor(supabase, leadIds, { nowMs })])
+    : [{ data: [] as unknown[], error: null }, { standing: new Set<string>(), unread: new Set<string>(), pickPending: new Set<string>(), wonPending: new Set<string>() } as StandingRead];
+  if (leadVisitsRead.error) reportError("crm:file:leadVisits", leadVisitsRead.error);
+  // A list missing either half (or the leads it is read through) is said unread, never drawn as all.
+  const visits: CustomerVisit[] | null =
+    requests === null || ownVisitsRead.error || leadVisitsRead.error
+      ? null
+      : fileVisitOrder(
+          mergeVisits((ownVisitsRead.data ?? []) as unknown as CustomerVisit[], (leadVisitsRead.data ?? []) as unknown as CustomerVisit[]),
+        );
+  const stages = requestStages(requests ?? [], standing);
+  // Every visit this page did read, even with one half failed: a Requests row names the one that stands.
+  const knownVisits = mergeVisits(
+    (ownVisitsRead.data ?? []) as unknown as CustomerVisit[],
+    (leadVisitsRead.data ?? []) as unknown as CustomerVisit[],
+  );
   const deviceCount = Number(portalDevices?.devices);
   // CUSTOMER PORTAL OFF (0352, rule f): the office's link controls aren't drawn. The link row is
   // untouched, and the invoice pay link never depended on it.
@@ -335,6 +398,56 @@ export default async function CustomerDetailPage({
         </Card>
       ),
     },
+    // cn-v1171 (CUST). Appended last on purpose: on a phone the strip folds its LAST tabs into More, and
+    // the four the office uses most stay in sight.
+    {
+      id: "inspections",
+      label: t("cu_btn_tabInspections"),
+      // Visits still ahead: booked or waiting, not done and not ended (a badge counts only what is open).
+      count: countOpen(visits, (v) => isOpenFileVisit(v, nowMs)),
+      content: (
+        <Card>
+          <CardContent className="py-3">
+            <FileVisitList visits={visits} tz={tz} lang={lang} t={t} empty={t("cu_noInspectionsYet")} unread={t("cu_inspectionsUnread")} />
+          </CardContent>
+        </Card>
+      ),
+    },
+    {
+      id: "requests",
+      label: t("cu_btn_tabRequests"),
+      // Requests still in play: on the Leads list, or with a visit standing.
+      count: countOpen(requests, (r) => isOpenRequest(stages.get(r.id))),
+      content: (
+        <Card className="overflow-hidden">
+          {requests === null ? (
+            <p role="status" className="px-5 py-4 text-sm text-amber-700">
+              {t("cu_requestsUnread")}
+            </p>
+          ) : (
+            <RowList
+              items={requests.map((r) => {
+                const stage = stages.get(r.id) ?? "open";
+                // The visit that keeps it standing, from what this page read (the stage words name it).
+                const standingVisit =
+                  stage === "standing" ? (knownVisits.find((v) => v.inquiry_id === r.id && visitStands(v, nowMs)) ?? null) : null;
+                const words = leadStageWords(stage, { convertedTo: r.converted_to, standingVisit, tz, lang, t });
+                const source = leadSourceChip(r.source);
+                const sourceWords = source?.kind === "web" ? t("ld_fromYourWebsite") : source?.kind === "label" ? source.text : "";
+                return {
+                  key: r.id,
+                  label: requestLine(r),
+                  sub: [fillText(t("ld_file_arrived"), { when: formatDate(r.created_at, tz, lang) }), sourceWords].filter(Boolean).join(" · "),
+                  badge: { tone: words.tone, text: words.text },
+                  href: `/leads/${r.id}`,
+                };
+              })}
+              empty={empty("cu_noRequestsYet")}
+            />
+          )}
+        </Card>
+      ),
+    },
   ];
 
   return (
@@ -444,8 +557,12 @@ export default async function CustomerDetailPage({
         </div>
       )}
 
-      {/* Estimates and invoices are prices: a tech sees the customer's jobs, not what they cost. */}
-      <Tabs tabs={viewerIsStaff ? tabs : tabs.filter((t) => t.id !== "quotes" && t.id !== "invoices")} urlSync />
+      {/* Estimates and invoices are prices: a tech sees the customer's jobs, not what they cost. The
+          Requests and Inspections tabs are the office's sales file (cn-v1171), and their reads did not run. */}
+      <Tabs
+        tabs={viewerIsStaff ? tabs : tabs.filter((t) => t.id !== "quotes" && t.id !== "invoices" && t.id !== "inspections" && t.id !== "requests")}
+        urlSync
+      />
     </div>
   );
 }

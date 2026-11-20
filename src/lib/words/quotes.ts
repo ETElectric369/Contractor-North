@@ -322,11 +322,13 @@ export const words: WordCatalog = {
     qt_invoiceTexted: "Invoice texted",
     qt_estimateTexted: "Estimate texted",
 
-    // ── New Inspection (appointments/new-inspection-button; drawn on New Estimate, the Inspections tab and the lead row) ──
+    // ── New Inspection (appointments/new-inspection-button; drawn on New Estimate, cn-v1171) ──
     qt_couldNotStartInspection: "Could not start the inspection.",
     qt_btn_starting: "Starting…",
     qt_btn_startAnInspection: "Start an Inspection",
     qt_btn_bookAnInspection: "Book an Inspection",
+    // cn-v1171 (fixer, skeptic #74): Use This Customer drops the address typed here
+    qt_addressOnFilePrints: "The address you typed was not saved: this customer keeps the address on file. Edit the customer to change it.",
   },
   es: {
     qt_status_draft: "borrador",
@@ -552,10 +554,12 @@ export const words: WordCatalog = {
     qt_invoiceTexted: "Factura enviada por mensaje",
     qt_estimateTexted: "Presupuesto enviado por mensaje",
 
-    // ── New Inspection (appointments/new-inspection-button; drawn on New Estimate, the Inspections tab and the lead row) ──
+    // ── New Inspection (appointments/new-inspection-button; drawn on New Estimate, cn-v1171) ──
     qt_couldNotStartInspection: "No se pudo empezar la inspección.",
     qt_btn_starting: "Empezando…",
     qt_btn_startAnInspection: "Empezar una Inspección",
     qt_btn_bookAnInspection: "Agendar una Inspección",
+    // cn-v1171 (fixer, skeptic #74): Use This Customer drops the address typed here
+    qt_addressOnFilePrints: "La dirección que escribiste no se guardó: este cliente conserva la que ya tiene. Edita el cliente para cambiarla.",
   },
 };

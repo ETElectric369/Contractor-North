@@ -6,8 +6,22 @@ import { Plus, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createCustomer } from "@/app/(app)/crm/actions";
+import { DuplicateCustomerAsk } from "@/components/duplicate-customer-ask";
+import type { CustomerMatch } from "@/lib/crm/duplicates";
 import { useLang } from "@/components/lang-provider";
 import { translator } from "@/lib/i18n";
+
+/**
+ * WHAT A PICKER ADDS WHEN onCreated HANDS IT A CUSTOMER (cn-v1171, skeptic #74). Use This Customer
+ * hands the customer ON FILE to the same callback a new one goes to, and every picker put it on its
+ * "added" list, so the person was listed twice under one React key. The one already listed (on the
+ * picker's own list, or added before) is selected, never added again; only one the picker does not
+ * show yet is added.
+ */
+export function addedOnce<T extends { id: string }>(added: readonly T[], shown: readonly { id: string }[], c: T): T[] {
+  if (added.some((x) => x.id === c.id) || shown.some((x) => x.id === c.id)) return [...added];
+  return [c, ...added];
+}
 
 /**
  * "+ NEW CUSTOMER", RIGHT WHERE THE PICKER IS — one control, every surface.
@@ -28,7 +42,8 @@ import { translator } from "@/lib/i18n";
  * IT GOES THROUGH createCustomer, NEVER A HAND-ROLLED INSERT. The sweep also found three older
  * surfaces inserting into `customers` directly, which skips phone/state/zip normalization — so a
  * phone typed 5551234567 stores unformatted on one path and formatted on another. This component
- * exists partly so that stops multiplying.
+ * exists partly so that stops multiplying. Since cn-v1171 createCustomer also asks the one matcher
+ * first, so a picker can no longer make a twin of somebody already in the book without being asked.
  *
  * Name + phone only. Everything else lives on the contact page; a modal that asks eight questions
  * to link one name is why people gave up and picked "None".
@@ -62,6 +77,39 @@ export function NewCustomerInline({
   const [phone, setPhone] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  // ALREADY IN THE BOOK (cn-v1171): createCustomer made nothing and said who. Use This Customer hands
+  // the customer on file to onCreated, the same door a new one goes through; Add Anyway saves the
+  // same name and phone again with allow_duplicate=1.
+  const [dup, setDup] = useState<{ match: CustomerMatch; sentence: string } | null>(null);
+
+  function save(allowDuplicate: boolean) {
+    start(async () => {
+      setErr(null);
+      const fd = new FormData();
+      fd.set("name", name.trim());
+      if (phone.trim()) fd.set("phone", phone.trim());
+      if (allowDuplicate) fd.set("allow_duplicate", "1");
+      const r = await createCustomer(fd);
+      if (!r.ok && r.duplicate) return setDup({ match: r.duplicate, sentence: r.error ?? "" });
+      setDup(null);
+      if (!r.ok || !r.id) return setErr(r.error ?? t("cu_couldntSaveCustomer"));
+      await done({ id: r.id, name: name.trim() || phone.trim() });
+    });
+  }
+
+  async function done(c: { id: string; name: string }) {
+    await onCreated(c);
+    setOpen(false);
+    setDup(null);
+    setName("");
+    setPhone("");
+  }
+
+  function takeExisting(c: { id: string; name: string }) {
+    start(async () => {
+      await done({ id: c.id, name: c.name || name.trim() || phone.trim() });
+    });
+  }
 
   if (!open)
     return (
@@ -85,29 +133,17 @@ export function NewCustomerInline({
             with no autocomplete/name/type, the browser has to GUESS which box is a phone, and it
             guesses inconsistently. Declared, the offer is reliable — no plugin, nothing to pay
             for; it's built into Safari (Settings → AutoFill → "info from my contacts"). */}
-        <Input name="name" autoComplete="name" placeholder={t("cu_nameRequired")} value={name} onChange={(e) => setName(e.target.value)} className="h-11" autoFocus />
-        <Input name="phone" type="tel" autoComplete="tel" placeholder={t("cu_phone")} value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} inputMode="tel" className="h-11" />
+        <Input name="name" autoComplete="name" placeholder={t("cu_nameRequired")} value={name} onChange={(e) => (setName(e.target.value), setDup(null))} className="h-11" autoFocus />
+        <Input name="phone" type="tel" autoComplete="tel" placeholder={t("cu_phone")} value={phone} onChange={(e) => (setPhone(formatPhone(e.target.value)), setDup(null))} inputMode="tel" className="h-11" />
       </div>
       {err && <p className="text-sm text-rose-600">{err}</p>}
+      {dup && <DuplicateCustomerAsk match={dup.match} sentence={dup.sentence} onUse={takeExisting} onAddAnyway={() => save(true)} pending={pending} />}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
           className="min-w-[9.5rem]"
           disabled={pending || (!name.trim() && !phone.trim())}
-          onClick={() =>
-            start(async () => {
-              setErr(null);
-              const fd = new FormData();
-              fd.set("name", name.trim());
-              if (phone.trim()) fd.set("phone", phone.trim());
-              const r = await createCustomer(fd);
-              if (!r.ok || !r.id) return setErr(r.error ?? t("cu_couldntSaveCustomer"));
-              await onCreated({ id: r.id, name: name.trim() || phone.trim() });
-              setOpen(false);
-              setName("");
-              setPhone("");
-            })
-          }
+          onClick={() => save(false)}
         >
           {pending ? (
             <>

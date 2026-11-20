@@ -101,7 +101,8 @@ describe("New Customer in Spanish", () => {
     expect(words).toContain("Nuevo Cliente");
     expect(html).toContain('data-modal="Nuevo Cliente"');
     expect(html).toContain('data-actions="Crear Cliente"');
-    for (const w of ["Nombre *", "Empresa", "Tipo", "Estado", "Correo", "Teléfono", "Dirección", "Ciudad", "Estado (EE. UU.)", "Código postal", "Notas", "Importar un .vcf", "Autorrelleno"]) expect(words).toContain(w);
+    // cn-v1171: the person is the lead form's own block (Business and the town behind their links).
+    for (const w of ["Nombre", "Empresa", "Tipo", "Estado", "Correo", "Teléfono", "Dirección", "Ciudad, Estado, Código Postal", "Notas", "Importar un .vcf", "Autorrelleno"]) expect(words).toContain(w);
     for (const o of ["Residencial", "Comercial", "Industrial", "Contratista", "Subcontratista", "Activo", "Inactivo"]) {
       expect(html).toContain(`>${o}</option>`);
       expect(esTitleCase(o)).toBe(true);
@@ -120,7 +121,7 @@ describe("New Customer in Spanish", () => {
 
 describe("Edit Customer in Spanish (shared: the customer page, the job page, the estimate's customer card)", () => {
   const levels = [{ id: "pl-1", name: "Catbird", markup_pct: 12 }];
-  it("Editar, the sheet's heading and save, the lead status option as Prospecto, the markup words", () => {
+  it("Editar, the sheet's heading and save, the lead status option as Prospecto (the badge's word), the markup words", () => {
     const html = es(<EditCustomerButton customer={{ ...larkspur, status: "lead" } as Customer} pricingLevels={levels} />);
     const words = text(html);
     expect(words).toContain("Editar");
@@ -135,7 +136,8 @@ describe("Edit Customer in Spanish (shared: the customer page, the job page, the
   it("an English caller's label is its own; English by default", () => {
     expect(text(en(<EditCustomerButton customer={larkspur} />))).toContain("Edit");
     expect(en(<EditCustomerButton customer={larkspur} pricingLevels={levels} />)).toContain("Catbird (12% markup)");
-    expect(en(<EditCustomerButton customer={larkspur} />)).toMatch(/<option value="lead"( selected="")?>Inquiry<\/option>/);
+    // cn-v1171: the stored `lead` is Lead, the word the customer's page badge draws (it said Inquiry).
+    expect(en(<EditCustomerButton customer={larkspur} />)).toMatch(/<option value="lead"( selected="")?>Lead<\/option>/);
     expect(text(es(<EditCustomerButton customer={larkspur} label={t("cu_btn_addTheirEmail")} />))).toContain("Agregar Su Correo");
   });
 });
@@ -218,7 +220,7 @@ describe("the catalog", () => {
     expect(e.cu_showingFirst).toBe("Showing the first {n} customers — search to narrow the list.");
     expect(e.cu_btn_mergeIntoKept).toBe("Merge {n} into Kept");
     expect(e.cu_btn_backToCustomers).toBe("Back to Customers");
-    expect(e.cu_btn_statusInquiry).toBe("Inquiry");
+    expect(e.cu_btn_statusLead).toBe("Lead");
     expect(e.cu_deleteConfirm).toBe(
       "Delete {name}? Only possible when nothing important still points at them — jobs, estimates, invoices, contracts, account credits, or a link to a job as a sub/supplier all block it. Appointments, documents, work orders and inquiries survive but lose their contact.",
     );

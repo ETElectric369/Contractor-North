@@ -119,8 +119,6 @@ describe("the Edit Details modal speaks Spanish to a Spanish reader", () => {
     expect(fresh).toContain("Fijar una Hora");
     expect(fresh).toContain("Proponer Horas");
     expect(fresh).not.toMatch(/Set a Time|Propose Times|New Appointment|Save Appointment/);
-    expect(es(form({ defaultType: "inspection" }))).toContain("Nueva Inspección</button>");
-    expect(es(form({ defaultType: "inspection", buttonLabel: "Agendar una Inspección" }))).toContain("Agendar una Inspección</button>"); // a caller's own words first
   });
 
   it("the door words, as a pure function, in both languages (whole phrases: Cita and Inspección carry their own article)", () => {

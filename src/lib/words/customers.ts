@@ -48,6 +48,9 @@ export const words: WordCatalog = {
     "src/app/(app)/crm/[id]/merge-customer-button.tsx",
     "src/components/new-customer-inline.tsx",
     "src/components/sort-filter-bar.tsx",
+    // cn-v1171 (PEOPLE): the one customer form behind New and Edit, and the one already-a-customer ask.
+    "src/components/customer-fields.tsx",
+    "src/components/duplicate-customer-ask.tsx",
   ],
   sameInBoth: ["cu_type_industrial", "cu_btn_typeIndustrial"],
   en: {
@@ -99,7 +102,6 @@ export const words: WordCatalog = {
     cu_btn_typeIndustrial: "Industrial",
     cu_btn_typeContractor: "Contractor",
     cu_btn_typeSubcontractor: "Subcontractor",
-    cu_btn_statusInquiry: "Inquiry",
     cu_btn_statusActive: "Active",
     cu_btn_statusInactive: "Inactive",
     cu_somethingWrong: "Something went wrong.",
@@ -112,7 +114,6 @@ export const words: WordCatalog = {
     cu_autofillTip: "Tip: type the person's name and pick them when your browser offers the card — then press {autofill} on the card itself.",
     cu_autofill: "AutoFill",
     cu_namePlaceholder: "Customer or contact name",
-    cu_optional: "(optional)",
     cu_filledIn: "Filled in {name} — review and save.",
     cu_cantReadCard: "Couldn't read a contact from that card. Make sure it's a .vcf you shared from Contacts.",
 
@@ -272,6 +273,18 @@ export const words: WordCatalog = {
     cu_descending: "Descending — tap for ascending",
     cu_ascTitle: "A → Z, low → high",
     cu_descTitle: "Z → A, high → low",
+    // cn-v1171 (CUST)
+    cu_btn_tabInspections: "Inspections",
+    cu_btn_tabRequests: "Requests",
+    cu_noInspectionsYet: "No inspections yet.",
+    cu_noRequestsYet: "No requests yet.",
+    cu_inspectionsUnread: "Couldn't load their inspections. Reload to try again.",
+    cu_requestsUnread: "Couldn't load their requests. Reload to try again.",
+    // cn-v1171 (PEOPLE)
+    cu_btn_statusLead: "Lead",
+    cu_btn_openTheirFile: "Open Their File",
+    cu_btn_useThisCustomer: "Use This Customer",
+    cu_btn_addAnyway: "Add Anyway",
   },
   es: {
     cu_status_lead: "prospecto",
@@ -317,7 +330,6 @@ export const words: WordCatalog = {
     cu_btn_typeIndustrial: "Industrial",
     cu_btn_typeContractor: "Contratista",
     cu_btn_typeSubcontractor: "Subcontratista",
-    cu_btn_statusInquiry: "Prospecto",
     cu_btn_statusActive: "Activo",
     cu_btn_statusInactive: "Inactivo",
     cu_somethingWrong: "Algo salió mal.",
@@ -329,7 +341,6 @@ export const words: WordCatalog = {
     cu_autofillTip: "Consejo: escribe el nombre de la persona y elígela cuando tu navegador te ofrezca la tarjeta — luego toca {autofill} en la tarjeta misma.",
     cu_autofill: "Autorrelleno",
     cu_namePlaceholder: "Nombre del cliente o contacto",
-    cu_optional: "(opcional)",
     cu_filledIn: "Se llenaron los datos de {name} — revisa y guarda.",
     cu_cantReadCard: "No se pudo leer un contacto de esa tarjeta. Asegúrate de que sea un .vcf que compartiste desde Contactos.",
 
@@ -481,5 +492,17 @@ export const words: WordCatalog = {
     cu_descending: "Descendente — toca para ascendente",
     cu_ascTitle: "A → Z, menor → mayor",
     cu_descTitle: "Z → A, mayor → menor",
+    // cn-v1171 (CUST)
+    cu_btn_tabInspections: "Inspecciones",
+    cu_btn_tabRequests: "Solicitudes",
+    cu_noInspectionsYet: "Aún no hay inspecciones.",
+    cu_noRequestsYet: "Aún no hay solicitudes.",
+    cu_inspectionsUnread: "No se pudieron cargar sus inspecciones. Recarga para intentar de nuevo.",
+    cu_requestsUnread: "No se pudieron cargar sus solicitudes. Recarga para intentar de nuevo.",
+    // cn-v1171 (PEOPLE)
+    cu_btn_statusLead: "Prospecto",
+    cu_btn_openTheirFile: "Abrir Su Ficha",
+    cu_btn_useThisCustomer: "Usar Este Cliente",
+    cu_btn_addAnyway: "Agregar de Todos Modos",
   },
 };

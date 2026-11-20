@@ -186,16 +186,18 @@ describe("every tab count in the app is an open count", () => {
  * said it was finished. The tags come from ONE rule (lib/inspections, inspectionRowTags and its plain-
  * words twin rowTagWords) and the page writes none of its own, which is what stops the next one riding
  * into the wrong pile. Since the page became tiles (cn-v1163) a row draws no pill at all: what a pill
- * said is said in the row's phrase, handed to it by that rule.
+ * said is said in the row's phrase, handed to it by that rule. The tiles became one list (cn-v1171);
+ * the rule is handed the row's state, and the row's state word is a plain slate word, never a pill.
  */
 describe("the open Inspections pile wears no Done pill", () => {
-  it("every tag on a row comes from the one rule — the page and its board write none themselves", () => {
+  it("every tag on a row comes from the one rule — the page and its list write none themselves", () => {
     const page = read("app/(app)/inspections/page.tsx");
-    const board = read("app/(app)/inspections/inspections-board.tsx");
-    // The one rule, handed the row's tile, the reader's language and translator (the tags' words only).
+    const list = read("app/(app)/inspections/inspection-list.tsx");
+    // The one rule, handed the row's state (or the fold's ending), the reader's language and
+    // translator (the tags' words only).
     expect(page).toContain("tags: rowTagWords(a, tile, lang, t),");
-    // No pill on the page or its board. A tag written inline there is the bug.
-    for (const f of [page, board]) {
+    // No pill on the page or its list. A tag written inline there is the bug.
+    for (const f of [page, list]) {
       expect(f).not.toMatch(/<Badge\b/);
       expect(f).not.toMatch(/\bDone\b/);
     }

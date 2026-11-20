@@ -2,13 +2,12 @@ import Link from "next/link";
 import { ArrowLeft, Globe, Mail, MapPin, Phone, User } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge, statusTone, type Tone } from "@/components/ui/badge";
+import { Badge, statusTone } from "@/components/ui/badge";
 import { fillText, type Lang } from "@/lib/i18n";
 import { formatDate, formatDateTime } from "@/lib/utils";
-import { appointmentTypeLabel, visitTitle } from "@/lib/statuses";
 import { jobStatusLabel } from "@/lib/job-status";
 import { leadSourceChip } from "@/lib/inquiries/sources";
-import { pickWentUnanswered, visitStands, type LeadStage } from "@/lib/leads/new-intake";
+import { pickWentUnanswered, visitStands, visitWasWon, type LeadStage } from "@/lib/leads/new-intake";
 import { intakePaths } from "@/lib/playbook/uploads";
 import { LeadDoors } from "../lead-doors";
 import { LeadClock } from "../lead-clock";
@@ -18,40 +17,12 @@ import { PlanBriefPanel } from "../plan-brief-panel";
 import { SaveAsContactButton } from "./file-doors";
 import { FileEstimates } from "./file-estimates";
 import type { FileEstimate, FileJob, FileLead, FileVisit } from "./file-reads";
+// cn-v1171: a visit and a lead's stage are said by the same pieces the customer's page draws.
+import { FileVisitList } from "@/components/file/visit-list";
+import { leadStageWords } from "@/components/file/lead-stage";
+import { fileVisitOrder } from "@/lib/appointments/file-visit";
 
 type Words = (key: string) => string;
-
-/** A visit's state, as the file says it (booked / done / won / Not Sold). null: a state the file has
- *  not been taught, which reads as its stored word. */
-export function visitStateKey(v: Pick<FileVisit, "status" | "outcome">): string | null {
-  if (v.outcome === "won") return "ld_btn_fileVisitWon";
-  if (v.outcome === "lost" || v.outcome === "no_bid") return "ld_btn_fileVisitNotSold";
-  if (v.status === "completed") return "ld_btn_fileVisitDone";
-  if (v.status === "scheduled" || v.status === "proposed") return "ld_btn_fileVisitBooked";
-  return null;
-}
-
-const STATE_TONE: Record<string, Tone> = {
-  ld_btn_fileVisitWon: "green",
-  ld_btn_fileVisitNotSold: "red",
-  ld_btn_fileVisitDone: "slate",
-  ld_btn_fileVisitBooked: "blue",
-};
-
-/** When a visit is: its day, or that it waits on the customer's pick, or for a day. */
-export function visitWhen(v: Pick<FileVisit, "status" | "starts_at">, tz: string, lang: Lang, t: Words): string {
-  if (v.status === "proposed") return t("ld_btn_fileWaitingOnPick");
-  if (!v.starts_at) return t("ld_btn_fileWaitingForADay");
-  return formatDateTime(v.starts_at, tz, lang);
-}
-
-/** The header's one word for where a converted lead went. */
-export function convertedKey(to: string | null | undefined): string {
-  if (to === "customer") return "ld_file_stageCustomer";
-  if (to === "quote" || to === "estimate") return "ld_file_stageEstimate";
-  if (to === "job") return "ld_file_stageJob";
-  return "ld_file_stageConverted";
-}
 
 export type LeadFileProps = {
   lead: FileLead;
@@ -97,6 +68,9 @@ export function LeadFile(p: LeadFileProps) {
   const standingVisit = (p.visits ?? []).find((v) => visitStands(v, p.nowMs)) ?? null;
   // Times were sent, the first went by with no pick, and nothing else stands: say so by the doors.
   const pickPending = !standingVisit && (p.visits ?? []).some((v) => pickWentUnanswered(v, p.nowMs));
+  // An inspection marked Won and no job picked, nothing else standing (cn-v1171, skeptic #74).
+  const wonPending = !standingVisit && (p.visits ?? []).some((v) => visitWasWon(v));
+  const stageBadge = leadStageWords(stage, { convertedTo: lead.converted_to, standingVisit, tz, lang, t });
 
   return (
     <div className="space-y-4">
@@ -108,19 +82,15 @@ export function LeadFile(p: LeadFileProps) {
         <PageHeader title={title} description={business || undefined} />
         <div className="-mt-3 flex flex-wrap items-center gap-2">
           {/* WHERE IT IS: one badge. */}
-          {stage === "open" && <Badge tone="amber" className="normal-case">{t("ld_file_stageOpen")}</Badge>}
-          {stage === "standing" && standingVisit && (
+          {stage === "standing" && standingVisit ? (
             <Link href={`/appointments/${standingVisit.id}`} className="inline-flex min-h-11 items-center">
-              <Badge tone="blue" className="normal-case">
-                {fillText(t("ld_btn_fileStageStanding"), {
-                  what: appointmentTypeLabel(standingVisit.type, lang, t),
-                  when: visitWhen(standingVisit, tz, lang, t),
-                })}
+              <Badge tone={stageBadge.tone} className="normal-case">
+                {stageBadge.text}
               </Badge>
             </Link>
+          ) : (
+            stage !== "standing" && <Badge tone={stageBadge.tone} className="normal-case">{stageBadge.text}</Badge>
           )}
-          {stage === "notSold" && <Badge tone="red" className="normal-case">{t("ld_file_stageNotSold")}</Badge>}
-          {stage === "converted" && <Badge tone="green" className="normal-case">{t(convertedKey(lead.converted_to))}</Badge>}
           <span className="text-xs text-slate-500">{fillText(t("ld_file_arrived"), { when: formatDateTime(lead.created_at, tz, lang) })}</span>
           {/* "next to time stamp running clock since lead arrival": only while it waits on the list. */}
           {stage === "open" && <LeadClock since={lead.created_at} nowMs={p.nowMs} />}
@@ -132,6 +102,7 @@ export function LeadFile(p: LeadFileProps) {
       {/* Visits unread: the lead is treated as not standing (offered, never hidden), and said so. */}
       {p.visits === null && <Unread>{t("ld_file_visitsUnread")}</Unread>}
       {stage === "open" && pickPending && <Unread>{t("ld_pickPending")}</Unread>}
+      {stage === "open" && wonPending && <Unread>{t("ld_wonPending")}</Unread>}
 
       <LeadDoors inquiry={lead} stage={stage} businessPhone={p.businessPhone} openSchedule={p.openSchedule} />
 
@@ -234,30 +205,15 @@ export function LeadFile(p: LeadFileProps) {
           <CardTitle>{t("ld_file_inspections")}</CardTitle>
         </CardHeader>
         <CardContent>
-          {p.visits === null ? (
-            <Unread>{t("ld_file_inspectionsUnread")}</Unread>
-          ) : p.visits.length === 0 ? (
-            <p className="text-sm text-slate-400">{t("ld_file_noInspections")}</p>
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {p.visits.map((v) => {
-                const key = visitStateKey(v);
-                const shown = visitTitle(v.title);
-                return (
-                  <li key={v.id}>
-                    <Link href={`/appointments/${v.id}`} className="flex min-h-11 flex-wrap items-center gap-x-2 gap-y-0.5 py-2 text-sm hover:text-brand">
-                      <span className="font-medium text-slate-800">{appointmentTypeLabel(v.type, lang, t)}</span>
-                      <span className="text-slate-500">{visitWhen(v, tz, lang, t)}</span>
-                      <Badge tone={key ? STATE_TONE[key] : "slate"} className="ml-auto normal-case">
-                        {key ? t(key) : String(v.status ?? "")}
-                      </Badge>
-                      {shown && <span className="w-full truncate text-xs text-slate-400">{shown}</span>}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          {/* Cancelled ones too (cn-v1171): the Inspections page has no Filed side, so the file is where they are found. */}
+          <FileVisitList
+            visits={p.visits === null ? null : fileVisitOrder(p.visits)}
+            tz={tz}
+            lang={lang}
+            t={t}
+            empty={t("ld_file_noInspections")}
+            unread={t("ld_file_inspectionsUnread")}
+          />
         </CardContent>
       </Card>
 

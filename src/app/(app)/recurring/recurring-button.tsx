@@ -2,7 +2,7 @@
 
 import { COMPANY_FIELD } from "@/lib/vendor-words";
 import { useState, useTransition } from "react";
-import { NewCustomerInline } from "@/components/new-customer-inline";
+import { NewCustomerInline, addedOnce } from "@/components/new-customer-inline";
 import { useRouter } from "next/navigation";
 import { taxFieldShown } from "@/lib/sales-tax-switch";
 import { Plus, Pencil, Trash2 } from "lucide-react";
@@ -163,7 +163,7 @@ export function RecurringButton({
                   <option value="">—</option>
                   {[...addedCustomers, ...customers].map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </Select>
-                <NewCustomerInline className="mt-1.5" onCreated={(c) => { setAddedCustomers((p) => [c, ...p]); setForcedCustomer(c.id); }} />
+                <NewCustomerInline className="mt-1.5" onCreated={(c) => { setAddedCustomers((p) => addedOnce(p, customers, c)); setForcedCustomer(c.id); }} />
               </div>
               <div>
                 <Label htmlFor="r-desc">Description</Label>
@@ -180,7 +180,7 @@ export function RecurringButton({
                   <option value="">—</option>
                   {[...addedCustomers, ...customers].map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </Select>
-                <NewCustomerInline className="mt-1.5" onCreated={(c) => { setAddedCustomers((p) => [c, ...p]); setForcedCustomer(c.id); }} />
+                <NewCustomerInline className="mt-1.5" onCreated={(c) => { setAddedCustomers((p) => addedOnce(p, customers, c)); setForcedCustomer(c.id); }} />
               </div>
               <div>
                 <Label>Line items</Label>

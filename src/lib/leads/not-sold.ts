@@ -39,8 +39,8 @@ export async function reopenNotSold(supabase: SupabaseClient, id: string): Promi
 }
 
 /**
- * A VISIT ENDED NOT SOLD: its lead is Not Sold too, but only when the lead is open and NO OTHER visit
- * from it still stands (read after the visit's own outcome was written, so that one no longer
+ * A VISIT ENDED NOT SOLD: its lead is Not Sold too, but only when the lead is open, NO OTHER visit
+ * from it still stands and none was marked Won (read after the visit's own outcome was written, so that one no longer
  * stands). A lead whose visits could not be read is left open: in doubt, offered, never hidden.
  */
 export async function markLeadNotSoldFromVisit(
@@ -53,6 +53,9 @@ export async function markLeadNotSoldFromVisit(
   const read = await standingFor(supabase, [inquiryId]);
   if (read.unread.has(inquiryId)) return { marked: false, error: new Error("lead visits unread") };
   if (read.standing.has(inquiryId)) return { marked: false };
+  // Another visit from it was marked Won (cn-v1171, skeptic #74): a Won visit no longer stands, but
+  // the lead was won, so one visit's Not Sold never marks it Not Sold.
+  if (read.wonPending.has(inquiryId)) return { marked: false };
   const { data, error } = await supabase
     .from("inquiries")
     .update({ status: NOT_SOLD_STATUS, updated_at: new Date().toISOString() })

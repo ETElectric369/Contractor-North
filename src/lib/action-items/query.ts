@@ -381,8 +381,8 @@ async function buildActionItems(ctx: {
   // office's), and his build reads nothing else.
   // A VISIT ALREADY ANSWERED IS NOT ASKED ABOUT AGAIN (cn-v1158). This read was on status alone, so a
   // visit marked Lost while still 'scheduled' came back here as a visit nobody closed out. Three doors
-  // write that answer onto a scheduled visit: the Didn't Happen? group on /inspections and a write-up
-  // row's ⋯ Lost (both setAppointmentOutcome, the row's through the registry's appointment.setOutcome),
+  // write that answer onto a scheduled visit: a Day Passed or write-up row's ⋯ Not Sold on
+  // /inspections (cn-v1171; setAppointmentOutcome, the row's through the registry's appointment.setOutcome),
   // and the stamp an estimate leaves on the visits behind it when it is marked declined or expired
   // (lib/appointments/behind-quote). Nort is NOT a fourth: appointment.setOutcome is a row's door and
   // is not in AGENT_WRITE_ALLOWED, so when he declines an estimate the answer is that estimate's stamp,
