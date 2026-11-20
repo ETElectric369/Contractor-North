@@ -59,8 +59,6 @@ describe("every (kind, verb) the row table can send maps to a registry action", 
   it("walks a real table (every verbed door of every kind)", () => {
     const pairs = new Set(sent.map(([k, v]) => `${k}:${v}`));
     for (const want of [
-      "inquiry:do",
-      "inquiry:snooze",
       "inquiry:dismiss",
       "appointment:do",
       "appointment:dismiss",
@@ -84,6 +82,9 @@ describe("every (kind, verb) the row table can send maps to a registry action", 
       "receipt_unbilled:notACost",
     ])
       expect(pairs, want).toContain(want);
+    // cn-v1170: a lead row sends ONE verb, Not Sold (dismiss). No Called, no Snooze: its Schedule
+    // is a link to the lead's file and its Call a tel: link.
+    expect([...pairs].filter((p) => p.startsWith("inquiry:"))).toEqual(["inquiry:dismiss"]);
   });
 
   it("each one resolves, to an action the registry has, never with a prefixed id", () => {
@@ -103,8 +104,9 @@ describe("every (kind, verb) the row table can send maps to a registry action", 
 describe("the mappings that matter", () => {
   const map = (kind: ActionKind, verb: Affordance, id: string, target?: string) => resolveRowVerb(kind, verb, id, PAYLOAD, target ?? null);
 
-  it("a snooze never writes contacted; the lead's ending writes lost, never a deletion", () => {
-    expect(map("inquiry", "snooze", "lead-1")).toEqual({ name: "inquiry.snooze", input: { id: "lead-1", date: "2026-10-03" } });
+  it("a lead has no snooze and no contact verb; its ending writes Not Sold, never a deletion", () => {
+    expect(map("inquiry", "snooze", "lead-1")).toBeNull();
+    expect(map("inquiry", "do", "lead-1")).toBeNull();
     expect(map("inquiry", "dismiss", "lead-1")).toEqual({ name: "inquiry.markLost", input: { id: "lead-1" } });
     const dispatch = readFileSync(join(process.cwd(), "src/lib/action-items/dispatch-map.ts"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
     expect(dispatch).not.toContain("inquiry.delete");

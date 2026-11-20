@@ -59,19 +59,19 @@ describe("a Didn't Happen? row's ⋯ doors", () => {
         onKeep: noop,
       }),
     );
-  it("Move to Another Day…, It Happened: Write It Up, Lost and Dismiss…, Title Case, in both languages", () => {
+  it("Move to Another Day…, It Happened: Write It Up, Not Sold and Dismiss…, Title Case, in both languages", () => {
     LANG = "en";
     const en = rows();
     expect(en).toContain(">Move to Another Day…<");
     expect(en).toContain(">It Happened: Write It Up<");
-    expect(en).toContain(">Lost<");
+    expect(en).toContain(">Not Sold<");
     expect(en).toContain(">Dismiss…<");
     expect(en.match(/<button/g)?.length).toBe(4);
     LANG = "es";
     const es = rows();
     expect(es).toContain(">Mover a Otro Día…<");
     expect(es).toContain(">Sí Se Hizo: Redactarla<");
-    expect(es).toContain(">Perdida<");
+    expect(es).toContain(">No Vendida<");
     expect(es).toContain(">Descartar…<");
   });
 });

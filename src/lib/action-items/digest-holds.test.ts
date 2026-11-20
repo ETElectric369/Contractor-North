@@ -35,7 +35,7 @@ function fake(answers: Record<string, Answer | (() => Answer)>) {
         return q;
       },
     };
-    for (const m of ["select", "eq", "in", "is", "or", "lt", "lte", "gte", "order", "limit"]) {
+    for (const m of ["select", "eq", "neq", "in", "is", "or", "lt", "lte", "gte", "order", "limit"]) {
       q[m] = (...args: unknown[]) => {
         filters[table].push([m, ...args]);
         return q;
@@ -83,7 +83,7 @@ describe("the morning push", () => {
       organizations: { data: [ORG] },
       jobs: { count: 3 },
       invoices: { data: [{ invoice_number: "INV-071" }], count: 1 },
-      inquiries: { data: [{ name: "Dana" }], count: 2 },
+      inquiries: { data: [{ id: "l-1", name: "Dana" }, { id: "l-2", name: "Theo" }] },
       tasks: { data: [] },
     });
     await sendDayAheadDigests(db);
@@ -94,14 +94,37 @@ describe("the morning push", () => {
     });
   });
 
-  it("a new lead snoozed to a later day waits for it: the lead read carries Needs You's due filter", async () => {
-    const db = fake({ organizations: { data: [ORG] }, jobs: { count: 0 }, invoices: { count: 0 }, inquiries: { count: 0 }, tasks: { data: [] } });
+  // cn-v1170: the lead line is the Leads list (lib/leads/new-intake), the rule Needs You and the
+  // Sales badge read; a lead has no follow-up day, and one with an inspection on the books is off it.
+  it("the lead line names the leads on the Leads list, oldest first, for this company only", async () => {
+    const db = fake({
+      organizations: { data: [ORG] },
+      jobs: { count: 0 },
+      invoices: { count: 0 },
+      inquiries: { data: [{ id: "l-1", name: "Casey Loam" }, { id: "l-2", name: "Theo Vance" }, { id: "l-3", name: "Dana Rook" }] },
+      appointments: { data: [{ inquiry_id: "l-2", status: "scheduled", outcome: null }] },
+      tasks: { data: [] },
+    });
     await sendDayAheadDigests(db);
     const leads = db.filters.inquiries;
     expect(leads).toContainEqual(["eq", "org_id", "org-1"]);
-    expect(leads).toContainEqual(["eq", "status", "new"]);
-    // next_follow_up_at empty, or on/before the company's today: the rule My Day and the Sales badge use.
-    expect(leads.find((f) => f[0] === "or")?.[1]).toMatch(/^next_follow_up_at\.is\.null,next_follow_up_at\.lte\.\d{4}-\d{2}-\d{2}$/);
+    expect(leads).toContainEqual(["is", "converted_at", null]);
+    expect(leads).toContainEqual(["neq", "status", "lost"]);
+    expect(leads).toContainEqual(["order", "created_at", { ascending: true }]);
+    expect(leads.some((f) => f[0] === "or")).toBe(false);
+    // The visits are read for this company too (a service client), and the booked lead is off.
+    expect(db.filters.appointments).toContainEqual(["eq", "org_id", "org-1"]);
+    expect(notifyPeople).toHaveBeenCalledWith("org-1", ["owner-1"], "day_ahead", {
+      title: "Needs You: 2",
+      body: "New lead: Casey Loam · New lead: Dana Rook",
+      url: "/planner",
+    });
+  });
+
+  it("a failed lead read is filed and names nobody; the company's morning still goes", async () => {
+    const db = fake({ organizations: { data: [ORG] }, jobs: { count: 1 }, invoices: { count: 0 }, inquiries: { error: { message: "boom" } }, tasks: { data: [] } });
+    expect(await sendDayAheadDigests(db)).toMatchObject({ pushed: 1, failed: 0 });
+    expect(reportError).toHaveBeenCalledWith("cron-day-ahead.leads", { message: "boom" }, { orgId: "org-1" });
   });
 
   it("a company whose plan has ended gets no push and is counted; the standing company still gets its morning (cn-v1137)", async () => {

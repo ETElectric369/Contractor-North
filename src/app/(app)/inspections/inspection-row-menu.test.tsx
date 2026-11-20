@@ -106,11 +106,11 @@ describe("which moves a row's ⋯ holds", () => {
 describe("the sheet's two faces", () => {
   it("resting: the rows the menu allows, in order, each a 44px sheet row, nothing red", () => {
     const en = face(["move", "happened", "lost", "del"], false);
-    expect(buttons(en)).toEqual(["Move to Another Day…", "It Happened: Write It Up", "Lost", "Dismiss…"]);
+    expect(buttons(en)).toEqual(["Move to Another Day…", "It Happened: Write It Up", "Not Sold", "Dismiss…"]);
     expect(en.match(/<button[^>]*class="[^"]*min-h-\[44px\] w-full[^"]*"/g)).toHaveLength(4);
     expect(en).not.toMatch(/red-/);
     expect(buttons(face(["move", "del"], false))).toEqual(["Move to Another Day…", "Dismiss…"]);
-    expect(buttons(face(["lost"], false))).toEqual(["Lost"]);
+    expect(buttons(face(["lost"], false))).toEqual(["Not Sold"]);
   });
 
   it("asking: the question, the deed in red and Keep It; the rows are gone", () => {
@@ -135,7 +135,7 @@ describe("the sheet's two faces", () => {
 
   it("Spanish, and every label Title Case in both languages", () => {
     const es = face(["move", "happened", "lost", "del"], false, "es");
-    expect(buttons(es)).toEqual(["Mover a Otro Día…", "Sí Se Hizo: Redactarla", "Perdida", "Descartar…"]);
+    expect(buttons(es)).toEqual(["Mover a Otro Día…", "Sí Se Hizo: Redactarla", "No Vendida", "Descartar…"]);
     for (const lang of ["en", "es"] as const) {
       const t = translator(lang);
       for (const k of ["ip_btn_moveToAnotherDay", "ip_btn_itHappened", "ip_btn_lost", "ip_btn_delete", "ip_btn_deleteIt", "vp_btn_keepIt", "ag_btn_undo"]) {
@@ -228,17 +228,49 @@ describe("It Happened: Write It Up", () => {
   });
 });
 
-describe("Lost", () => {
-  it("writes lost, closes, re-reads, and Undo clears the outcome", async () => {
+describe("Not Sold (cn-v1170, was Lost)", () => {
+  it("writes lost, closes, re-reads; the Undo clears the outcome with no option and says the plain sentence", async () => {
     const setOutcome = vi.fn(async () => ({ ok: true }));
     const io = rig();
     await markItLost("a1", io, { setOutcome: setOutcome as any });
     expect(setOutcome).toHaveBeenCalledWith("a1", "lost");
-    expect(io.log).toEqual(["close", "toast:success:Marked Lost.", "refresh"]);
+    expect(io.log).toEqual(["close", "toast:success:Marked Not Sold.", "refresh"]);
     undoOf(io.toast)();
     await settle();
-    expect(setOutcome).toHaveBeenLastCalledWith("a1", null);
+    expect(setOutcome.mock.lastCall).toEqual(["a1", null]);
     expect(io.toast).toHaveBeenLastCalledWith("Back where it was.", "success");
+  });
+
+  it("the lead went with it: the toast says so; the Undo says the lead is open again ONLY when the server said leadReopened", async () => {
+    const setOutcome = vi.fn(async (_id: string, o: string | null) => (o ? { ok: true, leadMarked: true } : { ok: true, leadReopened: true }));
+    const io = rig();
+    await markItLost("a1", io, { setOutcome: setOutcome as any });
+    expect(io.log).toEqual(["close", "toast:success:Marked Not Sold. The lead is Not Sold too.", "refresh"]);
+    undoOf(io.toast)();
+    await settle();
+    expect(setOutcome.mock.lastCall).toEqual(["a1", null]);
+    expect(io.toast).toHaveBeenLastCalledWith("Back where it was. The lead is open again.", "success");
+  });
+
+  it("the lead went with it but the server did not reopen it: the plain undone sentence, never a claim", async () => {
+    const setOutcome = vi.fn(async (_id: string, o: string | null) => (o ? { ok: true, leadMarked: true } : { ok: true }));
+    const io = rig();
+    await markItLost("a1", io, { setOutcome: setOutcome as any });
+    undoOf(io.toast)();
+    await settle();
+    expect(io.toast).toHaveBeenLastCalledWith("Back where it was.", "success");
+  });
+
+  it("a lead step that failed is said, on the mark and on the Undo", async () => {
+    const setOutcome = vi.fn(async (_id: string, o: string | null) =>
+      o ? { ok: true, warning: "Its lead couldn't be marked." } : { ok: true, warning: "Its lead couldn't be reopened." },
+    );
+    const io = rig();
+    await markItLost("a1", io, { setOutcome: setOutcome as any });
+    expect(io.toast).toHaveBeenCalledWith("Its lead couldn't be marked.", "error");
+    undoOf(io.toast)();
+    await settle();
+    expect(io.toast).toHaveBeenLastCalledWith("Its lead couldn't be reopened.", "error");
   });
 
   it("an Undo that fails says why", async () => {

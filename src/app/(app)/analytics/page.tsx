@@ -280,7 +280,7 @@ export default async function AnalyticsPage({
           </div>
           <CardContent className="space-y-2 py-5 text-sm">
             <div className="flex justify-between"><span className="text-slate-500">Won</span><span className="font-medium text-green-600">{qs.won}</span></div>
-            <div className="flex justify-between"><span className="text-slate-500">Lost / expired</span><span className="font-medium text-red-600">{qs.lost}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">Not Sold / expired</span><span className="font-medium text-red-600">{qs.lost}</span></div>
             <div className="flex justify-between"><span className="text-slate-500">Awaiting answer</span><span className="font-medium text-slate-800">{qs.awaiting}</span></div>
             <div className="flex justify-between border-t border-slate-100 pt-2"><span className="text-slate-500">Pipeline value (sent)</span><span className="font-semibold text-slate-900">{formatCurrency(qs.pipelineValue)}</span></div>
           </CardContent>

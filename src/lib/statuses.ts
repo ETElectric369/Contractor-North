@@ -52,7 +52,9 @@ export const INQUIRY_STATUSES = ["new", "contacted", "quoted", "won", "lost"] as
  *  unknown or retired value reads as itself in both languages. */
 export function inquiryStatusLabel(status: string, lang: Lang = "en", words?: Words): string {
   const raw = String(status ?? "");
-  if (lang !== "es" || !words) return raw;
+  // cn-v1170: the one value whose word is not its stored value. A lead's ending is stored 'lost' and
+  // reads "not sold" (Erik: "Not Sold" replaces "Lost" everywhere), the catalog's ld_status_lost in English.
+  if (lang !== "es" || !words) return raw === "lost" ? "not sold" : raw;
   return (INQUIRY_STATUSES as readonly string[]).includes(raw) ? words(`ld_status_${raw}`) : raw;
 }
 

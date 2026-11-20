@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { markInquiryContacted, convertInquiry, deleteInquiry, createInquiry, snoozeInquiry, setInquiryStatus } from "@/app/(app)/leads/actions";
+import { markInquiryContacted, convertInquiry, deleteInquiry, createInquiry, setInquiryStatus } from "@/app/(app)/leads/actions";
 import type { ActionDef } from "../types";
 
 export const inquiryActions: Record<string, ActionDef> = {
@@ -8,17 +8,22 @@ export const inquiryActions: Record<string, ActionDef> = {
     group: "inquiry",
     label: "Add a lead",
     description:
-      // A NEW LEAD IS A LEAD, NOT A BOOKING (audit v921): this used to promise "it auto-books a
-      // next-day follow-up", which is the phantom-booking createInquiry deliberately removed —
-      // the lead lands with next_follow_up_at NULL and no appointment. Nort reads this text as
-      // fact, so it was telling people about a follow-up nobody had booked.
-      "Capture a new LEAD / inquiry (the top of the funnel) — e.g. 'add a lead, <name>, <phone>, wants <the work>'. Only name is required; phone/email/company/message/type are optional. When type isn't given it is inferred from Company: a company is commercial, none is residential. The lead lands on the follow-up list with no date; set one with inquiry.contact. Afterward you can contact (inquiry.contact) or convert it (inquiry.convert).",
+      // A NEW LEAD IS A LEAD, NOT A BOOKING (audit v921). cn-v1170: the input is the form's fields
+      // (the Scope is `message`); no kind, no how long, no follow-up day.
+      "Capture a new LEAD / inquiry (the top of the funnel), e.g. 'add a lead, <name>, <phone>, wants <the work>'. Only name is required. Optional: company_name (their business), phone, email, the address (address = street line, city, state, zip), message (the SCOPE: what they need and the kind of work), notes, source (how they found you, a label like Web, Signage, Word of Mouth or Referral; leave it out when they did not say), and type (residential or commercial; when it isn't given it is inferred from the business: a business is commercial, none is residential). The lead lands on the Leads list, which is the reminder: it stays there until it is scheduled or marked Not Sold. Nothing is booked. Afterward you can book its inspection (inquiry.convert with target 'inspection') or record they were reached (inquiry.contact).",
     input: z.object({
       name: z.string().min(1),
+      company_name: z.string().nullable().optional(),
       phone: z.string().nullable().optional(),
       email: z.string().nullable().optional(),
-      company_name: z.string().nullable().optional(),
+      address: z.string().nullable().optional(),
+      city: z.string().nullable().optional(),
+      state: z.string().nullable().optional(),
+      zip: z.string().nullable().optional(),
       message: z.string().nullable().optional(),
+      notes: z.string().nullable().optional(),
+      source: z.string().nullable().optional(),
+      // Kept from before cn-v1170 (nobody decided to drop it): createInquiry honours a sent type.
       type: z.enum(["residential", "commercial"]).optional(),
     }),
     auth: "staff",
@@ -26,10 +31,11 @@ export const inquiryActions: Record<string, ActionDef> = {
     handler: (i) => {
       const fd = new FormData();
       fd.set("name", i.name);
-      if (i.phone) fd.set("phone", i.phone);
-      if (i.email) fd.set("email", i.email);
-      if (i.company_name) fd.set("company_name", i.company_name);
-      if (i.message) fd.set("message", i.message);
+      // No `unit`: the lead form posts none, so inquiryFields never reads one (cn-v1170 fixer).
+      for (const k of ["company_name", "phone", "email", "address", "city", "state", "zip", "message", "notes", "source"] as const) {
+        const v = (i[k] ?? "").trim();
+        if (v) fd.set(k, v);
+      }
       if (i.type) fd.set("type", i.type);
       return createInquiry(fd);
     },
@@ -38,29 +44,19 @@ export const inquiryActions: Record<string, ActionDef> = {
     name: "inquiry.contact",
     group: "inquiry",
     label: "Mark inquiry contacted",
-    description: "Mark a lead/inquiry as contacted, optionally with a follow-up date (YYYY-MM-DD).",
-    input: z.object({ id: z.string(), follow_up_date: z.string().nullable().optional() }),
-    auth: "staff",
-    effect: "write",
-    handler: (i) => markInquiryContacted(i.id, i.follow_up_date ?? undefined),
-  },
-  "inquiry.snooze": {
-    name: "inquiry.snooze",
-    group: "inquiry",
-    label: "Snooze a lead",
     description:
-      "Bring a lead back on a later day without saying anyone reached them — 'bring the Karen lead back Monday'. Pass its id (from list_inquiries) and date (YYYY-MM-DD, company-local, today or later). It sets only the next follow-up day: the lead's status and last contact stay as they are (use inquiry.contact when they were actually reached). The lead, new or contacted, stays off Needs You until that day. Reversible.",
-    input: z.object({ id: z.string(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }),
+      "Record that a lead was reached (status contacted, the time of contact stamped). Pass its id (from list_inquiries). It stays on the Leads list until it is scheduled or marked Not Sold; there is no follow-up day (for a dated nudge, the person sets a reminder).",
+    input: z.object({ id: z.string() }),
     auth: "staff",
     effect: "write",
-    handler: (i) => snoozeInquiry(i.id, i.date),
+    handler: (i) => markInquiryContacted(i.id),
   },
   "inquiry.markLost": {
     name: "inquiry.markLost",
     group: "inquiry",
-    label: "Mark a lead lost",
+    label: "Mark a lead Not Sold",
     description:
-      "Record that a lead went nowhere — 'the Karen lead is lost, she went with someone else'. Pass its id (from list_inquiries). The lead is kept (not deleted) with status lost, so it leaves the follow-up list and the record stays; set it back on /leads if that was wrong.",
+      "Record that a lead went nowhere, e.g. 'the Dana lead is not sold, she went with someone else'. Pass its id (from list_inquiries). The lead is kept (not deleted) and marked Not Sold, so it leaves the Leads list and the record stays with everything on it; Reopen under Not Sold at the bottom of the Leads page brings it back. Refused while an inspection booked from it still stands: then the visit is marked Not Sold or dismissed on its own page.",
     input: z.object({ id: z.string() }),
     auth: "staff",
     effect: "write",

@@ -485,7 +485,7 @@ describe("saveQuote ties the estimate to the inspection it writes up: twice at m
   const visitRead = (c: Call) => c.table === "appointments" && c.verb === "select" && c.select === "id, capture";
   const visitStamp = (c: Call) => c.table === "appointments" && c.verb === "update";
   const SENTENCE =
-    "The estimate is saved, but it could not be tied to its inspection, so the inspection can still show as waiting to be written up. Do not start another estimate from that inspection. When this estimate is settled, mark the inspection Won or Lost on its own page.";
+    "The estimate is saved, but it could not be tied to its inspection, so the inspection can still show as waiting to be written up. Do not start another estimate from that inspection. When this estimate is settled, mark the inspection Won or Not Sold on its own page.";
   let reportError: ReturnType<typeof vi.fn>;
   beforeEach(async () => {
     reportError = (await import("@/lib/observe")).reportError as unknown as ReturnType<typeof vi.fn>;

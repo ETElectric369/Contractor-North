@@ -31,6 +31,7 @@ export const FEEDER_SAY_KEYS = [
   "ny_btn_pile_jobsNeedingADay",
   "ny_btn_pile_doneNotBilled",
   "ny_btn_pile_permitInspections",
+  "ny_btn_pile_leadsToCall",
   // Which paper an estimate row names (`docKey`).
   "ny_docEstimate",
   "ny_docQuote",
@@ -60,9 +61,9 @@ export const FEEDER_SAY_KEYS = [
   "ny_w_jobNotBilled",
   "ny_w_noCostsYet",
   "ny_w_leadNew",
-  "ny_w_leadFollowUp",
+  "ny_w_leadReached",
   "ny_w_requestNew",
-  "ny_w_requestFollowUp",
+  "ny_w_requestReached",
   "ny_w_toWriteUp",
   "ny_w_toWriteUpTitled",
   "ny_w_docNotSent",
@@ -111,6 +112,7 @@ export const FEEDER_SAY_KEYS = [
   "ny_w_unreadSupplierPapers",
   "ny_w_unreadSupplierPay",
   "ny_w_unreadHours",
+  "ny_w_unreadLeads",
   "ny_w_hoursNotAllListed",
 ] as const;
 

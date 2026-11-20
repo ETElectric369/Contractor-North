@@ -11,7 +11,7 @@ import { useToast } from "@/components/toast";
 import { useLang } from "@/components/lang-provider";
 import { translator, fillText } from "@/lib/i18n";
 import { clock12, type Words } from "@/lib/lang-words";
-import { setLeadContact, sizeLead } from "../leads/actions";
+import { setLeadContact } from "../leads/actions";
 import { setJobContact, setJobHold, sizeAppointment, sizeJob, snoozeJobHold } from "./actions";
 import { usePlacement } from "./placement-context";
 import { deleteTheVisit, type DoorIo } from "../inspections/inspection-row-menu";
@@ -88,7 +88,7 @@ function PlaceAndCrew({ i }: { i: Placeable }) {
 function openRow(i: Placeable, t: Words): { href: string; label: string } {
   if (i.kind === "job") return { href: `/jobs/${i.id}`, label: t("ag_btn_openTheJob") };
   if (i.kind === "appointment") return { href: `/appointments/${i.id}`, label: t("ag_btn_openTheVisit") };
-  return { href: `/leads?focus=${i.id}`, label: t("ag_rail_btn_openTheLead") };
+  return { href: `/leads/${i.id}`, label: t("ag_rail_btn_openTheLead") };
 }
 
 /**
@@ -386,18 +386,14 @@ export function PlaceRail({
     });
   }
 
-  /** ONE CONTROL, THREE TABLES. A floater's size lives on `jobs`, a lead's on `inquiries`, an
-   *  already-booked visit's on `appointments`. The card doesn't make him care which — but the
-   *  dispatch has to be exhaustive, because sending one kind's id to another kind's writer updates
-   *  zero rows and, by the silent-write law, that reads as an error about the wrong record. */
+  /** ONE CONTROL, TWO TABLES. A floater's size lives on `jobs`, an already-booked visit's on
+   *  `appointments`. A lead has no size since cn-v1170 (the meeting: "Remove how long (will be
+   *  determined in Inspector)"), so a lead's card draws no control and this never sees one. Sending
+   *  one kind's id to another kind's writer would update zero rows, so the dispatch is exhaustive. */
   function size(i: Placeable, patch: { workKind?: string; plannedMinutes?: number | null }) {
+    if (i.kind === "lead") return;
     start(async () => {
-      const res =
-        i.kind === "job"
-          ? await sizeJob(i.id, patch.plannedMinutes ?? null)
-          : i.kind === "appointment"
-            ? await sizeAppointment(i.id, patch)
-            : await sizeLead(i.id, patch);
+      const res = i.kind === "job" ? await sizeJob(i.id, patch.plannedMinutes ?? null) : await sizeAppointment(i.id, patch);
       if (!res.ok) { toast(res.error ?? t("ag_rail_couldntSave"), "error"); return; }
       router.refresh();
     });
@@ -484,14 +480,17 @@ export function PlaceRail({
                           <Badge tone={KIND_TONE[workKind(i)]}>
                             {i.kind === "appointment" && workKind(i) === "job" ? t("ag_rail_kindJobVisit") : kindLabel(workKind(i), lang, t)}
                           </Badge>
-                          <span
-                            className={`font-mono text-xs tabular-nums ${
-                              i.planned_minutes ? "text-slate-600" : "text-slate-300"
-                            }`}
-                            title={i.planned_minutes ? t("ag_rail_expectedTime") : t("ag_rail_nobodySized")}
-                          >
-                            {durationLabel(i.planned_minutes, lang, t)}
-                          </span>
+                          {/* A lead has no length (cn-v1170): its inspection takes the default. */}
+                          {i.kind !== "lead" && (
+                            <span
+                              className={`font-mono text-xs tabular-nums ${
+                                i.planned_minutes ? "text-slate-600" : "text-slate-300"
+                              }`}
+                              title={i.planned_minutes ? t("ag_rail_expectedTime") : t("ag_rail_nobodySized")}
+                            >
+                              {durationLabel(i.planned_minutes, lang, t)}
+                            </span>
+                          )}
                           {i.urgent && <Badge tone="amber">{t("ag_rail_overdue")}</Badge>}
                           {i.onHold && (
                             <Badge tone="slate">
@@ -580,18 +579,21 @@ export function PlaceRail({
                         the tap target now, not a descendant. */}
                     {(on || expandedId === i.id) && (
                       <div className="mt-1.5 space-y-1.5 pl-6">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {/* THE SAME control the lead row carries — see work-shape-controls. */}
-                          <WorkShapeControls
-                            workKind={i.workKind ?? null}
-                            plannedMinutes={i.planned_minutes ?? null}
-                            showKind={i.kind !== "job"}
-                            disabled={pending}
-                            onPatch={(patch) => size(i, patch)}
-                          />
-                          {/* The record is one tap away in the card's ⋯ (Open the Job, Open the Visit,
-                              Open the Lead), never a second link here. */}
-                        </div>
+                        {/* A job's or a visit's size, right here (see work-shape-controls). A lead has
+                            no Kind and no How Long since cn-v1170: Schedule always books an
+                            inspection. The record is one tap away in the card's ⋯, never a second
+                            link here. */}
+                        {i.kind !== "lead" && (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <WorkShapeControls
+                              workKind={i.workKind ?? null}
+                              plannedMinutes={i.planned_minutes ?? null}
+                              showKind={i.kind !== "job"}
+                              disabled={pending}
+                              onPatch={(patch) => size(i, patch)}
+                            />
+                          </div>
+                        )}
 
                         {/* Enter the phone/email ON THE SPOT — the driveway moment. Saves on Enter
                             or when the field loses focus; blank never erases. A JOB's entry rides

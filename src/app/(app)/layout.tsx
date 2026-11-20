@@ -19,6 +19,7 @@ import { readReconcileWork } from "@/app/(app)/reconcile/reconcile-read";
 import { reconcileBadge } from "@/lib/reconcile-kinds";
 import { reportError } from "@/lib/observe";
 import { todayStrInTz } from "@/lib/tz";
+import { countNewIntake } from "@/lib/leads/new-intake";
 import { GeofenceMonitor } from "@/components/geofence-monitor";
 import { FenceStandDown } from "@/components/fence-stand-down";
 import { OfflineDrain } from "@/components/offline-drain";
@@ -159,21 +160,14 @@ export default async function AppLayout({
   // already reads per-href counts (dock.tsx:75) — this was wired for exactly one href since the
   // day it shipped. A count is cosmetic, never a crash.
   //
-  // ONLY THE LEADS DUE NOW (NY-feeders): a lead snoozed from Needs You waits for its day, and so
-  // does its dot, so the badge and the row agree. "Now" is the company's today, so this starts the
-  // moment the org read gives the timezone; it never holds the shell up (the dock gets it with the
-  // other badges, unresolved), and it never rejects.
+  // ONE BADGE, ONE LIST (cn-v1170, Erik: "one badge one list simple"): the number of leads on the
+  // Leads list, by the one rule (lib/leads/new-intake countNewIntake), so the dot and the list
+  // cannot disagree. It never holds the shell up (the dock gets it with the other badges,
+  // unresolved), and it never rejects: a failed read is filed and shows no badge.
   const freshLeadsP: Promise<number> = (async () => {
     if (!isStaff) return 0;
     try {
-      const today = todayStrInTz(getOrgSettings((await orgP)?.settings).timezone || "America/Los_Angeles");
-      const { count } = await supabase
-        .from("inquiries")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "new")
-        .is("converted_at", null)
-        .or(`next_follow_up_at.is.null,next_follow_up_at.lte.${today}`);
-      return count ?? 0;
+      return await countNewIntake(supabase);
     } catch (e) {
       reportError("app-layout:lead-badge", e);
       return 0;

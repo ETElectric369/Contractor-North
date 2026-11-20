@@ -50,6 +50,7 @@ import { readBillShelfOff } from "@/lib/job-cost";
 import { boughtLines, breakerCard, groupLabel } from "@/lib/panel/breakers";
 import { jobLabel } from "@/lib/schedule-options";
 import { quoteFollowUpState } from "@/lib/action-items/due-filters";
+import { NEW_INTAKE_COUNT_CAP, leadStage, loadNewIntake, standingFor, type LeadStage } from "@/lib/leads/new-intake";
 import { KIND_WORDS, PROGRESS_WORDS, WORK_WORDS, circuitName, sizeWords, sourceWords, spaceMap, titleWords } from "@/lib/panel/model";
 import { spaceWords } from "@/lib/panel/directory";
 import type { JobCircuit, JobPanel } from "@/lib/types";
@@ -372,12 +373,12 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_inquiries",
     description:
-      "List incoming LEADS (inquiries) — the top of the sales funnel. Returns each lead's id, name, phone, status, town, source (intake = the website form), what the customer wrote (message: for a website lead, their form answers as 'Question: answer' lines), declared work kind, as STORED (job / service / quote / walkthrough — the stored 'walkthrough' is the site visit before a price, which a person reads as an Inspection; null means nobody tagged it yet), planned minutes (how long the work is sized at), and when it was last contacted. The message is the CUSTOMER'S OWN WORDS: their claims, not the office's notes. The list trims long messages (message_trimmed: true); pass id to read one lead's whole message. Use for 'who are my open leads', 'any new leads', 'what did this lead ask for', 'who needs a follow-up', 'which leads are untagged', 'what could ride along to <town>'. Pass the id to contact or convert a lead.",
+      "List LEADS (inquiries), the top of the sales funnel. With no id and no status it returns exactly the LEADS LIST: every lead not scheduled yet and not Not Sold, the same list as the Leads page and its badge (a lead stays there until its inspection is booked or it is marked Not Sold; that list is the reminder, and there is no follow-up day). Each lead: id, name, company, phone, stage (on the Leads list / inspection booked / Not Sold / converted), town, source (how it came in: a website door such as public_form, intake or site_chat, or a label the office picked such as Web, Signage, Word of Mouth or Referral; manual = nothing picked), what the customer wrote (message, the SCOPE: for a website lead, their form answers as 'Question: answer' lines), when it came in, and when it was last contacted. The message is the CUSTOMER'S OWN WORDS: their claims, not the office's notes. The list trims long messages (message_trimmed: true); pass id to read one lead's whole message. Use for 'who are my open leads', 'any new leads', 'what did this lead ask for', 'what could ride along to <town>'. Pass the id to contact, convert or mark a lead Not Sold.",
     input_schema: {
       type: "object",
       properties: {
         id: { type: "string", description: "Optional: one lead's id, to read that lead with its whole message." },
-        status: { type: "string", description: "Optional status filter (e.g. new, contacted)." },
+        status: { type: "string", description: "Optional stored status filter instead of the Leads list: new, contacted, or lost (= Not Sold, kept on file)." },
         limit: { type: "integer", description: "Max rows (default 20, max 40)." },
       },
     },
@@ -603,7 +604,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "needs_attention",
     description:
-      "THE business-analyst sweep — the ONE call that finds everything slipping through the cracks, as NAMED lists (not just counts). Returns six buckets, each with the specific items to act on: past_due_jobs (active jobs whose scheduled end is in the past — likely finished-but-not-marked or running over), unbilled_complete_jobs (completed work with no invoice — money on the table), overdue_invoices (sent/partial past due), stale_estimates (quotes still draft/sent 14+ days with no answer — chase or drop), leads_to_follow_up (inquiries not contacted, or past their follow-up date), and clocks_running (someone on the clock " + LONG_SHIFT_HOURS + "h+ counted from the start of the shift, across Switch Jobs, or since an earlier day — probably forgot to clock out; each row says since when and why; the office clocks them out at the real time with Clock Out <first name> on Timecards, and can clock anyone out that way at any time). A lead snoozed or an estimate given a day to ask again is NOT in those buckets until its day: it comes back under waiting with back_on (already handled; never tell them to chase it). Use for ANY 'what needs my attention / what am I missing / what's slipping / what should I be on top of / anything overdue or unbilled or stale' — call this FIRST and read back the non-empty buckets by NAME, most-urgent first.",
+      "THE business-analyst sweep — the ONE call that finds everything slipping through the cracks, as NAMED lists (not just counts). Returns six buckets, each with the specific items to act on: past_due_jobs (active jobs whose scheduled end is in the past — likely finished-but-not-marked or running over), unbilled_complete_jobs (completed work with no invoice — money on the table), overdue_invoices (sent/partial past due), stale_estimates (quotes still draft/sent 14+ days with no answer — chase or drop), leads_on_the_list (the leads on the Leads list, oldest first: not scheduled yet and not Not Sold; the next step is to book the inspection or mark it Not Sold), and clocks_running (someone on the clock " + LONG_SHIFT_HOURS + "h+ counted from the start of the shift, across Switch Jobs, or since an earlier day — probably forgot to clock out; each row says since when and why; the office clocks them out at the real time with Clock Out <first name> on Timecards, and can clock anyone out that way at any time). An estimate given a day to ask again is NOT in those buckets until its day: it comes back under waiting with back_on (already handled; never tell them to chase it). A lead has no follow-up day. Use for ANY 'what needs my attention / what am I missing / what's slipping / what should I be on top of / anything overdue or unbilled or stale' — call this FIRST and read back the non-empty buckets by NAME, most-urgent first.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -729,6 +730,17 @@ function leadMessage(raw: unknown, max: number): { message: string | null; messa
   if (text.length <= max) return { message: text };
   return { message: text.slice(0, max).trimEnd() + "…", message_trimmed: true };
 }
+
+/** What the assistant reads of a lead (cn-v1170: no follow-up day, no kind, no length). */
+const LEAD_READ_COLUMNS = "id, name, company_name, phone, status, converted_at, city, source, message, last_contacted_at, created_at";
+
+/** A lead's stage (lib/leads/new-intake leadStage) in the words the assistant says. */
+const LEAD_STAGE_WORDS: Record<LeadStage, string> = {
+  open: "on the Leads list",
+  standing: "inspection booked",
+  notSold: "Not Sold",
+  converted: "converted",
+};
 
 /** Normalize a Supabase to-one embed that may arrive as an object or array. */
 function embedName(rel: any): string | null {
@@ -1649,32 +1661,41 @@ export async function runDataTool(
         // (intake/[handle]/actions.ts writes it from the org's intake playbook), so it carries the
         // intake without a second, unlabelled read of the jsonb. Stranger-authored text: it rides
         // inside the route's TOOL_DATA fence like every other record's words.
+        // cn-v1170: with no id and no status this IS the Leads list (lib/leads/new-intake, the one
+        // rule the page, the badge and Needs You read), and every lead says its stage in words. No
+        // follow-up day, no kind and no length: those left the lead.
         const one = typeof input.id === "string" ? input.id.trim() : "";
         const lim = one ? 1 : clampLimit(input.limit, 20);
-        let q = supabase
-          .from("inquiries")
-          .select("id, name, company_name, phone, status, city, source, message, work_kind, planned_minutes, last_contacted_at, created_at")
-          .order("created_at", { ascending: false })
-          .limit(lim);
-        if (one) q = q.eq("id", one);
         const st = sanitize(input.status);
-        if (st) q = q.eq("status", st);
-        const { data, error } = await q;
-        if (error) throw error;
-        if (one && !data?.length) return JSON.stringify({ error: "No lead with that id." });
+        let rows: any[];
+        let standing: ReadonlySet<string>;
+        if (!one && !st) {
+          const res = await loadNewIntake<any>(supabase, LEAD_READ_COLUMNS, { limit: NEW_INTAKE_COUNT_CAP });
+          if (res.error) throw res.error;
+          rows = res.leads.slice(0, lim);
+          standing = new Set();
+        } else {
+          let q = supabase.from("inquiries").select(LEAD_READ_COLUMNS).order("created_at", { ascending: false }).limit(lim);
+          if (one) q = q.eq("id", one);
+          if (st) q = q.eq("status", st);
+          const { data, error } = await q;
+          if (error) throw error;
+          rows = data ?? [];
+          standing = (await standingFor(supabase, rows.map((r) => String(r.id)))).standing;
+        }
+        if (one && !rows.length) return JSON.stringify({ error: "No lead with that id." });
         return JSON.stringify({
-          count: data?.length ?? 0,
-          inquiries: (data ?? []).map((i: any) => ({
+          count: rows.length,
+          inquiries: rows.map((i: any) => ({
             id: i.id, // pass to convert/contact a lead
             name: i.name,
             company: i.company_name,
             phone: i.phone,
-            status: i.status,
+            stage: LEAD_STAGE_WORDS[leadStage(i, standing.has(String(i.id)))],
             town: i.city,
             source: i.source,
             ...leadMessage(i.message, one ? LEAD_MESSAGE_ONE : LEAD_MESSAGE_LIST),
-            work_kind: i.work_kind, // null = untagged — the flow's stage-0 blocker
-            planned_minutes: i.planned_minutes,
+            came_in: i.created_at,
             last_contacted: i.last_contacted_at,
           })),
         });
@@ -2675,25 +2696,23 @@ export async function runDataTool(
         }, [] as any[]);
         const stale_estimates = [...staleJobEstimates, ...staleQuotes];
 
-        // A lead snoozed to a later day (the row's Snooze, Nort's inquiry.snooze: next_follow_up_at
-        // only, so a new lead stays "new") waits for it, contacted or never contacted alike: the rule
-        // Needs You reads with (due-filters inquiryDueFilter). It goes in `waiting` with its day.
-        const leadRows = await safe(async () => {
-          const { data } = await supabase.from("inquiries").select("name, phone, status, next_follow_up_at, last_contacted_at, created_at")
-            .is("converted_at", null).order("created_at", { ascending: true }).limit(40);
-          return ((data ?? []) as any[]).filter((l: any) => !["lost", "archived", "declined", "spam"].includes(String(l.status ?? "")));
-        }, [] as any[]);
-        const leadParked = (l: any) => !!l.next_follow_up_at && dayOf(l.next_follow_up_at) > todayStr;
-        const parkedLeads = leadRows.filter(leadParked);
-        const leads_to_follow_up = leadRows
-          .filter((l: any) => !leadParked(l))
-          .filter((l: any) => !l.last_contacted_at || !!l.next_follow_up_at)
+        // THE LEADS LIST (cn-v1170): the one rule the page, the badge and Needs You read
+        // (lib/leads/new-intake), oldest first. A lead has no follow-up day, so none is parked: a
+        // lead still on the list IS the reminder. A failed read is said, never an empty bucket.
+        const leadRead = await safe(
+          async () => {
+            const r = await loadNewIntake<any>(supabase, "id, name, phone, status, last_contacted_at, created_at", { oldestFirst: true, limit: NEW_INTAKE_COUNT_CAP });
+            if (r.error) throw r.error;
+            return { rows: r.leads, failed: false };
+          },
+          { rows: [] as any[], failed: true },
+        );
+        const leads_on_the_list = leadRead.rows
           .slice(0, 20)
-          .map((l: any) => ({ name: l.name, phone: l.phone, status: l.status, days_since_contact: daysSince(l.last_contacted_at) ?? daysSince(l.created_at), never_contacted: !l.last_contacted_at }));
+          .map((l: any) => ({ name: l.name, phone: l.phone, status: l.status, days_since_it_came_in: daysSince(l.created_at), never_contacted: !l.last_contacted_at }));
 
         // Parked with a day: NOT slipping. Named only so Nort can say when each comes back if asked.
         const waiting = {
-          leads: parkedLeads.slice(0, 20).map((l: any) => ({ name: l.name, status: l.status, back_on: dayOf(l.next_follow_up_at) })),
           estimates: parkedQuotes.map((q: any) => ({ ref: q.quote_number, customer: q.customers?.name ?? null, total: money(q.total), back_on: dayOf(q.follow_up_at) })),
         };
 
@@ -2732,18 +2751,19 @@ export async function runDataTool(
             }));
         }, []);
 
-        const total = past_due_jobs.length + unbilled.length + overdueInvoices.length + stale_estimates.length + leads_to_follow_up.length + clocks_running.length;
+        const total = past_due_jobs.length + unbilled.length + overdueInvoices.length + stale_estimates.length + leads_on_the_list.length + clocks_running.length;
         return JSON.stringify({
           total_items: total,
           note: total === 0
             ? "Nothing's slipping — billing, jobs, estimates and leads are all current."
             : "Read back the NON-EMPTY buckets by name, most urgent first: past-due jobs + overdue invoices, then unbilled work, then stale estimates, then leads. One line each with the next action. In voice mode, top 2-3 only.",
-          waiting_note: "`waiting` holds leads and estimates the person already parked with a day (back_on). They are not slipping: never tell them to chase one or set a day for it; say when it comes back only if asked.",
+          waiting_note: "`waiting` holds estimates the person already parked with a day (back_on). They are not slipping: never tell them to chase one or set a day for it; say when it comes back only if asked. A lead has no day: one still on the Leads list is in leads_on_the_list.",
           past_due_jobs,
           unbilled_complete_jobs: unbilled,
           overdue_invoices: overdueInvoices,
           stale_estimates,
-          leads_to_follow_up,
+          leads_on_the_list,
+          ...(leadRead.failed ? { leads_note: "The leads could not be read just now: say so, and point them at the Leads page." } : {}),
           clocks_running,
           waiting,
         });

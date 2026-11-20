@@ -41,6 +41,7 @@ export const words: WordCatalog = {
     "src/app/(app)/settings/nort-greeting.tsx",
     "src/app/(app)/settings/passkey-manager.tsx",
     "src/app/(app)/settings/avatar-upload.tsx",
+    "src/app/(app)/settings/lead-sources.tsx",
     "src/components/feature-off-line.tsx",
     "src/components/nav-link.tsx",
     "src/components/weather-widget.tsx",
@@ -406,6 +407,17 @@ export const words: WordCatalog = {
     // The measure sheet, when POST /api/measure/context answers punchUnread: the punch or its job could not be read. Never shown as "not on the clock".
     sh_measure_clockUnread: "Couldn't read your time clock just now. Tap Try Again.",
     sh_measure_holdingModel: "+ is holding a 3D model you haven't saved, and reloading now would lose it. Save it or discard it, then tap {label} again.",
+
+    // ── FORM (cn-v1170): Settings › Customers › Lead sources (settings/lead-sources.tsx) ──
+    sh_leadSourcesTitle: "Lead sources",
+    sh_leadSourcesDesc: "Where your leads come from. The lead form offers these in its Lead Source box.",
+    sh_leadSourcesEmptyDefault: "With none on the list, the form offers Web, Signage, Word of Mouth and Referral.",
+    sh_leadSourceAddPlaceholder: "Add a source…",
+    sh_btn_addLeadSource: "Add",
+    sh_btn_removeLeadSource: "Remove {name}",
+    sh_leadSourceAlready: "That one is already on the list.",
+    sh_leadSourceListFull: "The list holds {n}. Take one off to add another.",
+    sh_leadSourcesNotSaved: "That didn't save: {error}",
   },
   es: {
     sh_language: "Idioma",
@@ -730,5 +742,16 @@ export const words: WordCatalog = {
     sh_measure_visitBusy: "Esta visita está ocupada con un modelo 3D propio. Termina ese en la visita y toca Guardar en Esta Visita de nuevo.",
     sh_measure_clockUnread: "No se pudo leer tu reloj en este momento. Toca Intentar de Nuevo.",
     sh_measure_holdingModel: "El + tiene un modelo 3D sin guardar, y recargar ahora lo perdería. Guárdalo o descártalo, y toca {label} de nuevo.",
+
+    // ── FORM (cn-v1170): Ajustes › Clientes › Orígenes de prospectos ──
+    sh_leadSourcesTitle: "Orígenes de prospectos",
+    sh_leadSourcesDesc: "De dónde vienen tus prospectos. El formulario del prospecto los ofrece en su casilla Origen del Prospecto.",
+    sh_leadSourcesEmptyDefault: "Sin ninguno en la lista, el formulario ofrece Web, Signage, Word of Mouth y Referral.",
+    sh_leadSourceAddPlaceholder: "Agrega un origen…",
+    sh_btn_addLeadSource: "Agregar",
+    sh_btn_removeLeadSource: "Quitar {name}",
+    sh_leadSourceAlready: "Ese ya está en la lista.",
+    sh_leadSourceListFull: "La lista tiene {n} como máximo. Quita uno para agregar otro.",
+    sh_leadSourcesNotSaved: "No se guardó: {error}",
   },
 };

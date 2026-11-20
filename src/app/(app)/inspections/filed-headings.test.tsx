@@ -173,26 +173,26 @@ describe("the filed tiles: Completed, Lost, Cancelled", () => {
     const html = await render("completed");
     expect(tilesOf(html).map((x) => [x.id, x.name, x.count])).toEqual([
       ["completed", "Completed", "2"],
-      ["lost", "Lost", "4"],
+      ["lost", "Not Sold", "4"],
       ["cancelled", "Cancelled", "1"],
     ]);
     expect(await filedRows()).toEqual([
       ["Completed", ["Sam Tillery", "Hot tub circuit"]],
       // Whatever the status: still scheduled, completed, cancelled; lost and the old no_bid alike.
-      ["Lost", ["Dana Rook", "Theo Vance", "Casey Loam", "Deck lighting"]],
+      ["Not Sold", ["Dana Rook", "Theo Vance", "Casey Loam", "Deck lighting"]],
       ["Cancelled", ["Service change"]],
     ]);
   });
 
-  it("Spanish: Terminadas, Perdidas, Canceladas, over the same rows, with no English tile name left", async () => {
+  it("Spanish: Terminadas, No Vendidas, Canceladas, over the same rows, with no English tile name left", async () => {
     state.language = "es";
     const rows = await filedRows();
     expect(rows).toEqual([
       ["Terminadas", ["Sam Tillery", "Hot tub circuit"]],
-      ["Perdidas", ["Dana Rook", "Theo Vance", "Casey Loam", "Deck lighting"]],
+      ["No Vendidas", ["Dana Rook", "Theo Vance", "Casey Loam", "Deck lighting"]],
       ["Canceladas", ["Service change"]],
     ]);
-    for (const [name] of rows) expect(name).not.toMatch(/Lost|Cancelled|Completed|written/);
+    for (const [name] of rows) expect(name).not.toMatch(/Lost|Not Sold|Perdid|Cancelled|Completed|written/);
   });
 
   it("the visit that never happened is not filed as completed and written up, in either language", async () => {
@@ -220,9 +220,9 @@ describe("a tile with no rows is drawn dimmed, with no number", () => {
 
   it("only lost rows: Lost alone", async () => {
     state.visits = structuredClone([NEVER_HAPPENED, NO_BID]);
-    expect(await counted()).toEqual(["Lost"]);
+    expect(await counted()).toEqual(["Not Sold"]);
     state.language = "es";
-    expect(await counted()).toEqual(["Perdidas"]);
+    expect(await counted()).toEqual(["No Vendidas"]);
   });
 
   it("nothing lost: Completed and Cancelled, and no number on Lost between them", async () => {
@@ -241,7 +241,7 @@ describe("a tile with no rows is drawn dimmed, with no number", () => {
 
   it("a cancelled visit marked Lost empties Cancelled, not Lost", async () => {
     state.visits = structuredClone([LOST_AND_CANCELLED]);
-    expect(await counted()).toEqual(["Lost"]);
+    expect(await counted()).toEqual(["Not Sold"]);
   });
 
   it("nothing filed at all: the empty state, and no tile", async () => {
@@ -312,11 +312,11 @@ describe("in the source: ONE rule decides the tile", () => {
     expect(cols).toContain("status");
   });
 
-  it("the tile's words: Lost and Perdidas, a pile's name beside Terminadas and Canceladas; the row's answer stays Perdida", async () => {
+  it("the tile's words (cn-v1170): Not Sold and No Vendidas, a pile's name beside Terminadas and Canceladas; the row's answer is No Vendida", async () => {
     const { translator } = await import("@/lib/i18n");
-    expect(translator("en")("ip_btn_tileLost")).toBe("Lost");
-    expect(translator("es")("ip_btn_tileLost")).toBe("Perdidas");
-    expect(translator("es")("ip_btn_lost")).toBe("Perdida");
+    expect(translator("en")("ip_btn_tileLost")).toBe("Not Sold");
+    expect(translator("es")("ip_btn_tileLost")).toBe("No Vendidas");
+    expect(translator("es")("ip_btn_lost")).toBe("No Vendida");
     expect(translator("es")("ip_btn_tileCancelled")).toBe("Canceladas");
     expect(translator("es")("ip_btn_tileCompleted")).toBe("Terminadas");
   });

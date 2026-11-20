@@ -211,10 +211,9 @@ describe("the open Inspections pile wears no Done pill", () => {
 });
 
 describe("the chrome's other numbers", () => {
-  it("the dock badges Needs You (/planner), new unanswered leads (/leads) and Reconcile — and nothing else", () => {
+  it("the dock badges Needs You (/planner), the leads on the Leads list (/leads) and Reconcile — and nothing else", () => {
     const layout = read("app/(app)/layout.tsx");
     expect(layout).toContain('return { "/planner": needsAction, "/leads": freshLeads, "/reconcile": await reconcileP };');
-    expect(layout).toMatch(/\.eq\("status", "new"\)\s*\.is\("converted_at", null\)/);
     // Three keys in the whole map, and the amber dot on a tile is their sum over the rows it draws.
     expect([...layout.matchAll(/"\/(planner|leads|reconcile)":/g)].length).toBe(6);
   });
@@ -238,12 +237,14 @@ describe("the chrome's other numbers", () => {
     expect(layout).toContain("if (!isStaff || !profile.org_id) return 0;");
   });
 
-  it("the Sales dot counts only the leads due now: a lead snoozed from Needs You waits for its day, like its row", () => {
+  // ONE BADGE, ONE LIST (cn-v1170): the Sales dot is the Leads list's length by the one rule
+  // (lib/leads/new-intake countNewIntake), never a filter of the layout's own; it never throws.
+  it("the Sales dot counts the leads on the Leads list, through the one rule", () => {
     const layout = read("app/(app)/layout.tsx");
-    // Right after the two pinned calls, the same rule as Needs You's lead read: no day, or a day that
-    // has come, by the company's today.
-    expect(layout).toMatch(/\.eq\("status", "new"\)\s*\.is\("converted_at", null\)\s*\.or\(`next_follow_up_at\.is\.null,next_follow_up_at\.lte\.\$\{today\}`\)/);
-    expect(layout).toMatch(/const today = todayStrInTz\(getOrgSettings\(\(await orgP\)\?\.settings\)\.timezone/);
+    expect(layout).toContain('import { countNewIntake } from "@/lib/leads/new-intake";');
+    expect(layout).toMatch(/if \(!isStaff\) return 0;\s*try \{\s*return await countNewIntake\(supabase\);\s*\} catch \(e\) \{\s*reportError\("app-layout:lead-badge", e\);\s*return 0;/);
+    expect(layout).not.toContain("next_follow_up_at");
+    expect(layout).not.toMatch(/from\("inquiries"\)/);
   });
 
   it("the bell counts unread notifications only, as the database counts them (never the 20 lines it shows)", () => {

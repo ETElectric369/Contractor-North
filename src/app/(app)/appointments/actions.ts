@@ -37,6 +37,7 @@ import { customerForInquiry } from "@/lib/actions/win-customer";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_JOB_MINUTES } from "@/lib/schedule/job-block";
 import { putBackPlan, wontHappenVerdict } from "@/lib/appointments/wont-happen";
+import { markLeadNotSoldFromVisit, reopenNotSold } from "@/lib/leads/not-sold";
 import { addCaptureItemsToJobList, canonicalMaterialListId } from "../materials/actions";
 import { reportError } from "@/lib/observe";
 import { visitWork } from "@/lib/appointments/visit-work";
@@ -324,9 +325,8 @@ export async function createInspectionNow(
   if (opts.inquiryId) {
     const { data } = await supabase
       .from("inquiries")
-      // work_kind rides along (PROJECTION LAW): the tag the office picked on the lead must reach
-      // the insert below, or this door quietly refiles a service call as an inspection.
-      .select("id, name, address, city, state, zip, message, notes, customer_id, intake, work_kind")
+      // No work_kind (cn-v1170): a lead's visit is always an inspection, so its kind is not read.
+      .select("id, name, address, city, state, zip, message, notes, customer_id, intake")
       .eq("id", opts.inquiryId)
       .maybeSingle();
     if (!data) return { ok: false, error: await ws.say("ag_srv_leadNotFound") };
@@ -344,15 +344,13 @@ export async function createInspectionNow(
   const { data: appt, error } = await supabase
     .from("appointments")
     .insert({
-      /* WHAT HE TOLD THE APP BEATS THE BUTTON'S NAME. Erik tagged Nora 'service' on the lead,
-         tapped the row's one-tap door, and got "Site inspection" — the third booking door off one
-         lead, and the only one still discarding the declared kind. All three obey it now. */
-      type: appointmentTypeFor((inq as { work_kind?: string | null } | null)?.work_kind),
+      /* ALWAYS AN INSPECTION (cn-v1170, Erik's yes: a lead's visit always is one). The type and
+         title come from the helpers a lead with no kind always took, the same as the lead's Book It
+         and Let Them Pick, so all three booking doors still agree. */
+      type: appointmentTypeFor(null),
       // The stock title of an inspection with no lead is the site visit's one word (lib/statuses); the
       // STOCK lists below rename it once an address or a customer arrives.
-      title: inq
-        ? bookingTitle(workKind({ kind: "lead", workKind: (inq as { work_kind?: string | null }).work_kind }), inq.name)
-        : "Inspection",
+      title: inq ? bookingTitle(workKind({ kind: "lead", workKind: null }), inq.name) : "Inspection",
       starts_at: new Date().toISOString(), // now — an instant is an instant in any tz
       status: "scheduled", // NOT completed: the capture (or "Mark Inspection Done") finishes it
       // The WHOLE address, not just the street line — and the parts alongside it, so nothing
@@ -378,19 +376,15 @@ export async function createInspectionNow(
 
   await pushCalendarItem("appointment", appt.id); // live Google push (fire-safe)
 
-  // Same engaged-not-closed stamp as the booked-inspection path: the lead stays OPEN
-  // (converted_at untouched) and resurfaces today for the write-up.
+  // Same engaged-not-closed stamp as the booked-inspection path: the lead stays OPEN (converted_at
+  // untouched), Contacted, and no follow-up day (gone everywhere, cn-v1170): its standing visit
+  // takes it off the Leads list until the visit ends.
   if (inq) {
-    const tz = await (async () => {
-      const { data } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-      return getOrgSettings((data as { settings?: unknown } | null)?.settings).timezone;
-    })();
     await supabase
       .from("inquiries")
       .update({
         status: "contacted",
         last_contacted_at: new Date().toISOString(),
-        next_follow_up_at: todayStrInTz(tz),
         updated_at: new Date().toISOString(),
       })
       .eq("id", inq.id);
@@ -1475,7 +1469,7 @@ export async function setAppointmentTitle(id: string, title: string): Promise<Re
 export async function setAppointmentOutcome(
   id: string,
   outcome: "won" | "lost" | "no_bid" | null,
-): Promise<Result> {
+): Promise<Result & { leadMarked?: boolean; leadReopened?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const ws = wordsOf(ctx.supabase, ctx.userId);
@@ -1485,14 +1479,45 @@ export async function setAppointmentOutcome(
     // as last touched months before the day its answer was given.
     .update({ outcome, outcome_at: outcome ? new Date().toISOString() : null, updated_at: new Date().toISOString() })
     .eq("id", id)
-    .select("id");
+    .select("id, inquiry_id");
   if (error) return { ok: false, error: dbError(error) };
   // Silent-write law: a zero-row update is a 204, and "saved" without a row is the failure
   // this whole fix exists to end.
   if (!data?.length) return { ok: false, error: await ws.say("ag_srv_didntSaveAccess") };
+
+  /* ITS LEAD FOLLOWS ITS ENDING, BOTH WAYS (cn-v1170). A visit that ended Not Sold takes its lead with
+     it in the same deed, but only an open lead with no OTHER visit still standing (lib/leads/not-sold).
+     An ending taken back (cleared) or turned to Won puts a Not Sold, unconverted lead back the way
+     Reopen does, whoever asks: the visit's answer is the lead's answer. A lead that could not be
+     moved is said in `warning`. */
+  const inquiryId = (data[0] as { inquiry_id?: string | null }).inquiry_id ?? null;
+  let leadMarked = false;
+  let leadReopened = false;
+  let warning: string | undefined;
+  if (inquiryId && (outcome === "lost" || outcome === "no_bid")) {
+    const m = await markLeadNotSoldFromVisit(ctx.supabase, inquiryId);
+    leadMarked = m.marked;
+    if (m.error) {
+      reportError("appointments:outcome:leadNotSold", m.error, { appointmentId: id, leadId: inquiryId });
+      warning = await ws.say("ag_srv_leadNotMarked");
+    }
+  } else if (inquiryId && (outcome === null || outcome === "won")) {
+    const r = await reopenNotSold(ctx.supabase, inquiryId);
+    leadReopened = r.ok;
+    if (!r.ok && r.reason === "error") {
+      reportError("appointments:outcome:leadReopen", r.error, { appointmentId: id, leadId: inquiryId });
+      warning = await ws.say("ag_srv_leadNotReopened");
+    }
+  }
+  if (inquiryId) revalidatePath("/leads");
   revalidatePath("/planner");
   revalidatePath("/inspections");
-  return { ok: true };
+  return {
+    ok: true,
+    ...(leadMarked ? { leadMarked: true } : {}),
+    ...(leadReopened ? { leadReopened: true } : {}),
+    ...(warning ? { warning } : {}),
+  };
 }
 
 /**

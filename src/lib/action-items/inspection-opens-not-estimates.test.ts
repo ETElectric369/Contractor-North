@@ -125,10 +125,10 @@ describe("the write-up stamp is not silent (saveQuote)", () => {
     const en = translator("en")("qs_stampNotLinked");
     const es = translator("es")("qs_stampNotLinked");
     expect(en).toBe(
-      "The estimate is saved, but it could not be tied to its inspection, so the inspection can still show as waiting to be written up. Do not start another estimate from that inspection. When this estimate is settled, mark the inspection Won or Lost on its own page.",
+      "The estimate is saved, but it could not be tied to its inspection, so the inspection can still show as waiting to be written up. Do not start another estimate from that inspection. When this estimate is settled, mark the inspection Won or Not Sold on its own page.",
     );
     expect(es).toBe(
-      "El presupuesto se guardó, pero no se pudo enlazar con su inspección, así que la inspección puede seguir apareciendo como pendiente de redactar. No empieces otro presupuesto desde esa inspección. Cuando este presupuesto se resuelva, marca la inspección como Ganada o Perdida en su propia página.",
+      "El presupuesto se guardó, pero no se pudo enlazar con su inspección, así que la inspección puede seguir apareciendo como pendiente de redactar. No empieces otro presupuesto desde esa inspección. Cuando este presupuesto se resuelva, marca la inspección como Ganada o No Vendida en su propia página.",
     );
     // The door it must never name, by the visit page's own words for it in each language.
     expect(en).not.toContain(translator("en")("vi_btn_startTheEstimate"));

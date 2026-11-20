@@ -260,7 +260,7 @@ export const appointmentActions: Record<string, ActionDef> = {
     group: "appointment",
     label: "Record how it ended",
     description:
-      "Record how an inspection ended: 'lost' (didn't win the bid), 'no_bid' (decided not to quote it), or 'won'. Use it when the user says they lost a bid, aren't pursuing it, or already handled the work — it clears the visit from Needs You without inventing an estimate.",
+      "Record how an inspection ended: 'lost' (Not Sold: didn't win the bid), 'no_bid' (decided not to quote it; also reads Not Sold), or 'won'. Use it when the user says it was not sold, they lost a bid, aren't pursuing it, or already handled the work — it clears the visit from Needs You without inventing an estimate. Not Sold also marks the visit's lead Not Sold when that lead is open and no other visit from it still stands (the answer says leadMarked); 'won' on a visit whose lead is Not Sold puts the lead back on the Leads list (the answer says leadReopened). Read back what the answer says, and any warning in it.",
     input: z.object({ id: z.string(), outcome: z.enum(["won", "lost", "no_bid"]) }),
     auth: "staff",
     effect: "write",
@@ -274,7 +274,7 @@ export const appointmentActions: Record<string, ActionDef> = {
     group: "appointment",
     label: "Dismiss a visit",
     description:
-      "Dismiss a visit (the app's Dismiss door): deleted when nothing is on it, otherwise cancelled and kept on file. Not Lost: Lost records that the visit happened and the work was not won.",
+      "Dismiss a visit (the app's Dismiss door): deleted when nothing is on it, otherwise cancelled and kept on file. Different from Not Sold, which records that the visit happened and the work was not won.",
     input: z.object({ id: z.string() }),
     auth: "staff",
     effect: "write",

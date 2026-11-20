@@ -3,24 +3,12 @@ import { jobWords } from "./words";
 /**
  * THE DAY A PERSON PICKED IS THE DAY IT COMES BACK (Wave 1 seam fixes on release/w1a).
  *
- * Order 1 gives three waits a day: a lead's Snooze (inquiry.snooze → next_follow_up_at), an
- * estimate's follow-up (quote.followUp → quotes.follow_up_at, 0366) and a job's hold
- * (setJobHold → jobs.hold_until, 0366). Nort and the pickers say "comes back Monday", so Needs You
- * has to agree: a wait whose day is after today is off Now (it waits in the Waiting fold with that
- * day), and on its day it is back.
- *
- * The lead filter is a PostgREST `.or()` string so the rule runs in the database read, not after a
- * `.limit()`; due-filters.test.ts evaluates it over rows. The estimate and hold rules run per row.
+ * Two waits have a day: an estimate's follow-up (quote.followUp → quotes.follow_up_at, 0366) and a
+ * job's hold (setJobHold → jobs.hold_until, 0366). Nort and the pickers say "comes back Monday", so
+ * Needs You has to agree: a wait whose day is after today is off Now (it waits in the Waiting fold
+ * with that day), and on its day it is back. A lead has no day since cn-v1170 (lib/leads/new-intake:
+ * a lead still on the Leads list IS the reminder).
  */
-
-/**
- * A lead (new or contacted) is on Needs You when it has no follow-up day, or the day is today or
- * earlier. A NEW lead snoozed to Monday is off the list until Monday, exactly like a contacted one:
- * the Snooze on its row and Nort's inquiry.snooze are the same deed.
- */
-export function inquiryDueFilter(todayStr: string): string {
-  return `next_follow_up_at.is.null,next_follow_up_at.lte.${todayStr}`;
-}
 
 /**
  * WHERE A JOB ON HOLD SITS (Wave 1, lane 5; 0366's hold_until), decided on each held row:

@@ -1027,7 +1027,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
             )}
             {/* Provenance backlinks — the lead, the visit. */}
             {savedPage?.lead && (
-              <Link href={`/leads?focus=${savedPage.lead.id}`} className="mt-1 inline-block text-sm text-brand hover:underline">
+              <Link href={`/leads/${savedPage.lead.id}`} className="mt-1 inline-block text-sm text-brand hover:underline">
                 {fillText(t("qe_fromLead"), { name: savedPage.lead.name ?? "" })}
               </Link>
             )}

@@ -20,6 +20,20 @@ import { isMissingColumn } from "@/lib/job-tasks";
 import { listActiveTechs } from "@/lib/schedule-options";
 import { crewChips } from "@/lib/schedule/block-info";
 import { visitTitle, PICKABLE_APPOINTMENT_TYPES } from "@/lib/statuses";
+import { loadNewIntake } from "@/lib/leads/new-intake";
+import { reportError } from "@/lib/observe";
+
+/** What the rail reads of a lead (cn-v1170: no follow-up day, no kind, no length). */
+type RailLeadRow = {
+  id: string;
+  name: string | null;
+  address: string | null;
+  city: string | null;
+  phone: string | null;
+  email: string | null;
+  message: string | null;
+  notes: string | null;
+};
 
 export const dynamic = "force-dynamic";
 
@@ -162,14 +176,13 @@ export default async function SchedulePage({
     return withDay.error && isMissingColumn(withDay.error) ? railJobs(RAIL_JOB_COLS) : withDay;
   };
 
-  const [{ data: leadRows }, { data: dateless }, { data: undated }, { data: orgRow }, { data: staffRows }] = await Promise.all([
-    supabase
-      .from("inquiries")
-      .select("id, name, address, city, phone, email, message, notes, next_follow_up_at, work_kind, planned_minutes")
-      .is("converted_at", null)
-      .neq("status", "lost")
-      .order("created_at", { ascending: false })
-      .limit(RAIL_LIMITS.leads),
+  const [leadRead, { data: dateless }, { data: undated }, { data: orgRow }, { data: staffRows }] = await Promise.all([
+    // THE LEADS LIST'S OWN LEADS (cn-v1170): the one rule (lib/leads/new-intake), so a lead with a
+    // visit still standing is off the rail as it is off the list. One whose visit was dismissed or
+    // cancelled is back by itself, and so is one whose pick-a-time request went unanswered past the
+    // first time offered; a visit that ends Not Sold marks its lead Not Sold, which stays off until
+    // Reopen (or a changed answer on the visit) puts it back. No follow-up day, no kind, no length.
+    loadNewIntake<RailLeadRow>(supabase, "id, name, address, city, phone, email, message, notes", { limit: RAIL_LIMITS.leads }),
     railJobsWithDay(),
     // A booking with no time on it yet — proposed, or created without a date.
     supabase
@@ -190,38 +203,12 @@ export default async function SchedulePage({
   ]);
   const team = ((staffRows ?? []) as { id: string; full_name: string | null }[]).map((s) => ({ id: s.id, full_name: s.full_name }));
 
-  /* ── A LEAD WITH A DAY ON IT IS NOT WAITING FOR A DAY ─────────────────────────────────────
-     The comment above claims this list is leads with "no inspection booked yet". The query said
-     no such thing — only converted_at IS NULL and status <> 'lost' — and booking from this very
-     rail leaves converted_at NULL BY DESIGN (an inspected lead can still go on to be an estimate,
-     leads/actions.ts). So a lead he had just placed reappeared here looking untouched.
-
-     That is worse than cosmetic now that the tick IS the booking. He taps Thursday, the lead comes
-     straight back on the board, and the natural read is either "it didn't take" or "I'll move it to
-     Friday" — either way he ticks it again, and convertInquiry's inspection branch has no existence
-     check, so that is a SECOND inspection inserted, a second Google push, and two calendar chips
-     with nobody able to say which one the customer was told about.
-
-     /leads already carries exactly this cross-check — added when Erik reported the same thing
-     ("the sarah dale lead was already converted to an inspection but still shows up as a new
-     lead"). THE PROJECTION LAW: the bug was never a missing column, it was a select list. The
-     booked ones are on the calendar four inches to the right, so this is a move, not a dead end. */
-  const leadIds = ((leadRows ?? []) as { id: string }[]).map((r) => String(r.id));
-  const { data: bookedRows } = leadIds.length
-    ? await supabase
-        .from("appointments")
-        .select("inquiry_id")
-        .in("inquiry_id", leadIds)
-        // ANY booking, not just an inspection-typed one. 0231 lets a lead book as a JOB or a
-        // service call, and a type filter would have left exactly those still sitting on the board
-        // looking unscheduled — the same duplicate-visit hole, reopened by widening the vocabulary.
-        // What matters is whether a day was chosen, never which word was chosen with it.
-        .neq("status", "cancelled")
-        .limit(500)
-    : { data: [] as { inquiry_id: string | null }[] };
-  const alreadyBooked = new Set(
-    ((bookedRows ?? []) as { inquiry_id: string | null }[]).map((r) => String(r.inquiry_id)),
-  );
+  /* A LEAD WITH A DAY ON IT IS NOT WAITING FOR A DAY: a lead he had just placed used to come back
+     here looking untouched, and a second tick booked a second inspection. The one rule reads the
+     visits (a booked one stands), so the cross-check this page once wrote by hand is the rule's. A
+     failed read is filed; the rail then shows no leads, and the Leads page says it could not load. */
+  if (leadRead.error) reportError("schedule.rail.leads", leadRead.error);
+  const leadRows = leadRead.leads;
 
   // HIS WORKING DAY, not a literal. Settings → Crew & time is the answer; the rail was carrying
   // 08:00/13:00 in code and quietly overruling it.
@@ -229,9 +216,7 @@ export default async function SchedulePage({
 
   const today = todayStrInTz(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone);
   const waiting: Placeable[] = [
-    ...((leadRows ?? []) as Record<string, string | null>[])
-      .filter((r) => !alreadyBooked.has(String(r.id)))
-      .map((r) => ({
+    ...leadRows.map((r) => ({
       id: String(r.id),
       kind: "lead" as const,
       name: String(r.name ?? "Lead"),
@@ -240,12 +225,7 @@ export default async function SchedulePage({
       phone: r.phone ?? null,
       email: r.email ?? null,
       note: r.message ?? r.notes ?? null,
-      urgent: !!r.next_follow_up_at && String(r.next_follow_up_at) < today,
-      // The kind and the size the office chose ON THE LEAD (0230) — the rail shows what they
-      // said rather than deciding again.
-      workKind: r.work_kind ?? null,
-      planned_minutes: r.planned_minutes == null ? null : Number(r.planned_minutes),
-      })),
+    })),
     ...((dateless ?? []) as unknown as Record<string, string | null>[]).map((r) => ({
       id: String(r.id),
       kind: "job" as const,
@@ -312,7 +292,9 @@ export default async function SchedulePage({
 
   // Any rail read that hit its cap: the list may be missing some (the heading says "n+").
   const railCapped =
-    (leadRows ?? []).length >= RAIL_LIMITS.leads ||
+    // The leads read says itself whether it came back at its limit (loadNewIntake `capped`): the
+    // rule then drops booked leads, so the count drawn is never the read's.
+    leadRead.capped ||
     ((dateless ?? []) as unknown[]).length >= RAIL_LIMITS.jobs ||
     ((undated ?? []) as unknown[]).length >= RAIL_LIMITS.visits;
 

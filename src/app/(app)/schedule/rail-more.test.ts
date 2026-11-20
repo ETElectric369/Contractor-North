@@ -179,7 +179,8 @@ describe("a rail card: one ⋯, no status dropdown", () => {
     const visit = rows({ id: "a1", kind: "appointment", name: "Site inspection: Rita Moss", address: null, city: null });
     expect(visit).toMatch(/<a[^>]*href="\/appointments\/a1"[^>]*>Open the Visit<\/a>/);
     const lead = rows({ id: "l1", kind: "lead", name: "Rita Moss", address: null, city: null });
-    expect(lead).toMatch(/<a[^>]*href="\/leads\?focus=l1"[^>]*>Open the Lead<\/a>/);
+    // cn-v1170: a link to a lead, from anywhere, is the lead's own page.
+    expect(lead).toMatch(/<a[^>]*href="\/leads\/l1"[^>]*>Open the Lead<\/a>/);
     expect(text(visit + lead)).not.toMatch(/Hold|Snooze|Why/);
   });
 
@@ -275,7 +276,9 @@ describe("the heading counts what waits, and says when a list is capped", () => 
     expect(page).toContain('{railCapped && <p className="-mt-1 mb-2 text-xs text-slate-500">{t("ag_rail_moreWaiting")}</p>}');
     expect(railWords.en.ag_rail_moreWaiting).toBe("More is waiting than this list shows. Find the rest on Jobs and Leads.");
     expect(page).toContain("const RAIL_LIMITS = { leads: 500, jobs: 200, visits: 200 } as const;");
-    for (const k of ["leads", "jobs", "visits"]) expect(page).toContain(`.limit(RAIL_LIMITS.${k})`);
+    for (const k of ["jobs", "visits"]) expect(page).toContain(`.limit(RAIL_LIMITS.${k})`);
+    // The leads come through the one rule (cn-v1170), with the same cap.
+    expect(page).toContain("{ limit: RAIL_LIMITS.leads }");
   });
 });
 
@@ -469,5 +472,27 @@ describe("the small parts: every header door 44px (W2-01), one word (lib/statuse
     }
     // A size alone never asks about the kind.
     expect(await sizeAppointment("a1", { plannedMinutes: 60 })).toEqual({ ok: true });
+  });
+});
+
+// cn-v1170, the meeting: "Remove how long (will be determined in Inspector)". A lead's card on the
+// rail offers no Kind and no How Long, takes no overdue mark from a follow-up day, and the rail's
+// leads are the Leads list's own (lib/leads/new-intake). A job's and a visit's size stay.
+describe("a lead's card on the rail (cn-v1170)", () => {
+  const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+
+  it("no size control and no length for a lead; jobs and visits keep theirs", () => {
+    const rail = src("src/app/(app)/schedule/place-rail.tsx");
+    expect(rail).not.toContain("sizeLead");
+    expect(rail).toMatch(/\{i\.kind !== "lead" && \(\s*<div className="flex flex-wrap items-center gap-1\.5">\s*<WorkShapeControls/);
+    expect(rail).toMatch(/\{i\.kind !== "lead" && \(\s*<span\s*className=\{`font-mono text-xs tabular-nums/);
+    expect(rail).toContain('const res = i.kind === "job" ? await sizeJob(i.id, patch.plannedMinutes ?? null) : await sizeAppointment(i.id, patch);');
+  });
+
+  it("the page reads the leads through the one rule, with no follow-up day, kind or length", () => {
+    const page = src("src/app/(app)/schedule/page.tsx");
+    expect(page).toContain('loadNewIntake<RailLeadRow>(supabase, "id, name, address, city, phone, email, message, notes", { limit: RAIL_LIMITS.leads })');
+    expect(page).not.toMatch(/next_follow_up_at|work_kind|alreadyBooked/);
+    expect(page).not.toMatch(/\.from\("inquiries"\)/);
   });
 });

@@ -206,12 +206,12 @@ describe("how the visit ended, in Spanish", () => {
   const base = { appointmentId: "appt-1", isStaff: true, decidable: true, status: "completed", estimate: null, outcome: null, outcomeAt: null, job: null, tz: TZ };
   const ending = (o: Partial<Parameters<typeof VisitEnding>[0]>) => es(createElement(VisitEnding, { ...base, ...o }));
 
-  it("the two honest endings: Perdida, and Ganada · Elegir el Trabajo on the attach door", () => {
+  it("the two honest endings: No Vendida (cn-v1170, was Perdida), and Ganada · Elegir el Trabajo on the attach door", () => {
     const html = ending({});
     expect(text(html)).toMatch(/^¿Cómo terminó esta\?/);
-    expect(html).toContain(">Perdida<");
+    expect(html).toContain(">No Vendida<");
     expect(html).toContain("Ganada · Elegir el Trabajo");
-    expect(html).not.toMatch(/Lost|Won · Pick the Job|How did this one end/);
+    expect(html).not.toMatch(/Lost|Not Sold|Perdida|Won · Pick the Job|How did this one end/);
   });
 
   it("the estimate it became, a dead one said so; the outcome with a Spanish day and Cambiar", () => {
@@ -228,7 +228,7 @@ describe("how the visit ended, in Spanish", () => {
     expect(won).not.toContain("Jul 31, 2026");
     expect(won).toContain(">Cambiar<");
     expect(outcomeWord("won", t)).toBe("Ganada");
-    expect(outcomeWord("no_bid", t)).toBe("Perdida");
+    expect(outcomeWord("no_bid", t)).toBe("No Vendida");
     expect(outcomeWord("won")).toBe("Won"); // English by default, as the ending's own test pins
     expect(outcomeWord("archived", t)).toBe("archived"); // an unknown stored word is shown as stored
   });
@@ -517,8 +517,9 @@ describe("the visit page catalog (vp_)", () => {
       vp_addressGoesOnLead: "{typed} — this visit’s address goes on the lead",
       vp_couldntConnectIt: "Couldn't connect it — try again.",
       vp_won: "Won",
-      vp_lost: "Lost",
-      vp_btn_lost: "Lost",
+      // cn-v1170: the ending reads Not Sold (was Lost), and two new sentences say the lead went with it.
+      vp_lost: "Not Sold",
+      vp_btn_lost: "Not Sold",
       vp_btn_wonPickTheJob: "Won · Pick the Job",
       vp_btn_clearTheAnswer: "Clear the Answer",
       vp_btn_keepIt: "Keep It",
@@ -528,7 +529,9 @@ describe("the visit page catalog (vp_)", () => {
       vp_howDidThisOneEnd: "How did this one end?",
       vp_thatDidntSave: "That didn't save — try again.",
       vp_markedWon: "Marked Won.",
-      vp_markedLost: "Marked Lost.",
+      vp_markedLost: "Marked Not Sold.",
+      vp_markedLostLeadToo: "Marked Not Sold. The lead is Not Sold too.",
+      vp_undoneLeadToo: "Back where it was. The lead is open again.",
       vp_answerCleared: "Answer cleared.",
       vp_btn_undo: "Undo",
       vp_putBack: "Put back.",

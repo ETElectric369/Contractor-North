@@ -31,3 +31,23 @@ export type WebSource = (typeof WEB_SOURCES)[number];
 /** True when a lead's source is one of the website's doors. */
 export const isWebSource = (source: string | null | undefined): boolean =>
   (WEB_SOURCES as readonly string[]).includes(String(source ?? ""));
+
+/** The stored value of a lead somebody typed in without picking where it came from. */
+export const MANUAL_SOURCE = "manual";
+
+/**
+ * WHAT A LEAD'S SOURCE SAYS ON ITS CHIP (cn-v1170). A company keeps its own list of lead sources now
+ * (settings.lead_sources: "Web", "Signage", "Word of Mouth", "Referral", editable), and the lead
+ * form stores the label the person picked in the same `source` column the website's doors write.
+ * So one function reads the column for every screen: a website door is the web chip the row already
+ * draws; a picked label is its own text; a lead with nothing picked ('manual', or blank) has no chip.
+ * Pure: the caller's catalog says "From Your Website".
+ */
+export type LeadSourceChip = { kind: "web" } | { kind: "label"; text: string } | null;
+
+export function leadSourceChip(source: string | null | undefined): LeadSourceChip {
+  const s = String(source ?? "").trim();
+  if (!s || s === MANUAL_SOURCE) return null;
+  if (isWebSource(s)) return { kind: "web" };
+  return { kind: "label", text: s };
+}

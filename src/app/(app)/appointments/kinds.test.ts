@@ -9,8 +9,6 @@ import { join } from "node:path";
  *                           sent is Other (a new visit) or an inspection (offering times).
  *   edit                    takes one of the five, or the row's own stored kind unchanged: a Client
  *                           Meeting whose time moves stays a Client Meeting.
- *   sizeLead                a write guard, not a picker: any known kind saves, so an old lead's
- *                           Quote or Office re-picked still saves (only the pickers narrow).
  */
 type Row = Record<string, unknown>;
 const s = vi.hoisted(() => ({
@@ -69,7 +67,6 @@ vi.mock("@/lib/appointments/proposal", async (importOriginal) => ({
 }));
 
 const { createAppointment, updateAppointment, createAppointmentProposal } = await import("./actions");
-const { sizeLead } = await import("../leads/actions");
 const { WorkShapeControls } = await import("@/components/work-shape-controls");
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -163,16 +160,7 @@ describe("offering times", () => {
   });
 });
 
-describe("sizeLead is a write guard, not a picker", () => {
-  it("an old lead's Quote or Office re-picked still saves; Other saves; junk is refused", async () => {
-    for (const k of ["quote", "office", "other", "walkthrough", ""]) {
-      s.updates = [];
-      expect(await sizeLead("lead-1", { workKind: k }), k).toEqual({ ok: true });
-      expect(s.updates[0].patch.work_kind, k).toBe(k || null);
-    }
-    expect(await sizeLead("lead-1", { workKind: "nonsense" })).toEqual({ ok: false, error: "That isn't a kind of work." });
-  });
-});
+// sizeLead went with cn-v1170: a lead no longer carries a kind or a length ("Remove how long").
 
 describe("the pickers offer the five (and a row's own old kind)", () => {
   const read = (p: string) => readFileSync(join(process.cwd(), "src", p), "utf8");
@@ -204,11 +192,12 @@ describe("the pickers offer the five (and a row's own old kind)", () => {
     expect(btn).toContain('type: appointment?.type ?? urlSeed.current.type ?? defaultType ?? (defaultJobId ? "job" : "other"),');
   });
 
-  it("the lead form and the rail's kind select map kindOptions, never WORK_KINDS", () => {
-    for (const f of ["app/(app)/leads/inquiry-fields.tsx", "components/work-shape-controls.tsx"]) {
-      const src = read(f);
-      expect(src, f).toMatch(/kindOptions\((value\.work_kind|workKind)\)\.map\(/);
-      expect(src, f).not.toContain("WORK_KINDS.map(");
-    }
+  it("the rail's kind select maps kindOptions, never WORK_KINDS; the lead form asks no kind (cn-v1170: it is the Scope)", () => {
+    const src = read("components/work-shape-controls.tsx");
+    expect(src).toMatch(/kindOptions\((value\.work_kind|workKind)\)\.map\(/);
+    expect(src).not.toContain("WORK_KINDS.map(");
+    const form = read("app/(app)/leads/inquiry-fields.tsx");
+    expect(form).not.toContain("work_kind");
+    expect(form).not.toContain("kindOptions");
   });
 });

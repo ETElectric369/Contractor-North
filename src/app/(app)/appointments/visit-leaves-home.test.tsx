@@ -150,8 +150,8 @@ describe("an inspection row's Dismiss… asks in its sheet, never in the browser
   });
 
   it("resting: the sheet's rows; asking: the question, the deed in red and Keep It (Title Case, both languages)", () => {
-    expect(buttons(face(false, "en"))).toEqual(["Move to Another Day…", "It Happened: Write It Up", "Lost", "Dismiss…"]);
-    expect(buttons(face(false, "es"))).toEqual(["Mover a Otro Día…", "Sí Se Hizo: Redactarla", "Perdida", "Descartar…"]);
+    expect(buttons(face(false, "en"))).toEqual(["Move to Another Day…", "It Happened: Write It Up", "Not Sold", "Dismiss…"]);
+    expect(buttons(face(false, "es"))).toEqual(["Mover a Otro Día…", "Sí Se Hizo: Redactarla", "No Vendida", "Descartar…"]);
     const en = face(true, "en");
     expect(text(en)).toContain("Dismiss this visit? It is deleted if nothing is on it. If anything is (notes, an estimate, an invoice, a time-pick link), it is cancelled and kept on file.");
     expect(buttons(en)).toEqual(["Dismiss", "Keep It"]);
@@ -159,7 +159,7 @@ describe("an inspection row's Dismiss… asks in its sheet, never in the browser
     const es = face(true, "es");
     expect(text(es)).toContain("¿Descartar esta visita? Se elimina si no tiene nada. Si tiene algo (notas, un presupuesto, una factura, un enlace para elegir hora), se cancela y se conserva en el archivo.");
     expect(buttons(es)).toEqual(["Descartar", "Dejarla"]);
-    expect(es).not.toMatch(/Delete|Keep It|Lost/);
+    expect(es).not.toMatch(/Delete|Keep It|Lost|Not Sold/);
     // The door as the list mounts it is the one ⋯, and its sheet starts at rest (it opens closed).
     const mounted = renderToStaticMarkup(
       createElement(InspectionRowMenu, {

@@ -6,7 +6,7 @@ import { orgStaffIds, pushConfigured } from "@/lib/push";
 import { notifyPeople } from "@/lib/notifications";
 import { sixForPerson, type DigestTask } from "./digest-six";
 import { PUSH_POOL_LIMIT, RANK_POOL_SELECT, rankPoolQuery } from "@/lib/six-rank";
-import { inquiryDueFilter } from "./due-filters";
+import { NEW_INTAKE_COUNT_CAP, loadNewIntake } from "@/lib/leads/new-intake";
 import { readActiveOrgs } from "@/lib/cron-orgs";
 import { reportError } from "@/lib/observe";
 
@@ -93,17 +93,17 @@ export async function sendDayAheadDigests(
           .lt("due_date", today)
           .order("due_date", { ascending: true })
           .limit(2),
-        supabase
-          .from("inquiries")
-          .select("name", { count: "exact" })
-          .eq("org_id", org.id)
-          .eq("status", "new")
-          .is("converted_at", null)
-          // A new lead snoozed to a later day waits for it here too: the rule Needs You and the Sales
-          // badge read with, so the push never names a lead My Day has in its Waiting fold.
-          .or(inquiryDueFilter(today))
-          .order("created_at", { ascending: true })
-          .limit(2),
+        // THE LEADS LIST (cn-v1170): the one rule Needs You and the Sales badge read with
+        // (lib/leads/new-intake), oldest first so the push names who has waited longest. The service
+        // client reads every company, so the company is named. A failed read is filed and names nobody.
+        loadNewIntake<{ id: string; name: string | null }>(supabase, "id, name", {
+          orgId: org.id,
+          oldestFirst: true,
+          limit: NEW_INTAKE_COUNT_CAP,
+        }).then((r) => {
+          if (r.error) reportError("cron-day-ahead.leads", r.error, { orgId: org.id });
+          return { count: r.leads.length, data: r.leads.slice(0, 2) };
+        }),
       ]);
 
       // THE PUSH CANDIDATES — the same cut, order and bound as My Day's card, through the ONE shared

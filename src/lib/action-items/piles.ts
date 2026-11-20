@@ -61,9 +61,11 @@ export const PILE_DEFS: Record<PileName, PileDef> = {
   // closed out): See All unfolds every row read here instead of opening a page that doesn't list them.
   done_not_billed: { label: "Done, Not Billed", verb: "Bill It", listHref: null, listLabel: null },
   leads_to_call: {
-    label: "Leads to Call",
+    // cn-v1170: the list is new intake only ("NEW INTAKE ONLY"), so the pile says so (the id stays).
+    label: "New Leads",
     labelLeadsOff: "Requests to Call Back",
-    verb: "Called",
+    // cn-v1170: a lead's button is Schedule (no Called any more).
+    verb: "Schedule",
     verbLeadsOff: "Call Back",
     listHref: "/leads",
     listLabel: "See All on Leads",

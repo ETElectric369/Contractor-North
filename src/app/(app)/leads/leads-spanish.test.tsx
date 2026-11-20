@@ -19,10 +19,8 @@ vi.mock("@/lib/use-draft", () => ({ useDraft: () => ({ restored: false, clear: (
 vi.mock("./actions", () => ({
   convertInquiry: vi.fn(),
   deleteInquiry: vi.fn(),
-  markInquiryContacted: vi.fn(),
   setInquiryStatus: vi.fn(),
-  sizeLead: vi.fn(),
-  snoozeInquiry: vi.fn(),
+  reopenLead: vi.fn(),
   suggestVisitSlots: vi.fn(),
   createInquiry: vi.fn(),
   updateInquiry: vi.fn(),
@@ -30,6 +28,7 @@ vi.mock("./actions", () => ({
   intakeFileUrl: vi.fn(),
 }));
 vi.mock("@/app/(app)/appointments/actions", () => ({ createInspectionNow: vi.fn(), openLeadInspection: vi.fn() }));
+vi.mock("./lead-sources-actions", () => ({ readLeadSources: vi.fn() }));
 // The booking sheet drawn open (a closed Modal renders nothing on the server): its title, body and save.
 vi.mock("@/components/ui/modal", () => ({
   Modal: ({ title, children, footer }: { title: ReactNode; children: ReactNode; footer?: ReactNode }) =>
@@ -37,7 +36,7 @@ vi.mock("@/components/ui/modal", () => ({
   ModalActions: ({ saveLabel }: { saveLabel?: string }) => createElement("button", null, saveLabel),
 }));
 // The link-ready screen is a state the sheet reaches after a server round trip; this seeds it. The
-// first useState(null) ConvertMenu calls is its `link` (the others start false, "", a day, or slots).
+// first useState(null) LeadScheduleSheet calls is its `link` (the others start "", a day, or slots).
 const seed: { link: unknown } = { link: undefined };
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react")>();
@@ -55,10 +54,12 @@ vi.mock("react", async (importOriginal) => {
 });
 
 import { LangProvider } from "@/components/lang-provider";
-import { InquiryRow, LeadDetails } from "./inquiry-row";
+import { InquiryRow } from "./inquiry-row";
 import { InquiryFields, inquiryFormValue } from "./inquiry-fields";
-import { ConvertMenu } from "./convert-menu";
-import { formatDate, formatDateTime } from "@/lib/utils";
+import { LeadScheduleSheet } from "./convert-menu";
+import { NotSoldFold } from "./not-sold-fold";
+import { translator } from "@/lib/i18n";
+import { formatDateTime } from "@/lib/utils";
 import type { Inquiry } from "@/lib/types";
 
 const es = (el: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(LangProvider, { lang: "es", children: el }));
@@ -99,18 +100,19 @@ const lead = (over: Partial<Inquiry> = {}): Inquiry =>
     ...over,
   }) as Inquiry;
 
-const rowProps = { customers: [], todayYmd: "2026-09-28", tz: "America/Los_Angeles" };
+// The server's now, 3 days and 4 hours after the lead came in (the running clock's first draw).
+const rowProps = { todayYmd: "2026-09-28", tz: "America/Los_Angeles", nowMs: Date.parse("2026-09-27T16:00:00.000Z") + (3 * 24 + 4) * 3_600_000 };
 
-describe("the row in Spanish", () => {
-  it("says the next step, the score and the doors in Spanish", () => {
-    const html = es(createElement(InquiryRow, { inquiry: lead(), ...rowProps }));
-    expect(html).toContain("Nuevo · Llámale");
+describe("the row in Spanish (cn-v1170)", () => {
+  it("says the score, the source, the clock and the doors in Spanish", () => {
+    const html = es(createElement(InquiryRow, { inquiry: lead({ source: "intake" as Inquiry["source"] }), ...rowProps }));
     expect(html).toContain("Prioridad 7");
-    expect(html).toContain("Inspección");
-    expect(html).toContain("Agendar");
-    expect(html).toContain("Presupuesto");
+    expect(html).toContain("Desde Tu Sitio Web");
+    expect(html).toMatch(/aria-label="Esperando 3 d 4 h desde que llegó"[^>]*>3 d 4 h</);
+    for (const w of [">Agendar<", "No Vendido", "Editar Detalles"]) expect(html, w).toContain(w);
     expect(html).not.toContain("Priority 7");
     expect(html).not.toContain(">Schedule<");
+    expect(html).not.toContain("Nuevo · Llámale");
   });
 
   it("its dates come out es-US (and English stays as it was)", () => {
@@ -120,44 +122,50 @@ describe("the row in Spanish", () => {
     const enCreated = formatDateTime(l.created_at);
     expect(esCreated).not.toBe(enCreated);
     expect(decode(html)).toContain(`title="Agregado ${esCreated}"`);
-    expect(decode(html)).toContain(`contactado ${formatDate(l.last_contacted_at, undefined, "es")}`);
     const english = decode(en(createElement(InquiryRow, { inquiry: l, ...rowProps })));
     expect(english).toContain(`title="Added ${enCreated}"`);
-    expect(english).toContain(`contacted ${formatDate(l.last_contacted_at)}`);
+    expect(english).toContain(">3d 4h<");
   });
 
-  it("the ⋯ panel's doors are Spanish", () => {
-    const html = es(createElement(LeadDetails, { inquiry: lead(), todayYmd: "2026-09-28" }));
-    for (const w of ["Seguimiento", "Marcar como Contactado", "Marcar como Perdido", "Guardar como Contacto", "Eliminar Prospecto", "Editar"]) {
-      expect(html, w).toContain(w);
-    }
+  it("the Not Sold fold is Spanish: its count, each lead's Reopen, the cut and a failed read", () => {
+    const t = translator("es");
+    const html = es(createElement(NotSoldFold, { leads: [{ id: "l2", name: "Dana Rook", company_name: null, message: "Deck stairs" }], cut: true, failed: false, t }));
+    expect(html).toContain("No Vendidos (1)");
+    expect(html).toContain('href="/leads/l2"');
+    expect(html).toContain("Reabrir");
+    expect(html).toContain("Se muestran los 50 más recientes.");
+    const failed = es(createElement(NotSoldFold, { leads: [], cut: false, failed: true, t }));
+    expect(failed).toContain("No se pudieron cargar los prospectos no vendidos.");
+    // None on file and nothing failed: no fold at all.
+    expect(es(createElement(NotSoldFold, { leads: [], cut: false, failed: false, t }))).toBe("");
   });
 });
 
 describe("New Lead's fields in Spanish", () => {
-  it("labels, durations and the closed More Options row", () => {
+  it("labels in the one form's order, the two links, and no Kind or How Long (cn-v1170)", () => {
     const html = es(createElement(InquiryFields, { value: inquiryFormValue(), onChange: () => {} }));
     const labels = [...html.matchAll(/<label[^>]*>([^<]+)<\/label>/g)].map((m) => m[1]);
-    expect(labels).toEqual(["Nombre", "Teléfono", "Dirección", "Lo que Necesitan", "Qué Tipo de Trabajo", "Cuánto Tiempo"]);
-    expect(html).toContain("Medio Día (4h)");
-    expect(html).toContain("Aún No Sé");
-    expect(html).toContain("Más Opciones");
-    expect(html).toContain("Empresa · Correo");
-    expect(html).toContain(">Inspección<"); // the kind of work, through lib/schedule/work-shape kindLabel
+    expect(labels).toEqual(["Nombre", "Dirección", "Teléfono", "Correo", "Alcance", "Notas", "Origen del Prospecto"]);
+    expect(html).toContain(">Empresa</button>");
+    expect(html).toContain(">Ciudad, Estado, Código Postal</button>");
+    expect(html).not.toContain("Cuánto Tiempo");
+    expect(html).not.toContain("Más Opciones");
   });
 });
 
-describe("the convert menu in Spanish", () => {
-  it("the booking sheet speaks Spanish", () => {
-    const html = es(createElement(ConvertMenu, { inquiryId: "lead-1", inquiryName: "Ana Larkspur" }));
+describe("the Schedule sheet in Spanish", () => {
+  const sheet = { inquiryId: "lead-1", inquiryName: "Ana Larkspur", open: true, onClose: () => {} };
+
+  it("the booking sheet speaks Spanish, with its three ways", () => {
+    const html = es(createElement(LeadScheduleSheet, sheet));
     expect(html).toContain("Agendar una Inspección");
     expect(html).toContain("Pone una inspección para <strong>Ana Larkspur</strong> en tu Agenda");
-    expect(html).toContain("Que Ellos Elijan");
+    for (const w of ["Agendar", "Que Ellos Elijan", "Empezar Ahora"]) expect(html, w).toContain(w);
   });
 
   it("the link-ready screen is Spanish, but the text the CUSTOMER gets stays English", () => {
     seed.link = { token: "tok-1", phone: "5305550100" };
-    const html = es(createElement(ConvertMenu, { inquiryId: "lead-1", inquiryName: "Ana Larkspur", businessPhone: "(530) 555-0199" }));
+    const html = es(createElement(LeadScheduleSheet, { ...sheet, businessPhone: "(530) 555-0199" }));
     expect(html).toContain("Envíales Estas Horas por Mensaje");
     expect(html).toContain("Copiar Enlace");
     expect(html).toContain("Enviar por Mensaje");

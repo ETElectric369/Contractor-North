@@ -92,7 +92,7 @@ type RunOpts = {
 
 /**
  * WHAT A ROW DOES WHEN A VERB IS SENT (pure, so it is tested whole):
- *   · hides: "sink" (Called or Close Out on a plain row: ticked done, sunk to the bottom), "remove"
+ *   · hides: "sink" (Close Out on a plain row: ticked done, sunk to the bottom), "remove"
  *     (it leaves: the verb ends it or gives it a day), or "none" (Assign: crew puts nothing ahead of a
  *     job, so the server keeps the row, and hiding it here would drop a job that still has no day
  *     off the list while the badge still counts it);
@@ -101,7 +101,7 @@ type RunOpts = {
  *     would take the sheet (and the refusal it has to say) with it.
  */
 export function verbLanding(item: Pick<ActionItem, "kind">, verb: Affordance, opts?: RunOpts): { hides: "sink" | "remove" | "none"; optimistic: boolean } {
-  const hides = verb === "assign" ? "none" : verb === "do" && !opts?.child && (item.kind === "inquiry" || item.kind === "appointment") ? "sink" : "remove";
+  const hides = verb === "assign" ? "none" : verb === "do" && !opts?.child && item.kind === "appointment" ? "sink" : "remove";
   return { hides, optimistic: hides !== "none" && !opts?.sheet };
 }
 

@@ -228,7 +228,7 @@ export function CustomerSelect({
       ) : leadName ? (
         <div>
           <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">{t("qt_leadNotCustomerYet")}</p>
-          <Link href={`/leads?focus=${lead?.id ?? ""}`} className="flex items-center gap-3 hover:text-brand">
+          <Link href={lead?.id ? `/leads/${lead.id}` : "/leads"} className="flex items-center gap-3 hover:text-brand">
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-50">
               <Sprout className="h-4 w-4 text-amber-600" />
             </div>

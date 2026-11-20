@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
- * EVERY WAIT HAS A DAY (NY-feeders, 0366): the two server pieces Needs You wires next (lane 5).
+ * EVERY WAIT HAS A DAY (NY-feeders, 0366): the server piece Needs You wires (lane 5).
  *
  *   setQuoteFollowUp  the day to ask again about an unanswered estimate: writes follow_up_at and
  *                     NOTHING else (never valid_until, the customer's offer window), today or later,
  *                     a zero-row write said, and before 0366 a refusal in words.
- *   snoozeInquiry     a lead comes back on a day: writes next_follow_up_at and nothing else (no
- *                     status, no last_contacted_at: nobody reached anyone), today or later.
+ *
+ * A lead's follow-up day (snoozeInquiry) is gone since cn-v1170: the Leads list is the reminder.
  */
 type Row = Record<string, unknown>;
 const s = vi.hoisted(() => ({
@@ -48,7 +48,6 @@ vi.mock("next/server", () => ({ after: vi.fn() }));
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
 
 const { setQuoteFollowUp } = await import("@/app/(app)/quotes/actions");
-const { snoozeInquiry } = await import("@/app/(app)/leads/actions");
 const { todayStrInTz } = await import("@/lib/tz");
 const { addDays } = await import("@/lib/come-back-days");
 const today = () => todayStrInTz(s.tz);
@@ -85,37 +84,21 @@ describe("setQuoteFollowUp", () => {
   });
 });
 
-describe("snoozeInquiry", () => {
-  it("writes the next follow-up day and nothing else: no status, no last contact", async () => {
-    expect(await snoozeInquiry("i-1", addDays(today(), 7))).toEqual({ ok: true });
-    expect(s.writes).toHaveLength(1);
-    const { table, patch, filters } = s.writes[0];
-    expect(table).toBe("inquiries");
-    expect(Object.keys(patch).sort()).toEqual(["next_follow_up_at", "updated_at"]);
-    expect(patch.next_follow_up_at).toBe(addDays(today(), 7));
-    expect(filters).toEqual([["eq", "id", "i-1"]]);
-  });
-
-  it("a past day is refused and nothing is written; a lead that's gone says so", async () => {
-    expect(await snoozeInquiry("i-1", addDays(today(), -3))).toEqual({ ok: false, error: "Pick today or later" });
-    expect(s.writes).toEqual([]);
-    s.hits = 0;
-    expect(await snoozeInquiry("i-gone", today())).toEqual({ ok: false, error: "That lead isn't available." });
-  });
-});
-
 describe("the registry and Nort", () => {
-  it("quote.followUp, inquiry.snooze and inquiry.markLost are registry writes Nort may run, each behind its switch", async () => {
+  // cn-v1170: a lead has no follow-up day any more (a lead on the Leads list IS the reminder), so
+  // inquiry.snooze left the registry; inquiry.markLost (Not Sold) stays.
+  it("quote.followUp and inquiry.markLost are registry writes Nort may run, each behind its switch; inquiry.snooze is gone", async () => {
     const { AGENT_WRITE_ALLOWED, AGENT_TOOL_FEATURE } = await import("@/lib/actions/agent-tools");
     const { quoteActions } = await import("@/lib/actions/entities/quote");
     const { inquiryActions } = await import("@/lib/actions/entities/inquiry");
-    for (const name of ["quote.followUp", "inquiry.snooze", "inquiry.markLost"]) expect(AGENT_WRITE_ALLOWED.has(name), name).toBe(true);
+    for (const name of ["quote.followUp", "inquiry.markLost"]) expect(AGENT_WRITE_ALLOWED.has(name), name).toBe(true);
     expect(AGENT_TOOL_FEATURE["quote.followUp"]).toBe("estimates");
-    expect(AGENT_TOOL_FEATURE["inquiry.snooze"]).toBe("leads");
     expect(AGENT_TOOL_FEATURE["inquiry.markLost"]).toBe("leads");
     expect(quoteActions["quote.followUp"]).toMatchObject({ auth: "staff", effect: "write" });
-    expect(inquiryActions["inquiry.snooze"]).toMatchObject({ auth: "staff", effect: "write" });
     expect(inquiryActions["inquiry.markLost"]).toMatchObject({ auth: "staff", effect: "write" });
+    expect(inquiryActions["inquiry.snooze"]).toBeUndefined();
+    expect(AGENT_WRITE_ALLOWED.has("inquiry.snooze")).toBe(false);
+    expect("inquiry.snooze" in AGENT_TOOL_FEATURE).toBe(false);
     // inquiry.delete stays (it lives on /leads behind its ⋯), and stays out of Nort's reach.
     expect(inquiryActions["inquiry.delete"]).toBeDefined();
     expect(AGENT_WRITE_ALLOWED.has("inquiry.delete")).toBe(false);

@@ -45,25 +45,27 @@ export function feederOn(kind: ActionKind, features: FeatureMap): boolean {
   return (FEEDER_SWITCHES[kind] ?? []).every((k) => featureOn(features, k));
 }
 
+/** What Needs You reads of a lead: the columns `INQUIRY_ROW_COLUMNS` names (cn-v1170: no follow-up day). */
 export type InquiryRow = {
   id: string;
   name: string | null;
   status: string;
-  next_follow_up_at: string | null;
   phone?: string | null;
-  /** The day it came in: a new lead's clock (cn-v1162). The build's read always carries it. */
+  /** The day it came in: the lead's clock (cn-v1162; since cn-v1170 its only one). */
   created_at?: string | null;
 };
 
+/** The columns the Needs You build hands to loadNewIntake (lib/leads/new-intake). */
+export const INQUIRY_ROW_COLUMNS = "id, name, phone, status, created_at";
+
 /**
- * One request on Needs You. Leads on: the lead row, its button Called, and (when there's a number)
- * Call behind its ⋯. Leads off: the same request, in plain words ("New Request from Dana"), with the
- * phone number its Call Back button dials: the lead list is out of the way, the person asking for
- * work is not. The card still opens the request itself (/leads?focus=, which renders with the Off
- * line). The row table (row-buttons.ts) decides which button says what.
+ * One lead on Needs You, exactly as the Leads list has it (cn-v1170, Erik: "if a lead is still on
+ * the lead page that IS the reminder ... one badge one list simple"). Leads on: Schedule, and behind
+ * ⋯ Call and Not Sold. Leads off: the same request in plain words ("New Request from Dana") with
+ * Call Back. Its clock is the day it came in; there is no follow-up day any more. The card opens
+ * the lead's file (/leads/<id>). The row table (row-buttons.ts) decides which button says what.
  */
-export function inquiryActionItem(q: InquiryRow, todayStr: string, leadsOn: boolean): Omit<ActionItem, "group"> {
-  const overdue = q.next_follow_up_at != null && q.next_follow_up_at <= todayStr;
+export function inquiryActionItem(q: InquiryRow, leadsOn: boolean): Omit<ActionItem, "group"> {
   const fresh = q.status === "new";
   const phone = (q.phone ?? "").trim() || null;
   // WHO AND WHAT, for the box (cn-v1161): the person's name in bold, else the word for nobody named,
@@ -73,23 +75,19 @@ export function inquiryActionItem(q: InquiryRow, todayStr: string, leadsOn: bool
     id: q.id,
     kind: "inquiry",
     title: q.name as string,
-    subtitle: fresh ? "New lead — reach out" : "Follow up",
+    subtitle: fresh ? "New lead — reach out" : "Reached, not booked yet",
     who: named,
     ...(named ? {} : { whoSay: { key: "ny_who_someone" } }),
-    what: { key: leadsOn ? (fresh ? "ny_w_leadNew" : "ny_w_leadFollowUp") : fresh ? "ny_w_requestNew" : "ny_w_requestFollowUp" },
-    when: q.next_follow_up_at,
-    // ITS CLOCK (cn-v1162): the follow-up day somebody set, else, for a lead nobody has reached yet,
-    // the day it came in: an outside party asked for work and is waiting for an answer, so a new lead
-    // is Due for its first week (the one rule's window). A contacted lead with no day has no clock.
-    clock: q.next_follow_up_at ?? (fresh ? (q.created_at ?? null) : null),
-    // A brand-new, uncontacted lead is the hottest thing on the board (speed-to-lead wins the job):
-    // top urgency. The one rule no longer reads a lead's urgency: its mark is its clock's (cn-v1162).
-    // An overdue follow-up is next; a contacted, on-schedule lead is normal.
-    urgency: fresh ? 2 : overdue ? 1 : 0,
+    what: { key: leadsOn ? (fresh ? "ny_w_leadNew" : "ny_w_leadReached") : fresh ? "ny_w_requestNew" : "ny_w_requestReached" },
+    // ITS CLOCK RUNS FROM ARRIVAL (cn-v1170, the meeting: "running clock since lead arrival"): the
+    // day it came in, for every lead on the list, reached or not. Due for its first week.
+    when: q.created_at ?? null,
+    clock: q.created_at ?? null,
+    // A brand-new, uncontacted lead is the hottest thing on the board (speed-to-lead wins the job).
+    urgency: fresh ? 2 : 1,
     done: false,
-    // Deep-link to THIS lead (not the bare list) so a tap on My Day scrolls to and
-    // flashes the exact row — the "new leads clickable on My Day" nerve.
-    href: `/leads?focus=${q.id}`,
+    // The lead's own file (cn-v1170: a link to a lead, from anywhere, is /leads/<id>).
+    href: `/leads/${q.id}`,
     affordances: AFFORDANCES.inquiry,
     ...(phone ? { phone } : {}),
   };
@@ -101,7 +99,7 @@ export function inquiryActionItem(q: InquiryRow, todayStr: string, leadsOn: bool
     // header left to rename).
     chip: "Request",
     title: fresh ? `New Request from ${who}` : `Request from ${who}`,
-    subtitle: fresh ? "Call them back" : "Follow up",
+    subtitle: fresh ? "Call them back" : "Called back",
     phone,
   };
 }

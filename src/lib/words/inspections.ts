@@ -30,6 +30,8 @@ import type { WordCatalog } from "./types";
  * Each tile's quiet line is a phrase (sentence case). A row's ⋯ holds Move to Another Day…, It Happened:
  * Write It Up, Lost and Dismiss… (cn-v1166: the door's one name); the old headings and the two big buttons of the Didn't Happen? group
  * are gone with their keys.
+ * cn-v1170: Lost reads Not Sold (Erik: "Not Sold" replaces "Lost" everywhere). The tile is No Vendidas,
+ * the row's button No Vendida; the key ids keep their old names.
  */
 export const words: WordCatalog = {
   prefix: "ip_",
@@ -53,7 +55,7 @@ export const words: WordCatalog = {
     ip_btn_tileNeedsADay: "Needs a Day",
     ip_btn_tileMissed: "Didn't Happen?",
     ip_btn_tileCompleted: "Completed",
-    ip_btn_tileLost: "Lost",
+    ip_btn_tileLost: "Not Sold",
     ip_btn_tileCancelled: "Cancelled",
     ip_tileOldest: "Oldest: {age}",
     ip_tileNext: "Next: {when}",
@@ -76,7 +78,7 @@ export const words: WordCatalog = {
     ip_btn_pickADay: "Pick a Day",
     ip_btn_moveToAnotherDay: "Move to Another Day…",
     ip_btn_itHappened: "It Happened: Write It Up",
-    ip_btn_lost: "Lost",
+    ip_btn_lost: "Not Sold",
     ip_btn_delete: "Dismiss…",
     ip_deleteAsk: "Dismiss this visit? It is deleted if nothing is on it. If anything is (notes, an estimate, an invoice, a time-pick link), it is cancelled and kept on file.",
     ip_btn_deleteIt: "Dismiss",
@@ -97,7 +99,7 @@ export const words: WordCatalog = {
     ip_btn_tileNeedsADay: "Falta el Día",
     ip_btn_tileMissed: "¿No Se Hizo?",
     ip_btn_tileCompleted: "Terminadas",
-    ip_btn_tileLost: "Perdidas",
+    ip_btn_tileLost: "No Vendidas",
     ip_btn_tileCancelled: "Canceladas",
     ip_tileOldest: "La más antigua: {age}",
     ip_tileNext: "La próxima: {when}",
@@ -120,7 +122,7 @@ export const words: WordCatalog = {
     ip_btn_pickADay: "Elegir un Día",
     ip_btn_moveToAnotherDay: "Mover a Otro Día…",
     ip_btn_itHappened: "Sí Se Hizo: Redactarla",
-    ip_btn_lost: "Perdida",
+    ip_btn_lost: "No Vendida",
     ip_btn_delete: "Descartar…",
     ip_deleteAsk: "¿Descartar esta visita? Se elimina si no tiene nada. Si tiene algo (notas, un presupuesto, una factura, un enlace para elegir hora), se cancela y se conserva en el archivo.",
     ip_btn_deleteIt: "Descartar",

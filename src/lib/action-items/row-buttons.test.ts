@@ -41,7 +41,7 @@ describe("the table", () => {
       [row("quote_draft", { send: { kind: "quote", id: "q1", number: "E-012", customerName: "Dana", amount: 1200, lineCount: 4, openHref: "/quotes/q1" } }), "Send It"],
       [row("quote_awaiting"), "Still Waiting"],
       [row("quote_accepted", { affordances: ["schedule", "open"], targetId: "job-1" }), "Pick a Day"],
-      [row("inquiry"), "Called"],
+      [row("inquiry"), "Schedule"],
       [row("appointment"), "Close Out"],
       [row("inspection_writeup"), "Open the Inspection"],
       [row("job_to_schedule"), "Pick a Day"],
@@ -75,8 +75,8 @@ describe("the table", () => {
 
   it("behind ⋯: Snooze, Assign, and the honest endings behind a confirm", () => {
     expect(labels(rowButtons(row("job_to_schedule"), staff).more)).toEqual(["Assign", "Finish", "Cancel"]);
-    expect(labels(rowButtons(row("inquiry", { phone: "555-0100" }), staff).more)).toEqual(["Call", "Snooze", "Lost"]);
-    expect(labels(rowButtons(row("quote_awaiting"), staff).more)).toEqual(["Won It", "Lost"]);
+    expect(labels(rowButtons(row("inquiry", { phone: "555-0100" }), staff).more)).toEqual(["Call", "Not Sold"]);
+    expect(labels(rowButtons(row("quote_awaiting"), staff).more)).toEqual(["Won It", "Not Sold"]);
     expect(labels(rowButtons(row("quote_draft"), staff).more)).toEqual(["Not Needed"]);
     expect(labels(rowButtons(row("appointment"), staff).more)).toEqual(["Dismiss"]);
     expect(labels(rowButtons(row("visit_unbilled"), staff).more)).toEqual(["Cancel"]);
@@ -85,15 +85,16 @@ describe("the table", () => {
     for (const d of rowButtons(row("job_to_schedule"), staff).more.filter((x) => x.label !== "Assign")) expect(d.act.type).toBe("confirm");
   });
 
-  it("the doors where the app can't know (2026-11-04): Already Invoiced, Lost on a win, Won It, Signed on Paper", () => {
+  it("the doors where the app can't know (2026-11-04): Already Invoiced, Not Sold on a win, Won It, Signed on Paper", () => {
     // A win with no job (the live case: nothing can settle it): its two doors behind ⋯.
     const win = row("quote_accepted", { alreadyInvoiced: { kind: "quote", id: "q1" } });
     expect(rowButtons(win, staff).primary?.label).toBe("Pick a Day");
-    expect(labels(rowButtons(win, staff).more)).toEqual(["Already Invoiced", "Lost"]);
+    expect(labels(rowButtons(win, staff).more)).toEqual(["Already Invoiced", "Not Sold"]);
+    expect(rowButtons(win, staff).more[1].act).toMatchObject({ title: "Not Sold After All?", button: "Mark It Not Sold" });
     expect(rowButtons(win, staff).more[0].act).toEqual({ type: "alreadyInvoiced", target: { kind: "quote", id: "q1" } });
     expect(rowButtons(win, staff).more[1].act).toMatchObject({ type: "confirm", verb: "dismiss" });
-    // No answer yet: Won It, Already Invoiced, Lost.
-    expect(labels(rowButtons(row("quote_awaiting", { alreadyInvoiced: { kind: "quote", id: "q2" } }), staff).more)).toEqual(["Won It", "Already Invoiced", "Lost"]);
+    // No answer yet: Won It, Already Invoiced, Not Sold.
+    expect(labels(rowButtons(row("quote_awaiting", { alreadyInvoiced: { kind: "quote", id: "q2" } }), staff).more)).toEqual(["Won It", "Already Invoiced", "Not Sold"]);
     expect(rowButtons(row("quote_awaiting"), staff).more[0].act).toMatchObject({ type: "confirm", verb: "do" });
     // Done, Not Billed: Already Invoiced beside Cancel; a technician never sees it.
     const done = row("visit_unbilled", { alreadyInvoiced: { kind: "job", id: "j1" } });
@@ -127,11 +128,25 @@ describe("the table", () => {
     expect(rowButtons(row("quote_awaiting", { affordances: ["dismiss", "open"] }), staff).primary).toBeNull();
   });
 
-  it("Leads off: Call Back stays the button, ⋯ Called and Lost; no number, Called", () => {
+  // cn-v1170: a lead's doors are the Leads list's (Erik: "remove everything else except Schedule and
+  // Not sold"). No Called, no Snooze. Schedule is the lead's file with its sheet open.
+  it("a lead: Schedule, then Call and Not Sold behind ⋯ (Not Sold? / Mark It Not Sold, kept on file)", () => {
+    const on = rowButtons(row("inquiry", { id: "lead-7", phone: "555-0100" }), staff);
+    expect(on.primary).toEqual({ label: "Schedule", act: { type: "open", href: "/leads/lead-7?schedule=1" } });
+    const notSold = on.more.find((d) => d.label === "Not Sold")!;
+    expect(notSold.act).toMatchObject({ type: "confirm", verb: "dismiss", title: "Not Sold?", button: "Mark It Not Sold", keep: "Keep It" });
+    expect((notSold.act as { body: string }).body).toContain("kept on file");
+    expect(allDoors(on).map((d) => d.label)).not.toEqual(expect.arrayContaining(["Called"]));
+    expect(allDoors(on).map((d) => d.label)).not.toContain("Snooze");
+  });
+
+  it("Leads off: Call Back stays the button, ⋯ Not Sold; no number, no button (the row still opens)", () => {
     const off = rowButtons(row("inquiry", { phone: "555-0100", chip: "Request" }), { leadsOn: false, isStaff: true });
     expect(off.primary).toEqual({ label: "Call Back", act: { type: "call", tel: "555-0100" } });
-    expect(labels(off.more)).toEqual(["Called", "Lost"]);
-    expect(rowButtons(row("inquiry", { chip: "Request" }), { leadsOn: false, isStaff: true }).primary?.label).toBe("Called");
+    expect(labels(off.more)).toEqual(["Not Sold"]);
+    const bare = rowButtons(row("inquiry", { chip: "Request" }), { leadsOn: false, isStaff: true });
+    expect(bare.primary).toBeNull();
+    expect(labels(bare.more)).toEqual(["Not Sold"]);
   });
 
   it("a pile carries its pile's verb, which only opens it", () => {
@@ -216,7 +231,7 @@ describe("an inspection to write up can be OPENED, not only written up or called
     // the ⋯ row was the same door twice under a second name (skeptic #60): it is gone.
     const b = rowButtons(row("inspection_writeup", { id: "appt-9", href: "/appointments/appt-9" }), { leadsOn: true, isStaff: true });
     expect(b.primary).toEqual({ label: "Open the Inspection", act: { type: "open", href: "/appointments/appt-9" } });
-    expect(b.more.map((d) => d.label)).toEqual(["Lost"]);
+    expect(b.more.map((d) => d.label)).toEqual(["Not Sold"]);
     // No second door, under any name, opens a page: exactly one "open" on the whole row.
     const opens = allDoors(b).filter((d) => d.act.type === "open");
     expect(opens).toHaveLength(1);
@@ -236,7 +251,7 @@ describe("an inspection to write up can be OPENED, not only written up or called
 
   it("⋯ gains Dismiss only when the row carries the wontHappen verb (a visit not yet completed)", () => {
     const withIt = rowButtons(row("inspection_writeup", { affordances: ["dismiss", "wontHappen", "open"] }), staff);
-    expect(withIt.more.map((d) => d.label)).toEqual(["Dismiss", "Lost"]);
+    expect(withIt.more.map((d) => d.label)).toEqual(["Dismiss", "Not Sold"]);
     const door = withIt.more.find((d) => d.label === "Dismiss")!;
     expect(door.act).toMatchObject({ type: "confirm", verb: "wontHappen", title: "Dismiss This Visit?", button: "Dismiss" });
     const without = rowButtons(row("inspection_writeup", { affordances: ["dismiss", "open"] }), staff);
@@ -408,7 +423,7 @@ describe("the doors in Spanish", () => {
       [row("quote_draft"), "Enviarlo"],
       [row("invoice_draft"), "Enviarla"],
       [row("quote_awaiting"), "Sigo Esperando"],
-      [row("inquiry"), "Ya Llamé"],
+      [row("inquiry"), "Agendar"],
       [row("appointment"), "Cerrar la Visita"],
       [row("inspection_writeup"), "Abrir la Inspección"],
       [row("job_to_schedule"), "Elegir un Día"],
@@ -432,9 +447,10 @@ describe("the doors in Spanish", () => {
       [row("supplier_paper"), null],
     ];
     for (const [item, label] of cases) expect(rowButtons(item, es).primary?.label ?? null, item.kind).toBe(label);
-    expect(labels(rowButtons(row("inquiry", { phone: "555-0100" }), es).more)).toEqual(["Llamar", "Posponer", "Perdido"]);
+    expect(labels(rowButtons(row("inquiry", { phone: "555-0100" }), es).more)).toEqual(["Llamar", "No Vendido"]);
+    expect(rowButtons(row("inquiry", { phone: "555-0100" }), es).more[1].act).toMatchObject({ title: "¿No Vendido?", button: "Marcar como No Vendido" });
     expect(rowButtons(row("inquiry", { phone: "555-0100" }), esOff).primary?.label).toBe("Devolver la Llamada");
-    expect(labels(rowButtons(row("inspection_writeup", { affordances: ["dismiss", "wontHappen", "open"] }), es).more)).toEqual(["Descartar", "Perdida"]);
+    expect(labels(rowButtons(row("inspection_writeup", { affordances: ["dismiss", "wontHappen", "open"] }), es).more)).toEqual(["Descartar", "No Vendida"]);
     expect(labels(rowButtons(row("job_to_schedule"), es).more)).toEqual(["Asignar", "Terminar", "Cancelar"]);
     expect(rowButtons(row("invoice_draft"), es).more[0]).toMatchObject({ label: "Apartar hasta…", act: { type: "comeBack", button: "Apartar" } });
   });
@@ -445,7 +461,7 @@ describe("the doors in Spanish", () => {
         id: `pile:${name}`,
         affordances: ["open"],
         pile: { name, label: "x", count: 2, capped: false, listHref: null, listLabel: null, verb },
-        children: [row(kind), row(kind)],
+        children: [row(kind, { phone: "555-0100" }), row(kind, { phone: "555-0100" })],
       });
     expect(rowButtons(pile("estimates_not_sent", "Send It", "quote_draft"), es).primary?.label).toBe("Enviarlo");
     expect(rowButtons(pile("invoices_not_sent", "Send It", "invoice_draft"), es).primary?.label).toBe("Enviarla");

@@ -94,7 +94,7 @@ describe("an estimate made out to a lead", () => {
     expect(html).toContain("Lead — not a customer yet");
     expect(html).toContain("Dana Rook");
     // The way to the lead's own row stays.
-    expect(html).toContain('href="/leads?focus=lead-1"');
+    expect(html).toContain('href="/leads/lead-1"');
     // Re-pinned in cn-v1158 (see the header): the card draws no address line and no pin beside one.
     // (The street still stands inside the lead's own FORM, as a box to correct it in: next test.)
     expect(html).not.toContain("16 Larkspur Circle, Testville, CA 96161");
@@ -200,9 +200,10 @@ describe("an estimate with a customer that started from a lead", () => {
 });
 
 describe("the lead's form on its own page is what it was", () => {
-  it("the outline Edit button, with Delete Lead in the sheet", () => {
+  it("Edit Details (cn-v1170: the old outline Edit had no caller left), with Delete Lead in the sheet", () => {
     const html = en(createElement(InquiryModal, { inquiry: leadRow(), mode: "edit" }));
-    expect(html).toMatch(/<button[^>]*><svg[^>]*>.*?<\/svg> Edit<\/button>/);
+    expect(html).toMatch(/<button[^>]*>Edit Details<\/button>/);
+    expect(html).not.toMatch(/> Edit<\/button>/);
     expect(html).toContain("Delete Lead");
   });
 });
@@ -238,11 +239,11 @@ describe("the whole lead rides to the card", () => {
     const fields = actions.slice(actions.indexOf("function inquiryFields("), actions.indexOf("export async function createInquiry("));
     const written = [...fields.matchAll(/^\s{4}([a-z_]+):/gm)].map((m) => m[1]);
     expect(written.sort()).toEqual(
-      ["address", "city", "company_name", "email", "message", "notes", "phone", "planned_minutes", "state", "work_kind", "zip"].sort(),
+      // cn-v1170: no work_kind or planned_minutes any more; the source is written apart, only when picked.
+      ["address", "city", "company_name", "email", "message", "notes", "phone", "state", "zip"].sort(),
     );
     const row = leadRow() as unknown as Record<string, unknown>;
-    // Every one of them is a column of the row the card hands over (work_kind and planned_minutes are
-    // real columns lib/types does not list; `*` carries them).
-    for (const col of written.filter((c) => c !== "work_kind" && c !== "planned_minutes")) expect(row).toHaveProperty(col);
+    // Every one of them is a column of the row the card hands over.
+    for (const col of written) expect(row).toHaveProperty(col);
   });
 });

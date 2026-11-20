@@ -1,17 +1,16 @@
 "use client";
 
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useOrgPublicBase } from "@/components/use-org-public-base";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Check, Copy, FileText, MessageSquare } from "lucide-react";
+import { Check, Copy, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label } from "@/components/ui/input";
 import { DayField } from "@/components/day-field";
-import { NewInspectionButton } from "../appointments/new-inspection-button";
+import { createInspectionNow } from "../appointments/actions";
 import { convertInquiry, suggestVisitSlots } from "./actions";
-import { workKind } from "@/lib/schedule/work-shape";
 import { useLang } from "@/components/lang-provider";
 import { translator, fillText } from "@/lib/i18n";
 
@@ -50,32 +49,24 @@ function defaultSlots(): { date: string; time: string }[] {
 }
 
 /**
- * The lead's front-and-center next steps — no more "Convert ▾" grab-bag. A lead either needs an
- * inspection to gather scope, or it's ready to price:
- *   • Inspection — starts one now, when you're already there.
- *   • Schedule — books an inspection onto the Schedule; the lead STAYS a lead. Two ways:
- *     "Book It" (a firm date) or "Let Them Pick" (offer up to 3 times → a /pick link to text them,
- *     same pattern as the appointment modal's Propose Times).
- *   • Create estimate — opens the estimate builder from this lead.
- * The rest of the pipeline (customer + scheduled job) happens automatically when the estimate is
- * ACCEPTED — that's the moment a prospect becomes a customer, so Contacts never fills with people
- * who never bought. (`customers` prop kept for signature stability; no longer used here.)
+ * THE LEAD'S SCHEDULE SHEET (cn-v1170): one sheet, three ways, always an INSPECTION (Erik's yes,
+ * 2026-11-19: Schedule on a lead always books an inspection; the straight-to-job fork went):
+ *   • Book It: a firm day, 9 AM, through convertInquiry's booking.
+ *   • Let Them Pick: up to 3 times -> a /pick link to text them (the appointment modal's pattern).
+ *   • Start Now: the one-tap inspect-now door (createInspectionNow), straight into the visit.
+ * LeadDoors (lead-doors.tsx) owns whether it is open. Once its visit stands the lead leaves the list.
  */
-export function ConvertMenu({
+export function LeadScheduleSheet({
   inquiryId,
   inquiryName,
-  workKind: workKindProp = null,
   businessPhone = null,
-  estimateDoor = true,
+  open,
+  onClose,
 }: {
   inquiryId: string;
   inquiryName: string;
-  customers?: { id: string; name: string }[];
-  /** The lead's declared Kind? tag. THE COPY MUST TELL THE TRUTH IT ACTS: a job/service lead with
-   *  a firm date books NO inspection — the server converts it into a real placed JOB (leads/
-   *  actions firm-booking fork), the lead graduates, and Done/Pay now wait on the job page. The
-   *  modal used to promise "an amber inspection… the lead stays open" for exactly that tap. */
-  workKind?: string | null;
+  open: boolean;
+  onClose: () => void;
   /**
    * THE BUSINESS LINE (organizations.phone), so this modal can say which number the text will NOT
    * go out from. Erik: "the text prompt defaults to my personal number and it needs to default to
@@ -88,22 +79,18 @@ export function ConvertMenu({
    * next to Copy Link is the honest version, and Copy Link is the working route to it.
    */
   businessPhone?: string | null;
-  /** The Estimates switch (0352): off, no Estimate button (convertInquiry refuses it too). */
-  estimateDoor?: boolean;
 }) {
-  const kind = workKind({ kind: "lead", workKind: workKindProp });
-  const isWork = kind === "job" || kind === "service";
   const lang = useLang();
   const t = translator(lang);
   const router = useRouter();
-  const [inspectOpen, setInspectOpen] = useState(false);
   const [inspectDate, setInspectDate] = useState(defaultInspectDate());
-  const [mode, setMode] = useState<"book" | "pick">("book");
+  const [mode, setMode] = useState<"book" | "pick" | "now">("book");
   const [slots, setSlots] = useState(defaultSlots);
   const [timeNote, setTimeNote] = useState("");
+  // The first useState(null) here is `link` (leads-spanish.test seeds the link-ready screen through it).
   const [link, setLink] = useState<{ token: string; phone: string | null } | null>(null);
   const [copied, setCopied] = useState(false);
-  const [busy, setBusy] = useState<null | "estimate" | "inspection" | "job" | "contact">(null);
+  const [busy, setBusy] = useState<null | "book" | "pick" | "now">(null);
   const [error, setError] = useState<string | null>(null);
   /* RIDE-ALONG SLOTS. The modal opens INSTANTLY on the blind defaults (60mph law), then the
      calendar's own suggestion lands async: days already holding inspections, at times that fit
@@ -112,22 +99,33 @@ export function ConvertMenu({
   const [slotNote, setSlotNote] = useState<string | null>(null);
   const touchedRef = useRef(false);
 
-  async function run(target: "estimate" | "inspection" | "job") {
-    setBusy(target);
+  async function run() {
+    const way = mode;
+    setBusy(way);
     setError(null);
-    // "estimate" opens the builder; "inspection" books the visit; "job" mints the real thing.
-    const res = await convertInquiry(inquiryId, target === "estimate" ? "quote" : target, {
-      ...(target === "inspection"
-        ? mode === "pick"
-          ? { slots: slots.filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s.date)), timeNote: timeNote.trim() || null }
-          : { startDate: inspectDate }
-        : {}),
-    });
+    if (way === "now") {
+      // START NOW: the lead row's old one-tap Inspection door, the same server door, into the visit.
+      const res = await createInspectionNow({ inquiryId });
+      if (!res.ok || !res.id) {
+        setError(res.error ?? t("ld_couldntStartInspection"));
+        setBusy(null);
+        return;
+      }
+      router.push(`/appointments/${res.id}`);
+      return;
+    }
+    const res = await convertInquiry(
+      inquiryId,
+      "inspection",
+      way === "pick"
+        ? { slots: slots.filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s.date)), timeNote: timeNote.trim() || null }
+        : { startDate: inspectDate },
+    );
     if (res.ok && res.token) {
-      // "Let them pick" — show the link-ready screen; the lead stays open.
+      // "Let them pick": the link-ready screen. NO refresh yet: the proposed visit takes the lead off
+      // the list, which would unmount this sheet before the link is copied. Closing it refreshes.
       setLink({ token: res.token, phone: res.phone ?? null });
       setBusy(null);
-      router.refresh();
       return;
     }
     if (res.ok && res.redirect) {
@@ -138,7 +136,9 @@ export function ConvertMenu({
     setBusy(null);
   }
 
-  function openInspect() {
+  // Every opening starts clean, then the calendar's own suggestion rides in (below).
+  useEffect(() => {
+    if (!open) return;
     setInspectDate(defaultInspectDate());
     setSlots(defaultSlots());
     setTimeNote("");
@@ -147,10 +147,10 @@ export function ConvertMenu({
     setMode("book");
     setSlotNote(null);
     touchedRef.current = false;
-    setInspectOpen(true);
+    let live = true;
     suggestVisitSlots(inquiryId)
       .then((r) => {
-        if (!r.ok || !r.slots.length || touchedRef.current) return;
+        if (!live || !r.ok || !r.slots.length || touchedRef.current) return;
         // Clustered days first, blind defaults padding out to three options.
         const pad = defaultSlots().filter((d) => !r.slots.some((x) => x.date === d.date));
         setSlots([...r.slots, ...pad].slice(0, 3));
@@ -158,12 +158,19 @@ export function ConvertMenu({
         setSlotNote(r.note ?? null);
       })
       .catch(() => { /* suggestion only — the defaults already stand */ });
-  }
+    return () => {
+      live = false;
+    };
+  }, [open, inquiryId]);
 
+  // cn-v1170: Let Them Pick's action revalidates nothing (it would unmount this sheet with the
+  // link on it), so every close refreshes the route here: Done, Cancel, the X, a tap outside and
+  // the phone's back all come through this one function.
   function closeInspect() {
     if (busy !== null) return;
-    setInspectOpen(false);
     setLink(null);
+    onClose();
+    router.refresh();
   }
 
   // The BUSINESS's domain, not the browser's — see useOrgPublicBase.
@@ -185,84 +192,24 @@ export function ConvertMenu({
   }
 
   return (
-    <>
-      {/* THREE VERBS, ONE SET, CENTRED. Erik: "lets make the buttons simple: (Inspect - Schedule
-          - Estimate) and they should line up on the page centered instead of all over the place
-          now its confusing." They used to sit at the end of the contact line, so their left edge
-          moved with whatever phone/email/note happened to precede them — every row put them
-          somewhere different and the eye had to re-find them on each one. Centred on their own
-          row, they land in the same place down the whole list. */}
-      {/* THE THREE VERBS ARE THE CENTRED THING — the contact sits OUTSIDE the centring.
-          First attempt centred the whole group with the contact button inside it, so a long name
-          ("Steph McCafee") shoved all three verbs left and a short one ("Eileen") let them drift
-          right: the rows still didn't line up, which was the entire complaint. Absolutely
-          positioning the contact takes it out of the flow, so the three verbs centre on the row
-          itself and land at the same x all the way down the list however long the name is. */}
-      <div className="relative flex w-full flex-wrap items-center justify-center gap-2 sm:flex-nowrap">
-        {/* Already there? One tap creates the inspection (linked to this lead) and lands
-            straight on its capture page — no booking ceremony (nowOnly: the schedule
-            options live right here in the modal alongside).
-            ERIK'S ONE-WORD VERBS (July), with the site visit's one word (lib/statuses): Inspection ·
-            Schedule · Estimate. 44px each; on a phone the icons step aside so the three still fit
-            one line at 375px (the words carry the meaning). */}
-        <NewInspectionButton
-          nowOnly
-          label={t("ld_btn_inspection")}
-          title={t("ld_inspectionNowTitle")}
-          iconClassName="hidden h-4 w-4 sm:block"
-          inquiryId={inquiryId}
-          variant="outline"
-        />
-        {/* "Schedule", not "Schedule inspection" — Erik: "takes up way too much space on the
-            screen and is distracting". An inspection is the only thing there is to schedule on
-            a LEAD row; the modal it opens says "Book an Inspection" in its title, which is where
-            that word belongs. */}
-        <Button
-          variant="outline"
-          onClick={openInspect}
-          disabled={busy !== null}
-          title={isWork ? t(kind === "job" ? "ld_putJobOnSchedule" : "ld_putServiceCallOnSchedule") : t("ld_bookInspectionStaysOpen")}
-        >
-          <CalendarPlus className="hidden h-4 w-4 sm:block" /> {t("ld_btn_schedule")}
-        </Button>
-        {estimateDoor && (
-          <Button onClick={() => run("estimate")} disabled={busy !== null}>
-            <FileText className="hidden h-4 w-4 sm:block" /> {busy === "estimate" ? t("ld_btn_opening") : t("ld_btn_estimate")}
-          </Button>
-        )}
-        {/* THE CONTACT BUTTON IS GONE — the NAME is that control now (see inquiry-row).
-            Erik: "have the name be the contact button or create contact option to clear up all
-            that much more space … lets unify and simplfy in all we do." Two things saying the
-            same thing is one thing too many, and it was also what made the three verbs fail to
-            line up: its width changed with the name, so the centred group moved per row. */}
-      </div>
-      {error && !inspectOpen && <p className="mt-1 text-xs text-red-600">{error}</p>}
-
-      <Modal
-        open={inspectOpen}
-        onClose={closeInspect}
-        title={
-          link ? t("ld_btn_textThemTheseTimes")
-          // Pick mode books a PROPOSAL for every kind — a job can't be placed on an unchosen
-          // day, so the work-flavored title would promise a conversion pick mode never does.
-          : isWork && mode === "book" ? (kind === "job" ? t("ld_btn_scheduleTheJob") : t("ld_btn_bookTheServiceCall"))
-          : isWork ? t("ld_btn_offerTimesForTheVisit")
-          : t("ld_btn_bookAnInspection")
-        }
-        size="sm"
-        footer={
-          link ? (
-            <ModalActions onCancel={closeInspect} onSave={closeInspect} saveLabel={t("ld_btn_done")} hideCancel />
-          ) : (
-            <ModalActions
-              onCancel={closeInspect}
-              onSave={() => run("inspection")}
-              saving={busy === "inspection"}
-              saveLabel={mode === "pick" ? t("ld_btn_createLink") : isWork ? (kind === "job" ? t("ld_btn_scheduleJob") : t("ld_btn_bookServiceCall")) : t("ld_btn_bookIt")}
-            />
-          )
-        }
-      >
+    <Modal
+      open={open}
+      onClose={closeInspect}
+      title={link ? t("ld_btn_textThemTheseTimes") : mode === "now" ? t("ld_startNowTitle") : t("ld_btn_bookAnInspection")}
+      size="sm"
+      footer={
+        link ? (
+          <ModalActions onCancel={closeInspect} onSave={closeInspect} saveLabel={t("ld_btn_done")} hideCancel />
+        ) : (
+          <ModalActions
+            onCancel={closeInspect}
+            onSave={() => void run()}
+            saving={busy !== null}
+            saveLabel={mode === "pick" ? t("ld_btn_createLink") : mode === "now" ? t("ld_btn_startNow") : t("ld_btn_bookIt")}
+          />
+        )
+      }
+    >
         {link ? (
           <div className="space-y-3">
             <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
@@ -294,29 +241,27 @@ export function ConvertMenu({
           </div>
         ) : (
           <div className="space-y-4">
-            {isWork && mode === "book" ? (
-              <p className="text-sm text-slate-600">
-                {around(t(kind === "job" ? "ld_putsJobOnSchedule" : "ld_putsServiceCallOnSchedule"), "name", <strong>{inquiryName}</strong>)}
-              </p>
-            ) : (
-              <p className="text-sm text-slate-600">
-                {around(t("ld_booksInspectionFor"), "name", <strong>{inquiryName}</strong>)}
-              </p>
-            )}
+            <p className="text-sm text-slate-600">
+              {around(t(mode === "now" ? "ld_startNowSays" : "ld_booksInspectionFor"), "name", <strong>{inquiryName}</strong>)}
+            </p>
 
             <SegmentedControl
               stretch
               activeId={mode}
-              onSelect={(id) => setMode(id as typeof mode)}
+              onSelect={(id) => {
+                setError(null);
+                setMode(id as typeof mode);
+              }}
               items={[
                 { id: "book", label: t("ld_btn_bookIt") },
                 { id: "pick", label: t("ld_btn_letThemPick") },
+                { id: "now", label: t("ld_btn_startNow") },
               ]}
             />
 
-            {mode === "book" ? (
+            {mode === "now" ? null : mode === "book" ? (
               <div>
-                <Label htmlFor="inspect-date">{isWork ? t("ld_startDate") : t("ld_day")}</Label>
+                <Label htmlFor="inspect-date">{t("ld_day")}</Label>
                 <DayField id="inspect-date" value={inspectDate} onChange={(iso) => { touchedRef.current = true; setSlotNote(null); setInspectDate(iso); }} />
                 {slotNote && <p className="mt-1 text-xs text-brand">{slotNote}</p>}
                 <p className="mt-1 text-xs text-slate-400">{t("ld_defaultsToNine")}</p>
@@ -355,7 +300,6 @@ export function ConvertMenu({
             {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
           </div>
         )}
-      </Modal>
-    </>
+    </Modal>
   );
 }

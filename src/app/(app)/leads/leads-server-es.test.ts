@@ -55,7 +55,7 @@ vi.mock("@/lib/staff-guard", () => ({ requireStaff: async () => ({ supabase: fre
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }));
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
 vi.mock("@/lib/rate-limit", () => ({ rateLimited: async () => false }));
-vi.mock("../schedule/actions", () => ({ placeJobOnDay: vi.fn(), planDayTimes: vi.fn() }));
+vi.mock("../schedule/actions", () => ({ planDayTimes: vi.fn() }));
 vi.mock("../quotes/actions", () => ({ saveQuote: vi.fn() }));
 vi.mock("@/lib/plan-brief-run", () => ({ runPlanBrief: vi.fn(async () => ({ ok: true })) }));
 
@@ -64,10 +64,9 @@ import {
   createInquiry,
   deleteInquiry,
   intakeFileUrl,
+  reopenLead,
   scheduleLeadsOnDay,
   setLeadContact,
-  sizeLead,
-  snoozeInquiry,
   updateInquiry,
 } from "./actions";
 
@@ -95,16 +94,15 @@ describe("a Spanish-reading office hears the leads' refusals in Spanish", () => 
     expect(await intakeFileUrl("l1", "org-1/x.pdf")).toEqual({ ok: false, error: "No se encontró." });
   });
 
-  it("the batch, the sizing and the contact spot", async () => {
+  it("the batch and the contact spot", async () => {
     expect(await scheduleLeadsOnDay([], "2026-11-06")).toEqual({ ok: false, error: "Elige al menos un prospecto.", booked: 0, failures: [] });
     expect(await scheduleLeadsOnDay(["l1"], "Thursday")).toEqual({ ok: false, error: "Elige un día.", booked: 0, failures: [] });
-    expect(await sizeLead("l1", { workKind: "juggling" })).toEqual({ ok: false, error: "Ese no es un tipo de trabajo." });
-    expect(await sizeLead("l1", { plannedMinutes: -5 })).toEqual({ ok: false, error: "Esa duración no tiene sentido." });
     expect(await setLeadContact("l1", { email: "snowbell" })).toEqual({ ok: false, error: "Ese correo no se ve bien." });
   });
 
-  it("a lib's refusal comes back in the caller's words too (the come-back day)", async () => {
-    expect(await snoozeInquiry("l1", "soon")).toEqual({ ok: false, error: "Elige un día." });
+  it("Reopen on a lead that is not Not Sold any more (cn-v1170)", async () => {
+    db.rows = { inquiries: { id: "l1", status: "new", converted_at: null, last_contacted_at: null } };
+    expect(await reopenLead("l1")).toEqual({ ok: false, error: "Este prospecto ya no está como no vendido. Recarga para ver dónde está." });
   });
 
   it("a note handed to the screen: two customers with the lead's name", async () => {
@@ -118,7 +116,6 @@ describe("a Spanish-reading office hears the leads' refusals in Spanish", () => 
   });
 
   it("a door that says nothing reads no language", async () => {
-    expect(await sizeLead("l1", {})).toEqual({ ok: true });
     expect(await setLeadContact("l1", { phone: "5305550100" })).toEqual({ ok: true });
     expect(await updateInquiry("l1", form({ name: "Larkspur" }))).toEqual({ ok: true });
     expect(db.profileReads).toBe(0);
@@ -138,8 +135,6 @@ describe("an English reader gets the very bytes the actions always said", () => 
     expect(await updateInquiry("l1", form({ name: "Larkspur" }))).toEqual({ ok: false, error: "That lead isn't available." });
     expect(await convertInquiry("l1", "customer")).toEqual({ ok: false, error: "Lead not found." });
     expect(await scheduleLeadsOnDay([], "2026-11-06")).toEqual({ ok: false, error: "Pick at least one lead.", booked: 0, failures: [] });
-    expect(await sizeLead("l1", { plannedMinutes: -5 })).toEqual({ ok: false, error: "That duration isn't sensible." });
     expect(await setLeadContact("l1", { email: "snowbell" })).toEqual({ ok: false, error: "That email doesn't look right." });
-    expect(await snoozeInquiry("l1", "soon")).toEqual({ ok: false, error: "Pick a day." });
   });
 });

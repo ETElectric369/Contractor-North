@@ -76,9 +76,8 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "inquiry.create",
   "inquiry.contact",
   "inquiry.convert",
-  // Every wait has a day (NY-feeders, 0366): bring a lead back on a later day, or record it lost
-  // (kept, status lost). Tier-1 reversible writes Nort runs on a yes, like inquiry.contact.
-  "inquiry.snooze",
+  // Record a lead Not Sold (kept on file). A tier-1 reversible write Nort runs on a yes, like
+  // inquiry.contact. inquiry.snooze left with the follow-up day (cn-v1170).
   "inquiry.markLost",
   "permit.create",
   // Mycelium: the office/field nodes — log a safety record, a compliance item, a lien update. All
@@ -190,7 +189,6 @@ export const AGENT_TOOL_FEATURE: Readonly<Record<string, FeatureKey>> = {
   "inquiry.create": "leads",
   "inquiry.contact": "leads",
   "inquiry.convert": "leads",
-  "inquiry.snooze": "leads",
   "inquiry.markLost": "leads",
   "quote.create": "estimates",
   "quote.followUp": "estimates",

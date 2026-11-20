@@ -25,8 +25,9 @@ import { noJobStrayDoors } from "@/lib/already-billed";
 import { noJobHoursActionItem } from "./no-job-hours-item";
 import { readNoJobHours, type NoJobHours } from "@/lib/no-job-hours";
 import { isOpenToBuy, newestListPerJob } from "@/lib/materials-checklist";
-import { feederOn, inquiryActionItem } from "./switches";
-import { draftInvoiceState, heldJobState, inquiryDueFilter, lateInvoiceFilter, quoteFollowUpState, quoteNoAnswerFilter } from "./due-filters";
+import { INQUIRY_ROW_COLUMNS, feederOn, inquiryActionItem, type InquiryRow } from "./switches";
+import { NEW_INTAKE_COUNT_CAP, loadNewIntake } from "@/lib/leads/new-intake";
+import { draftInvoiceState, heldJobState, lateInvoiceFilter, quoteFollowUpState, quoteNoAnswerFilter } from "./due-filters";
 import { isMissingColumn } from "@/lib/job-tasks";
 import { featureOn, featuresFromOffKey } from "@/lib/features";
 import { COSTED_INVOICE_COLUMNS, NEEDS_RETURN_DAYS, costedJobIds, daysAgoStr, detectStrayTime, detectUnbilledWork, rollupWorkedJobs } from "./leak-detectors";
@@ -176,6 +177,29 @@ async function inChunks(ids: readonly string[], read: (chunk: string[]) => Promi
   for (let i = 0; i < uniq.length; i += ID_CHUNK) parts.push(uniq.slice(i, i + ID_CHUNK));
   const res = await Promise.all(parts.map((p) => Promise.resolve(read(p))));
   return { data: res.flatMap((r) => r?.data ?? []), error: res.find((r) => r?.error)?.error ?? null };
+}
+
+/** The most lead rows one build draws; the pile still counts every lead on the list. */
+export const LEAD_ROWS_DRAWN = 50;
+
+/**
+ * THE LEADS LIST as a feeder's read (cn-v1170): loadNewIntake with the badge's own cap, so the
+ * pile's count is the badge's number. Rows oldest first (the lead waiting longest leads). A failed
+ * read is reported and comes back as an error, which the build says as a Couldn't Check line.
+ */
+export async function readLeadsList(supabase: Parameters<typeof loadNewIntake>[0]): Promise<Read> {
+  try {
+    const res = await loadNewIntake<InquiryRow>(supabase, INQUIRY_ROW_COLUMNS, { limit: NEW_INTAKE_COUNT_CAP });
+    if (res.error) {
+      reportError("action-items.leads", res.error);
+      return { data: [], error: res.error, count: 0 };
+    }
+    const oldestFirst = [...res.leads].reverse();
+    return { data: oldestFirst.slice(0, LEAD_ROWS_DRAWN), error: null, count: res.leads.length };
+  } catch (e) {
+    reportError("action-items.leads", e);
+    return { data: [], error: e, count: 0 };
+  }
 }
 
 async function buildActionItems(ctx: {
@@ -500,7 +524,6 @@ async function buildActionItems(ctx: {
   const [
     jobsR,
     inqR,
-    inqLaterR,
     apptR,
     orgR,
     invR,
@@ -544,30 +567,10 @@ async function buildActionItems(ctx: {
           .limit(1, { referencedTable: "time_entries" })
           .limit(JOBS_DAY_READ_CAP)
       : empty,
-    // New/contacted leads due for follow-up — staff only. A snoozed lead (new or contacted) is off
-    // Now until its day (inquiryDueFilter) and waits in the fold (the next read). A LIVE OBLIGATION:
-    // it runs with Leads off too (Call Back).
-    isStaff
-      ? supabase
-          .from("inquiries")
-          .select("id, name, phone, status, next_follow_up_at, converted_at, created_at", { count: "exact" })
-          .in("status", ["new", "contacted"])
-          .is("converted_at", null)
-          .or(inquiryDueFilter(todayStr))
-          .order("created_at", { ascending: true })
-          .limit(50)
-      : empty,
-    // ...and the ones whose day is later: the fold, with the day each comes back.
-    isStaff
-      ? supabase
-          .from("inquiries")
-          .select("id, name, status, next_follow_up_at")
-          .in("status", ["new", "contacted"])
-          .is("converted_at", null)
-          .gt("next_follow_up_at", todayStr)
-          .order("next_follow_up_at", { ascending: true })
-          .limit(50)
-      : empty,
+    // THE LEADS LIST, EXACTLY (cn-v1170), staff only. The one rule (lib/leads/new-intake), never a
+    // filter of its own: the same read and the same cap as the Sales badge, so the row count and the
+    // badge agree. No follow-up day and no fold. A LIVE OBLIGATION: it runs with Leads off too.
+    isStaff ? readLeadsList(supabase) : empty,
     apptP,
     // Captures awaiting a filing decision — staff only. What each one is decides where it sorts
     // (the /bills tray or Organize: isTrayPaper).
@@ -731,7 +734,7 @@ async function buildActionItems(ctx: {
     receiptsP,
     waitsP,
   ])) as [
-    Read, Read, Read, Read, Read, Read, Read & { noFollowUp?: boolean; later?: Read }, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, DoneRead, Read,
+    Read, Read, Read, Read, Read, Read & { noFollowUp?: boolean; later?: Read }, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, DoneRead, Read,
     Read & { withDay: boolean }, Read | null, NeedsYouWaits,
   ];
 
@@ -925,33 +928,37 @@ async function buildActionItems(ctx: {
   // ONE PERSON, ONE ROW (Erik: "the same fact never shows as two rows"). A lead whose visit happened
   // and is waiting to be written up is past calling back: the write-up row above IS its next step,
   // so the lead's Call Back row (and its fold row) stays out, and the pile counts what is drawn.
+  // cn-v1170: the rows are the Leads list's (a lead with a standing visit is already off it, so the
+  // write-up guard rarely bites); a failed read is one Couldn't Check line, never an empty list.
   let leadsRidden = 0;
-  for (const q of (inqR.data ?? []) as any[]) {
+  if (isStaff && inqR.error) {
+    items.push({
+      id: "leads-unread",
+      kind: "inquiry",
+      title: "New Leads · Couldn't Check",
+      subtitle: "Couldn't read your leads just now. Open Leads to see them.",
+      whoSay: { key: "ny_who_unread", vars: { labelKey: "ny_btn_pile_leadsToCall" } },
+      what: { key: "ny_w_unreadLeads" },
+      who: null,
+      when: null,
+      urgency: 1,
+      done: false,
+      href: "/leads",
+      affordances: ["open"],
+    });
+  }
+  for (const q of (inqR.data ?? []) as InquiryRow[]) {
     if (leadRidesItsWriteUp(q.id, writeUpLeadIds)) {
       leadsRidden++;
       continue;
     }
-    items.push({ ...inquiryActionItem(q, todayStr, leadsOn), since: q.created_at ?? null });
+    items.push({ ...inquiryActionItem(q, leadsOn), since: q.created_at ?? null });
   }
-  counts.leads_to_call = lessRidden(sqlCount(inqR), leadsRidden);
-  for (const q of (inqLaterR.data ?? []) as any[]) {
-    if (leadRidesItsWriteUp(q.id, writeUpLeadIds)) continue;
-    const name = String(q.name ?? "").trim() || "Someone";
-    const row = waitingRow({
-      id: q.id,
-      kind: "inquiry",
-      title: leadsOn ? name : `Request from ${name}`,
-      why: q.status === "new" ? "Snoozed" : "Follow Up",
-      backOn: q.next_follow_up_at,
-      href: `/leads?focus=${q.id}`,
-    });
-    if (row) waiting.push(row);
-  }
+  const leadCount = (inqR.count ?? 0) >= NEW_INTAKE_COUNT_CAP ? { capped: true } : sqlCount(inqR);
+  counts.leads_to_call = lessRidden(leadCount, leadsRidden);
   // A visit with a lead rides the lead's row (one fact, one row) — the leads DRAWN, so a lead kept
   // out by its write-up never hides a second visit of its own.
-  const leadIds = new Set<string>(
-    [...((inqR.data ?? []) as any[]), ...((inqLaterR.data ?? []) as any[])].map((q) => String(q.id)).filter((id) => !writeUpLeadIds.has(id)),
-  );
+  const leadIds = new Set<string>(((inqR.data ?? []) as InquiryRow[]).map((q) => String(q.id)).filter((id) => !writeUpLeadIds.has(id)));
 
 
   // ── VISITS NOBODY CLOSED OUT.

@@ -15,7 +15,7 @@ import type { ActionKind, Affordance } from "./types";
  *
  * No task arms and no convert branch (Wave 1, W1-16): tasks and Reminders never reach Needs You
  * (0358). The registry keeps task.* and inquiry.convert for Nort; nothing here reaches them. Nor
- * inquiry.delete: a lead's ending is inquiry.markLost (kept, status lost), never a deletion.
+ * inquiry.delete: a lead's ending is inquiry.markLost (Not Sold, kept on file), never a deletion.
  */
 export type DispatchPayload = { date?: string; assignee?: string; reason?: string };
 
@@ -37,7 +37,6 @@ export function resolveRowVerb(
   const reason = (payload?.reason ?? "").trim();
 
   if (verb === "do") {
-    if (kind === "inquiry") return { name: "inquiry.contact", input: { id } };
     if (kind === "appointment") return { name: "appointment.setStatus", input: { id, status: "completed" } };
     // Take Off Hold: back to scheduled or to be scheduled by its date (setJobHold(id, null)).
     if (kind === "job_on_hold") {
@@ -65,9 +64,7 @@ export function resolveRowVerb(
 
   if (verb === "snooze") {
     if (!date) return null;
-    // SNOOZE IS NOT A CONTACT. The lead comes back on that day and nobody is said to have reached
-    // anyone (no 'contacted', no last_contacted_at): Nort's inquiry.snooze, the same deed.
-    if (kind === "inquiry") return { name: "inquiry.snooze", input: { id, date } };
+    // A lead has no Snooze since cn-v1170 (a lead on the Leads list IS the reminder).
     // Still Waiting: the follow-up day only (quotes.follow_up_at); valid_until never moves.
     if (kind === "quote_awaiting") return { name: "quote.followUp", input: { id, date } };
     // A hold whose day has come: another day, the reason written only when none is saved.
@@ -107,7 +104,7 @@ export function resolveRowVerb(
   }
 
   if (verb === "dismiss") {
-    // THE HONEST ENDINGS. Each writes a real domain fact (a lost lead, a declined estimate, an
+    // THE HONEST ENDINGS. Each writes a real domain fact (a Not Sold lead, a declined estimate, an
     // inspection's outcome, a cancelled visit or job, a paper in the Archive), so Needs You stays a
     // projection of reality and never a list of things somebody clicked away.
     if (kind === "inquiry") return { name: "inquiry.markLost", input: { id } };
@@ -117,7 +114,7 @@ export function resolveRowVerb(
     if (kind === "appointment") return { name: "appointment.wontHappen", input: { id } };
     if (kind === "organize") return { name: "organize.archive", input: { id } };
     if (kind === "quote_awaiting") return { name: "quote.setStatus", input: { id, status: "declined" } };
-    // A win that went away after all (Lost): the estimate is declined; its job is left as it is.
+    // A win that went away after all (Not Sold): the estimate is declined; its job is left as it is.
     if (kind === "quote_accepted") return { name: "quote.setStatus", input: { id, status: "declined" } };
     if (kind === "inspection_writeup") return { name: "appointment.setOutcome", input: { id, outcome: "lost" } };
     if (kind === "quote_draft") {

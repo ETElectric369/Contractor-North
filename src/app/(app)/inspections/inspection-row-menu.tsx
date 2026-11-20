@@ -7,6 +7,7 @@ import { useLang } from "@/components/lang-provider";
 import { translator } from "@/lib/i18n";
 import type { Lang } from "@/lib/locale";
 import { wontHappenToast, wontHappenUndo } from "@/lib/appointments/wont-happen";
+import { notSoldAnswer, undoneKey } from "@/lib/appointments/not-sold";
 import { dayWords } from "@/lib/action-items/dated-when";
 import { fillSlots } from "@/lib/lang-words";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,7 @@ import type { BoardRow } from "./board-types";
  *   · Move to Another Day…: the one day picker; the visit keeps its time of day and its length, and
  *     the toast names the day it went to.
  *   · It Happened: Write It Up: marks the visit done, so it moves to Write Up (Undo puts its status back).
- *   · Lost: the visit did not become work; it is kept, under Lost (Undo clears the outcome).
+ *   · Not Sold (cn-v1170, was Lost): the visit did not become work; it is kept, under Not Sold (Undo clears the outcome).
  *   · Dismiss… (cn-v1166; was Delete…): the visit page's own Dismiss, behind its ask; a visit that is cancelled and kept
  *     (something was on it) offers Undo, as the visit's own page does.
  * The page decides which a row gets (its `menu`); a row with none of them gets no ⋯ at all, and a
@@ -138,7 +139,12 @@ export async function markItHappened(
   io.refresh();
 }
 
-/** LOST: the one ending for a visit that did not become work. The Undo clears the outcome. */
+/**
+ * NOT SOLD (cn-v1170, was Lost): the one ending for a visit that did not become work. When the answer
+ * says the visit's lead went Not Sold with it (leadMarked), the toast says so. The Undo clears the
+ * outcome, and the server puts a Not Sold lead back by its own rule: the Undo says the lead is open
+ * again only when the answer says it was (leadReopened). A lead step that failed (warning) is said.
+ */
 export async function markItLost(
   id: string,
   io: DoorIo,
@@ -153,7 +159,26 @@ export async function markItLost(
   }
   if (!res.ok) return refused(io, res.error ?? io.t("vp_thatDidntSave"));
   io.close();
-  io.toast(io.t("vp_markedLost"), "success", undoWith(io, () => deps.setOutcome(id, null)));
+  const a = notSoldAnswer(res);
+  const undo = {
+    label: io.t("ag_btn_undo"),
+    onClick: () => {
+      void deps.setOutcome(id, null).then(
+        (r) => {
+          if (!r.ok) io.toast(r.error ?? io.t("vp_thatDidntSave"), "error");
+          else {
+            const k = undoneKey(r);
+            io.toast(k ? io.t(k) : io.t("ip_backWhereItWas"), "success");
+            if (r.warning) io.toast(r.warning, "error");
+          }
+          io.refresh();
+        },
+        () => io.toast(io.t("vp_thatDidntSave"), "error"),
+      );
+    },
+  };
+  io.toast(io.t(a.said), "success", undo);
+  if (a.warning) io.toast(a.warning, "error");
   io.refresh();
 }
 

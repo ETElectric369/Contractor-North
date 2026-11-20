@@ -33,7 +33,8 @@ import { TellNort } from "@/components/tell-nort";
 import { JobPermits } from "./job-permits";
 import { TookFromStock } from "../../materials/took-from-stock";
 import { RecurringRowActions } from "../../recurring/recurring-actions-ui";
-import { ConvertMenu } from "../../leads/convert-menu";
+import { FileEstimates } from "../../leads/[id]/file-estimates";
+import { translator } from "@/lib/i18n";
 
 const r = (c: any, p: any) => renderToStaticMarkup(createElement(c, p));
 
@@ -169,16 +170,18 @@ describe("Recurring Billing: a template's row", () => {
   });
 });
 
-describe("Estimates on a lead's row", () => {
-  it("on (the default): Estimate beside Schedule", () => {
-    const html = r(ConvertMenu, { inquiryId: "i1", inquiryName: "Sarah" });
-    expect(html).toMatch(/ Estimate<\/button>/);
-    expect(html).toContain("Schedule");
+// cn-v1170: Start an Estimate left the lead's row ("an estimate without a visit" is kept, on the
+// lead's file at /leads/<id>); the same switch gates it there.
+describe("Estimates on a lead's file", () => {
+  const base = { leadId: "i1", estimates: [], stage: "open", lang: "en", t: translator("en") };
+  it("on: Start an Estimate", () => {
+    expect(r(FileEstimates, { ...base, estimatesOn: true })).toContain("Start an Estimate");
   });
-  it("off: no Estimate; Schedule stays", () => {
-    const html = r(ConvertMenu, { inquiryId: "i1", inquiryName: "Sarah", estimateDoor: false });
-    expect(html).not.toMatch(/ Estimate<\/button>/);
-    expect(html).toContain("Schedule");
+  it("off: no Start an Estimate; the estimates already made stay listed", () => {
+    const estimates = [{ id: "q1", quote_number: "E-001", title: "Larkspur deck", status: "draft", created_at: "2026-11-01T17:00:00Z" }];
+    const html = r(FileEstimates, { ...base, estimates, estimatesOn: false });
+    expect(html).not.toContain("Start an Estimate");
+    expect(html).toContain("E-001");
   });
 });
 

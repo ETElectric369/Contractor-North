@@ -255,13 +255,8 @@ const KEEPS_THE_OLD_WORD: { file: string; text: string; whole?: true; reason: st
     text: "own walkthrough of taking a tap",
     reason: "Apple's own walkthrough of taking a tap: a tutorial video, a third sense of the word",
   },
-  // NORT, told the stored value as stored (and told which word a person reads). The clause, not the
-  // file: every other description in assistant-tools.ts is swept.
-  {
-    file: "src/lib/assistant-tools.ts",
-    text: "(job / service / quote / walkthrough — the stored 'walkthrough' is the site visit before a price, which a person reads as an Inspection; null means nobody tagged it yet)",
-    reason: "names the STORED work_kind value to Nort, and says in the same breath that it reads as an Inspection",
-  },
+  // (cn-v1170: list_inquiries no longer hands Nort a lead's work kind, so its stored-value clause,
+  // the one kept literal in assistant-tools.ts, is gone with it.)
 ];
 
 /** True when the only old words left in this literal are ones this file is allowed to keep. */
@@ -371,7 +366,7 @@ describe("the old word cannot come back", () => {
    * files fails here even if an existing entry happens to cover it — which is the hole the old
    * file-level list had: appointments/actions.ts could gain any number of them, unseen.
    */
-  it("the whole allowlist is nine literals in five files, and nothing more hides behind it", () => {
+  it("the whole allowlist is eight literals in four files, and nothing more hides behind it", () => {
     const perFile: Record<string, number> = {};
     for (const f of files) {
       const n = wordsIn(f).filter((w) => OLD_WORD.test(w.text) && !isDatabaseName(w.text)).length;
@@ -381,10 +376,9 @@ describe("the old word cannot come back", () => {
       "src/app/(app)/appointments/actions.ts": 2, // the two STOCK lists
       "src/components/command-bar.tsx": 3, // three alias spellings
       "src/components/tap-to-pay/settings-section.tsx": 1, // Apple's sentence
-      "src/lib/assistant-tools.ts": 1, // list_inquiries' stored-value clause
       "src/lib/job-name.ts": 2, // two SOURCE_TAGS spellings
     });
-    expect(Object.values(perFile).reduce((a, b) => a + b, 0)).toBe(9);
+    expect(Object.values(perFile).reduce((a, b) => a + b, 0)).toBe(8);
   }, 60_000);
 
   it("every database name on the exception list carries why it is there", () => {

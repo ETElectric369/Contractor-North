@@ -389,11 +389,54 @@ describe("action registry — the waits Nort can move (job.snoozeHold, invoice.s
     }
   });
 
-  it("a snooze moves a day and a lead's ending is Lost, never a delete", () => {
+  it("a snooze moves a day and a lead's ending is Not Sold, never a delete", () => {
     expect(REGISTRY["quote.followUp"].description).toMatch(/only the follow-up day/);
-    expect(REGISTRY["inquiry.snooze"].description).toMatch(/only the next follow-up day/);
     expect(REGISTRY["inquiry.markLost"].description).toMatch(/kept \(not deleted\)/);
+    expect(REGISTRY["inquiry.markLost"].description).toMatch(/Not Sold/);
+    expect(REGISTRY["inquiry.markLost"].label).toBe("Mark a lead Not Sold");
     expect(offered("owner")).not.toContain("inquiry__delete");
+  });
+
+  // cn-v1170: a lead has no follow-up day (Erik: "if a lead is still on the lead page that IS the
+  // reminder"), so the lead's snooze is gone from the registry and inquiry.contact takes no date.
+  it("a lead has no follow-up day: no inquiry.snooze, and inquiry.contact takes only the id", () => {
+    expect(REGISTRY["inquiry.snooze"]).toBeUndefined();
+    expect(AGENT_WRITE_ALLOWED.has("inquiry.snooze")).toBe(false);
+    expect(offered("owner")).not.toContain("inquiry__snooze");
+    const contact = REGISTRY["inquiry.contact"];
+    expect(contact.input.safeParse({ id: "i-1" }).success).toBe(true);
+    expect(JSON.stringify(contact.input.safeParse({ id: "i-1", follow_up_date: "2026-12-01" }).data)).not.toContain("follow_up_date");
+    expect(contact.description).not.toMatch(/follow-up date/i);
+  });
+
+  it("inquiry.create takes the form's fields: the address parts, the scope, notes and a source; no kind, no how long", () => {
+    const create = REGISTRY["inquiry.create"];
+    const ok = create.input.safeParse({
+      name: "Sam Tillery",
+      company_name: "Northline Supply",
+      address: "12 Larkspur Ln",
+      city: "Truckee",
+      state: "CA",
+      zip: "96161",
+      message: "Panel upgrade",
+      notes: "Gate code on file",
+      source: "Referral",
+    });
+    expect(ok.success).toBe(true);
+    const shape = Object.keys((create.input as unknown as { shape: Record<string, unknown> }).shape).sort();
+    // No `unit` (the form posts none, so it would be promised and dropped); `type` kept from before.
+    expect(shape).toEqual(["address", "city", "company_name", "email", "message", "name", "notes", "phone", "source", "state", "type", "zip"]);
+  });
+
+  it("inquiry.create hands a spoken type to createInquiry, which honours it", async () => {
+    const create = REGISTRY["inquiry.create"];
+    expect(create.input.safeParse({ name: "Dana Rook", type: "commercial" }).success).toBe(true);
+    expect(create.input.safeParse({ name: "Dana Rook", type: "industrial" }).success).toBe(false);
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(process.cwd(), "src/lib/actions/entities/inquiry.ts"), "utf8");
+    expect(src).toContain('if (i.type) fd.set("type", i.type);');
+    expect(src).not.toMatch(/"unit"/);
   });
 });
 
@@ -442,11 +485,13 @@ describe("action registry — job.setCustomer", () => {
     expect(offered("tech")).not.toContain("job__setCustomer");
   });
 
-  it("EXACTLY this one name: the list's SIZE is pinned (74 before cn-v1157, 75 with it)", () => {
+  it("EXACTLY this one name: the list's SIZE is pinned (74 before cn-v1157, 75 with it, 74 since cn-v1170)", () => {
     // Membership cannot hold "exactly one": a second name let in beside it would pass every line above.
     // The count is the pin. A new agent write is a decision (the freeze on agent-write expansion), so
     // whoever lets one in moves this number on purpose, in the same change, and says why.
-    expect(AGENT_WRITE_ALLOWED.size).toBe(75);
+    // cn-v1170 took one OUT and added none: inquiry.snooze, because a lead has no follow-up day any
+    // more (Erik, 2026-11-19: "the follow up reminders dont really work, one badge one list simple").
+    expect(AGENT_WRITE_ALLOWED.size).toBe(74);
     // The count is of real doors: a name on the list that is no action in the registry would hold
     // the number steady while a real one came or went.
     for (const name of AGENT_WRITE_ALLOWED) expect(REGISTRY[name], name).toBeTruthy();

@@ -349,3 +349,49 @@ describe("Nort's product map after the shell wave", () => {
     expect(dict("en").cu_btn_typeContractor).toBe("Contractor");
   });
 });
+
+/**
+ * THE LEADS REWORK (cn-v1170). Erik, 2026-11-19: "if a lead is still on the lead page that IS the
+ * reminder and the follow up reminders dont really work, one badge one list simple". Nort says the
+ * Leads list is new intake only, with Schedule, Not Sold and Edit Details; the one word is Not Sold.
+ */
+describe("Nort's map after the Leads rework", () => {
+  const leads = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Sales → Leads (/leads)")) ?? "";
+  const needsYou = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- My Day → Needs You")) ?? "";
+  const inspections = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Sales → Inspections")) ?? "";
+
+  it("the Leads list is new intake, it is the reminder, and its row's doors are Schedule, Not Sold, Edit Details", () => {
+    expect(leads).toContain("NEW INTAKE ONLY");
+    expect(leads).toContain("the list IS the reminder: there is no follow-up day");
+    expect(leads).toContain("three doors: Schedule, Not Sold, Edit Details");
+    expect(leads).toContain("Book It (a day and a time), Let Them Pick");
+    expect(leads).toContain("Start Now");
+    expect(leads).toContain("it always books an INSPECTION");
+    expect(leads).toContain("/leads/<id>");
+    expect(leads).toContain("the Not Sold fold at the bottom of the Leads page, where Reopen puts it back");
+    expect(leads).toContain("Lead Sources");
+    for (const gone of [/Follow Up/, /Mark Contacted/, /Mark Lost/, /Inspection · Schedule · Estimate/, /Uncontacted leads badge/]) expect(leads).not.toMatch(gone);
+  });
+
+  it("Needs You's lead row and a visit's ending say Not Sold, and no lead is snoozed", () => {
+    expect(needsYou).toContain("honest ending (Not Sold, Not Needed, Dismiss, Cancel, Set Aside");
+    expect(needsYou).toContain("its button is Schedule");
+    expect(needsYou).toContain("it has no Snooze and no follow-up day");
+    expect(inspections).toContain("Not Sold is a visit that happened and wasn't won");
+    expect(NORT_PRODUCT_MAP).not.toMatch(/\bLost is a visit\b/);
+    expect(NORT_PRODUCT_MAP).not.toMatch(/\(Lost, Not Needed/);
+  });
+
+  it("the site chat's lead source is the one the code writes", () => {
+    expect(NORT_PRODUCT_MAP).toContain("source 'site_chat'");
+    expect(NORT_PRODUCT_MAP).not.toContain("website_chat");
+    expect(readFileSync(join(process.cwd(), "src/lib/inquiries/sources.ts"), "utf8")).toContain('"site_chat"');
+  });
+
+  it("the chat route teaches no follow-up day for a lead, and no inquiry.snooze", () => {
+    const route = readFileSync(join(process.cwd(), "src/app/api/chat/route.ts"), "utf8");
+    expect(route).not.toContain("inquiry.snooze");
+    expect(route).toContain("a lead has NO follow-up day: it stays on the Leads list until it is scheduled (its inspection booked) or marked Not Sold");
+    expect(route).toContain("inquiry.markLost (kept on file, marked Not Sold)");
+  });
+});

@@ -85,9 +85,9 @@ export interface Inquiry {
   zip: string | null;
   message: string | null;
   notes: string | null;
-  // "deck_configurator" is what estimate/[handle]/actions.ts actually writes; it was missing
-  // here, so every lead off Chris's own configurator rendered as if it had been typed by hand.
-  source: "manual" | "public_form" | "tahoe_deck" | "deck_configurator";
+  // A website door's value (lib/inquiries/sources WEB_SOURCES), 'manual', or since cn-v1170 a label
+  // the company picked from its own Lead Sources list: any text. Read it through leadSourceChip.
+  source: string;
   status: InquiryStatus;
   next_follow_up_at: string | null;
   last_contacted_at: string | null;

@@ -107,6 +107,10 @@ export interface OrgSettings {
   pay_schedule: "weekly" | "biweekly" | "semimonthly" | "monthly";
   pay_anchor: string; // "YYYY-MM-DD" — start of a reference pay period
 
+  /** Where a lead came from, as the company names it (cn-v1170): the lead form's Lead Source list.
+   *  Read through leadSourceList (cleaned on read; an empty list reads as the default). */
+  lead_sources: string[];
+
   // Payments
   payment_methods: string[];
   /** The org's Venmo username (no @). Pay now's Venmo chip shows its QR with the amount filled. */
@@ -361,6 +365,35 @@ export interface OrgSettings {
   books_begin: string | null;
 }
 
+/**
+ * THE COMPANY'S OWN LEAD SOURCES (cn-v1170). Erik, 2026-11-19: "lead source/type dropdown editable
+ * list (i.e.: web, signage, word of mouth, referral)". These four are where every company starts.
+ * Cleaned on read like every settings list: strings only, spaces collapsed, cut at LEAD_SOURCE_MAX_LEN,
+ * one per spelling whatever its case, at most LEAD_SOURCE_MAX_COUNT. A list that comes out empty reads
+ * as the default, as payment_methods does, so the form never offers nothing.
+ */
+export const DEFAULT_LEAD_SOURCES: readonly string[] = ["Web", "Signage", "Word of Mouth", "Referral"];
+export const LEAD_SOURCE_MAX_LEN = 60;
+export const LEAD_SOURCE_MAX_COUNT = 30;
+
+export function leadSourceLabel(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return raw.replace(/\s+/g, " ").trim().slice(0, LEAD_SOURCE_MAX_LEN).trim();
+}
+
+export function leadSourceList(raw: unknown): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const v of Array.isArray(raw) ? raw : []) {
+    const label = leadSourceLabel(v);
+    if (!label || seen.has(label.toLowerCase())) continue;
+    seen.add(label.toLowerCase());
+    out.push(label);
+    if (out.length >= LEAD_SOURCE_MAX_COUNT) break;
+  }
+  return out.length ? out : [...DEFAULT_LEAD_SOURCES];
+}
+
 export const DEFAULT_SETTINGS: OrgSettings = {
   currency: "USD",
   timezone: "America/Los_Angeles",
@@ -400,6 +433,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
 
   // THE ONE COPY of the house list is lib/payment-method (cn-v1152): every pay door draws its chips from
   // settings.payment_methods and falls back to that same list when a company has cleared it.
+  lead_sources: [...DEFAULT_LEAD_SOURCES],
   payment_methods: [...DEFAULT_PAYMENT_METHODS],
   venmo_handle: "",
   card_fee_percent: 0, // off — see the field's comment for what turning it on actually commits you to
@@ -651,6 +685,7 @@ export function getOrgSettings(raw: unknown): OrgSettings {
   merged.trade = normalizeTradeKey((stored as { trade?: unknown }).trade);
   merged.features = normalizeFeatures((stored as { features?: unknown }).features, (stored as { timeclock_job_codes?: unknown }).timeclock_job_codes);
   merged.timeclock_job_codes = merged.features.job_codes;
+  merged.lead_sources = leadSourceList((stored as { lead_sources?: unknown }).lead_sources);
   // A day or nothing: a hand-edited "June 8" must not move a company's line somewhere unnamed.
   {
     const b = merged.books_begin;

@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { useDraft } from "@/lib/use-draft";
-import { InquiryFields, inquiryFormValue } from "./inquiry-fields";
+import { INQUIRY_FORM_KEYS, InquiryFields, inquiryFormValue, type InquiryFormValue } from "./inquiry-fields";
 import { createInquiry, updateInquiry, deleteInquiry } from "./actions";
+import { readLeadSources } from "./lead-sources-actions";
 import type { Inquiry } from "@/lib/types";
 import { createParamClaim } from "@/lib/param-claim";
 import { useLang } from "@/components/lang-provider";
@@ -38,9 +39,11 @@ export function InquiryModal({
 }: {
   inquiry?: Inquiry;
   mode?: "new" | "edit";
-  /** How the edit door is drawn: the outline button (the lead's own ⋯ panel), or "quiet" — a small
-   *  named door beside the thing it edits (the estimate's lead card). */
-  trigger?: "button" | "quiet";
+  /** How the edit door is drawn: "quiet", a small named door beside the thing it edits (the
+   *  estimate's lead card), or "details", the lead's Edit Details button among its doors (cn-v1170:
+   *  "if Edit Details is the only option under the ... then just say Edit Details instead of ...").
+   *  "button" is the New Lead button; an edit given it draws Edit Details. */
+  trigger?: "button" | "quiet" | "details";
   /** True where the lead is corrected from another record's page: Delete Lead stays on the Leads
    *  page, behind its own warning, and never sits beside an estimate. */
   noDelete?: boolean;
@@ -68,10 +71,33 @@ export function InquiryModal({
     editing ? "lead-edit:" + inquiry!.id : "lead-new",
     form,
     (f) => {
-      setForm({ ...inquiryFormValue(inquiry), ...f });
+      // Only the form's own keys: a draft kept by the older form (Kind, How Long) restores clean.
+      const next = inquiryFormValue(inquiry);
+      for (const k of INQUIRY_FORM_KEYS) if (f && k in f) (next as unknown as Record<string, unknown>)[k] = (f as Partial<InquiryFormValue>)[k];
+      setForm(next);
       setFormKey((k) => k + 1);
     },
   );
+
+  // THE COMPANY'S LEAD SOURCES (cn-v1170), read when the form opens: once per opening, never per row.
+  // A failed read is said under the select; the lead's own source is offered either way.
+  const [sources, setSources] = useState<string[] | null>(null);
+  const [sourcesFailed, setSourcesFailed] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    setSourcesFailed(false);
+    readLeadSources()
+      .then((r) => {
+        if (!alive) return;
+        if (r.ok) setSources(r.sources);
+        else setSourcesFailed(true);
+      })
+      .catch(() => alive && setSourcesFailed(true));
+    return () => {
+      alive = false;
+    };
+  }, [open]);
   // Dirty = the form differs from a fresh one (covers typed input AND a
   // restored draft; a restored-then-reset form correctly reads clean again).
   const initialSnap = useRef<string | null>(null);
@@ -173,8 +199,9 @@ export function InquiryModal({
           <Pencil className="h-4 w-4 shrink-0" /> {t("ld_btn_editLead")}
         </button>
       ) : editing ? (
-        <Button variant="outline" onClick={openModal}>
-          <Pencil className="h-4 w-4" /> {t("ld_btn_edit")}
+        // cn-v1170: every other edit door is Edit Details (the old outline Edit had no caller left).
+        <Button variant="secondary" onClick={openModal}>
+          {t("ld_btn_editDetails")}
         </Button>
       ) : (
         <Button onClick={openModal}>
@@ -223,7 +250,7 @@ export function InquiryModal({
         >
           <div className="space-y-4">
             {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-            <InquiryFields key={formKey} value={form} onChange={(p) => setForm((f) => ({ ...f, ...p }))} />
+            <InquiryFields key={formKey} value={form} onChange={(p) => setForm((f) => ({ ...f, ...p }))} sources={sources} sourcesFailed={sourcesFailed} />
           </div>
         </Modal>
       </form>

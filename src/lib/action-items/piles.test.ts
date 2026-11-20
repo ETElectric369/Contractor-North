@@ -166,10 +166,11 @@ describe("a pile never hides a NOW row", () => {
 });
 
 describe("the Leads-off label", () => {
-  it("Leads to Call becomes Requests to Call Back, its verb Call Back", () => {
+  it("New Leads becomes Requests to Call Back, its verb Call Back", () => {
     const on = roll([row("inquiry"), row("inquiry")]);
-    expect(on[0].title).toBe("Leads to Call · 2");
-    expect(on[0].pile?.verb).toBe("Called");
+    expect(on[0].title).toBe("New Leads · 2");
+    // cn-v1170: a lead's button is Schedule (no Called).
+    expect(on[0].pile?.verb).toBe("Schedule");
     const off = roll([row("inquiry"), row("inquiry")], { leadsOn: false });
     expect(off[0].title).toBe("Requests to Call Back · 2");
     expect(off[0].pile?.verb).toBe("Call Back");
@@ -179,7 +180,7 @@ describe("the Leads-off label", () => {
 describe("real counts", () => {
   it("an exact count bigger than the rows read: the pile says it, and See All goes to the list page", () => {
     const out = roll([row("inquiry"), row("inquiry")], { counts: { leads_to_call: { total: 60 } } });
-    expect(out[0].title).toBe("Leads to Call · 60");
+    expect(out[0].title).toBe("New Leads · 60");
     expect(pileUnfoldsHere(out[0].pile!, out[0].children!.length)).toBe(false);
   });
 

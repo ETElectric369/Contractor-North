@@ -9,6 +9,7 @@ import { useLang } from "@/components/lang-provider";
 import { translator } from "@/lib/i18n";
 import { formatDate } from "@/lib/utils";
 import { estimateStatusLabel } from "@/lib/statuses";
+import { notSoldAnswer, undoneKey } from "@/lib/appointments/not-sold";
 import { setAppointmentOutcome } from "../actions";
 import { LinkPicker } from "./link-picker";
 
@@ -41,8 +42,9 @@ export type VisitOutcomeWord = "won" | "lost" | "no_bid";
 
 type Words = (key: string) => string;
 
-// ONE WORD FOR AN ENDING THAT ISN'T A WIN (Erik, 2026-10-08: "just keep Lost everywhere - KISS"). The
-// column still holds no_bid on a few old rows (Nort's tool can write it); every one of them reads Lost.
+// ONE WORD FOR AN ENDING THAT ISN'T A WIN (Erik, 2026-10-08: "just keep Lost everywhere - KISS"; and
+// 2026-11-19, cn-v1170: "Not Sold" replaces "Lost"). The column still holds no_bid on a few old rows
+// (Nort's tool can write it); every one of them reads Not Sold.
 const WORD_KEY: Record<VisitOutcomeWord, string> = { won: "vp_won", lost: "vp_lost", no_bid: "vp_lost" };
 
 /** The outcome, in the page's words (the reader's language when handed its translator; English by
@@ -111,7 +113,29 @@ export function VisitEnding({
         toast(res.error ?? t("vp_thatDidntSave"), "error");
         return;
       }
-      toast(next ? t(next === "won" ? "vp_markedWon" : "vp_markedLost") : t("vp_answerCleared"), "success");
+      if (next === "lost") {
+        // cn-v1170: Not Sold may close the visit's lead too, and the toast says so. The Undo clears the
+        // answer; the server reopens the lead by its own rule and says whether it did (leadReopened).
+        const a = notSoldAnswer(res);
+        toast(t(a.said), "success", {
+          label: t("vp_btn_undo"),
+          onClick: () => {
+            void setAppointmentOutcome(appointmentId, null).then(
+              (r) => {
+                toast(r.ok ? t(undoneKey(r) ?? "vp_answerCleared") : (r.error ?? t("vp_thatDidntSave")), r.ok ? "success" : "error");
+                if (r.ok && r.warning) toast(r.warning, "error");
+                router.refresh();
+              },
+              () => toast(t("vp_thatDidntSave"), "error"),
+            );
+          },
+        });
+        if (a.warning) toast(a.warning, "error");
+      } else {
+        toast(next ? t("vp_markedWon") : t("vp_answerCleared"), "success");
+        // Won or cleared may put the visit's Not Sold lead back; a lead step that failed is said.
+        if (res.warning) toast(res.warning, "error");
+      }
       setChanging(false);
       router.refresh();
     });

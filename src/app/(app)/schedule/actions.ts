@@ -1851,8 +1851,8 @@ export async function setVisitTimes(
 /**
  * SIZE (and re-tag) AN ALREADY-BOOKED VISIT from the rail.
  *
- * The twin of sizeJob/sizeLead for the third kind. Without it the rail's duration dropdown sent an
- * APPOINTMENT id to sizeLead, which updates `inquiries` — zero rows, and the SILENT-WRITE LAW says
+ * The twin of sizeJob for a visit (sizeLead went with cn-v1170: a lead has no length now). Without it
+ * the rail's duration dropdown sent an APPOINTMENT id to the lead sizer, which updated `inquiries` — zero rows, and the SILENT-WRITE LAW says
  * that is a 204 and not an error, so it would have reported "That lead isn't available" for an
  * appointment that was sitting right there. Same shape of hole as the placement one, two rows down.
  *
@@ -1867,8 +1867,8 @@ export async function sizeAppointment(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const ws = wordsOf(ctx.supabase, ctx.userId);
-  /* A KIND THAT ISN'T ONE IS REFUSED (W2-06), in words and with nothing written: the same rule sizeLead
-     keeps. Any known kind is taken (the pickers narrow what's offered; a guard never refuses a row's own
+  /* A KIND THAT ISN'T ONE IS REFUSED (W2-06), in words and with nothing written: the same rule the lead
+     sizer kept before cn-v1170. Any known kind is taken (the pickers narrow what's offered; a guard never refuses a row's own
      old kind, so an old Quote or Office can be picked again), and "other". Junk used to fall through
      appointmentTypeFor's default and land as an inspection nobody chose. */
   if (patch?.workKind && !isWorkKind(patch.workKind) && patch.workKind !== "other") {

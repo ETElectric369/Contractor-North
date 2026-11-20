@@ -115,6 +115,9 @@ export const words: WordCatalog = {
     ag_srv_didntSaveReload: "That didn't save - reload and try again.",
     ag_srv_visitHasLead: "This visit already has a lead attached — change who it's for from the visit's page.",
     ag_srv_didntSaveAccess: "That didn't save — check your access and try again.",
+    // CORE, cn-v1170: a visit's Not Sold also ends its lead (setAppointmentOutcome).
+    ag_srv_leadNotMarked: "The visit is marked, but its lead couldn't be marked Not Sold. It stays on the Leads list.",
+    ag_srv_leadNotReopened: "The visit's answer is saved, but its lead couldn't be reopened. Reopen it from the Leads page.",
     ag_srv_cantReadDateTime: "I couldn't read that date/time.",
     ag_srv_cantReadEnd: "I couldn't read the end time.",
     ag_srv_endTimeAfterStart: "The end time has to be after the start.",
@@ -153,7 +156,8 @@ export const words: WordCatalog = {
     ag_srv_leadStatus_contacted: "contacted",
     ag_srv_leadStatus_quoted: "quoted",
     ag_srv_leadStatus_won: "won",
-    ag_srv_leadStatus_lost: "lost",
+    // cn-v1170: the lead's ending reads not sold (Erik: "Not Sold" replaces "Lost"); the stored value stays 'lost'.
+    ag_srv_leadStatus_lost: "not sold",
     ag_srv_oldJobKeptWork: "{job} kept the tasks and parts from this visit.",
     ag_srv_theJobItHad: "The job it had",
     ag_srv_taskOne: "{n} task",
@@ -285,6 +289,9 @@ export const words: WordCatalog = {
     ag_srv_didntSaveReload: "No se guardó - recarga e inténtalo de nuevo.",
     ag_srv_visitHasLead: "Esta visita ya tiene un prospecto — cambia para quién es desde la página de la visita.",
     ag_srv_didntSaveAccess: "No se guardó — revisa tu acceso e inténtalo de nuevo.",
+    // CORE, cn-v1170.
+    ag_srv_leadNotMarked: "La visita quedó marcada, pero su prospecto no se pudo marcar como no vendido. Sigue en la lista de prospectos.",
+    ag_srv_leadNotReopened: "La respuesta de la visita quedó guardada, pero su prospecto no se pudo reabrir. Reábrelo desde la página de prospectos.",
     ag_srv_cantReadDateTime: "No pude leer esa fecha y hora.",
     ag_srv_cantReadEnd: "No pude leer la hora de fin.",
     ag_srv_endTimeAfterStart: "La hora de fin tiene que ser después del inicio.",
@@ -323,7 +330,7 @@ export const words: WordCatalog = {
     ag_srv_leadStatus_contacted: "contactado",
     ag_srv_leadStatus_quoted: "cotizado",
     ag_srv_leadStatus_won: "ganado",
-    ag_srv_leadStatus_lost: "perdido",
+    ag_srv_leadStatus_lost: "no vendido",
     ag_srv_oldJobKeptWork: "{job} se quedó con las tareas y piezas de esta visita.",
     ag_srv_theJobItHad: "El trabajo que tenía",
     ag_srv_taskOne: "{n} tarea",

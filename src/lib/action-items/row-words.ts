@@ -80,9 +80,14 @@ export const NY_EN: Readonly<Record<string, string>> = {
   ny_w_lienRecord: "Lien to record",
   ny_w_lienRecordPast: "Lien recording past due",
   ny_w_leadNew: "New lead · call them",
-  ny_w_leadFollowUp: "Lead · follow up",
+  ny_w_leadReached: "Lead · reached, not booked yet",
   ny_w_requestNew: "New request · call them back",
-  ny_w_requestFollowUp: "Request · follow up",
+  ny_w_requestReached: "Request · called back",
+  ny_w_askNotSold: "Not Sold?",
+  // cn-v1170 fixer: the Not Sold confirms' bodies (row-buttons), {what} the row's title.
+  ny_w_notSoldLeadBody: "Marks {what} Not Sold, so it leaves Needs You and the Leads list. It is kept on file with everything on it, and Reopen under Not Sold at the bottom of the Leads page brings it back.",
+  ny_w_notSoldRequestBody: "Marks {what} Not Sold, so it leaves Needs You. It is kept on file with everything on it.",
+  ny_w_notSoldVisitBody: "Records {what} as Not Sold, so it stops asking. The inspection is marked Not Sold, and so is its lead when nothing else from it is booked; you can change it back on its own page.",
   ny_w_toWriteUp: "{type} · to write up",
   ny_w_toWriteUpTitled: "{text} · {type} · to write up",
   ny_docEstimate: "Estimate",
@@ -141,6 +146,7 @@ export const NY_EN: Readonly<Record<string, string>> = {
   ny_w_unreadSupplierPapers: "Couldn't read your supplier papers just now, so any bill or discount waiting on you isn't here. Open Bills to see them.",
   ny_w_unreadSupplierPay: "Couldn't check what's due to your suppliers just now, so a discount deadline may be missing here. Open Bills to see it.",
   ny_w_unreadHours: "Couldn't read the shifts that are on no job just now. Open Timecards to see them.",
+  ny_w_unreadLeads: "Couldn't read your leads just now. Open Leads to see them.",
   ny_w_hoursNotAllListed: "The newest {n} shifts on no job are all billed, empty or today's, so older ones weren't checked.",
   ny_btn_seeAllOnEstimates: "See All on Estimates",
   ny_btn_seeAllOnInvoices: "See All on Invoices",
@@ -158,7 +164,7 @@ export const NY_EN: Readonly<Record<string, string>> = {
   ny_btn_pile_lateInvoices: "Late Invoices",
   ny_btn_pile_invoicesNotSent: "Invoices Not Sent",
   ny_btn_pile_doneNotBilled: "Done, Not Billed",
-  ny_btn_pile_leadsToCall: "Leads to Call",
+  ny_btn_pile_leadsToCall: "New Leads",
   ny_btn_pile_requestsToCallBack: "Requests to Call Back",
   ny_btn_pile_visitsToCloseOut: "Visits to Close Out",
   ny_btn_pile_inspectionsToWriteUp: "Inspections to Write Up",
@@ -185,7 +191,6 @@ export const NY_EN: Readonly<Record<string, string>> = {
   ny_btn_pickADay: "Pick a Day",
   ny_btn_call: "Call",
   ny_btn_callBack: "Call Back",
-  ny_btn_called: "Called",
   ny_btn_closeOut: "Close Out",
   ny_btn_buyMaterialsOpen: "Buy Materials · {n} Open",
   ny_btn_buyMaterialsOpenOne: "Buy Materials · {n} Open",
@@ -209,8 +214,9 @@ export const NY_EN: Readonly<Record<string, string>> = {
   ny_btn_cancel: "Cancel",
   ny_btn_notNeeded: "Not Needed",
   ny_btn_wonIt: "Won It",
-  ny_btn_lost: "Lost",
-  ny_btn_lostVisit: "Lost",
+  ny_btn_lost: "Not Sold",
+  ny_btn_lostVisit: "Not Sold",
+  ny_btn_markItNotSold: "Mark It Not Sold",
   ny_btn_assign: "Assign",
   ny_btn_finish: "Finish",
   ny_btn_didntHappen: "Dismiss",
@@ -220,6 +226,8 @@ export const NY_EN: Readonly<Record<string, string>> = {
   ny_btn_signedOnPaper: "Signed on Paper",
   // Another catalog's key a row's door reuses (never re-added under ny_): the visit's own door.
   ld_btn_openTheInspection: "Open the Inspection",
+  // A lead's Schedule (cn-v1170): the Leads list's own door word.
+  ld_btn_schedule: "Schedule",
 };
 
 const spanish = (c: Pick<SayCtx, "lang" | "words">): c is { lang: "es"; words: Words } => c.lang === "es" && !!c.words;

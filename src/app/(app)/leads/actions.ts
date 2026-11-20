@@ -1,7 +1,7 @@
 "use server";
 import { readUsualBillingKind } from "@/lib/schedule-options";
 import { dbError } from "@/lib/db-error";
-import { placeJobOnDay, planDayTimes } from "../schedule/actions";
+import { planDayTimes } from "../schedule/actions";
 
 import { customerAddressFrom } from "@/lib/inquiries/lead-address";
 import { bustBillsOfQuotes, bustDocPdf, bustLeadPdfs } from "@/lib/pdf-cache";
@@ -10,23 +10,18 @@ import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
 import { spreadTimes } from "@/lib/schedule/place-by-town";
-import {
-  appointmentTypeFor,
-  bookingTitle,
-  isWorkKind,
-  spanEnd,
-  workKind,
-} from "@/lib/schedule/work-shape";
+import { appointmentTypeFor, bookingTitle, workKind } from "@/lib/schedule/work-shape";
+import { standingFor } from "@/lib/leads/new-intake";
+import { reopenNotSold } from "@/lib/leads/not-sold";
 import { carryFromCustomer, matchKnownCustomer, type KnownCustomer } from "@/lib/inquiries/known-customer";
 import { createServiceClient } from "@/lib/supabase/server";
 import { customerForInquiry } from "@/lib/actions/win-customer";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
-import { getOrgSettings } from "@/lib/org-settings";
+import { getOrgSettings, leadSourceLabel } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { PROJECT_TYPES, estimateLinesFromIntake } from "@/lib/lead-triage";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { jobNameFrom, jobWho, leadScopeWords } from "@/lib/job-name";
-import { checkComeBackDay } from "@/lib/come-back-days";
 import { createProposalCore, cleanSlots, type ProposalSlot } from "@/lib/appointments/proposal";
 import { ESTIMATE_VISIT_TYPES, INQUIRY_STATUSES, INSPECTION_TYPES } from "@/lib/statuses";
 import { saveQuote } from "../quotes/actions";
@@ -96,9 +91,14 @@ function ymdAddDays(ymd: string, n: number): string {
   return new Date(new Date(`${ymd}T12:00:00Z`).getTime() + n * 86_400_000).toISOString().slice(0, 10);
 }
 
-// When "contacted" is tapped with no explicit follow-up, schedule the next touch this
-// many days out — enough to leave the My Day inbox, soon enough that the lead doesn't slip.
-const FOLLOW_UP_DEFAULT_DAYS = 3;
+/**
+ * WHAT A LEAD'S VISIT IS BOOKED AS (cn-v1170). Erik's yes, 2026-11-19: Schedule on a lead always books
+ * an INSPECTION; the straight-to-job fork went, and the lead's kind and length are no longer read
+ * ("Remove how long (will be determined in Inspector)"). These are the defaults a lead with no kind
+ * always got, through the same helpers, never a second literal.
+ */
+const LEAD_VISIT_KIND = workKind({ kind: "lead", workKind: null });
+const LEAD_VISIT_TYPE = appointmentTypeFor(null);
 
 /** The org timezone, for building "9 AM local" instants server-side. */
 async function orgTimezone(supabase: SupabaseClient): Promise<string> {
@@ -152,10 +152,19 @@ function inquiryFields(formData: FormData) {
     zip: orNull(formatZip(String(formData.get("zip") ?? ""))),
     message: emptyToNull(formData.get("message")),
     notes: emptyToNull(formData.get("notes")),
-    // Both nullable by design — "Not sure yet" is a real answer and the default (0230).
-    work_kind: emptyToNull(formData.get("work_kind")),
-    planned_minutes: Number(formData.get("planned_minutes")) || null,
+    // cn-v1170: no work_kind or planned_minutes. Erik: "Remove how long (will be determined in
+    // Inspector)"; what kind of work is part of the Scope now. Neither door writes them any more.
   };
+}
+
+/**
+ * THE LEAD SOURCE THE PERSON PICKED (cn-v1170): the label from the company's list (settings
+ * lead_sources), trimmed and cut at 60. A label no longer on the list is still taken, since the list
+ * can change after the lead was made. Null = nothing picked: create stores 'manual', edit leaves the
+ * stored source alone (a website lead keeps its door).
+ */
+function pickedLeadSource(formData: FormData): string | null {
+  return leadSourceLabel(formData.get("source")) || null;
 }
 
 export async function createInquiry(formData: FormData): Promise<Result & { note?: string }> {
@@ -188,10 +197,8 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
   // "i had a lead sarah dale and started an inspection and theres only one string and all this
   // other stuff is recorded and im completely confused by it."
   //
-  // `inquiries.next_follow_up_at` already IS the follow-up list: /leads orders by it and the
-  // Needs-action inbox feeds off it. So the lead carries its own date, and the calendar keeps
-  // meaning "things I agreed to be somewhere for". Nothing here needs the company's clock any more,
-  // so creating a lead stopped reading Settings for a timezone it never used.
+  // The Leads list itself is the follow-up list (cn-v1170: a lead stays on it until it is scheduled
+  // or Not Sold), and the calendar keeps meaning "things I agreed to be somewhere for".
 
   /**
    * THE APP ALREADY KNOWS THIS PERSON (Erik, entering his real lead list: "lack of fluidity and
@@ -240,15 +247,11 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
       ...carried,
       type: LEAD_TYPES.includes(sentType) ? sentType : inferredLeadType(fields.company_name ?? carried.company_name ?? null),
       customer_id: linkedCustomerId,
-      source: "manual",
+      // Nothing picked is lib/inquiries/sources MANUAL_SOURCE, as a literal (its test scans the doors for it).
+      ...(pickedLeadSource(formData) ? { source: pickedLeadSource(formData) } : { source: "manual" }),
       status: "new",
-      // NO INVENTED DEADLINE. Erik: "this auto follow up one day later should default to open …
-      // have it just say follow up and leave it on a list of follow ups."
-      // Stamping tomorrow made every lead overdue the day after it was entered — twelve leads, all
-      // red, about a date nobody chose. A lead needing a follow-up is a STATE, not a missed
-      // appointment. Null means "on the follow-up list, no date promised"; the office sets a real
-      // date when there is a real reason.
-      next_follow_up_at: null,
+      // NO FOLLOW-UP DAY (cn-v1170): a lead on the Leads list IS the reminder ("one badge one list
+      // simple"), so nothing writes next_follow_up_at; the column keeps its own default.
       created_by: ctx.userId,
     })
     .select("id")
@@ -275,9 +278,11 @@ export async function updateInquiry(id: string, formData: FormData): Promise<Res
 
   // THE SILENT-WRITE LAW (audit v921): a zero-row update is a 204, not an error — a deleted or
   // merged-away lead edited from a stale tab used to answer "Saved".
+  // A picked source is written; none picked leaves the stored one (a website door, or 'manual') alone.
+  const source = pickedLeadSource(formData);
   const { data, error } = await supabase
     .from("inquiries")
-    .update({ name, ...fields, updated_at: new Date().toISOString() })
+    .update({ name, ...fields, ...(source ? { source } : {}), updated_at: new Date().toISOString() })
     .eq("id", id)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
@@ -319,8 +324,10 @@ export async function updateInquiry(id: string, formData: FormData): Promise<Res
   return { ok: true };
 }
 
-/** Log contact now; optionally set/update the next follow-up date. */
-export async function markInquiryContacted(id: string, nextFollowUp?: string | null): Promise<Result> {
+/** Log contact now: status Contacted and when, nothing else. Follow-up days are gone everywhere
+ *  (Erik's yes, 2026-11-19: "if a lead is still on the lead page that IS the reminder"), so this no
+ *  longer writes or defaults one (cn-v1170). Kept for the assistant's inquiry.contact. */
+export async function markInquiryContacted(id: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -329,26 +336,6 @@ export async function markInquiryContacted(id: string, nextFollowUp?: string | n
     status: "contacted",
     updated_at: new Date().toISOString(),
   };
-  if (nextFollowUp !== undefined) {
-    // Caller passed an explicit date (or null to clear).
-    patch.next_follow_up_at = nextFollowUp || null;
-  } else {
-    // The bare "contacted" checkbox (My Day inbox) passes no date. Contacting must
-    // still MOVE the lead: the inbox re-includes any lead whose next_follow_up_at is
-    // null or due (query.ts), so leaving it null pulled the just-contacted lead right
-    // back — the "checking the box resets" report (Erik 2026-07-20). A contacted lead
-    // must always carry a next touch, so default one a few days out — but only when the
-    // lead has no FUTURE follow-up already, so an explicit snooze is never shortened.
-    const { data: row } = await supabase
-      .from("inquiries")
-      .select("next_follow_up_at")
-      .eq("id", id)
-      .maybeSingle();
-    const tz = await orgTimezone(supabase);
-    const todayStr = todayStrInTz(tz);
-    const cur = (row as { next_follow_up_at?: string | null } | null)?.next_follow_up_at ?? null;
-    if (!cur || cur <= todayStr) patch.next_follow_up_at = ymdAddDays(todayStr, FOLLOW_UP_DEFAULT_DAYS);
-  }
   // THE SILENT-WRITE LAW (audit v921): a zero-row update is a 204 — ticking "contacted" from a
   // stale My Day tab on a lead that's since been deleted used to toast "Marked contacted".
   const { data: hit, error } = await supabase.from("inquiries").update(patch).eq("id", id).select("id");
@@ -358,36 +345,6 @@ export async function markInquiryContacted(id: string, nextFollowUp?: string | n
   // My Day's "Needs action" inbox lists open leads — mark-contacted from THERE (Alexa
   // 2026-07-20: "checking the box resets") needs the planner to re-fetch too, else the
   // lead reappears un-contacted. The My-Day-refresh law.
-  revalidatePath("/planner");
-  return { ok: true };
-}
-
-/**
- * THIS LEAD COMES BACK ON A DAY (NY-feeders, 0366): a Snooze, not a contact. It writes
- * next_follow_up_at and nothing else: no status, no last_contacted_at, because nobody reached anyone
- * (markInquiryContacted is the door that says someone did). The day is the company's today or later.
- * A zero-row write is said, never assumed landed.
- */
-export async function snoozeInquiry(id: string, date: string): Promise<Result> {
-  const ctx = await requireStaff();
-  if ("error" in ctx) return { ok: false, error: ctx.error };
-  const supabase = ctx.supabase;
-  const today = todayStrInTz(await orgTimezone(supabase));
-  const day = checkComeBackDay(today, date);
-  if (!day.ok) {
-    // The refusal in the caller's words: the language is read only when the day is refused.
-    const lang = await wordsOf(supabase, ctx.userId).lang();
-    const said = checkComeBackDay(today, date, lang, translator(lang));
-    return { ok: false, error: said.ok ? day.error : said.error };
-  }
-  const { data, error } = await supabase
-    .from("inquiries")
-    .update({ next_follow_up_at: day.day, updated_at: new Date().toISOString() })
-    .eq("id", id)
-    .select("id");
-  if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadUnavailable") };
-  revalidatePath("/leads");
   revalidatePath("/planner");
   return { ok: true };
 }
@@ -421,6 +378,14 @@ export async function setInquiryStatus(id: string, status: string): Promise<Resu
     return { ok: true, id: customerId };
   }
 
+  /* NOT SOLD WAITS FOR ITS VISIT (cn-v1170). A lead with a visit still on the books is on the
+     Inspections side, and the visit is where it ends: one sentence, one action. A lead whose visits
+     could not be read is not refused (the Undo is there either way). */
+  if (status === "lost") {
+    const read = await standingFor(supabase, [id]);
+    if (read.standing.has(id)) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_visitStands") };
+  }
+
   // THE SILENT-WRITE LAW (audit v921): a zero-row update is a 204, not an error.
   const { data, error } = await supabase
     .from("inquiries")
@@ -431,6 +396,24 @@ export async function setInquiryStatus(id: string, status: string): Promise<Resu
   if (!data?.length) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadUnavailable") };
   revalidatePath("/leads");
   revalidatePath("/planner"); // My Day shows inquiry counts — keep it in sync
+  return { ok: true };
+}
+
+/**
+ * REOPEN (cn-v1170): a Not Sold lead goes back on the Leads list, Contacted when somebody reached
+ * them and New otherwise. Erik: "if they are Not Sold then the data stays with them in that file for
+ * further sales reach out". Only a Not Sold lead that was never converted (lib/leads/not-sold).
+ */
+export async function reopenLead(id: string): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const res = await reopenNotSold(ctx.supabase, id);
+  if (!res.ok) {
+    if (res.reason === "error") return { ok: false, error: dbError(res.error) };
+    return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_notNotSold") };
+  }
+  revalidatePath("/leads");
+  revalidatePath("/planner");
   return { ok: true };
 }
 
@@ -590,13 +573,10 @@ export async function convertInquiry(
     if (slots.length) {
       const carry = await carryForInquiry(supabase, inq);
       const res = await createProposalCore(supabase, {
-        // The SAME kind rule as "Book it" — which booking door the office pressed must never
-        // change what the calendar says the visit is.
-        type: appointmentTypeFor((inq as { work_kind?: string | null }).work_kind),
-        title: bookingTitle(
-          workKind({ kind: "lead", workKind: (inq as { work_kind?: string | null }).work_kind }),
-          String(inq.name ?? ""),
-        ),
+        // The SAME kind as "Book it" (LEAD_VISIT_TYPE, cn-v1170: always an inspection) — which
+        // booking door the office pressed must never change what the calendar says the visit is.
+        type: LEAD_VISIT_TYPE,
+        title: bookingTitle(LEAD_VISIT_KIND, String(inq.name ?? "")),
         slots,
         timeNote: opts.timeNote ?? null,
         inquiryId: id,
@@ -614,48 +594,30 @@ export async function convertInquiry(
         createdBy: ctx.userId,
         // 9 AM org-local tentative instant from the first offered slot.
         startsAtIso: tzDateTimeUtc(slots[0].date, slots[0].time, tz),
-        // The How-long tag survives this door too — Book-it carries it, so must pick-a-time.
-        plannedMinutes: (inq as { planned_minutes?: number | null }).planned_minutes ?? null,
+        // No length from the lead (cn-v1170: "will be determined in Inspector").
+        plannedMinutes: null,
       });
       if (!res.ok) return { ok: false, error: res.error };
-      const earliest = slots.map((s) => s.date).sort()[0];
+      // Engaged, not closed: contacted, and NO follow-up day (gone everywhere, cn-v1170). The
+      // proposed visit now stands, so the lead is off the Leads list until it ends.
       await supabase
         .from("inquiries")
         .update({
           status: "contacted",
           last_contacted_at: new Date().toISOString(),
-          next_follow_up_at: earliest,
           updated_at: new Date().toISOString(),
         })
         .eq("id", id);
-      revalidatePath("/leads");
-      revalidatePath("/schedule");
-      revalidatePath("/planner");
+      // cn-v1170: NO revalidatePath here. A server action that revalidates re-renders the route in
+      // the same answer; the new proposed visit stands, the lead leaves the list, its row unmounts,
+      // and the sheet holding the link goes with it before it can be copied. The sheet refreshes
+      // the route when it closes (convert-menu closeInspect); the other pages are force-dynamic.
       return { ok: true, token: res.token, phone: inq.phone ?? null };
     }
 
-    /* A SERVICE CALL IS A JOB. Erik, after paying Nora out through an appointment page: "nora is
-       set as a service call which means im in and out and all the inspection estimate and all that
-       stuff in the way... i dont need a pay now button on the inspection page i need a job page
-       for the job that was done with a pay button."
-       So a lead tagged JOB or SERVICE, given a firm day, doesn't book a visit at all — it BECOMES
-       the job, placed on that day (multi-day spans and the start time included), with the job
-       page's Done and Pay now waiting at the end. The inspection machinery never enters the
-       picture, because nothing is being inspected: the work is sold and somebody is going to go do
-       it. "Let them pick" keeps the appointment shape — a job can't be placed on an unchosen day. */
-    const declaredKind = String((inq as { work_kind?: string | null }).work_kind ?? "");
-    if ((declaredKind === "job" || declaredKind === "service") && opts.startDate) {
-      const conv = await convertInquiry(id, "job", {});
-      const jobId = conv.ok ? /^\/jobs\/(.+)$/.exec(conv.redirect ?? "")?.[1] : undefined;
-      if (!conv.ok || !jobId) {
-        return conv.ok ? { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_couldntMakeJob") } : conv;
-      }
-      const placed = await placeJobOnDay(jobId, opts.startDate, opts.startTime);
-      if (!placed.ok) {
-        return { ok: false, error: placed.error ?? (await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_jobDidntLand")) };
-      }
-      return { ok: true, redirect: `/jobs/${jobId}` };
-    }
+    // THE STRAIGHT-TO-JOB FORK IS GONE (cn-v1170, Erik's yes: "Schedule on a lead always books an
+    // INSPECTION"). A lead tagged job or service used to become a placed job here; it books an
+    // inspection like every lead, and the work is sized and sold from there.
 
     // "Book it": a firm 9 AM slot — built in the ORG timezone (the old
     // `new Date(date+"T00:00:00"); setHours(9)` parsed as SERVER-local UTC,
@@ -664,45 +626,14 @@ export async function convertInquiry(
     const startsAtIso = tzDateTimeUtc(startDate, /^\d{2}:\d{2}$/.test(opts.startTime ?? "") ? opts.startTime! : "09:00", tz);
     if (!startsAtIso) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_pickValidDay") };
     const carry = await carryForInquiry(supabase, inq);
-    const kindChosen = workKind({ kind: "lead", workKind: (inq as { work_kind?: string | null }).work_kind });
-
-    /* HOW LONG HE SAID, DRAWN AS HOW LONG HE SAID.
-       Erik: "i just scheduled Matt warren for monday for a whole day as a job and it showed up as
-       an inspection for an hour."
-
-       planned_minutes was written faithfully — and nothing draws it. The calendar sizes a block
-       from ends_at, and this insert never set one, so TimeGrid fell back to its `startMin + 60`
-       default and every booking became a one-hour pill no matter what the office entered. A full
-       day and a half-hour service call rendered identically, which makes the number he was asked
-       for pointless at the exact moment it was supposed to pay off.
-
-       Clamped to one working day: planned_minutes is a WORK-LOAD figure, and spending 960 ("2
-       days") as wall clock from 8am ends the appointment at midnight. A multi-day visit is a span
-       of days, not one very long block. */
-    const sized = Number((inq as { planned_minutes?: number | null }).planned_minutes ?? 0);
-    const startHm = /^\d{2}:\d{2}$/.test(opts.startTime ?? "") ? opts.startTime! : "09:00";
-    /* A WEEK ENDS ON FRIDAY. Clamping a multi-day size to one working day is how "a week" showed up
-       as a Monday; spending it as wall clock would end it at 2am. spanEnd walks the working days
-       and finishes at the same hour on the last one. */
-    const span = spanEnd(startDate, startHm, sized);
-    const endsAtIso = span
-      ? tzDateTimeUtc(span.lastYmd, span.endHHMM, tz)
-      : null;
 
     const { error: aErr } = await supabase.from("appointments").insert({
-      // THE TAG THE OFFICE PICKED ON THE LEAD, not a hard-coded "inspection". Erik: "if we enter
-      // that data on the lead view itself and editable on the schedule page we might be getting
-      // somewhere." One choice, made once, at the moment somebody knew — and it survives to the
-      // calendar chip instead of being re-decided here. Falls back to inspection, which is what a
-      // lead's next step is when nobody has said otherwise.
-      type: appointmentTypeFor((inq as { work_kind?: string | null }).work_kind),
-      // …and how long they said it would take, so the day it lands on knows its own load.
-      planned_minutes: (inq as { planned_minutes?: number | null }).planned_minutes ?? null,
-      // The name follows the kind. "Site inspection: Matt Warren" on a day booked as a full day of
-      // work is the app describing what he did back to him, wrongly, where he goes to check.
-      title: bookingTitle(kindChosen, String(inq.name ?? "")),
+      // ALWAYS AN INSPECTION (cn-v1170), through the helpers a lead with no kind always took; no
+      // length and no end from the lead ("Remove how long (will be determined in Inspector)"), so
+      // the calendar draws its default block.
+      type: LEAD_VISIT_TYPE,
+      title: bookingTitle(LEAD_VISIT_KIND, String(inq.name ?? "")),
       starts_at: startsAtIso,
-      ends_at: endsAtIso,
       location: inq.address,
       notes:
         [inq.message ?? inq.notes ?? null, carriedNote(carry.carried), briefNote(carry.briefCarried)]
@@ -717,16 +648,13 @@ export async function convertInquiry(
       created_by: ctx.userId,
     });
     if (aErr) return { ok: false, error: aErr.message };
-    // Engaged, not closed: mark contacted and resurface the lead AFTER the visit — a follow-up
-    // stamped ON the visit date made the lead nag "Follow up" the very morning its own visit sat
-    // on the agenda (three rows for one piece of work). The day after is when "how did it go /
-    // write the estimate" is a real question — and the write-up feeder carries that too.
+    // Engaged, not closed: contacted, and NO follow-up day (gone everywhere, cn-v1170). The visit
+    // now stands, so the lead is off the Leads list until the visit ends (lib/leads/new-intake).
     await supabase
       .from("inquiries")
       .update({
         status: "contacted",
         last_contacted_at: new Date().toISOString(),
-        next_follow_up_at: ymdAddDays(startDate, 1),
         updated_at: new Date().toISOString(),
       })
       .eq("id", id);
@@ -895,9 +823,8 @@ export async function convertInquiry(
         // here. 0379 fills it at the database for any door that forgets; this one says it out loud.
         billing_type: await readUsualBillingKind(supabase),
         description: inq.message ?? null,
-        // The size he set on the lead — the flow's whole point is that a fact stated once
-        // survives every step (the appointment path already carries it; the job path dropped it).
-        planned_minutes: (inq as { planned_minutes?: number | null }).planned_minutes ?? null,
+        // No size from the lead (cn-v1170: a lead no longer carries how long; the job is sized
+        // where it is planned).
         // Lifecycle rework (2026-07): "estimate" is a QUOTE stage, not a job status — a job
         // born from a lead starts in the to_be_scheduled waiting room either way.
         status: "to_be_scheduled",
@@ -1083,22 +1010,17 @@ export async function scheduleLeadsOnDay(
      Belt to the rail's braces — the schedule page already drops booked leads from the board, but a
      filter at one read path is a convention; refusing the write is the boundary. And it is a
      refusal with a reason, not a silent skip: he is told the visit already exists. */
-  const [{ data: existing }, { data: existingJobs }] = await Promise.all([
-    ctx.supabase
-      .from("appointments")
-      .select("inquiry_id")
-      .in("inquiry_id", ids)
-      // Any non-cancelled booking counts — a lead placed as a job (0231) is just as booked as one
-      // placed as an inspection.
-      .neq("status", "cancelled")
-      .limit(500),
-    // …and the job fork writes NO appointment (it mints a jobs row + segments), so a stale
-    // board's re-submit of a job-kind lead sailed past an appointments-only check straight into
-    // the conversion race. A lead whose job already exists is booked, full stop.
+  // cn-v1170: "booked" is THE RULE's standing visit (lib/leads/new-intake), not any non-cancelled
+  // visit: a lead whose visit ended Not Sold and was reopened is on the list again and can be placed.
+  // A lead whose visits could not be read is offered (in doubt, never hidden), as the rail drew it.
+  const [read, { data: existingJobs }] = await Promise.all([
+    standingFor(ctx.supabase, ids),
+    // …and a lead whose job already exists is booked, full stop (the job fork that made one here is
+    // gone since cn-v1170, but a lead can still have become a job through another door).
     ctx.supabase.from("jobs").select("inquiry_id").in("inquiry_id", ids).limit(500),
   ]);
   const alreadyBooked = new Set([
-    ...((existing ?? []) as { inquiry_id: string | null }[]).map((r) => String(r.inquiry_id)),
+    ...read.standing,
     ...((existingJobs ?? []) as { inquiry_id: string | null }[]).map((r) => String(r.inquiry_id)),
   ]);
 
@@ -1121,8 +1043,7 @@ export async function scheduleLeadsOnDay(
       failures.push({ id: ids[i], error: await ws.say("ld_srv_alreadyBooked") });
       continue;
     }
-    // The job/service fork lives INSIDE convertInquiry's firm-booking branch now — one fork,
-    // every door (this rail, the lead modal's "Book it") behaves identically.
+    // The one booking door, so this rail and the lead's Book It always book the same inspection.
     const res = await convertInquiry(ids[i], "inspection", { startDate: date, startTime: times[i] });
     if (res.ok) booked++;
     else failures.push({ id: ids[i], error: res.error ?? (await ws.say("ld_srv_couldntBook")) });
@@ -1131,47 +1052,6 @@ export async function scheduleLeadsOnDay(
   revalidatePath("/schedule");
   revalidatePath("/planner");
   return { ok: booked > 0, booked, failures, error: booked ? undefined : failures[0]?.error };
-}
-
-/**
- * SIZE THE WORK FROM WHEREVER YOU ARE.
- *
- * Erik: "if we enter that data on the lead view itself and editable on the schedule page we might
- * be getting somewhere." The lead form is where the answer usually arrives — on the call — but the
- * moment you actually NEED the number is while filling a day, and making him leave the schedule,
- * find the lead, edit it, and come back is the round trip he says costs him the most.
- *
- * Both fields independently optional: sizing something you already tagged must not force you to
- * re-pick the tag, and vice versa. Passing neither is a no-op rather than an error.
- */
-export async function sizeLead(
-  id: string,
-  patch: { workKind?: string | null; plannedMinutes?: number | null },
-): Promise<Result> {
-  const ctx = await requireStaff();
-  if ("error" in ctx) return { ok: false, error: ctx.error };
-  const clean: Record<string, unknown> = {};
-  if (patch.workKind !== undefined) {
-    const k = String(patch.workKind ?? "").trim();
-    // Against the ONE list (lib/schedule/work-shape), not a copy of it. The copy that used to live
-    // here is what refused "Phone call" the hour it was added.
-    if (k && !isWorkKind(k) && k !== "other") return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_notAKind") };
-    clean.work_kind = k || null; // "" clears it back to "not sure yet"
-  }
-  if (patch.plannedMinutes !== undefined) {
-    const m = Number(patch.plannedMinutes) || 0;
-    if (m < 0 || m > 60 * 24 * 30) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_durationOff") };
-    clean.planned_minutes = m > 0 ? m : null; // 0 means "not sure yet", never a zero-length job
-  }
-  if (!Object.keys(clean).length) return { ok: true };
-  clean.updated_at = new Date().toISOString();
-  // THE SILENT-WRITE LAW: a zero-row update is a 204, not an error.
-  const { data, error } = await ctx.supabase.from("inquiries").update(clean).eq("id", id).select("id");
-  if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadUnavailable") };
-  revalidatePath("/leads");
-  revalidatePath("/schedule");
-  return { ok: true };
 }
 
 /**
@@ -1245,12 +1125,13 @@ export async function suggestVisitSlots(
 
   const { data: inq } = await supabase
     .from("inquiries")
-    .select("id, city, planned_minutes")
+    .select("id, city")
     .eq("id", inquiryId)
     .maybeSingle();
   if (!inq) return { ok: false, slots: [], error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadNotFound") };
   const leadTown = String((inq as { city?: string | null }).city ?? "").trim().toLowerCase();
-  const minutes = Number((inq as { planned_minutes?: number | null }).planned_minutes ?? 0) || 90;
+  // A lead carries no length any more (cn-v1170): an inspection is fitted at its usual 90 minutes.
+  const minutes = 90;
 
   // The window: tomorrow through two weeks out. Existing estimate visits mark the days that are
   // already "inspection days" — absorbed rows are jobs now and don't count as visit days.

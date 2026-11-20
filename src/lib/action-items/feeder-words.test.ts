@@ -30,7 +30,8 @@ function pick(table: string, cols: string): any {
   if (table === "quotes" && cols.includes("quote_line_items")) return state.rows.estimateDrafts ?? [];
   if (table === "organized_items" && cols.includes("summary")) return state.rows.papers ?? [];
   if (table === "contracts") return state.rows.contracts ?? [];
-  if (table === "inquiries" && cols.includes("converted_at")) return state.rows.leads ?? [];
+  // The Leads list's read (lib/leads/new-intake, cn-v1170): its own column list.
+  if (table === "inquiries" && cols.includes("created_at")) return state.rows.leads ?? [];
   if (table === "lien_records") return state.rows.liens ?? [];
   if (table === "jobs" && cols.includes("job_schedule_segments(")) return state.rows.needDay ?? [];
   if (table === "jobs" && cols.includes("hold_reason")) return state.rows.holds ?? [];
@@ -97,8 +98,8 @@ const PLAN_KEYS = new Set([
   // D2, the phrases.
   "ny_w_invoice", "ny_w_invoiceNotSent", "ny_w_invoiceBackFromSetAside", "ny_w_jobFinishedSend", "ny_w_jobCancelledSend", "ny_w_visitNotBilled",
   "ny_w_workNotBilled", "ny_w_visitBilledNotPaid", "ny_w_workBilledNotPaid", "ny_w_jobNotBilled", "ny_w_noCostsYet",
-  "ny_w_lienPrelim", "ny_w_lienPrelimPast", "ny_w_lienRecord", "ny_w_lienRecordPast", "ny_w_leadNew", "ny_w_leadFollowUp",
-  "ny_w_requestNew", "ny_w_requestFollowUp", "ny_w_toWriteUp", "ny_w_toWriteUpTitled", "ny_docEstimate", "ny_docQuote",
+  "ny_w_lienPrelim", "ny_w_lienPrelimPast", "ny_w_lienRecord", "ny_w_lienRecordPast", "ny_w_leadNew", "ny_w_leadReached",
+  "ny_w_requestNew", "ny_w_requestReached", "ny_w_toWriteUp", "ny_w_toWriteUpTitled", "ny_docEstimate", "ny_docQuote",
   "ny_w_docNotSent", "ny_w_docNoAnswer", "ny_w_docFollowUp", "ny_w_docOfferEnds", "ny_w_docOfferEnded",
   "ny_w_contractNotSigned", "ny_w_saidYes", "ny_w_saidYesNoRef", "ny_w_neverHadADay", "ny_w_datedNeverWorked",
   "ny_w_lastDay", "ny_w_workedNothingNext", "ny_w_quietSince", "ny_w_nToBuy", "ny_w_holdBack", "ny_w_holdNoDay",
@@ -112,9 +113,11 @@ const PLAN_KEYS = new Set([
   "ny_w_bankToSort",
   // D2, the Couldn't Check sentences.
   "ny_w_unreadJobsDay", "ny_w_unreadHolds", "ny_w_unreadReceipts", "ny_w_unreadDone", "ny_w_unreadPermits",
-  "ny_w_unreadSupplierPapers", "ny_w_unreadSupplierPay", "ny_w_unreadHours", "ny_w_hoursNotAllListed",
+  "ny_w_unreadSupplierPapers", "ny_w_unreadSupplierPay", "ny_w_unreadHours", "ny_w_unreadLeads", "ny_w_hoursNotAllListed",
   // D3's pile names, which a Couldn't Check line borrows as its label when it has a pile.
   "ny_btn_pile_jobsNeedingADay", "ny_btn_pile_doneNotBilled", "ny_btn_pile_permitInspections",
+  // cn-v1170: the leads' Couldn't Check line.
+  "ny_btn_pile_leadsToCall",
 ]);
 
 const FEEDERS = [
@@ -156,12 +159,12 @@ describe("the keys a feeder emits", () => {
 
 describe("the pure feeders", () => {
   it("a lead: its name in bold, else the word for nobody named; Leads off says it as a request", () => {
-    const lead = { id: "i1", name: "Sam Tillery", status: "new", next_follow_up_at: null };
-    expect(inquiryActionItem(lead, TODAY, true)).toMatchObject({ who: "Sam Tillery", what: { key: "ny_w_leadNew" } });
-    expect(inquiryActionItem({ ...lead, status: "contacted" }, TODAY, true).what).toEqual({ key: "ny_w_leadFollowUp" });
-    expect(inquiryActionItem(lead, TODAY, false).what).toEqual({ key: "ny_w_requestNew" });
-    expect(inquiryActionItem({ ...lead, status: "contacted" }, TODAY, false).what).toEqual({ key: "ny_w_requestFollowUp" });
-    const nameless = inquiryActionItem({ ...lead, name: "  " }, TODAY, true);
+    const lead = { id: "i1", name: "Sam Tillery", status: "new" };
+    expect(inquiryActionItem(lead, true)).toMatchObject({ who: "Sam Tillery", what: { key: "ny_w_leadNew" } });
+    expect(inquiryActionItem({ ...lead, status: "contacted" }, true).what).toEqual({ key: "ny_w_leadReached" });
+    expect(inquiryActionItem(lead, false).what).toEqual({ key: "ny_w_requestNew" });
+    expect(inquiryActionItem({ ...lead, status: "contacted" }, false).what).toEqual({ key: "ny_w_requestReached" });
+    const nameless = inquiryActionItem({ ...lead, name: "  " }, true);
     expect(nameless.who).toBeNull();
     expect(nameless.whoSay).toEqual({ key: "ny_who_someone" });
   });
@@ -357,21 +360,23 @@ describe("the build: each row's who, what and amount (table A2)", () => {
     expect(byId(rows, "d4").what).toEqual({ key: "ny_w_invoiceBackFromSetAside", vars: { ref: "INV-113", day: dayAgo(12) }, tail: "Larkspur Fence · J-064" });
   });
 
-  it("a lead's clock: a new lead with no follow-up day is Due from the day it came in, for a week; a contacted one has none", async () => {
+  it("a lead's clock runs from the day it came in (cn-v1170: no follow-up day), reached or not: Due for a week", async () => {
     state.rows.leads = [
-      { id: "lead-1", name: "Sam Tillery", phone: null, status: "new", next_follow_up_at: null, converted_at: null, created_at: daysAgo(1) },
-      { id: "lead-9", name: "Dana Rook", phone: null, status: "new", next_follow_up_at: null, converted_at: null, created_at: daysAgo(9) },
-      { id: "lead-c", name: "Theo Vance", phone: null, status: "contacted", next_follow_up_at: null, converted_at: null, created_at: daysAgo(1) },
+      { id: "lead-1", name: "Sam Tillery", phone: null, status: "new", created_at: daysAgo(1) },
+      { id: "lead-9", name: "Dana Rook", phone: null, status: "new", created_at: daysAgo(9) },
+      { id: "lead-c", name: "Theo Vance", phone: null, status: "contacted", created_at: daysAgo(1) },
     ];
     const rows = await build();
     expect(byId(rows, "lead-1")).toMatchObject({ clock: daysAgo(1), level: "soon" });
     expect(byId(rows, "lead-9")).toMatchObject({ clock: daysAgo(9), level: "none" });
-    expect([byId(rows, "lead-c").clock ?? null, byId(rows, "lead-c").level]).toEqual([null, "none"]);
+    expect(byId(rows, "lead-c")).toMatchObject({ clock: daysAgo(1), level: "soon", what: { key: "ny_w_leadReached" } });
   });
 
-  it("the lead read selects created_at: without it every new lead would silently go plain", () => {
+  it("the lead read selects created_at: without it every lead would silently go plain", async () => {
+    const { INQUIRY_ROW_COLUMNS } = await import("./switches");
+    expect(INQUIRY_ROW_COLUMNS.split(", ")).toContain("created_at");
     const src = readFileSync(join(__dirname, "query.ts"), "utf8");
-    expect(src).toMatch(/\.from\("inquiries"\)\s*\.select\("[^"]*\bcreated_at\b[^"]*", \{ count: "exact" \}\)/);
+    expect(src).toContain("loadNewIntake<InquiryRow>(supabase, INQUIRY_ROW_COLUMNS,");
   });
 
   it("materials: the crew's day is the clock, today or tomorrow", async () => {

@@ -221,7 +221,7 @@ export const words: WordCatalog = {
     qs_acceptedJobAttention: "Estimate accepted, but the job needs attention: {why}",
     // What is TRUE when the stamp did not land, and what NOT to do: the old line sent the person back
     // through Start the Estimate, which finds nothing standing on a visit with no lead and births a twin.
-    qs_stampNotLinked: "The estimate is saved, but it could not be tied to its inspection, so the inspection can still show as waiting to be written up. Do not start another estimate from that inspection. When this estimate is settled, mark the inspection Won or Lost on its own page.",
+    qs_stampNotLinked: "The estimate is saved, but it could not be tied to its inspection, so the inspection can still show as waiting to be written up. Do not start another estimate from that inspection. When this estimate is settled, mark the inspection Won or Not Sold on its own page.",
 
     // ── quotes/actions: the estimator and the circuit schedule (pass 2) ──
     qs_takeoffTooLongTrim: "That take-off ran longer than one pass — trim the scope and try again.",
@@ -440,7 +440,7 @@ export const words: WordCatalog = {
     qs_anInvoice: "una factura",
     qs_jobNotCreated: "No se creó el trabajo.",
     qs_acceptedJobAttention: "Presupuesto aceptado, pero el trabajo necesita atención: {why}",
-    qs_stampNotLinked: "El presupuesto se guardó, pero no se pudo enlazar con su inspección, así que la inspección puede seguir apareciendo como pendiente de redactar. No empieces otro presupuesto desde esa inspección. Cuando este presupuesto se resuelva, marca la inspección como Ganada o Perdida en su propia página.",
+    qs_stampNotLinked: "El presupuesto se guardó, pero no se pudo enlazar con su inspección, así que la inspección puede seguir apareciendo como pendiente de redactar. No empieces otro presupuesto desde esa inspección. Cuando este presupuesto se resuelva, marca la inspección como Ganada o No Vendida en su propia página.",
 
     qs_takeoffTooLongTrim: "Esa cuantificación fue más larga que una pasada — recorta el alcance e inténtalo de nuevo.",
     qs_takeoffTooLongSplit: "Esa cuantificación fue más larga que una pasada — divide el plano, o recorta el alcance e inténtalo de nuevo.",

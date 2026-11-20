@@ -45,79 +45,75 @@ describe("feederOn — which Needs You feeders a switch turns off", () => {
   });
 });
 
-describe("inquiryActionItem — a request on Needs You", () => {
-  const row = { id: "i1", name: "Dana Reyes", status: "new", next_follow_up_at: null, phone: "(530) 555-0142" };
+describe("inquiryActionItem — a lead on Needs You (cn-v1170: the Leads list's own row)", () => {
+  const at = "2026-09-24T17:00:00Z";
+  const row = { id: "i1", name: "Dana Rook", status: "new", phone: "(530) 555-0142", created_at: at };
 
-  it("Leads on: the lead row, carrying the number its ⋯ Call dials (its button is Called, not Call Back)", () => {
-    expect(inquiryActionItem(row, "2026-09-26", true)).toEqual({
+  it("Leads on: the lead row, its clock and its day the day it came in, opening the lead's file", () => {
+    expect(inquiryActionItem(row, true)).toEqual({
       id: "i1",
       kind: "inquiry",
-      title: "Dana Reyes",
+      title: "Dana Rook",
       subtitle: "New lead — reach out",
-      who: "Dana Reyes",
+      who: "Dana Rook",
       what: { key: "ny_w_leadNew" },
-      when: null,
-      // No day it came in on the row: no clock (the build's read always carries created_at).
-      clock: null,
+      when: at,
+      clock: at,
       urgency: 2,
       done: false,
-      href: "/leads?focus=i1",
+      href: "/leads/i1",
       affordances: AFFORDANCES.inquiry,
       phone: "(530) 555-0142",
     });
     // No number: no phone on the row, so no Call anywhere.
-    expect(inquiryActionItem({ ...row, phone: null }, "2026-09-26", true).phone).toBeUndefined();
+    expect(inquiryActionItem({ ...row, phone: null }, true).phone).toBeUndefined();
   });
 
-  it("its clock (cn-v1162): the follow-up day somebody set, else a new lead's day in, else none", () => {
-    const at = "2026-09-24T17:00:00Z";
-    // A new lead: the day it came in, whatever leads are called.
-    expect(inquiryActionItem({ ...row, created_at: at }, "2026-09-26", true).clock).toBe(at);
-    expect(inquiryActionItem({ ...row, created_at: at }, "2026-09-26", false).clock).toBe(at);
-    // A follow-up day wins over the day it came in.
-    expect(inquiryActionItem({ ...row, created_at: at, next_follow_up_at: "2026-09-25" }, "2026-09-26", true).clock).toBe("2026-09-25");
-    // A contacted lead with no day has no clock: its day in is the office's to answer, not a deadline.
-    expect(inquiryActionItem({ ...row, status: "contacted", created_at: at }, "2026-09-26", true).clock).toBeNull();
-    expect(inquiryActionItem({ ...row, status: "contacted", created_at: at, next_follow_up_at: "2026-09-20" }, "2026-09-26", true).clock).toBe("2026-09-20");
-    // when, urgency and the words do not move with it.
-    const a = inquiryActionItem({ ...row, created_at: at }, "2026-09-26", true);
-    expect([a.when, a.urgency]).toEqual([null, 2]);
+  it("no follow-up day: a reached lead keeps the clock from its arrival and says it is not booked yet", () => {
+    const reached = inquiryActionItem({ ...row, status: "contacted" }, true);
+    expect(reached.clock).toBe(at);
+    expect(reached.when).toBe(at);
+    expect(reached.what).toEqual({ key: "ny_w_leadReached" });
+    expect(reached.urgency).toBe(1);
+    // A row with no day in has no clock at all (the build's read always carries created_at).
+    expect(inquiryActionItem({ ...row, created_at: null }, true).clock).toBeNull();
   });
 
-  it("Leads off: Call Back still shows, as the row's own button (row-buttons.ts)", async () => {
+  it("its doors: Schedule, then Call and Not Sold behind ⋯; no Called, no Snooze", async () => {
     const { rowButtons } = await import("./row-buttons");
-    const item = { ...inquiryActionItem(row, "2026-09-26", false), group: KIND_GROUP.inquiry };
-    const b = rowButtons(item, { leadsOn: false, isStaff: true });
-    expect(b.primary).toEqual({ label: "Call Back", act: { type: "call", tel: "(530) 555-0142" } });
-    // Leads on, the same person's button is Called, and the number is behind ⋯.
-    const on = rowButtons({ ...inquiryActionItem(row, "2026-09-26", true), group: KIND_GROUP.inquiry }, { leadsOn: true, isStaff: true });
-    expect(on.primary?.label).toBe("Called");
-    expect(on.more.map((d) => d.label)).toContain("Call");
+    const on = rowButtons({ ...inquiryActionItem(row, true), group: KIND_GROUP.inquiry }, { leadsOn: true, isStaff: true });
+    expect(on.primary).toEqual({ label: "Schedule", act: { type: "open", href: "/leads/i1?schedule=1" } });
+    expect(on.more.map((d) => d.label)).toEqual(["Call", "Not Sold"]);
+    expect(AFFORDANCES.inquiry).toEqual(["dismiss", "open"]);
+    // Leads off: Call Back is the button, Not Sold behind ⋯, and no Schedule (it books an inspection).
+    const offB = rowButtons({ ...inquiryActionItem(row, false), group: KIND_GROUP.inquiry }, { leadsOn: false, isStaff: true });
+    expect(offB.primary).toEqual({ label: "Call Back", act: { type: "call", tel: "(530) 555-0142" } });
+    expect(offB.more.map((d) => d.label)).toEqual(["Not Sold"]);
   });
 
-  it("Leads off: 'New Request from Dana Reyes', Call them back, and the number to dial", () => {
-    const it2 = inquiryActionItem(row, "2026-09-26", false);
-    expect(it2.title).toBe("New Request from Dana Reyes");
+  it("Leads off: 'New Request from Dana Rook', Call them back, and the number to dial", () => {
+    const it2 = inquiryActionItem(row, false);
+    expect(it2.title).toBe("New Request from Dana Rook");
     expect(it2.subtitle).toBe("Call them back");
     expect(it2.phone).toBe("(530) 555-0142");
     // Its chip rides on the row (Wave 1, W1-15): the flat list has no Leads header to rename.
     expect(it2.chip).toBe("Request");
-    // Same record, same urgency, same door (the list renders with the Off line on top).
-    expect(it2.href).toBe("/leads?focus=i1");
+    expect(it2.href).toBe("/leads/i1");
     expect(it2.urgency).toBe(2);
     expect(it2.kind).toBe("inquiry");
   });
 
-  it("Leads off, a follow-up with no phone: plain words and no Call Back to render", () => {
-    const it3 = inquiryActionItem({ ...row, status: "contacted", phone: null, next_follow_up_at: "2026-09-20" }, "2026-09-26", false);
-    expect(it3.title).toBe("Request from Dana Reyes");
-    expect(it3.subtitle).toBe("Follow up");
+  it("Leads off, a reached request with no phone: plain words and no Call Back to render", () => {
+    const it3 = inquiryActionItem({ ...row, status: "contacted", phone: null }, false);
+    expect(it3.title).toBe("Request from Dana Rook");
+    expect(it3.subtitle).toBe("Called back");
+    expect(it3.what).toEqual({ key: "ny_w_requestReached" });
     expect(it3.phone).toBeNull();
     expect(it3.urgency).toBe(1);
   });
 
   it("a nameless request still reads as a sentence", () => {
-    expect(inquiryActionItem({ ...row, name: null }, "2026-09-26", false).title).toBe("New Request from Someone");
+    expect(inquiryActionItem({ ...row, name: null }, false).title).toBe("New Request from Someone");
   });
 });
 
@@ -132,7 +128,7 @@ describe("the wiring (structural)", () => {
   it("the gated feeders skip their reads, and the request feeder runs whatever Leads says", () => {
     expect(query).toContain('isStaff && feederOn("quote_draft", features)');
     expect(query).toContain('isStaff && feederOn("inspection_writeup", features)');
-    expect(query).toContain("inquiryActionItem(q, todayStr, leadsOn)");
+    expect(query).toContain("inquiryActionItem(q, leadsOn)");
     expect(query).not.toMatch(/feederOn\("inquiry"/);
   });
 

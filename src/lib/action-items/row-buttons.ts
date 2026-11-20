@@ -26,7 +26,7 @@ export type RowAct =
   | { type: "open"; href: string }
   /** Dials a number. */
   | { type: "call"; tel: string }
-  /** Sends the verb straight away (Called, Close Out, Take Off Hold). */
+  /** Sends the verb straight away (Close Out, Take Off Hold). */
   | { type: "run"; verb: Affordance }
   /** Asks for a day (the day picker), then sends the verb with it (Pick a Day). */
   | { type: "pickDay"; verb: "schedule" }
@@ -78,7 +78,7 @@ const PILE_VERB_KEY: Record<string, string> = {
   "Pick a Day": "ny_btn_pickADay",
   "Get Paid": "ny_btn_getPaid",
   "Bill It": "ny_btn_billIt",
-  Called: "ny_btn_called",
+  Schedule: "ld_btn_schedule",
   "Call Back": "ny_btn_callBack",
   "Close Out": "ny_btn_closeOut",
   "Open Them": "ny_btn_openThem",
@@ -196,7 +196,7 @@ export function rowButtons(item: ActionItem, ctx: RowButtonsCtx): RowButtons {
             : null,
           invoiced,
           has(item, "dismiss")
-            ? ending("dismiss", L("ny_btn_lost"), "Didn't Win It?", `Records ${what} as lost, so it stops asking. The estimate is marked declined; you can change it back on its own page.`, "Mark It Lost")
+            ? ending("dismiss", L("ny_btn_lost"), "Didn't Win It?", `Records ${what} as Not Sold, so it stops asking. The estimate is marked declined; you can change it back on its own page.`, L("ny_btn_markItNotSold"))
             : null,
         ].filter((d): d is RowDoor => !!d),
       };
@@ -208,29 +208,31 @@ export function rowButtons(item: ActionItem, ctx: RowButtonsCtx): RowButtons {
         more: [
           invoiced,
           has(item, "dismiss")
-            ? ending("dismiss", L("ny_btn_lost"), "Lost After All?", `Marks ${what} declined, so it stops asking for a day. Its job is left as it is, and you can change the estimate back on its own page.`, "Mark It Lost")
+            ? ending("dismiss", L("ny_btn_lost"), "Not Sold After All?", `Marks ${what} declined, so it stops asking for a day. Its job is left as it is, and you can change the estimate back on its own page.`, L("ny_btn_markItNotSold"))
             : null,
         ].filter((d): d is RowDoor => !!d),
       };
     case "inquiry": {
+      // THE LEADS LIST'S OWN DOORS (cn-v1170, the meeting: "remove everything else except Schedule and
+      // Not sold"). Schedule opens the lead's file with its Schedule sheet open (it always books an
+      // inspection); Call dials; Not Sold keeps it on file. No Called and no Snooze: a lead on the
+      // list IS the reminder.
       const call: RowDoor | null = item.phone ? { label: leadsOn ? L("ny_btn_call") : L("ny_btn_callBack"), act: { type: "call", tel: item.phone } } : null;
-      const called: RowDoor | null = has(item, "do") ? { label: L("ny_btn_called"), act: { type: "run", verb: "do" } } : null;
-      const lost = has(item, "dismiss")
+      const notSold = has(item, "dismiss")
         ? ending(
             "dismiss",
             L("ny_btn_lost"),
-            "Lost This One?",
-            `Marks ${what} lost, so it leaves Needs You. It stays on the ${leadsOn ? "Leads list" : "request's page"} as lost, and you can set it back there.`,
-            "Mark It Lost",
+            L("ny_w_askNotSold"),
+            L(leadsOn ? "ny_w_notSoldLeadBody" : "ny_w_notSoldRequestBody", { what }),
+            L("ny_btn_markItNotSold"),
           )
         : null;
       if (leadsOn) {
-        return { primary: called, also: null, more: [call, snooze(false), lost].filter((d): d is RowDoor => !!d) };
+        return { primary: open(L("ld_btn_schedule"), `/leads/${item.id}?schedule=1`), also: null, more: [call, notSold].filter((d): d is RowDoor => !!d) };
       }
-      // Leads switched off: Call Back stays the button (the person asking for work is not switched off).
-      return call
-        ? { primary: call, also: null, more: [called, lost].filter((d): d is RowDoor => !!d) }
-        : { primary: called, also: null, more: [lost].filter((d): d is RowDoor => !!d) };
+      // Leads switched off: Call Back is the button (the person asking for work is not switched off).
+      // No Schedule: it books an inspection, which is the switched-off feature.
+      return { primary: call, also: null, more: [notSold].filter((d): d is RowDoor => !!d) };
     }
     case "appointment":
       // A tech's visit only opens: closing it out is the office's (appointment.setStatus is staff).
@@ -258,7 +260,8 @@ export function rowButtons(item: ActionItem, ctx: RowButtonsCtx): RowButtons {
             ? [ending("wontHappen", L("ny_btn_didntHappen"), "Dismiss This Visit?", `Takes ${what} off the schedule. It is deleted if nothing is on it, otherwise cancelled and kept on file.`, "Dismiss")]
             : []),
           ...(has(item, "dismiss")
-            ? [ending("dismiss", L("ny_btn_lostVisit"), "Didn't Win It?", `Records ${what} as lost, so it stops asking. The inspection is marked lost; you can change it back on its own page.`, "Mark It Lost")]
+            ? // cn-v1170: a visit's Not Sold marks its lead Not Sold too (setAppointmentOutcome), and says so.
+              [ending("dismiss", L("ny_btn_lostVisit"), "Didn't Win It?", L("ny_w_notSoldVisitBody", { what }), L("ny_btn_markItNotSold"))]
             : []),
         ],
       };

@@ -46,6 +46,7 @@ import { FeaturesPanel } from "./features-panel";
 import { FeatureOffLine } from "@/components/feature-off-line";
 import { featureOn, type FeatureKey } from "@/lib/features";
 import { PaymentMethods } from "./payment-methods";
+import { LeadSources } from "./lead-sources";
 import { TapToPaySettingsSection } from "@/components/tap-to-pay/settings-section";
 import { AutomationSettings } from "./automation-settings";
 import { TextingCard } from "./texting-card";
@@ -835,6 +836,12 @@ export default async function SettingsPage({
                   })()}
                 />
               </Section>
+              {/* The lead form's Lead Source list (cn-v1170), with the other ways a lead reaches you. */}
+              {on("leads") && (
+                <Section title={t("sh_leadSourcesTitle")}>
+                  <LeadSources sources={settings.lead_sources} />
+                </Section>
+              )}
               {/* The lead link and its QR are Leads' (the switch board). The request-an-estimate
                   link above is a public door that keeps working with Leads off. */}
               {on("leads") && (

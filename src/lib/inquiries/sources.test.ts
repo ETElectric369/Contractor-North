@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { WEB_SOURCES, isWebSource } from "./sources";
+import { MANUAL_SOURCE, WEB_SOURCES, isWebSource, leadSourceChip } from "./sources";
 
 /**
  * EVERY LEAD DOOR'S SOURCE IS ONE THE ROW KNOWS (W2-07). The lead row draws the Globe ("From Your
@@ -42,5 +42,17 @@ describe("the lead doors write sources the row knows", () => {
     expect(isWebSource("manual")).toBe(false);
     expect(isWebSource(null)).toBe(false);
     expect(isWebSource(undefined)).toBe(false);
+  });
+});
+
+describe("leadSourceChip (cn-v1170)", () => {
+  it("a website door is the web chip, a picked label is its own text, nothing picked is no chip", () => {
+    for (const s of WEB_SOURCES) expect(leadSourceChip(s)).toEqual({ kind: "web" });
+    expect(leadSourceChip("Word of Mouth")).toEqual({ kind: "label", text: "Word of Mouth" });
+    expect(leadSourceChip("  Signage ")).toEqual({ kind: "label", text: "Signage" });
+    expect(leadSourceChip(MANUAL_SOURCE)).toBeNull();
+    expect(leadSourceChip("")).toBeNull();
+    expect(leadSourceChip(null)).toBeNull();
+    expect(leadSourceChip(undefined)).toBeNull();
   });
 });

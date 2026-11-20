@@ -4,7 +4,6 @@ import { customerStatusLabel, inquiryStatusLabel, INQUIRY_STATUSES } from "@/lib
 import { LEAD_BUCKETS, PROJECT_TYPES, leadBucketWords, projectTypeLabel } from "@/lib/lead-triage";
 import { CRM_SORT_OPTIONS, crmOrderLabel } from "@/lib/crm-order";
 import { inspectionRowTags } from "@/lib/inspections";
-import { leadNextStep, monthDay, visitsUnreadLabel, VISITS_UNREAD, VISITS_UNREAD_LABEL, weekdayMonthDay, type LeadStepInput } from "@/lib/leads/next-step";
 
 /**
  * VENTAS-2'S FOUNDATION (cn-v1146): the two status helpers and the four libraries the leads, the
@@ -16,15 +15,18 @@ const es = translator("es");
 const en = translator("en");
 
 describe("inquiryStatusLabel", () => {
-  it("English is the raw value byte for byte, with or without a translator", () => {
+  it("English is the raw value byte for byte, with or without a translator, except lost, which reads not sold (cn-v1170)", () => {
     for (const s of INQUIRY_STATUSES) {
-      expect(inquiryStatusLabel(s)).toBe(s);
-      expect(inquiryStatusLabel(s, "en", en)).toBe(s);
-      expect(inquiryStatusLabel(s, "es")).toBe(s); // no translator handed in: English, never a raw key
+      const word = s === "lost" ? "not sold" : s;
+      expect(inquiryStatusLabel(s)).toBe(word);
+      expect(inquiryStatusLabel(s, "en", en)).toBe(word);
+      expect(inquiryStatusLabel(s, "es")).toBe(word); // no translator handed in: English, never a raw key
     }
+    // The English word is the agenda's lead status family's, the same as Spanish below.
+    for (const s of INQUIRY_STATUSES) expect(inquiryStatusLabel(s)).toBe(en(`ag_srv_leadStatus_${s}`));
   });
   it("Spanish reads the same words as the agenda's lead status family", () => {
-    expect(INQUIRY_STATUSES.map((s) => inquiryStatusLabel(s, "es", es))).toEqual(["nuevo", "contactado", "cotizado", "ganado", "perdido"]);
+    expect(INQUIRY_STATUSES.map((s) => inquiryStatusLabel(s, "es", es))).toEqual(["nuevo", "contactado", "cotizado", "ganado", "no vendido"]);
     for (const s of INQUIRY_STATUSES) expect(inquiryStatusLabel(s, "es", es)).toBe(es(`ag_srv_leadStatus_${s}`));
   });
   it("an unknown value reads as itself in both languages", () => {
@@ -79,34 +81,5 @@ describe("lib/inspections inspectionRowTags", () => {
     expect(spanish.map((t) => t.tone)).toEqual(inspectionRowTags(row, true).map((t) => t.tone));
     expect(spanish.map((t) => t.label).slice(1)).toEqual(["cancelada", "sin notas de campo"]);
     expect(spanish[0].label).toBe(es("jb_apptFinalInspection"));
-  });
-});
-
-describe("lib/leads/next-step", () => {
-  const base: LeadStepInput = {
-    status: "new", converted_at: null, converted_to: null, next_follow_up_at: null,
-    lead_bucket: null, site_inspection_required: null, source: null, referred_by: null,
-  };
-  const opts = { estimatesOn: true, tz: "America/Los_Angeles" };
-  it("English is unchanged with no language and with 'en'", () => {
-    expect(leadNextStep(base, null, "2026-11-06", opts).label).toBe("New · Call Them");
-    expect(leadNextStep({ ...base, lead_bucket: "A", site_inspection_required: true }, null, "2026-11-06", opts, "en", en).label).toBe("A · New · Call Them · Needs a Visit");
-    expect(leadNextStep({ ...base, next_follow_up_at: "2026-09-20" }, null, "2026-11-06", opts).label).toBe("Call Back · Sep 20");
-    expect(leadNextStep(base, VISITS_UNREAD, "2026-11-06", opts).label).toBe(VISITS_UNREAD_LABEL);
-    expect(visitsUnreadLabel()).toBe(VISITS_UNREAD_LABEL);
-    expect(monthDay("2026-09-20")).toBe("Sep 20");
-    expect(weekdayMonthDay("2026-10-01")).toBe("Thu Oct 1");
-    expect(monthDay("2026-09-20", "en")).toBe("Sep 20");
-  });
-  it("Spanish through a translator; tone and bucket unchanged", () => {
-    const step = leadNextStep({ ...base, lead_bucket: "A", site_inspection_required: true }, null, "2026-11-06", opts, "es", es);
-    expect(step.label).toBe("A · Nuevo · Llámale · Necesita una Visita");
-    expect(step.tone).toBe("blue");
-    expect(step.bucket).toBe("A");
-    expect(leadNextStep({ ...base, status: "lost" }, null, "2026-11-06", opts, "es", es).label).toBe("Perdido");
-    expect(leadNextStep(base, VISITS_UNREAD, "2026-11-06", opts, "es", es).label).toBe("No Cargaron las Visitas");
-    expect(leadNextStep({ ...base, next_follow_up_at: "2026-09-20" }, null, "2026-11-06", opts, "es", es).label).toMatch(/^Volver a Llamar · 20/);
-    const booked = leadNextStep(base, { done: 0, upcoming: 1, nextAt: null, nextType: "inspection" }, "2026-11-06", opts, "es", es);
-    expect(booked.label).toBe(`${es("ag_btn_kindInspection")} · Aún sin Día`);
   });
 });

@@ -18,16 +18,16 @@ describe("a lead whose visit is waiting to be written up rides the write-up row"
     expect(lessRidden({ total: 7, capped: true }, 1)).toEqual({ total: 6, capped: true });
   });
 
-  it("query.ts builds the write-up rows first and skips those leads in both the Now loop and the fold", () => {
+  // cn-v1170: no fold for a lead any more (no follow-up day), so the one loop is the Now loop.
+  it("query.ts builds the write-up rows first and skips those leads in the lead loop", () => {
     const src = readFileSync(new URL("./query.ts", import.meta.url), "utf8");
     const writeUps = src.indexOf("const writeUpLeadIds = new Set<string>()");
-    const nowLoop = src.indexOf("for (const q of (inqR.data ?? []) as any[])");
-    const foldLoop = src.indexOf("for (const q of (inqLaterR.data ?? []) as any[])");
+    const nowLoop = src.indexOf("for (const q of (inqR.data ?? []) as InquiryRow[])");
     expect(writeUps).toBeGreaterThan(-1);
     expect(writeUps).toBeLessThan(nowLoop);
-    expect(src.slice(nowLoop, foldLoop)).toContain("leadRidesItsWriteUp(q.id, writeUpLeadIds)");
-    expect(src.slice(foldLoop, foldLoop + 400)).toContain("leadRidesItsWriteUp(q.id, writeUpLeadIds)");
-    expect(src).toContain("counts.leads_to_call = lessRidden(sqlCount(inqR), leadsRidden)");
+    expect(src.slice(nowLoop, nowLoop + 200)).toContain("leadRidesItsWriteUp(q.id, writeUpLeadIds)");
+    expect(src).not.toContain("inqLaterR");
+    expect(src).toContain("counts.leads_to_call = lessRidden(leadCount, leadsRidden)");
     expect(src).toContain('if (a.inquiry_id) writeUpLeadIds.add(String(a.inquiry_id));');
   });
 });

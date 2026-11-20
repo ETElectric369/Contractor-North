@@ -21,7 +21,7 @@ vi.mock("./actions", () => ({
   placeJobOnDay: vi.fn(),
   planDayTimes: vi.fn(),
 }));
-vi.mock("../leads/actions", () => ({ setLeadContact: vi.fn(), sizeLead: vi.fn(), scheduleLeadsOnDay: vi.fn() }));
+vi.mock("../leads/actions", () => ({ setLeadContact: vi.fn(), scheduleLeadsOnDay: vi.fn() }));
 vi.mock("../jobs/actions", () => ({ setJobStatus: vi.fn() }));
 
 import { TimeGrid, type TimeGridEvent } from "@/components/time-grid";

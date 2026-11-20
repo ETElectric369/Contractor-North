@@ -107,7 +107,8 @@ export const SCREENS: Screen[] = [
     ],
   },
   { name: "Customers", word: "sh_dock_sl-customers", path: "/crm", say: "?q=<search>; one customer is /crm/<id>", staffOnly: true },
-  { name: "Leads", word: "sh_dock_sl-leads", path: "/leads", staffOnly: true },
+  // cn-v1170: the list is new intake only; one lead's page (its file) is its own route.
+  { name: "Leads", word: "sh_dock_sl-leads", path: "/leads", say: "one lead's page is /leads/<id>; /leads/<id>?schedule=1 opens its Schedule sheet", staffOnly: true },
   { name: "Inspections", word: "sh_dock_sl-inspections", path: "/inspections", staffOnly: true },
   {
     name: "An inspection (the visit sheet)",

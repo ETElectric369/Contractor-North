@@ -1,230 +1,78 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
-import { WorkShapeControls } from "@/components/work-shape-controls";
-import { useRouter } from "next/navigation";
-import { Phone, Mail, Globe, MapPin, UserPlus, FileText, Briefcase } from "lucide-react";
-import { DayField } from "@/components/day-field";
 import Link from "next/link";
+import { Phone, Mail, Globe, MapPin } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { InquiryModal } from "./inquiry-modal";
-import { ConvertMenu } from "./convert-menu";
-import { convertInquiry, deleteInquiry, markInquiryContacted, setInquiryStatus, sizeLead, snoozeInquiry } from "./actions";
-import { useToast, type ToastAction } from "@/components/toast";
-import { formatDateTime, formatDate } from "@/lib/utils";
+import { formatDateTime } from "@/lib/utils";
 import type { Inquiry } from "@/lib/types";
-import { leadBucketWords } from "@/lib/lead-triage";
 import { useLang } from "@/components/lang-provider";
 import { translator, fillText } from "@/lib/i18n";
-import { leadNextStep, monthDay, type LeadBucketLetter, type LeadVisitsAnswer } from "@/lib/leads/next-step";
-import { BECAME_UNREAD, becameHref, type LeadBecameAnswer } from "@/lib/leads/became";
-import { IntakeFiles } from "./intake-files";
-import { PlanBriefPanel } from "./plan-brief-panel";
-import { intakePaths } from "@/lib/playbook/uploads";
-
-// The bucket's colored dot (Chris's dot language: green ready · amber measure · blue consult).
-const BUCKET_DOT: Record<LeadBucketLetter, string> = { A: "bg-emerald-500", B: "bg-amber-500", C: "bg-sky-500" };
-
-/** The ⋯ panel's buttons: 44px, Title Case, one look. */
-const PANEL_BTN =
-  "inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50";
-
-type Toast = (message: string, kind?: "success" | "error" | "info", action?: ToastAction) => void;
-/** The reader's words (lib/i18n translator); English when a caller hands none. */
-type Words = (key: string) => string;
-const ENGLISH: Words = translator("en");
+import { leadSourceChip } from "@/lib/inquiries/sources";
+import { LeadDoors } from "./lead-doors";
+import { LeadClock } from "./lead-clock";
+import { LeadMarks } from "./lead-marks";
 
 /**
- * MARK LOST, WITH UNDO (W2-07). No confirm: the Undo is the safety, and it puts back the status the
- * lead HAD, carried in the toast (never a guessed "new"). The list drops lost leads, so the row goes
- * and the toast is what says where it went.
+ * A LEAD ON THE LEADS LIST (cn-v1170). Erik, 2026-11-19: "if a lead is still on the lead page that IS
+ * the reminder", so the row is the lead and its doors, and nothing that schedules a reminder. No
+ * expander: the lead's file (/leads/<id>, the name) holds the rest. Four lines: who (with the source,
+ * the triage score, when it came in and how long it has waited), how to reach them, the Scope, the
+ * doors. Each row is its own card ("Add visual barrier bolder between leads").
  */
-export async function markLeadLost(
-  lead: { id: string; name: string; status: string },
-  deps: { setStatus: (id: string, status: string) => Promise<{ ok: boolean; error?: string }>; toast: Toast; refresh: () => void; t?: Words },
-): Promise<void> {
-  const t = deps.t ?? ENGLISH;
-  const was = lead.status;
-  const res = await deps.setStatus(lead.id, "lost");
-  if (!res?.ok) {
-    deps.toast(res?.error ?? t("ld_couldntMarkLost"), "error");
-    return;
-  }
-  deps.toast(fillText(t("ld_markedLost"), { name: lead.name }), "success", {
-    label: t("ld_btn_undo"),
-    onClick: () => {
-      void (async () => {
-        const back = await deps.setStatus(lead.id, was);
-        deps.toast(back.ok ? t("ld_putBack") : (back.error ?? t("ld_couldntPutBack")), back.ok ? "success" : "error");
-        deps.refresh();
-      })();
-    },
-  });
-  deps.refresh();
-}
-
-/**
- * SAVE AS CONTACT, named and on purpose (W2-07). The lead's name used to be a button that made a
- * contact card on a tap whose only warning was a hover title a phone never shows: a silent write.
- * Erik (cn-v724): "a lead can convert to a contact anytime if the person wants to create one", so the
- * door stays, where a person asks for it. convertInquiry(id, 'customer') checks the book first and
- * never closes the lead; the toast says which happened ("Saved Rita Moss as a Contact", or "Linked To
- * Rita Moss" when the book already had her) and offers Open. Nothing navigates on its own.
- */
-export async function saveLeadAsContact(
-  lead: { id: string; name: string },
-  deps: {
-    convert: (id: string) => Promise<{ ok: boolean; id?: string; error?: string; contact?: { id: string; name: string; existing: boolean } }>;
-    toast: Toast;
-    open: (href: string) => void;
-    refresh: () => void;
-    t?: Words;
-  },
-): Promise<void> {
-  const t = deps.t ?? ENGLISH;
-  const res = await deps.convert(lead.id);
-  if (!res.ok || !res.id) {
-    deps.toast(res.error ?? t("ld_couldntMakeContact"), "error");
-    return;
-  }
-  const id = res.id;
-  const card = res.contact;
-  deps.toast(card?.existing ? fillText(t("ld_linkedTo"), { name: card.name }) : fillText(t("ld_savedAsContact"), { name: card?.name || lead.name }), "success", {
-    label: t("ld_btn_open"),
-    onClick: () => deps.open(`/crm/${id}`),
-  });
-  deps.refresh();
-}
-
 export function InquiryRow({
   inquiry,
-  customers,
-  focused = false,
-  visits = null,
-  todayYmd,
   tz,
   businessPhone = null,
-  estimateDoor = true,
-  referralsOn = false,
-  became = null,
+  nowMs,
+  visitsUnread = false,
+  pickPending = false,
 }: {
   inquiry: Inquiry;
-  customers: { id: string; name: string }[];
-  /** True when My Day (or an estimate backlink) deep-linked to this exact lead —
-      scroll it into view and flash a highlight so the eye lands on the right row. */
-  focused?: boolean;
-  /** This lead's visits (lib/leads/visit-read, three answers): what the next-step chip reads. A lead
-   *  with a completed inspection is CORRECTLY still open (an inspection never converts it), and the
-   *  chip is what tells it apart from a lead nobody has touched. VISITS_UNREAD when the board could
-   *  not read them — then the chip says so instead of guessing the next step. */
-  visits?: LeadVisitsAnswer;
-  /** The company's today (YYYY-MM-DD) and clock: a follow-up day and a visit's day are theirs. */
-  todayYmd: string;
+  /** The company's clock: the arrival time is said in it. */
   tz: string;
-  /** The org's own line (organizations.phone) — the "Text it" handoff has to be able to name it. */
+  /** The org's own line (organizations.phone): the Let Them Pick handoff has to be able to name it. */
   businessPhone?: string | null;
-  /** The Estimates switch (0352): off, the row has no Estimate button. */
-  estimateDoor?: boolean;
-  /** The Track Referrals switch: on, the ⋯ panel says who referred them. */
-  referralsOn?: boolean;
-  /** What a CONVERTED lead became (lib/leads/became, three answers): its estimates and jobs as doors,
-   *  none, or unread. Only a ?focus= row is ever converted, so the page reads it for that one row. */
-  became?: LeadBecameAnswer;
+  /** The server's now, so the running clock's first draw matches on the server and the phone. */
+  nowMs: number;
+  /** Its visits could not be read (lib/leads/new-intake `unread`): it is listed in case, and says so. */
+  visitsUnread?: boolean;
+  /** Its pick-a-time request ran out unanswered (lib/leads/new-intake `pickPending`): it is back on
+   *  the list, and the row says the times were sent. */
+  pickPending?: boolean;
 }) {
   const lang = useLang();
   const t = translator(lang);
-  const rowRef = useRef<HTMLLIElement>(null);
-  const [flash, setFlash] = useState(false);
-  // Option B (approved by Erik AND Andrew off the layout mock): two lines per lead, the one-tap
-  // verbs ON the row, and everything heavier — the message, the files, follow-up date, contact,
-  // edit — behind this one toggle.
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    // On un-focus (e.g. a same-route nav to /leads that keeps this row mounted) clear the ring —
-    // otherwise the cleanup cancels the pending setFlash(false) and the highlight sticks on.
-    if (!focused || !rowRef.current) { setFlash(false); return; }
-    rowRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
-    setFlash(true);
-    const timer = setTimeout(() => setFlash(false), 2200);
-    return () => clearTimeout(timer);
-  }, [focused]);
-
-  /* ONE NEXT-STEP CHIP (W2-07) in place of up to nine badges (status, inspection counts, bucket,
-     site visit, web, deck site, referred by, follow up): lib/leads/next-step reads the same facts and
-     says what to do next. The bucket's letter and dot lead it only on a lead that carries one. */
-  const step = leadNextStep(
-    {
-      status: inquiry.status,
-      converted_at: inquiry.converted_at,
-      converted_to: inquiry.converted_to,
-      next_follow_up_at: inquiry.next_follow_up_at,
-      lead_bucket: inquiry.lead_bucket,
-      site_inspection_required: inquiry.site_inspection_required,
-      source: (inquiry as { source?: string | null }).source ?? null,
-      referred_by: (inquiry as { referred_by?: string | null }).referred_by ?? null,
-    },
-    visits,
-    todayYmd,
-    { estimatesOn: estimateDoor, tz },
-    lang,
-    t,
-  );
+  const source = leadSourceChip((inquiry as { source?: string | null }).source ?? null);
 
   // Street first, then the town — the two parts he actually reads. Comma-joined and trimmed so a
   // lead carrying only a town still shows the town rather than nothing.
   const addressLine = [inquiry.address, inquiry.city].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ");
 
   return (
-    <li
-      ref={rowRef}
-      id={`lead-${inquiry.id}`}
-      className={`flex scroll-mt-24 flex-col gap-1 px-4 py-2.5 transition-colors ${
-        flash ? "bg-brand/5 ring-2 ring-inset ring-brand" : ""
-      }`}
-    >
-      {/* ── LINE 1: WHO, how to reach them, and the ONE next step. Erik: "lets do the phone number
-          and email to the right of the name". A linked lead's name opens its contact; an unlinked
-          one is only its name: making a contact is the ⋯ panel's Save as Contact, never a tap on a
-          name. ── */}
+    <li id={`lead-${inquiry.id}`} className="flex scroll-mt-24 flex-col gap-1.5 rounded-xl border-2 border-slate-200 bg-white px-4 py-3 shadow-sm">
+      {/* ── LINE 1: WHO. The name opens the lead's file; the business, where the lead came from, the
+          triage's score; at the right, when it came in and how long it has waited. ── */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        {inquiry.customer_id ? (
-          <Link
-            href={`/crm/${inquiry.customer_id}`}
-            onClick={(e) => e.stopPropagation()}
-            className="inline-flex min-h-11 items-center font-semibold text-slate-900 hover:text-brand hover:underline"
-            title={t("ld_openThisContact")}
-          >
-            {inquiry.name}
-          </Link>
-        ) : (
-          <span className="font-semibold text-slate-900">{inquiry.name}</span>
-        )}
-        {inquiry.company_name && <span className="text-xs text-slate-400">{inquiry.company_name}</span>}
-        {inquiry.phone && (
-          <a href={`tel:${inquiry.phone}`} onClick={(e) => e.stopPropagation()} className="flex min-h-11 items-center gap-1 text-xs font-medium text-brand hover:underline">
-            <Phone className="h-3 w-3 shrink-0" /> {inquiry.phone}
-          </a>
-        )}
-        {inquiry.email && (
-          <a href={`mailto:${inquiry.email}`} onClick={(e) => e.stopPropagation()} className="hidden min-h-11 items-center gap-1 text-xs text-slate-500 hover:text-brand hover:underline sm:flex">
-            <Mail className="h-3 w-3 shrink-0" /> {inquiry.email}
-          </a>
-        )}
+        <Link href={`/leads/${inquiry.id}`} className="inline-flex min-h-11 items-center font-semibold text-slate-900 hover:text-brand hover:underline">
+          {inquiry.name}
+        </Link>
+        {inquiry.company_name && <span className="text-xs text-slate-500">{inquiry.company_name}</span>}
         <span className="inline-flex items-center gap-1.5">
-          {step.web && (
-            <span role="img" aria-label={t("ld_fromYourWebsite")} title={t("ld_fromYourWebsite")} className="inline-flex text-slate-400">
-              <Globe className="h-3.5 w-3.5" />
-            </span>
+          {/* WHERE IT CAME FROM (lib/inquiries/sources leadSourceChip, the one reader): a website door
+              is the Globe and its words; a picked source is its own label; nothing picked, no chip. */}
+          {source?.kind === "web" && (
+            <Badge tone="slate" className="gap-1 normal-case">
+              <Globe aria-hidden className="h-3 w-3" /> {t("ld_fromYourWebsite")}
+            </Badge>
           )}
-          <Badge tone={step.tone} title={step.bucket ? leadBucketWords(step.bucket, lang, t).blurb : undefined} className="gap-1.5">
-            {step.bucket && <span aria-hidden className={`inline-block h-2 w-2 rounded-full ${BUCKET_DOT[step.bucket]}`} />}
-            {step.label}
-          </Badge>
-          {/* THE TRIAGE'S SCORE, SHOWN INSTEAD OF SILENTLY ORDERING (cn-v1137; lib/leads/board-order).
-              The website's triage scores a web lead by size, readiness and reach (lib/lead-triage);
-              the board no longer sorts by it, so the score is said here, on the leads that have one.
-              A hand-added lead has none and shows nothing — zero is no chip. */}
+          {source?.kind === "label" && (
+            <Badge tone="slate" className="normal-case">
+              {source.text}
+            </Badge>
+          )}
+          {/* THE TRIAGE'S SCORE, SHOWN INSTEAD OF SILENTLY ORDERING (cn-v1137). The website's triage
+              scores a web lead by size, readiness and reach (lib/lead-triage); the list is newest
+              first, so the score is said here, on the leads that have one. Zero is no chip. */}
           {Number(inquiry.priority) > 0 && (
             <Badge
               tone="slate"
@@ -234,23 +82,37 @@ export function InquiryRow({
               {fillText(t("ld_priority"), { n: String(Number(inquiry.priority)) })}
             </Badge>
           )}
+          {/* The triage's bucket and the customer's own site-visit request (cn-v1170: kept). Every
+              lead on this list has nothing standing, so a request for a visit is still unmet. */}
+          <LeadMarks bucket={inquiry.lead_bucket} needsVisit={!!inquiry.site_inspection_required} lang={lang} t={t} />
         </span>
-        <span className="ml-auto whitespace-nowrap font-mono text-xs tabular-nums text-slate-400" title={fillText(t("ld_added"), { when: formatDateTime(inquiry.created_at, undefined, lang) })}>
-          {formatDateTime(inquiry.created_at, undefined, lang)}
+        <span className="ml-auto inline-flex items-center gap-2">
+          <span className="whitespace-nowrap font-mono text-xs tabular-nums text-slate-400" title={fillText(t("ld_added"), { when: formatDateTime(inquiry.created_at, tz, lang) })}>
+            {formatDateTime(inquiry.created_at, tz, lang)}
+          </span>
+          {/* "next to time stamp running clock since lead arrival" (the 11-19 meeting). */}
+          <LeadClock since={inquiry.created_at} nowMs={nowMs} />
         </span>
       </div>
 
-      {/* ── LINE 2: THE ADDRESS, left-justified under the name, on its own line.
-          "addresses addresses and more addresses that is what this business is" — on its own line
-          it starts at the same x on every row, so the column reads down the page. One tap opens
-          Maps, which is what he actually does next with an address. ── */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-slate-500">
+      {/* ── LINE 2: HOW TO REACH THEM. Phone and email one tap each; the address opens Maps ("addresses
+          addresses and more addresses that is what this business is"); the website's reason. ── */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+        {inquiry.phone && (
+          <a href={`tel:${inquiry.phone}`} className="flex min-h-11 items-center gap-1 text-xs font-medium text-brand hover:underline">
+            <Phone className="h-3 w-3 shrink-0" /> {inquiry.phone}
+          </a>
+        )}
+        {inquiry.email && (
+          <a href={`mailto:${inquiry.email}`} className="flex min-h-11 min-w-0 items-center gap-1 text-xs text-slate-500 hover:text-brand hover:underline">
+            <Mail className="h-3 w-3 shrink-0" /> <span className="truncate">{inquiry.email}</span>
+          </a>
+        )}
         {addressLine && (
           <a
             href={`https://maps.apple.com/?q=${encodeURIComponent(addressLine)}`}
             target="_blank"
             rel="noreferrer"
-            onClick={(e) => e.stopPropagation()}
             className="flex min-h-11 items-center gap-1 text-sm font-medium text-slate-600 hover:text-brand hover:underline"
             title={t("ld_openInMaps")}
           >
@@ -258,244 +120,21 @@ export function InquiryRow({
             {addressLine}
           </a>
         )}
-        {inquiry.last_contacted_at && <span>{fillText(t("ld_contactedOn"), { date: formatDate(inquiry.last_contacted_at, undefined, lang) })}</span>}
         {inquiry.intake?.reason && <span className="hidden text-slate-400 md:inline">{inquiry.intake.reason}</span>}
-        <span className="ml-auto flex shrink-0 items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            aria-expanded={open}
-            aria-label={open ? t("ld_hideDetails") : t("ld_showDetails")}
-            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-slate-200 px-2 text-xs font-semibold text-slate-500 hover:bg-slate-50"
-          >
-            {open ? t("ld_btn_less") : "⋯"}
-          </button>
-        </span>
       </div>
 
-      {/* ── LINE 3: THE THREE VERBS, on their own row and centred (Erik: "they should line up on the
-          page centered instead of all over the place"). A CONVERTED LEAD IS PROVENANCE, NOT A LEAD:
-          a ?focus= row that already became an estimate or a job offers no verbs: its chip says what
-          it became, and BecameDoors opens it. ── */}
-      {inquiry.converted_at ? (
-        <BecameDoors became={became} t={t} />
-      ) : (
-        <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} customers={customers} workKind={(inquiry as { work_kind?: string | null }).work_kind ?? null} businessPhone={businessPhone} estimateDoor={estimateDoor} />
-      )}
+      {/* ── LINE 3: THE SCOPE ("what they need + kind of work = SCOPE"), two lines at most; the
+          whole of it is on the lead's file. ── */}
+      {inquiry.message && <p className="line-clamp-2 whitespace-pre-line text-sm text-slate-600">{inquiry.message}</p>}
 
-      {/* The message rides collapsed as ONE clamped line — the single biggest source of the old
-          row's height. The full text, the customer's files and the workflow controls all live one
-          tap away, on the row, without a navigation. */}
-      {!open && inquiry.message && (
-        <p className="line-clamp-1 text-xs text-slate-500">{inquiry.message}</p>
-      )}
+      {/* In doubt a lead is offered, never hidden (lib/leads/new-intake): said, not guessed. */}
+      {visitsUnread && <p role="status" className="text-xs text-amber-700">{t("ld_visitsUnread")}</p>}
+      {/* The times went out and the first one went by with no pick: the list is the reminder. */}
+      {pickPending && <p role="status" className="text-xs text-amber-700">{t("ld_pickPending")}</p>}
 
-      {open && <LeadDetails inquiry={inquiry} todayYmd={todayYmd} referralsOn={referralsOn} />}
+      {/* ── LINE 4: THE DOORS (lead-doors.tsx), the same set the lead's file draws. Every lead on this
+          list is open: one with a standing visit is not on it. ── */}
+      <LeadDoors inquiry={inquiry} stage="open" businessPhone={businessPhone} />
     </li>
-  );
-}
-
-/**
- * WHAT IT BECAME, AS DOORS (cn-v1157; lib/leads/became). Erik, 2026-11-10: "i had no way to get back
- * to his estimate even though it says right on the screen Became An Estimate". The chip named it and
- * the line under it said the estimate or job "carries the work now" — with no way to open either. So
- * the line is a door per record now, the job first (where the work lives once there is one), then the
- * estimates newest first, each with its number and what it is called. A read that failed SAYS so; a
- * lead whose records this reader cannot see keeps the old sentence, which is still true.
- */
-export function BecameDoors({ became, t = ENGLISH }: { became: LeadBecameAnswer; t?: Words }) {
-  if (became === BECAME_UNREAD) {
-    return (
-      <p role="status" className="text-center text-xs text-amber-700">
-        {t("ld_becameUnread")}
-      </p>
-    );
-  }
-  if (!became?.length) return <p className="text-center text-xs text-slate-400">{t("ld_alreadyConverted")}</p>;
-  return (
-    <div className="flex w-full flex-wrap items-center justify-center gap-2">
-      {became.map((door) => {
-        const Icon = door.kind === "estimate" ? FileText : Briefcase;
-        return (
-          <Link key={`${door.kind}-${door.id}`} href={becameHref(door)} className={`${PANEL_BTN} max-w-full`}>
-            <Icon className="h-4 w-4 shrink-0 text-slate-400" />
-            <span className="shrink-0">
-              {fillText(t(door.kind === "estimate" ? "ld_btn_openEstimate" : "ld_btn_openJob"), { number: door.number ?? "" }).trim()}
-            </span>
-            {door.title && <span className="truncate font-normal text-slate-500">· {door.title}</span>}
-          </Link>
-        );
-      })}
-    </div>
-  );
-}
-
-/**
- * THE ⋯ PANEL (W2-07): the message and files, the plan report, the work's kind and size, then the
- * Follow Up day with Mark Contacted and Mark Lost (the status moves itself: Quoted and Won are stamped
- * by the deed that earns them), Save as Contact for a lead with no card, Edit, and Delete Lead.
- */
-export function LeadDetails({
-  inquiry,
-  todayYmd,
-  referralsOn = false,
-}: {
-  inquiry: Inquiry;
-  todayYmd: string;
-  referralsOn?: boolean;
-}) {
-  const lang = useLang();
-  const t = translator(lang);
-  const router = useRouter();
-  const toast = useToast();
-  const [pending, start] = useTransition();
-  const [followUp, setFollowUp] = useState(inquiry.next_follow_up_at?.slice(0, 10) ?? "");
-  const referrer = (inquiry as { referrer?: { full_name?: string | null } | null }).referrer?.full_name ?? null;
-  const converted = !!inquiry.converted_at;
-
-  /** The Follow Up day saves itself once it is a real day, today or later (snoozeInquiry: the day
-   *  only, no status). A day already gone is said under the box, never saved as a guess. */
-  function pickFollowUp(v: string) {
-    setFollowUp(v);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || v < todayYmd || v === (inquiry.next_follow_up_at ?? "").slice(0, 10)) return;
-    start(async () => {
-      const res = await snoozeInquiry(inquiry.id, v);
-      if (!res.ok) { toast(res.error ?? t("ld_couldntSaveDay"), "error"); return; }
-      toast(fillText(t("ld_followUpOn"), { day: monthDay(v, lang) }), "success");
-      router.refresh();
-    });
-  }
-
-  function markContacted() {
-    start(async () => {
-      const res = await markInquiryContacted(inquiry.id, followUp || null);
-      if (!res?.ok) { toast(res?.error ?? t("ld_couldntMarkContacted"), "error"); return; }
-      toast(t("ld_markedContacted"), "success");
-      router.refresh();
-    });
-  }
-
-  return (
-    <div className="mt-1 space-y-3 rounded-lg bg-slate-50/70 p-3">
-      {inquiry.message && <p className="whitespace-pre-wrap text-sm text-slate-600">{inquiry.message}</p>}
-      {/* Who sent them, with Track Referrals on: a line in here, never a badge on the row. */}
-      {referralsOn && referrer && <p className="text-xs text-slate-500">{fillText(t("ld_referredBy"), { name: referrer })}</p>}
-      <IntakeFiles inquiryId={inquiry.id} paths={intakePaths(inquiry.intake)} />
-      <PlanBriefPanel inquiryId={inquiry.id} intake={inquiry.intake} />
-      <div className="flex flex-wrap items-end gap-3">
-        {/* THE CRITICAL PATH STARTS HERE. Erik: "this is what needs to be on the lead itself next to
-            the contacted drop down menu, thats the critical path." Kind + size, set at the phone
-            call, carried untouched to the schedule (the rail renders this SAME component), through
-            placement, onto the calendar, into the job. Stated once. */}
-        <div>
-          <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">{t("ld_theWork")}</label>
-          <WorkShapeControls
-            workKind={(inquiry as { work_kind?: string | null }).work_kind ?? null}
-            plannedMinutes={(inquiry as { planned_minutes?: number | null }).planned_minutes ?? null}
-            disabled={pending}
-            onPatch={(patch) =>
-              start(async () => {
-                const r = await sizeLead(inquiry.id, patch);
-                if (!r.ok) toast(r.error ?? t("ld_couldntSaveThat"), "error");
-                else router.refresh();
-              })
-            }
-          />
-        </div>
-        {!converted && (
-          <>
-            <div>
-              <label htmlFor={`follow-${inquiry.id}`} className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">
-                {t("ld_followUp")}
-              </label>
-              <DayField
-                id={`follow-${inquiry.id}`}
-                value={followUp}
-                min={todayYmd}
-                onChange={(iso) => pickFollowUp(iso)}
-                className="w-40 text-xs"
-              />
-            </div>
-            <button type="button" disabled={pending} onClick={markContacted} className={PANEL_BTN}>
-              {t("ld_btn_markContacted")}
-            </button>
-            {inquiry.status !== "lost" && (
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() =>
-                  start(() =>
-                    markLeadLost(
-                      { id: inquiry.id, name: inquiry.name, status: inquiry.status },
-                      { setStatus: setInquiryStatus, toast, refresh: () => router.refresh(), t },
-                    ),
-                  )
-                }
-                className={PANEL_BTN}
-              >
-                {t("ld_btn_markLost")}
-              </button>
-            )}
-          </>
-        )}
-      </div>
-      {!converted && /^\d{4}-\d{2}-\d{2}$/.test(followUp) && followUp < todayYmd && (
-        <p className="text-xs text-amber-700">{t("ld_dayPassed")}</p>
-      )}
-      <div className="flex flex-wrap items-center gap-3">
-        {/* A contact is made HERE, by name, never by tapping the lead's name. Only a lead with no card
-            that hasn't become anything yet. */}
-        {!inquiry.customer_id && !converted && (
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() =>
-              start(() =>
-                saveLeadAsContact(
-                  { id: inquiry.id, name: inquiry.name },
-                  {
-                    convert: (id) => convertInquiry(id, "customer", {}),
-                    toast,
-                    open: (href) => router.push(href),
-                    refresh: () => router.refresh(),
-                    t,
-                  },
-                ),
-              )
-            }
-            className={PANEL_BTN}
-          >
-            <UserPlus className="h-4 w-4 shrink-0" /> {t("ld_btn_saveAsContact")}
-          </button>
-        )}
-        <InquiryModal inquiry={inquiry} mode="edit" />
-        {/* DELETE, inside the ⋯ panel — Erik: "add a way to delete a lead entry… or a Delete option
-            inside the row's ⋯ menu." Behind the door and behind a confirm, per the nav doctrine:
-            destructive never sits beside the verbs you tap at 60mph. Note the split of meanings —
-            LOST is a lead that said no (it keeps the record); delete is for tests and junk, and it
-            keeps nothing. */}
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() => {
-            // A CONVERTED lead is an estimate's provenance (audit 7): deleting it severs the
-            // estimate's only link back to the person. Say so before the click.
-            if (!confirm(fillText(t(inquiry.converted_at ? "ld_confirmDeleteConverted" : "ld_confirmDelete"), { name: inquiry.name }))) return;
-            start(async () => {
-              const r = await deleteInquiry(inquiry.id);
-              if (!r.ok) {
-                toast(r.error ?? t("ld_couldntDeleteThat"), "error");
-                return;
-              }
-              toast(t("ld_leadDeleted"), "success");
-              router.refresh();
-            });
-          }}
-          className="ml-auto inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-medium text-rose-600 hover:bg-rose-50"
-        >
-          {t("ld_btn_deleteLead")}
-        </button>
-      </div>
-    </div>
   );
 }

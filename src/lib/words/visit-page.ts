@@ -33,8 +33,8 @@ import type { WordCatalog } from "./types";
  * Put back = Devuelta (ag_srv_toastPutBack), Edit Details = Editar Detalles (ag_srv_visitDidHappen),
  * Waiting For A Day = Esperando Un Día (jb_waitingForADay), pending pick = esperando elección
  * (ag_cal_pendingPick), cancelled = cancelada (ag_srv_apptStatus_cancelled), done = hecha
- * (ag_cal_doneLower). Coined here, once: Won = Ganada and Lost = Perdida (the visit's own ending, so
- * feminine), Dismiss = Descartar, Actions = Acciones, Planned = Planeado, Written up as =
+ * (ag_cal_doneLower). Coined here, once: Won = Ganada and Not Sold = No Vendida (cn-v1170, was Lost =
+ * Perdida; the visit's own ending, so feminine), Dismiss = Descartar, Actions = Acciones, Planned = Planeado, Written up as =
  * Redactada como.
  *
  * A SPANISH CLOCK ENDS IN A PERIOD ("8:00 a. m.", lib/lang-words esMeridiem), so no Spanish sentence here
@@ -213,9 +213,10 @@ export const words: WordCatalog = {
 
     // ── How the visit ended (visit-ending.tsx) ──
     vp_won: "Won",
-    vp_lost: "Lost",
-    // The same word as a DOOR (the office's Lost button): a clickable is a vp_btn_ key; the status word above stays its own.
-    vp_btn_lost: "Lost",
+    // cn-v1170: Not Sold where it said Lost (Erik: "Not Sold" replaces "Lost" everywhere); the key ids stay.
+    vp_lost: "Not Sold",
+    // The same word as a DOOR (the office's Not Sold button): a clickable is a vp_btn_ key; the status word above stays its own.
+    vp_btn_lost: "Not Sold",
     vp_btn_wonPickTheJob: "Won · Pick the Job",
     vp_btn_clearTheAnswer: "Clear the Answer",
     vp_btn_keepIt: "Keep It",
@@ -226,7 +227,10 @@ export const words: WordCatalog = {
     vp_howDidThisOneEnd: "How did this one end?",
     vp_thatDidntSave: "That didn't save — try again.",
     vp_markedWon: "Marked Won.",
-    vp_markedLost: "Marked Lost.",
+    vp_markedLost: "Marked Not Sold.",
+    // cn-v1170: a visit's Not Sold also closes its open lead (setAppointmentOutcome's leadMarked); said, and its Undo reopens it.
+    vp_markedLostLeadToo: "Marked Not Sold. The lead is Not Sold too.",
+    vp_undoneLeadToo: "Back where it was. The lead is open again.",
     vp_answerCleared: "Answer cleared.",
 
     // ── The header's ⋯ rows (visit-header-actions.tsx) and Mark Complete (mark-complete-button.tsx) ──
@@ -531,8 +535,8 @@ export const words: WordCatalog = {
     vp_couldntConnectIt: "No se pudo conectar — inténtalo de nuevo.",
 
     vp_won: "Ganada",
-    vp_lost: "Perdida",
-    vp_btn_lost: "Perdida",
+    vp_lost: "No Vendida",
+    vp_btn_lost: "No Vendida",
     vp_btn_wonPickTheJob: "Ganada · Elegir el Trabajo",
     vp_btn_clearTheAnswer: "Borrar la Respuesta",
     vp_btn_keepIt: "Dejarla",
@@ -542,7 +546,9 @@ export const words: WordCatalog = {
     vp_howDidThisOneEnd: "¿Cómo terminó esta?",
     vp_thatDidntSave: "Eso no se guardó — inténtalo de nuevo.",
     vp_markedWon: "Marcada como Ganada.",
-    vp_markedLost: "Marcada como Perdida.",
+    vp_markedLost: "Marcada como no vendida.",
+    vp_markedLostLeadToo: "Marcada como no vendida. El prospecto también quedó como no vendido.",
+    vp_undoneLeadToo: "Volvió a donde estaba. El prospecto está abierto otra vez.",
     vp_answerCleared: "Respuesta borrada.",
 
     vp_btn_undo: "Deshacer",

@@ -40,6 +40,10 @@ function fakeDb(result: { data: any; error?: any }, lots: any[] = []) {
     order: () => builder,
     limit: () => builder,
     in: () => builder,
+    neq(col: string, val: unknown) {
+      calls.filters.push(`neq:${col}:${String(val)}`);
+      return builder;
+    },
     or(expr: string) {
       calls.filters.push(`or:${expr}`);
       return builder;
@@ -66,6 +70,13 @@ function fakeDb(result: { data: any; error?: any }, lots: any[] = []) {
             then: (ok: any, err: any) => Promise.resolve({ data: lots, error: null }).then(ok, err),
           };
           return lotBuilder;
+        }
+        // THE LEADS LIST (cn-v1170): list_inquiries reads the leads' visits by the one rule
+        // (lib/leads/new-intake). None here: every lead in these fixtures is on the list.
+        if (table === "appointments") {
+          const visits: any = { select: () => visits, in: () => visits, neq: () => visits, eq: () => visits, limit: () => visits };
+          visits.then = (ok: any, err: any) => Promise.resolve({ data: [], error: null }).then(ok, err);
+          return visits;
         }
         if (calls.table === null) calls.table = table;
         return builder;
@@ -321,8 +332,7 @@ describe("list_inquiries — Nort can read what a lead said", () => {
     city: "Truckee",
     source: "intake",
     message: answers,
-    work_kind: null,
-    planned_minutes: null,
+    converted_at: null,
     last_contacted_at: null,
     created_at: "2026-09-04T00:56:43Z",
   };
@@ -333,6 +343,10 @@ describe("list_inquiries — Nort can read what a lead said", () => {
     expect(calls.table).toBe("inquiries");
     expect(calls.select).toContain("message");
     expect(calls.select).toContain("source");
+    // cn-v1170: the list is the Leads list (open, by the one rule), and a lead has no kind or length.
+    expect(calls.filters).toContain("is:converted_at:null");
+    expect(calls.filters).toContain("neq:status:lost");
+    expect(calls.select).not.toMatch(/work_kind|planned_minutes|next_follow_up_at/);
   });
 
   it("hands Nort the intake answers instead of 'no message'", async () => {

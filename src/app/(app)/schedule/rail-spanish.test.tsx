@@ -30,7 +30,7 @@ vi.mock("./actions", () => ({
   undoPlaceJob: vi.fn(),
   undoPlaceVisit: vi.fn(),
 }));
-vi.mock("../leads/actions", () => ({ setLeadContact: vi.fn(), sizeLead: vi.fn(), scheduleLeadsOnDay: vi.fn() }));
+vi.mock("../leads/actions", () => ({ setLeadContact: vi.fn(), scheduleLeadsOnDay: vi.fn() }));
 
 const { LangProvider } = await import("@/components/lang-provider");
 const { CrewBoard } = await import("./crew-board");

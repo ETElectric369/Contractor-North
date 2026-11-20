@@ -35,7 +35,6 @@ import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
 import { requestHref } from "@/lib/feature-doors";
-import { todayStrInTz } from "@/lib/tz";
 import { createNotifications } from "@/lib/notifications";
 import { orgStaffIds, sendPushToProfiles } from "@/lib/push";
 
@@ -124,7 +123,6 @@ export async function publicScheduleInspection(
   if (await rateLimited(`inspect-org:${orgId}`, 50, 86400))
     return { ok: false, error: "Too many requests — please try again later." };
   const settings = getOrgSettings(org.settings);
-  const tz = settings.timezone;
 
   // Find the inquiry this request belongs to: the most recent lead from the
   // SAME contact in the last 24h (both surfaces create one just before this
@@ -185,13 +183,12 @@ export async function publicScheduleInspection(
     return { ok: true, already: true };
   }
 
-  // Stamp the request — lights the 🚩 Site visit badge on the leads row — and
-  // resurface the lead today so it can't sit unnoticed.
+  // Stamp the request. No follow-up day (gone everywhere, cn-v1170): an open lead with no standing
+  // visit is on the Leads list already, which is what keeps it from sitting unnoticed.
   await supabase
     .from("inquiries")
     .update({
       site_inspection_required: true,
-      next_follow_up_at: todayStrInTz(tz),
       updated_at: new Date().toISOString(),
     })
     .eq("id", inquiry.id);

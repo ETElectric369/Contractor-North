@@ -1,154 +1,71 @@
-import Link from "next/link";
+import { redirect } from "next/navigation";
 import { UserPlus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
-import { todayStrInTz } from "@/lib/tz";
-import { listCustomerOptions } from "@/lib/schedule-options";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { translator } from "@/lib/i18n";
 import { currentLang } from "@/lib/current-lang";
-import { Card } from "@/components/ui/card";
-import { FactsGrid, StatTile } from "@/components/ui/stat-tile";
 import { InquiryModal } from "./inquiry-modal";
 import { InquiryRow } from "./inquiry-row";
 import { ReferralTally } from "./referral-tally";
+import { NOT_SOLD_FOLD_CAP, NotSoldFold, type NotSoldLine } from "./not-sold-fold";
 import type { Inquiry } from "@/lib/types";
-import { readLeadVisits } from "@/lib/leads/visit-read";
-import { BECAME_CAP, leadBecame, type BecameJobRow, type BecameQuoteRow, type LeadBecameAnswer } from "@/lib/leads/became";
+import { loadNewIntake, NOT_SOLD_STATUS } from "@/lib/leads/new-intake";
 import { reportError } from "@/lib/observe";
-import { orderLeadBoard } from "@/lib/leads/board-order";
 import { viewerSwitches } from "@/lib/viewer-switches";
 import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * THE LEADS LIST (cn-v1170). Erik, 2026-11-19: "NEW INTAKE ONLY (Remove Follow up-due)", and "if a
+ * lead is still on the lead page that IS the reminder ... one badge one list simple". The list is
+ * lib/leads/new-intake's (open, and no visit from it still stands: the badge reads the same rule),
+ * newest first, one card per lead. Not Sold leads wait in a fold under it, kept on file.
+ */
 export default async function InquiriesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ focus?: string; due?: string }>;
+  searchParams: Promise<{ focus?: string }>;
 }) {
-  const { focus, due } = await searchParams;
+  const { focus } = await searchParams;
+  // A LINK TO A LEAD IS /leads/<id>: the old ?focus= deep links (My Day, an estimate's "from lead")
+  // land on the lead's file, converted or not.
+  if (focus) redirect(`/leads/${encodeURIComponent(focus)}`);
   const supabase = await createClient();
   const t = translator(await currentLang());
 
-  const [{ data: inqData }, { data: custData }, sw] = await Promise.all([
-    // NEWEST FIRST (lib/leads/board-order, cn-v1137). The board used to sort the triage's priority
-    // first, so a lead typed by hand (always priority 0) landed UNDER every scored web lead and
-    // read as "the lead i just added isnt showing up". The score is a chip on the row now
-    // (inquiry-row.tsx), never a silent order; the follow-up order (undated first, then soonest)
-    // and the score remain as tie-breaks in the one rule.
-    orderLeadBoard(
-      supabase
-        .from("inquiries")
-        .select("*, referrer:profiles!inquiries_referred_by_fkey(full_name)")
-        .is("converted_at", null)
-        .neq("status", "lost"),
-    ),
-    listCustomerOptions(supabase),
-    // THE SWITCH BOARD (0352). Leads off: this page still opens from a link (a Needs You card, an
-    // estimate's "from lead"), with the shell's Off line on top, and New Lead goes. Website requests
-    // keep arriving either way. Track Referrals off: no tally. Estimates off: no Estimate on a row.
+  // ONE CLOCK (cn-v1170): the rule's pick window and each row's running clock read the same now.
+  const nowMs = Date.now();
+  const [intake, notSoldRead, sw, { data: tzRow }] = await Promise.all([
+    loadNewIntake<Inquiry>(supabase, "*, referrer:profiles!inquiries_referred_by_fkey(full_name)", { nowMs }),
+    // One more than the fold shows, so it can say it was cut.
+    supabase
+      .from("inquiries")
+      .select("id, name, company_name, message")
+      .eq("status", NOT_SOLD_STATUS)
+      .is("converted_at", null)
+      .order("updated_at", { ascending: false })
+      .limit(NOT_SOLD_FOLD_CAP + 1),
+    // THE SWITCH BOARD (0352). Leads off: this page still opens from a link, with the shell's Off
+    // line on top, and New Lead goes. Website requests keep arriving either way. Track Referrals off:
+    // no tally.
     viewerSwitches(),
+    // `phone` rides along with the settings read (PROJECTION LAW): the business line is what the Let
+    // Them Pick handoff has to be able to NAME (convert-menu).
+    supabase.from("organizations").select("settings, phone").limit(1).maybeSingle(),
   ]);
   const leadsOn = featureOn(sw.features, "leads");
+  if (intake.error) reportError("leads:list", intake.error);
+  if (notSoldRead.error) reportError("leads:notSold", notSoldRead.error);
 
-  const inquiries = (inqData ?? []) as Inquiry[];
-  const customers = (custData ?? []) as { id: string; name: string }[];
+  const inquiries = intake.leads;
+  const notSoldRows = (notSoldRead.data ?? []) as NotSoldLine[];
+  const notSold = notSoldRows.slice(0, NOT_SOLD_FOLD_CAP);
 
-  // A deep-link can point at a lead that already left the open list — a just-converted lead,
-  // or the "From lead" backlink on an estimate/job (which points at a now-converted lead). Fetch
-  // that one by id and surface it at the top so the link always lands on a real, flashing row
-  // instead of an empty list. Its chip (Became an Estimate / Became a Job / Lost) makes clear it's
-  // already been acted on.
-  let focusExtra: Inquiry | null = null;
-  if (focus && !inquiries.some((i) => i.id === focus)) {
-    const { data } = await supabase
-      .from("inquiries")
-      .select("*, referrer:profiles!inquiries_referred_by_fkey(full_name)")
-      .eq("id", focus)
-      .maybeSingle();
-    focusExtra = (data as Inquiry) ?? null;
-  }
-
-  /**
-   * WHAT THAT LEAD BECAME, AS DOORS (cn-v1157; lib/leads/became). Erik, 2026-11-10: "i had no way to
-   * get back to his estimate even though it says right on the screen Became An Estimate". A converted
-   * lead only ever shows here as the ?focus= row, so this is two small reads for that one row: the
-   * estimates and the jobs made from it (0109's inquiry_id on each), newest first. THE READS' ERRORS
-   * ARE KEPT: a failed read reaches the row as UNREAD and the row says so — never as "nothing".
-   */
-  let became: LeadBecameAnswer = null;
-  if (focusExtra?.converted_at) {
-    const [quotesRead, jobsRead] = await Promise.all([
-      supabase
-        .from("quotes")
-        .select("id, quote_number, title")
-        .eq("inquiry_id", focusExtra.id)
-        .order("created_at", { ascending: false })
-        .limit(BECAME_CAP),
-      supabase
-        .from("jobs")
-        .select("id, job_number, name")
-        .eq("inquiry_id", focusExtra.id)
-        .order("created_at", { ascending: false })
-        .limit(BECAME_CAP),
-    ]);
-    if (quotesRead.error) reportError("leads:became:quotes", quotesRead.error, { leadId: focusExtra.id });
-    if (jobsRead.error) reportError("leads:became:jobs", jobsRead.error, { leadId: focusExtra.id });
-    became = leadBecame(
-      { data: quotesRead.data as BecameQuoteRow[] | null, error: quotesRead.error },
-      { data: jobsRead.data as BecameJobRow[] | null, error: jobsRead.error },
-    );
-  }
-
-  /**
-   * WHAT EACH LEAD'S VISITS SAY, for its one next-step chip (W2-07, lib/leads/next-step).
-   *
-   * Erik: "the sarah dale lead was already converted to an inspection but still shows up as a
-   * new lead." Staying OPEN is correct and deliberate — leads/actions.ts documents inspection as
-   * exempt from converting, so an inspected lead can still go on to become an estimate. What was
-   * wrong is that her row looked IDENTICAL to a lead nobody had touched. So: how many visits are
-   * done, how many are still booked, and the earliest booked start (with its type), so the chip
-   * can say "Inspection · Tue Oct 1" or "Walked · Estimate Next". EVERY kind of visit counts,
-   * not just inspections; cancelled ones never do.
-   *
-   * THE READ'S ERROR IS KEPT, and the batching with it (lib/leads/visit-read): one request carrying
-   * every open lead's uuid outgrows the gateway past a couple of hundred leads, and five hundred rows
-   * is not a busy book's whole appointment list. Either way the old `const { data } = await …` dropped
-   * the error, so a failed read looked exactly like "no visits booked" and the chip told him to
-   * cold-call a lead he was seeing Tuesday. A lead whose visits could not be read now says so.
-   */
-  const leadIds = [...(inqData ?? []).map((i: { id: string }) => i.id), ...(focusExtra ? [focusExtra.id] : [])];
-  const visitState = await readLeadVisits(leadIds, (batch, cap) =>
-    supabase
-      .from("appointments")
-      .select("inquiry_id, status, starts_at, type")
-      .in("inquiry_id", batch)
-      .neq("status", "cancelled")
-      .limit(cap),
-  );
-  // ?due=1 — THE FOLLOW-UP LIST, as a lens on this board rather than a new page (the shape the
-  // layout mock recommended and everyone agreed to). next_follow_up_at already IS the follow-up
-  // list (cn-v612); this is the first surface that shows it as one.
-  const dueOnly = due === "1";
-  // "Due" is a CALENDAR-DATE question. next_follow_up_at is a bare `date` column, and
-  // `new Date("YYYY-MM-DD")` is UTC midnight — 5 PM Pacific the evening BEFORE — so the old
-  // instant-compare counted tomorrow's follow-ups as due every evening (this exact bug's third
-  // appearance in the codebase). Two date-words compare as strings; no clock is consulted.
-  // `phone` rides along with the settings read (PROJECTION LAW): the business line is what the
-  // "Text it" handoff has to be able to NAME — see convert-menu for why naming it is the whole fix.
-  const { data: tzRow } = await supabase.from("organizations").select("settings, phone").limit(1).maybeSingle();
-  // The company's clock: today's date, and the day each chip's booked visit falls on.
+  // The company's clock, and the server's now for each row's running clock (its first draw).
   const tz = getOrgSettings((tzRow as { settings?: unknown } | null)?.settings).timezone;
-  const todayYmd = todayStrInTz(tz);
   const businessPhone = ((tzRow as { phone?: string | null } | null)?.phone ?? "").trim() || null;
-  const isDue = (i: { next_follow_up_at: string | null }) =>
-    Boolean(i.next_follow_up_at && i.next_follow_up_at.slice(0, 10) <= todayYmd);
-  const base = focusExtra ? [focusExtra, ...inquiries] : inquiries;
-  const rows = dueOnly ? base.filter(isDue) : base;
-
-  // The tile and the ?due=1 lens MUST share one cutoff, or the count and the list disagree.
-  const dueToday = inquiries.filter(isDue).length;
 
   return (
     <div>
@@ -161,54 +78,35 @@ export default async function InquiriesPage({
           drop OUT of that list and this is where their credit stays visible. */}
       {featureOn(sw.features, "referrals") && <ReferralTally />}
 
-      {inquiries.length > 0 && (
-        <FactsGrid cols={2} className="mb-4 sm:max-w-sm">
-          {/* The tiles are the FILTER now — tap "Follow-Ups Due" and the board shows only what's
-              due; tap "Open Leads" (or it again) and everything is back. State lives in the URL, so
-              the lens survives a refresh and can be sent to somebody. Both count open leads only. */}
-          <Link href="/leads" aria-current={!dueOnly ? "true" : undefined} className={!dueOnly ? "rounded-xl ring-2 ring-brand" : ""}>
-            <StatTile label={t("ld_btn_openLeads")} value={inquiries.length} />
-          </Link>
-          <Link href="/leads?due=1" aria-current={dueOnly ? "true" : undefined} className={dueOnly ? "rounded-xl ring-2 ring-brand" : ""}>
-            <StatTile label={t("ld_btn_followUpsDue")} value={dueToday} tone={dueToday > 0 ? "warning" : "default"} />
-          </Link>
-        </FactsGrid>
-      )}
-
-      {rows.length === 0 ? (
+      {intake.error ? (
+        // A FAILED READ IS NEVER "NO LEADS": the empty state would tell him there is nothing to call.
+        <p role="status" className="rounded-xl border-2 border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {t("ld_listCouldntLoad")}
+        </p>
+      ) : inquiries.length === 0 ? (
         // No duplicate "New lead" here (Andrew, 8/21: "leave the new lead button on the top
         // right and get rid of the button in the center its redundant") — the header's button
         // is always on screen, including over this empty state.
-        <EmptyState
-          icon={UserPlus}
-          title={t("ld_noOpenLeads")}
-          description={
-            leadsOn
-              ? t("ld_emptyDesc")
-              : t("ld_nothingOpen")
-          }
-        />
+        <EmptyState icon={UserPlus} title={t("ld_noOpenLeads")} description={leadsOn ? t("ld_emptyDesc") : t("ld_nothingOpen")} />
       ) : (
-        <Card>
-          <ul className="divide-y divide-slate-100">
-            {rows.map((i) => (
-              <InquiryRow
-                key={i.id}
-                inquiry={i}
-                customers={customers}
-                focused={i.id === focus}
-                visits={visitState.forLead(i.id)}
-                todayYmd={todayYmd}
-                tz={tz}
-                businessPhone={businessPhone}
-                estimateDoor={featureOn(sw.features, "estimates")}
-                referralsOn={featureOn(sw.features, "referrals")}
-                became={focusExtra && i.id === focusExtra.id ? became : null}
-              />
-            ))}
-          </ul>
-        </Card>
+        // ONE CARD PER LEAD, with space between ("Add visual barrier bolder between leads").
+        <ul className="space-y-3">
+          {inquiries.map((i) => (
+            <InquiryRow
+              key={i.id}
+              inquiry={i}
+              tz={tz}
+              businessPhone={businessPhone}
+              nowMs={nowMs}
+              visitsUnread={intake.unread.has(i.id)}
+              pickPending={intake.pickPending.has(i.id)}
+            />
+          ))}
+        </ul>
       )}
+
+      <NotSoldFold leads={notSold} cut={notSoldRows.length > NOT_SOLD_FOLD_CAP} failed={!!notSoldRead.error} t={t} />
     </div>
   );
 }
+

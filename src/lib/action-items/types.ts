@@ -92,7 +92,7 @@ export { GROUP_ORDER, KIND_GROUP } from "./needs-you-rule";
  */
 export const WHEN_IS_A_DEADLINE: Record<ActionKind, boolean> = {
   job_to_schedule: true, // its scheduled day
-  inquiry: true, // the follow-up day
+  inquiry: false, // the day it came in (cn-v1170: no follow-up day)
   appointment: false, // the visit's own day: over, not overdue
   inspection_writeup: false, // the day the inspection happened
   organize: false, // the day the paper arrived
@@ -157,7 +157,7 @@ export interface ActionItem {
   chip?: string;
   /** supplier_paper only: the cards the rollup carries, and the jobs their pickers offer. */
   supplierPapers?: SupplierPaperFeed | null;
-  /** inquiry with Leads switched off only (action-items/switches): the number Call Back dials. */
+  /** inquiry only (action-items/switches): the number Call (Call Back with Leads off) dials. */
   phone?: string | null;
   /**
    * HOURS ON NO JOB (0357): a closed shift nobody put on a job may have been billed by hand on an
@@ -362,9 +362,9 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // NO convert verb: that sheet was the pre-0230 five-target grammar, and for a JOB-tagged lead
   // it booked a job-TYPED APPOINTMENT (bypassing the designation-does-the-converting law, which
   // only day-carrying doors reach). The lead row and the rail carry the real flow; open lands there.
-  // Called (do), Snooze (the day only: inquiry.snooze, never a contact), Lost (inquiry.markLost,
-  // kept with status lost, never deleted).
-  inquiry: ["do", "snooze", "dismiss", "open"],
+  // cn-v1170: Schedule opens the lead's file (a link, no verb); Not Sold (dismiss: inquiry.markLost,
+  // kept, never deleted). No Called and no Snooze: a lead on the Leads list IS the reminder.
+  inquiry: ["dismiss", "open"],
   // Close Out (do), ⋯ Dismiss (dismiss: appointment.wontHappen, cn-v1166). A tech's row only opens (appointmentAffordances).
   appointment: ["do", "dismiss", "open"],
   // The href opens THE INSPECTION, the visit's own page (/appointments/<id>), never the estimate

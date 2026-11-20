@@ -196,15 +196,16 @@ describe("what counts as booking a day", () => {
 describe("the walls the budget sits under", () => {
   const defs = [...AGENT_WRITE_ALLOWED].map((name) => ({ name, def: REGISTRY[name as keyof typeof REGISTRY] }));
 
-  it("every write Nort can make is a registry action, seventy-five of them", () => {
-    expect(defs).toHaveLength(75);
+  // cn-v1170: inquiry.snooze left (a lead has no follow-up day), so seventy-four.
+  it("every write Nort can make is a registry action, seventy-four of them", () => {
+    expect(defs).toHaveLength(74);
     for (const { name, def } of defs) expect(def, name).toBeTruthy();
   });
 
-  it("sixteen stop the turn for a yes, and the fifty-nine the budget counts are the rest", () => {
+  it("sixteen stop the turn for a yes, and the fifty-eight the budget counts are the rest", () => {
     const gated = defs.filter(({ def }) => needsConsent(def, "agent", false)).map(({ name }) => name);
     expect(gated).toHaveLength(16);
-    expect(defs.length - gated.length).toBe(59);
+    expect(defs.length - gated.length).toBe(58);
     expect(gated).toEqual(
       expect.arrayContaining([
         "payment.record",

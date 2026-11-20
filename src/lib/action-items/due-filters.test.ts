@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { draftInvoiceState, heldJobState, inquiryDueFilter, lateInvoiceFilter, quoteFollowUpState, quoteNoAnswerFilter } from "./due-filters";
+import { draftInvoiceState, heldJobState, lateInvoiceFilter, quoteFollowUpState, quoteNoAnswerFilter } from "./due-filters";
 
 /**
- * THE DAY A PERSON PICKED IS THE DAY IT COMES BACK (release/w1a seam fixes). Nort's inquiry.snooze,
- * quote.followUp and the hold picker all promise a day; Needs You has to keep it.
+ * THE DAY A PERSON PICKED IS THE DAY IT COMES BACK (release/w1a seam fixes). Nort's quote.followUp
+ * and the hold picker promise a day; Needs You has to keep it. A lead has no day since cn-v1170.
  *
  * The feeders filter in the database with PostgREST `.or()` strings, so these tests run those very
  * strings over rows with a small evaluator of the grammar they use (col.is.null, col.lte.v,
@@ -50,49 +50,29 @@ const TODAY = "2026-09-27";
 const TOMORROW = "2026-09-28";
 const src = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
 
-describe("a lead on Needs You: new or contacted, it follows its follow-up day", () => {
-  const due = (row: Row) => passes(inquiryDueFilter(TODAY), row);
-
-  it("a NEW lead snoozed to tomorrow is not listed today (Nort's 'bring the Karen lead back Monday')", () => {
-    expect(due({ status: "new", next_follow_up_at: TOMORROW })).toBe(false);
-  });
-
-  it("a new lead with no day, or today's, or a past day is listed: a fresh lead still shows the moment it lands", () => {
-    expect(due({ status: "new", next_follow_up_at: null })).toBe(true);
-    expect(due({ status: "new", next_follow_up_at: TODAY })).toBe(true);
-    expect(due({ status: "new", next_follow_up_at: "2026-09-20" })).toBe(true);
-  });
-
-  it("a contacted lead reads the same rule", () => {
-    expect(due({ status: "contacted", next_follow_up_at: TOMORROW })).toBe(false);
-    expect(due({ status: "contacted", next_follow_up_at: TODAY })).toBe(true);
-    expect(due({ status: "contacted", next_follow_up_at: null })).toBe(true);
-  });
-
-  it("the inquiry feeder filters with it, and no longer lets every 'new' lead through", () => {
+describe("a lead has no follow-up day (cn-v1170): the Leads list is the reminder", () => {
+  it("no lead filter of Needs You's own: the build reads the one rule, and no row reads a lead's day", () => {
     const query = src("src/lib/action-items/query.ts");
-    expect(query).toContain(".or(inquiryDueFilter(todayStr))");
-    expect(query).not.toContain("status.eq.new,next_follow_up_at");
+    expect(query).not.toContain("inquiryDueFilter");
+    expect(query).not.toContain("next_follow_up_at");
+    expect(src("src/lib/action-items/due-filters.ts")).not.toContain("inquiryDueFilter");
   });
-});
 
-describe("the row's Snooze on a lead is Nort's inquiry.snooze, not a contact", () => {
-  it("Snooze dispatches inquiry.snooze with the day; Called is the contact, with no day; Lost keeps the lead", async () => {
+  it("a lead row's verbs: Not Sold keeps the lead; there is no Snooze, no Called and no Schedule verb", async () => {
     const executeAction = vi.fn(async () => ({ ok: true }));
     vi.doMock("@/lib/actions/execute", () => ({ executeAction }));
     vi.doMock("next/cache", () => ({ revalidatePath: vi.fn() }));
     const { dispatchAction } = await import("./dispatch");
-    expect(await dispatchAction({ kind: "inquiry", id: "i-karen", verb: "snooze", payload: { date: TOMORROW } })).toEqual({ ok: true, error: undefined });
-    expect(executeAction).toHaveBeenLastCalledWith("inquiry.snooze", { id: "i-karen", date: TOMORROW }, { source: "ui" });
-    await dispatchAction({ kind: "inquiry", id: "i-karen", verb: "do" });
-    expect(executeAction).toHaveBeenLastCalledWith("inquiry.contact", { id: "i-karen" }, { source: "ui" });
-    await dispatchAction({ kind: "inquiry", id: "i-karen", verb: "dismiss" });
-    expect(executeAction).toHaveBeenLastCalledWith("inquiry.markLost", { id: "i-karen" }, { source: "ui" });
-    // A lead row has no Schedule verb any more (its Snooze and Called say both things it meant).
-    expect(await dispatchAction({ kind: "inquiry", id: "i-karen", verb: "schedule", payload: { date: TOMORROW } })).toEqual({
-      ok: false,
-      error: "That action isn't available here.",
-    });
+    await dispatchAction({ kind: "inquiry", id: "i-dana", verb: "dismiss" });
+    expect(executeAction).toHaveBeenLastCalledWith("inquiry.markLost", { id: "i-dana" }, { source: "ui" });
+    // Schedule on the row is a link to the lead's file (/leads/<id>?schedule=1), never a verb.
+    for (const verb of ["snooze", "do", "schedule"] as const) {
+      expect(await dispatchAction({ kind: "inquiry", id: "i-dana", verb, payload: { date: TOMORROW } }), verb).toEqual({
+        ok: false,
+        error: "That action isn't available here.",
+      });
+    }
+    expect(executeAction).toHaveBeenCalledTimes(1);
     vi.doUnmock("@/lib/actions/execute");
     vi.doUnmock("next/cache");
   });

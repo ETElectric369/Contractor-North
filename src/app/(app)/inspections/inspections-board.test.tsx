@@ -249,11 +249,11 @@ describe("the tiles of each view, in order, with name, count and line", () => {
     for (const x of tiles) expect(x.line ?? "").not.toMatch(/ago|Oldest|Next/);
   });
 
-  it("Filed: Completed · Lost · Cancelled, plain pictures, each with its quiet line", async () => {
+  it("Filed: Completed · Not Sold · Cancelled, plain pictures, each with its quiet line", async () => {
     const tiles = tilesOf(await render({ view: "completed" }));
     expect(tiles.map((x) => [x.id, x.name, x.count, x.line, x.tint])).toEqual([
       ["completed", "Completed", "1", "Written up", null],
-      ["lost", "Lost", "1", "Didn't become work", null],
+      ["lost", "Not Sold", "1", "Didn't become work", null],
       ["cancelled", "Cancelled", "1", "Called off", null],
     ]);
     state.language = "es";

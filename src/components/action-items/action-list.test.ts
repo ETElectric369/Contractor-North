@@ -7,7 +7,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 /**
  * CALL BACK (the switch board, 0352). With Leads switched off a request still reaches Needs You as
  * "New Request from …", and the one thing to do about it is one tap: Call Back dials the number.
- * With Leads on the row's button is Called (the number is behind its ⋯).
+ * With Leads on the row's button is Schedule, the lead's file with its Schedule sheet open (cn-v1170),
+ * and the number is behind its ⋯.
  */
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), replace: vi.fn() }) }));
 vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
@@ -32,19 +33,20 @@ const say = (key: string, vars: Record<string, string | number>) => fillSlots(t(
 /** No chip is drawn any more: the Badge's own markup. */
 const BADGE = "inline-flex items-center rounded-full px-2.5 py-0.5";
 
-const row = { id: "i1", name: "Dana Reyes", status: "new", next_follow_up_at: null, phone: "(530) 555-0142" };
+const row = { id: "i1", name: "Dana Reyes", status: "new", phone: "(530) 555-0142", created_at: "2026-09-25T17:00:00Z" };
 const render = (leadsOn: boolean) => {
-  const item = { ...inquiryActionItem(row, "2026-09-26", leadsOn), group: KIND_GROUP.inquiry };
+  const item = { ...inquiryActionItem(row, leadsOn), group: KIND_GROUP.inquiry };
   return renderToStaticMarkup(createElement(ActionList, { items: [item], todayStr: "2026-09-26", leadsOn, isStaff: true }));
 };
 
 describe("ActionList — a request with Leads off", () => {
-  it("Leads on: the lead row's button is Called; no Call Back, and the number waits behind ⋯", () => {
+  it("Leads on: the lead row's button is Schedule (the lead's file, its sheet open); no Called, no Call Back, and the number waits behind ⋯", () => {
     const html = render(true);
     expect(html).toContain("Dana Reyes");
     expect(html).not.toContain("Call Back");
     expect(html).not.toContain("tel:");
-    expect(html).toMatch(/<button[^>]*>Called<\/button>/);
+    expect(html).not.toMatch(/>Called</);
+    expect(html).toMatch(/<a [^>]*href="\/leads\/i1\?schedule=1"[^>]*>[^<]*Schedule/);
     expect(html).toContain('aria-label="More for Dana Reyes"');
   });
 
@@ -68,8 +70,8 @@ describe("ActionList — a request with Leads off", () => {
   });
 
   it("the Request chip still rides on the row itself (inquiryActionItem): a state key the buttons read, never drawn", () => {
-    expect(inquiryActionItem(row, "2026-09-26", false).chip).toBe("Request");
-    expect(inquiryActionItem(row, "2026-09-26", true).chip).toBeUndefined();
+    expect(inquiryActionItem(row, false).chip).toBe("Request");
+    expect(inquiryActionItem(row, true).chip).toBeUndefined();
   });
 });
 
@@ -391,8 +393,10 @@ describe("ActionList — a verb's refusal is always said, and the server's list 
 
   it("a bare button's verb is optimistic, and its refusal is said on the list by run() itself", () => {
     expect(verbLanding({ kind: "job_to_schedule" }, "schedule")).toEqual({ hides: "remove", optimistic: true });
-    expect(verbLanding({ kind: "inquiry" }, "do")).toEqual({ hides: "sink", optimistic: true });
-    expect(verbLanding({ kind: "inquiry" }, "do", { child: true })).toEqual({ hides: "remove", optimistic: true });
+    // Close Out on a plain visit row sinks; a lead has no "do" since cn-v1170 (no Called).
+    expect(verbLanding({ kind: "appointment" }, "do")).toEqual({ hides: "sink", optimistic: true });
+    expect(verbLanding({ kind: "appointment" }, "do", { child: true })).toEqual({ hides: "remove", optimistic: true });
+    expect(verbLanding({ kind: "inquiry" }, "dismiss")).toEqual({ hides: "remove", optimistic: true });
     expect(list()).toContain("if (!opts?.sheet) setError(message);");
   });
 
@@ -529,8 +533,9 @@ describe("the when line: overdue for a deadline, ago for a day that happened", (
   });
   it("every kind says which its day is, and the happened-day kinds are the ones whose day is the deed", () => {
     expect(Object.keys(WHEN_IS_A_DEADLINE).sort()).toEqual(Object.keys(KIND_GROUP).sort());
-    for (const k of ["inspection_writeup", "visit_unbilled", "time_stray", "job_unbilled_work", "appointment", "receipt_unbilled"]) expect(WHEN_IS_A_DEADLINE[k as keyof typeof WHEN_IS_A_DEADLINE], k).toBe(false);
-    for (const k of ["invoice_overdue", "inquiry", "lien_deadline", "supplier_pay", "job_on_hold", "permit_inspection"]) expect(WHEN_IS_A_DEADLINE[k as keyof typeof WHEN_IS_A_DEADLINE], k).toBe(true);
+    // A lead's day is the day it came in since cn-v1170 (no follow-up day).
+    for (const k of ["inspection_writeup", "visit_unbilled", "time_stray", "job_unbilled_work", "appointment", "receipt_unbilled", "inquiry"]) expect(WHEN_IS_A_DEADLINE[k as keyof typeof WHEN_IS_A_DEADLINE], k).toBe(false);
+    for (const k of ["invoice_overdue", "lien_deadline", "supplier_pay", "job_on_hold", "permit_inspection"]) expect(WHEN_IS_A_DEADLINE[k as keyof typeof WHEN_IS_A_DEADLINE], k).toBe(true);
   });
   it("the list reads it: an inspection done yesterday is Yesterday on the row, never overdue", () => {
     const html = renderToStaticMarkup(createElement(ActionList, { items: [item({ id: "w", kind: "inspection_writeup", when: "2026-10-07T17:00:00.000Z" })], todayStr: "2026-10-08", isStaff: true }));

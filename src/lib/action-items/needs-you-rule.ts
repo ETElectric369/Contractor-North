@@ -171,7 +171,7 @@ export function levelOf(item: Pick<ActionItem, "kind" | "id" | "urgency" | "when
       // Only late invoices are emitted, so every one is at least SOON.
       return past !== null && past >= NOW_INVOICE_LATE_DAYS ? "now" : "soon";
     case "materials_needed": // the crew's day, today or tomorrow: buy before the truck rolls
-    case "inquiry": // a follow-up day that came, or the day a new lead came in
+    case "inquiry": // the day the lead came in (cn-v1170: no follow-up day)
     case "quote_awaiting": // a follow-up day that came, or an offer ending inside five days
     case "invoice_draft": // the day it was set aside until has come
     case "job_on_hold": // its come-back day has come

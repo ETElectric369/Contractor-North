@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1170", date: "2026-11-19", line: "Leads is new intake only: each lead has a running clock, Schedule, Not Sold and Edit Details, and its own file page. Follow-up days are gone, the form is shorter, and Lost is now called Not Sold." },
   { version: "cn-v1169", date: "2026-11-19", line: "A job booked for a day nobody worked stays on My Day as Carried Over, with Do Today, and is offered at clock-in. The site fence's 15 minutes start at your tap. Revise shows only on a locked estimate." },
   { version: "cn-v1168", date: "2026-11-19", line: "Keep Both: when a revision was really separate work, like a second unit, one tap un-links it and the estimate it replaced counts again. Revise now says what it does before it makes anything." },
   { version: "cn-v1167", date: "2026-11-18", line: "A location notice could cover the whole screen while you were clocked in with no location stamped. It is a small strip under the top bar now, and Got It puts it away for that clock-in." },

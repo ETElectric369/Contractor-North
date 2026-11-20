@@ -630,6 +630,7 @@ describe("the visit page catalog (vp_), builder D's half", () => {
     // The whole catalog: C's 138 (the Lost door got its own vp_btn_ key, skeptic #50) and these 122.
     // + the five What Is This For? words (vp_whatIsThisFor…, vp_titleSav…, vp_titleNotSaved)
     // + the three words of the page with no visit to show (vp_visitGone, vp_visitGoneTech, vp_btn_backToInspections)
-    expect(Object.keys(vp.en)).toHaveLength(268);
+    // + cn-v1170's two (vp_markedLostLeadToo, vp_undoneLeadToo: a visit's Not Sold that took its lead)
+    expect(Object.keys(vp.en)).toHaveLength(270);
   });
 });
