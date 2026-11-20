@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { useDraft } from "@/lib/use-draft";
-import { INQUIRY_FORM_KEYS, InquiryFields, inquiryFormValue, type InquiryFormValue } from "./inquiry-fields";
+import { INQUIRY_FORM_KEYS, InquiryFields, customerLeadFormValue, inquiryFormValue, type InquiryFormValue } from "./inquiry-fields";
 import { createInquiry, updateInquiry, deleteInquiry } from "./actions";
 import { readLeadSources } from "./lead-sources-actions";
 import type { Inquiry } from "@/lib/types";
@@ -30,12 +30,36 @@ const newParam = createParamClaim();
  * this same form now (quotes/[id]/customer-select) — one editor, a second door to it. Whoever mounts it
  * hands it the WHOLE lead row: the save writes every field the form holds (leads/actions updateInquiry),
  * so a row read with a short select list would blank what it did not carry.
+ *
+ * A NEW LEAD FOR A CUSTOMER ALREADY ON FILE (cn-v1173). The owner, 2026-11-19: "i would like to
+ * promote the workflow starting with new lead which could be an existing client with a new job but it
+ * gets the information in the right place". The customer's page (crm/[id], its Requests tab) hands this
+ * form the customer: a NEW form starts from them through the same person block (their street and town
+ * are a suggestion: typing a different street drops their city, state and ZIP, as for a pick made in
+ * this sitting; untouched, their place posts whole), posts their id so createInquiry links THAT
+ * customer, and a save lands on the new lead's file, where Schedule is. That mount never answers the
+ * Leads page's ?new=1, and keeps its draft apart from the Leads page's. Opened clean, it starts from the
+ * customer as the page hands them NOW (an Edit Customer made on the same page is what it shows), and a
+ * form nobody typed in is never kept as that customer's draft.
  */
+export type LeadCustomer = {
+  id: string;
+  name: string | null;
+  company_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+};
+
 export function InquiryModal({
   inquiry,
   mode = "new",
   trigger = "button",
   noDelete = false,
+  customer,
 }: {
   inquiry?: Inquiry;
   mode?: "new" | "edit";
@@ -47,6 +71,8 @@ export function InquiryModal({
   /** True where the lead is corrected from another record's page: Delete Lead stays on the Leads
    *  page, behind its own warning, and never sits beside an estimate. */
   noDelete?: boolean;
+  /** A new lead started from this customer's page: the form is seeded from them and posts their id. */
+  customer?: LeadCustomer;
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,8 +84,12 @@ export function InquiryModal({
   const toast = useToast();
   const t = translator(useLang());
   const editing = mode === "edit" && !!inquiry;
+  /** The customer this new lead is for, or null (the Leads page's own New Lead, or an edit). */
+  const forCustomer = !editing && customer ? customer : null;
+  /** The form as it starts: the lead as it is, or (a customer's new lead) the customer in the person block. */
+  const blank = (): InquiryFormValue => (forCustomer ? customerLeadFormValue(forCustomer) : inquiryFormValue(inquiry));
 
-  const [form, setForm] = useState(() => inquiryFormValue(inquiry));
+  const [form, setForm] = useState(blank);
   // Remount key for the fields block: phone + address are uncontrolled inside
   // their components and only read defaultValue on mount, so a restored draft
   // (or a reset) needs a remount to actually show.
@@ -68,11 +98,11 @@ export function InquiryModal({
   // Interruption recovery: a deploy reload / iOS killing the tab restores the
   // half-typed lead. Keyed per record when editing so two leads never share.
   const draft = useDraft(
-    editing ? "lead-edit:" + inquiry!.id : "lead-new",
+    editing ? "lead-edit:" + inquiry!.id : forCustomer ? "lead-new:customer:" + forCustomer.id : "lead-new",
     form,
     (f) => {
       // Only the form's own keys: a draft kept by the older form (Kind, How Long) restores clean.
-      const next = inquiryFormValue(inquiry);
+      const next = blank();
       for (const k of INQUIRY_FORM_KEYS) if (f && k in f) (next as unknown as Record<string, unknown>)[k] = (f as Partial<InquiryFormValue>)[k];
       setForm(next);
       setFormKey((k) => k + 1);
@@ -101,17 +131,34 @@ export function InquiryModal({
   // Dirty = the form differs from a fresh one (covers typed input AND a
   // restored draft; a restored-then-reset form correctly reads clean again).
   const initialSnap = useRef<string | null>(null);
-  if (initialSnap.current === null) initialSnap.current = JSON.stringify(inquiryFormValue(inquiry));
+  if (initialSnap.current === null) initialSnap.current = JSON.stringify(blank());
   const dirty = JSON.stringify(form) !== initialSnap.current;
+
+  // A CUSTOMER'S FORM NOBODY TYPED IN IS NEVER THEIR DRAFT (cn-v1173). Its fresh form is the customer
+  // seeded, not blank, so the draft's mirror would keep the seed after every save, discard or re-seed,
+  // and a later open would say a draft was restored for words nobody typed (and show an old copy of the
+  // customer). This runs after the draft's own mirror, so a pristine form's pending write is dropped.
+  // The first pass is skipped: the draft is being read back then, never written.
+  const draftSeen = useRef(false);
+  const clearDraft = draft.clear;
+  const pristineForCustomer = !!forCustomer && !dirty;
+  useEffect(() => {
+    if (!draftSeen.current) {
+      draftSeen.current = true;
+      return;
+    }
+    if (pristineForCustomer) clearDraft();
+  }, [form, pristineForCustomer, clearDraft]);
 
   // This instance's name on the ?new=1 claim; it lets go on unmount as well as below.
   const claimant = useId();
   useEffect(() => () => newParam.release(claimant), [claimant]);
 
   // Open straight from the quick-add menu's "New lead" (/leads?new=1), then
-  // strip the param so a refresh or back-button doesn't reopen the form.
+  // strip the param so a refresh or back-button doesn't reopen the form. A customer's own New Lead
+  // never answers it: the claim is the Leads page's.
   useEffect(() => {
-    if (editing) return;
+    if (editing || forCustomer) return;
     if (searchParams.get("new") !== "1") {
       newParam.release(claimant); // param gone → release for the next quick-add tap
       return;
@@ -122,7 +169,7 @@ export function InquiryModal({
     params.delete("new");
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [searchParams, pathname, router, editing, claimant]);
+  }, [searchParams, pathname, router, editing, forCustomer, claimant]);
 
   function openModal() {
     setConfirmDel(false);
@@ -133,8 +180,10 @@ export function InquiryModal({
     // is open: a lead corrected elsewhere in the meantime would have been written back whole from the
     // old copy. Nothing typed is lost: a form with unsaved words (or a restored draft) is left alone.
     // The fields are re-seeded BEFORE the sheet opens; the sheet itself is never remounted.
-    if (editing && !dirty) {
-      const fresh = inquiryFormValue(inquiry);
+    // A customer's New Lead the same way (cn-v1173): the customer as the page hands them now, so an
+    // Edit Customer made on the same page is what the form starts from.
+    if ((editing || forCustomer) && !dirty) {
+      const fresh = blank();
       const snap = JSON.stringify(fresh);
       if (snap !== initialSnap.current) {
         initialSnap.current = snap;
@@ -149,9 +198,17 @@ export function InquiryModal({
   // an explicit discard, so the stored draft goes too.
   function discard() {
     draft.clear();
-    setForm(inquiryFormValue(inquiry));
-    setFormKey((k) => k + 1);
+    resetNew();
     setOpen(false);
+  }
+
+  /** A new form back to fresh, with its baseline: for a customer's form the fresh one is the customer
+   *  as handed in now, so the baseline moves with it and the reset reads clean (never a draft). */
+  function resetNew() {
+    const fresh = blank();
+    if (!editing) initialSnap.current = JSON.stringify(fresh);
+    setForm(fresh);
+    setFormKey((k) => k + 1);
   }
 
   function onSubmit(formData: FormData) {
@@ -177,14 +234,15 @@ export function InquiryModal({
       // Saved — drop the draft and reset so reopening doesn't offer a duplicate.
       draft.clear();
       if (!editing) {
-        setForm(inquiryFormValue());
-        setFormKey((k) => k + 1);
+        resetNew();
       } else {
         // The saved values ARE the new baseline — reopening starts clean.
         initialSnap.current = JSON.stringify(form);
       }
       setOpen(false);
-      router.refresh();
+      // From a customer's page the next step is the lead's own file, where Schedule is.
+      if (forCustomer && res.id) router.push(`/leads/${res.id}`);
+      else router.refresh();
     });
   }
 
@@ -249,8 +307,9 @@ export function InquiryModal({
           }
         >
           <div className="space-y-4">
+            {forCustomer && <input type="hidden" name="customer_id" value={forCustomer.id} />}
             {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-            <InquiryFields key={formKey} value={form} onChange={(p) => setForm((f) => ({ ...f, ...p }))} sources={sources} sourcesFailed={sourcesFailed} />
+            <InquiryFields key={formKey} value={form} onChange={(p) => setForm((f) => ({ ...f, ...p }))} sources={sources} sourcesFailed={sourcesFailed} seededTownIsSuggestion={!!forCustomer} />
           </div>
         </Modal>
       </form>

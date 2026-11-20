@@ -52,7 +52,7 @@ import type { WordCatalog } from "./types";
  * (lib/appointments/visit-start and wont-happen, lib/inspection/inspection-access INSPECTION_UNREAD,
  * lib/estimate/task-kits kitsReadWords): a library keeps its English inline as the default and takes
  * the caller's `lang` + translator (lib/lang-words say), so every existing caller and test reads the
- * same English byte for byte. House words added here, once: Appointment = Cita (nv_add_newAppointment),
+ * same English byte for byte. House words added here, once: Appointment = Cita (vp_btn_newAppointment),
  * Set A Time = Fijar Una Hora, Propose Times = Proponer Horas, Text It = Enviar Por Mensaje (the
  * Settle Up button's su_btn_textReceipt verb), Convert = Convertir, Anyone = Cualquiera, Type = Tipo,
  * Location = Ubicación (vi_btn_useMyLocation), Timecards = Tarjetas De Tiempo (the page's own name, as the

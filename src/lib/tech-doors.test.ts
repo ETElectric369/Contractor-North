@@ -3,6 +3,7 @@ import { translator } from "@/lib/i18n";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ACTIONS } from "@/components/global-quick-add";
+import { visitHeading } from "@/lib/appointments/inspection-page";
 import { appointmentAffordances } from "@/lib/action-items/types";
 import { canDeletePhoto } from "@/app/(app)/jobs/[id]/job-photos";
 import { canDeleteTask } from "@/lib/job-tasks";
@@ -92,9 +93,18 @@ describe("the job's side doors", () => {
     expect(s).toContain("answers: answersWithoutPrices(b.answers)");
     // A why line names a price and a note is the owner's own voice: only the office gets the sheets as written.
     expect(s).toContain("templates={viewerIsStaff ? (sheets ?? []) : sheetsWithoutMoney(sheets ?? [])}");
-    expect(s).toMatch(/estimateHref=\{viewerIsStaff && estimatesOn \?/);
-    // The heading names the estimate only for the people who get its door.
-    expect(s).toContain('{viewerIsStaff && estimatesOn ? t("vp_inspectionOrEstimate") : t("vp_inspection")}');
+    // The estimate's door is the office's, with Estimates on: built once (cn-v1173) and handed on.
+    expect(s).toMatch(/const estimateHref = viewerIsStaff && estimatesOn \?/);
+    expect(s).toContain("estimateHref={estimateHref}");
+    // The heading names the estimate only for the people who get its door, and never on an inspection
+    // (cn-v1173: lib/appointments/inspection-page visitHeading).
+    expect(s).toContain(
+      '{visitHeading({ isInspection, isStaff: viewerIsStaff, estimatesOn }) === "inspection_or_estimate" ? t("vp_inspectionOrEstimate") : t("vp_inspection")}',
+    );
+    for (const isInspection of [true, false])
+      for (const isStaff of [true, false])
+        for (const estimatesOn of [true, false])
+          expect(visitHeading({ isInspection, isStaff, estimatesOn })).toBe(!isInspection && isStaff && estimatesOn ? "inspection_or_estimate" : "inspection");
     expect(translator("en")("vp_inspectionOrEstimate")).toBe("Inspection or Estimate");
     expect(translator("en")("vp_inspection")).toBe("Inspection");
   });

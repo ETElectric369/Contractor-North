@@ -81,13 +81,13 @@ export default async function SchedulePage({
   // voice, activity, old bookmarks): plain ?view=appointments folds into the
   // calendar; its &new=1 create-intent carries over as ?new=appointment.
   if (sp.view === "appointments") redirect(sp.new === "1" ? "/schedule?new=appointment" : "/schedule");
-  // ?new=appointment (quick-add's door) → today's day drill with the create
+  // ?new=appointment (a link's door; the + menu's own row left in cn-v1173) → today's day drill with the create
   // modal auto-opened: the day view mounts the one create AppointmentButton,
   // and ?new=1 is the claim-guard param it answers. The date is pinned
   // EXPLICITLY (org-tz today) — a dateless day view keys off the client's
   // "today", and the server→client day correction would remount the button
   // and close the just-opened modal whenever the two clocks disagree.
-  // ?new=inspection (the + menu's New Inspection) is the same door opened on the inspection type;
+  // ?new=inspection (the + menu's New Inspection until cn-v1173; no menu links to it now) is the same door opened on the inspection type;
   // a tapped half hour (the day's Add to Schedule sheet) rides along as ?time=HH:MM. Both are
   // checked here and read by the create form (appointment-button) when it answers ?new=1.
   if (sp.new === "appointment" || sp.new === "inspection" || (sp.new === "1" && (sp.view !== "day" || !date))) {

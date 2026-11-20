@@ -116,10 +116,12 @@ describe("the nav catalog", () => {
     }
   });
 
-  it("the + menu's six verbs are the rows' keys, in the rows' order", () => {
+  it("the + menu's one typed start (cn-v1173: New Lead, or New Job with Leads off) is the rows' keys, in the rows' order", () => {
     const source = readFileSync(join(ROOT, "src/components/global-quick-add.tsx"), "utf8");
     const rowKeys = [...source.matchAll(/\{ key: "(nv_add_\w+)", href:/g)].map((m) => m[1]);
-    expect(rowKeys).toEqual(["nv_add_newLead", "nv_add_newJob", "nv_add_newAppointment", "nv_add_newInspection", "nv_add_newEstimate", "nv_add_newInvoice"]);
+    expect(rowKeys).toEqual(["nv_add_newLead", "nv_add_newJob"]);
+    // The four rows that left the + took their keys with them: nothing reads them any more.
+    for (const gone of ["nv_add_newAppointment", "nv_add_newInspection", "nv_add_newEstimate", "nv_add_newInvoice"]) for (const lang of ["en", "es"] as const) expect(nav[lang][gone], gone).toBeUndefined();
     for (const k of rowKeys) expect(nav.en[k], k).toMatch(/^New /);
     expect(keys.filter((k) => k.startsWith("nv_add_")).sort()).toEqual([...rowKeys, "nv_add_noSignal", "nv_add_stillSendingMany", "nv_add_stillSendingOne"].sort());
     for (const k of ["nv_add_noSignal", "nv_add_stillSendingOne", "nv_add_stillSendingMany"]) for (const lang of ["en", "es"] as const) expect(nav[lang][k]).toContain("{label}");

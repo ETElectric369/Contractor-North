@@ -292,12 +292,12 @@ export function AppointmentButton({
     const ctxJob = !appointment && defaultJobId ? jobs.find((j) => j.id === defaultJobId) : undefined;
     const ctxCust = !appointment && defaultCustomerId ? customers.find((c) => c.id === defaultCustomerId) : undefined;
     const date = appointment ? toLocal(appointment.starts_at, tz).date : suggestedDate(defaultDate);
-    // The door that opened this form may have said the time (a tapped half hour) and the type (the
-    // + menu's New Inspection): urlSeed, read once from ?new=1's companions below.
+    // The door that opened this form may have said the time (a tapped half hour) and the type (an
+    // address carrying ?type=): urlSeed, read once from ?new=1's companions below.
     const st = appointment ? toLocal(appointment.starts_at, tz) : { date, time: urlSeed.current.time ?? "08:00" };
     const en = appointment ? toLocal(appointment.ends_at, tz) : { date: "", time: "" };
     const base = {
-      // Default TYPE (W2-06): the door's own word first (?type=, the + menu's New Inspection); booked
+      // Default TYPE (W2-06): the door's own word first (?type=, an inspection asked for by address); booked
       // from a job, a Job (the work on that job's day); anywhere else Other, today's plain
       // appointment, with no write-up nag after it.
       type: appointment?.type ?? urlSeed.current.type ?? (defaultJobId ? "job" : "other"),
@@ -380,13 +380,13 @@ export function AppointmentButton({
   const claimant = useId();
   useEffect(() => () => newParam.release(claimant), [claimant]);
 
-  // Open straight from the quick-add menu's "New Appointment"
-  // (/schedule?view=appointments&new=1), then strip the param so a refresh or
+  // Open straight from a link that asks for the form (/schedule?new=appointment, or the
+  // older /schedule?view=appointments&new=1), then strip the param so a refresh or
   // back-button doesn't reopen the form. Edit instances never answer it.
   useEffect(() => {
     if (editing) return;
     if (searchParams.get("new") !== "1") {
-      newParam.release(claimant); // param gone → release for the next quick-add tap
+      newParam.release(claimant); // param gone → release for the next such link
       return;
     }
     if (!newParam.take(claimant)) return;

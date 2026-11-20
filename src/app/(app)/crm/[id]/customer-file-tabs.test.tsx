@@ -68,6 +68,14 @@ vi.mock("../../appointments/appointment-button", () => ({ AppointmentButton: () 
 vi.mock("@/components/section-actions-menu", () => ({ SectionActionsMenu: () => null }));
 vi.mock("@/components/back-link", () => ({ BackLink: () => null }));
 vi.mock("@/components/tabs", () => ({ Tabs: function TabsStub() { return null; } }));
+// The Requests tab's New Lead (cn-v1173) is the Leads page's own form, drawn here as a mark that says
+// which customer it was handed (the form itself is drawn in leads/lead-for-customer.test.tsx).
+vi.mock("../../leads/inquiry-modal", async () => {
+  const { createElement: h } = await import("react");
+  return {
+    InquiryModal: ({ customer }: { customer?: Record<string, unknown> }) => h("i", { "data-x": `new-lead ${JSON.stringify(customer ?? null)}` }),
+  };
+});
 
 import CustomerDetailPage from "./page";
 import { Tabs } from "@/components/tabs";
@@ -211,6 +219,49 @@ describe("a failed read is said in its tab, never drawn as nothing", () => {
   it("either visits read failing says the Inspections tab is unread", async () => {
     expect((await open("owner", { own: true })).draw("inspections")).toContain("Couldn&#x27;t load their inspections");
     expect((await open("owner", { byLead: true })).draw("inspections")).toContain("Couldn&#x27;t load their inspections");
+  });
+});
+
+describe("the Requests tab's New Lead (cn-v1173)", () => {
+  const RICH = { ...CUSTOMER, company_name: "Snowbell Builders", phone: "(530) 555-0100", email: "sam@example.test", address: "4 Larkspur Ln", city: "Thistlewood", state: "CA", zip: "96161" };
+  async function drawRequests(features?: Record<string, boolean>) {
+    answers("owner");
+    const base = db.answer;
+    db.answer = (table, ops) => {
+      if (table === "customers" && has(ops, "maybeSingle")) return { data: RICH, error: null };
+      if (table === "profiles") return { data: { role: "owner", active: true, organizations: { settings: { timezone: "America/Los_Angeles", features } } }, error: null };
+      return base(table, ops);
+    };
+    db.calls = [];
+    const el = (await CustomerDetailPage({ params: Promise.resolve({ id: CID }) })) as ReactElement;
+    const tab = findTabs(el)!.props.tabs.find((t) => t.id === "requests")!;
+    return renderToStaticMarkup(createElement("div", null, tab.content));
+  }
+
+  it("the office with Leads on: the Leads page's own form, handed this customer, above the tab's card", async () => {
+    const html = await drawRequests();
+    const mark = html.match(/data-x="new-lead ([^"]*)"/);
+    expect(mark).not.toBeNull();
+    const handed = JSON.parse(mark![1].replace(/&quot;/g, '"'));
+    expect(handed).toEqual({ id: CID, name: "Sam Tillery", company_name: "Snowbell Builders", phone: "(530) 555-0100", email: "sam@example.test", address: "4 Larkspur Ln", city: "Thistlewood", state: "CA", zip: "96161" });
+    // Top right of the tab's content, before the list.
+    expect(html).toMatch(/^<div><div class="space-y-3"><div class="flex justify-end"><i data-x="new-lead /);
+    expect(html.indexOf("new-lead")).toBeLessThan(html.indexOf('href="/leads/L1"'));
+  });
+
+  it("Leads off: no door (the tab and its list are as they were)", async () => {
+    const html = await drawRequests({ leads: false });
+    expect(html).not.toContain("new-lead");
+    expect(html).toContain('href="/leads/L1"');
+  });
+
+  it("source: the door is in the Requests tab, gated on the office and the Leads switch, and never in the header row", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/crm/[id]/page.tsx"), "utf8");
+    const tab = src.slice(src.indexOf('id: "requests",'), src.indexOf("return (", src.indexOf('id: "requests",')));
+    expect(tab).toMatch(/\{viewerIsStaff && featureOn\(sw\.features, "leads"\) && \(\s*<div className="flex justify-end">\s*<InquiryModal\s+customer=\{\{/);
+    expect(src.split("<InquiryModal").length - 1).toBe(1);
+    // One word for one door: the modal's own New Lead (ld_btn_newLead), no new key on this page.
+    expect(src).not.toMatch(/t\("[a-z]+_btn_newLead"\)/);
   });
 });
 

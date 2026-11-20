@@ -76,12 +76,18 @@ export function PersonFields({
   value,
   onChange,
   namePlaceholder,
+  seededTownIsSuggestion = false,
 }: {
   value: PersonValue;
   onChange: (patch: Partial<PersonValue>) => void;
   /** The Name box's hint where the lead's would not be true: a lead may be a note alone, a customer
    *  needs a name or a phone (crm/actions createCustomer), so the customer form says its own. */
   namePlaceholder?: string;
+  /** The street and town the block starts with were SEEDED from another record, not stored on this
+   *  one (cn-v1173: a customer's New Lead, where the new job may be at another property). They are a
+   *  suggestion: typing over the seeded street drops the seeded town, exactly as for a pick made in
+   *  this sitting; left untouched, it posts whole. Every other form leaves this off. */
+  seededTownIsSuggestion?: boolean;
 }) {
   const t = translator(useLang());
   const [businessOpen, setBusinessOpen] = useState(() => !!value.company_name.trim());
@@ -89,7 +95,7 @@ export function PersonFields({
   // The street a suggestion resolved IN THIS SITTING, or null. Only that pick's town is cleared when
   // the street is typed over (cn-v1171, skeptic #74): a STORED street reads as picked for the grey
   // line, and clearing its town on the first keystroke erased the stored city, state and ZIP on save.
-  const pickedHere = useRef<string | null>(null);
+  const pickedHere = useRef<string | null>(seededTownIsSuggestion && value.town_picked ? value.address : null);
   const pickedTown = value.town_picked ? formatCityStateZip(value.city, value.state, value.zip) : "";
   const linkClass = "mt-1 inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline";
 

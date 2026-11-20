@@ -13,8 +13,10 @@ import type { WordCatalog } from "./types";
  *                                      description={t("nv_desc_x")} />);
  *   nv_sched_                          the schedule's two headings that are not a PageHeader, and
  *                                      the Calendar back-link beside them;
- *   nv_add_                            the + menu's six "New …" verbs and the two sentences the
- *                                      + says when a tap can't go ({label} is the verb's own word);
+ *   nv_add_                            the + menu's one typed start (New Lead, or New Job with
+ *                                      Leads off; cn-v1173 took the other four "New …" rows off
+ *                                      the +) and the sentences the + says when a tap can't go
+ *                                      ({label} is the row's own word);
  *   nv_set_<cluster id>                the Settings clusters' names (lib/settings-words);
  *   nv_role_<role>                     a person's role on the account menu.
  *
@@ -117,13 +119,10 @@ export const words: WordCatalog = {
     // The back-link beside both (schedule/crew-board.tsx, schedule/page.tsx's map view).
     nv_sched_calendar: "Calendar",
 
-    // ── The + menu (global-quick-add.tsx ACTIONS, by key; Snap or Note is sh_snapOrNote) ──
+    // ── The + menu (global-quick-add.tsx ACTIONS, by key; Snap or Note is sh_snapOrNote). One typed
+    //    start (cn-v1173): New Lead, or New Job where the Leads switch is off. ──
     nv_add_newLead: "New Lead",
     nv_add_newJob: "New Job",
-    nv_add_newAppointment: "New Appointment",
-    nv_add_newInspection: "New Inspection",
-    nv_add_newEstimate: "New Estimate",
-    nv_add_newInvoice: "New Invoice",
     // Said under the rows when a tap can't go; {label} is the row's own word (quickAddGo).
     nv_add_noSignal: "No signal right now, so {label} can't open. Tap it again once you have a bar or two.",
     nv_add_stillSendingOne: "Snap or Note is still sending 1 file, and reloading now would stop it. Tap {label} again once it's in.",
@@ -225,10 +224,6 @@ export const words: WordCatalog = {
 
     nv_add_newLead: "Nuevo Prospecto",
     nv_add_newJob: "Nuevo Trabajo",
-    nv_add_newAppointment: "Nueva Cita",
-    nv_add_newInspection: "Nueva Inspección",
-    nv_add_newEstimate: "Nuevo Presupuesto",
-    nv_add_newInvoice: "Nueva Factura",
     nv_add_noSignal: "No hay señal ahora, así que {label} no puede abrir. Vuelve a tocar {label} cuando tengas una o dos barras.",
     nv_add_stillSendingOne: "Foto o Nota todavía está enviando 1 archivo, y recargar ahora lo detendría. Toca {label} de nuevo cuando ya esté.",
     nv_add_stillSendingMany: "Foto o Nota todavía está enviando {n} archivos, y recargar ahora los detendría. Toca {label} de nuevo cuando ya estén.",

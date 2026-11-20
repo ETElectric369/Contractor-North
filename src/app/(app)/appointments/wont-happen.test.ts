@@ -279,9 +279,10 @@ describe("the visit page's header: at most one main button, then ⋯", () => {
   const page = readFileSync(join(process.cwd(), "src/app/(app)/appointments/[id]/page.tsx"), "utf8");
   const rows = readFileSync(join(process.cwd(), "src/app/(app)/appointments/[id]/visit-header-actions.tsx"), "utf8");
 
-  it("Get Paid on a work visit, Mark Inspection Done on a booked inspection, none otherwise", () => {
+  it("Get Paid on a work visit, an inspection's one step from lib/appointments/inspection-page (Mark Inspection Done while booked), none otherwise", () => {
     expect(page).toContain("{viewerIsStaff && a.status !== \"cancelled\" && !isInspection && (");
-    expect(page).toContain("{viewerIsStaff && isInspection && booked && (");
+    // cn-v1173: the booked rule moved into inspectionHeaderStep (its table: inspection-page.test).
+    expect(page).toContain('{viewerIsStaff && headerStep === "mark_done" && (');
     expect(page).toContain('<MarkCompleteButton id={a.id} label={t("vp_btn_markInspectionDone")} />');
     expect(translator("en")("vp_btn_markInspectionDone")).toBe("Mark Inspection Done");
     expect(page).not.toContain("Mark inspection complete");
@@ -289,7 +290,7 @@ describe("the visit page's header: at most one main button, then ⋯", () => {
 
   it("the ⋯ rows, in order, 44px and Title Case, Dismiss red and last behind a divider", () => {
     const menu = page.slice(page.indexOf("<SectionActionsMenu tree={VISIT_ACTIONS_MENU}>"), page.indexOf("</SectionActionsMenu>"));
-    const order = ["<MarkDoneRow", "<AppointmentButton", "<UnscheduleButton id={a.id} menuItem", "<PutBackRow", "<WontHappenRow"].map((t) => menu.indexOf(t));
+    const order = ["<StartAJobRow", "<MarkDoneRow", "<AppointmentButton", "<UnscheduleButton id={a.id} menuItem", "<PutBackRow", "<WontHappenRow"].map((t) => menu.indexOf(t));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((x, y) => x - y)).toEqual(order);
     expect(menu).toContain('rowLabel={t("vp_btn_editDetails")}');

@@ -2,7 +2,7 @@
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Ban, CalendarPlus, CheckCircle2 } from "lucide-react";
+import { Ban, Briefcase, CalendarPlus, CheckCircle2 } from "lucide-react";
 import { useToast } from "@/components/toast";
 import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
@@ -19,8 +19,10 @@ import { putVisitBackOnSchedule, setAppointmentStatus, wontHappenAppointment } f
  * THE VISIT PAGE'S ⋯ ACTIONS ROWS (W2-11). The header used to carry up to seven controls: Get Paid,
  * "Mark inspection complete" (under 44px), a Delete for empty visits, a bare ✓ and ✗, Clear the Date
  * and Edit Details (whose modal footer had a hard Delete). Now it carries at most ONE main button
- * (Get Paid on a work visit, Mark Inspection Done on a booked inspection) and this menu, last on
+ * (Get Paid on a work visit; on an inspection Mark Inspection Done, Start the Estimate or Open the
+ * Estimate, lib/appointments/inspection-page, cn-v1173) and this menu, last on
  * the row: Mark Done · Edit Details… · Clear the Date · Put It Back on the Schedule · — · Dismiss (cn-v1166; was Won't Happen).
+ * On an inspection the office sees with no job, Start a Job from This Visit leads the menu (cn-v1173).
  *
  * Each row says what happened in a toast and closes the panel; a status it changes has an Undo.
  * The rows' own words are the signed-in person's language (lib/words/visit-page, vp_); a note the
@@ -77,6 +79,31 @@ export function MarkDoneRow({ id }: { id: string }) {
       }
     >
       <CheckCircle2 className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {pending ? t("vp_btn_saving") : t("vp_btn_markDone")}
+    </button>
+  );
+}
+
+/**
+ * 'Start a Job from This Visit' (cn-v1173): on the office's view of an inspection with no job, the start
+ * box is not drawn until it is asked for (lib/appointments/inspection-page). This row asks: it puts
+ * `start=1` on the same address (`href`, built by the page with every other param kept) and the card is
+ * back in its old place. A plain navigation, no modal of its own; the menu closes first, as every row's
+ * does, and the page keeps its scroll. replace, not push: Back still leaves the visit, as it did.
+ */
+export function StartAJobRow({ href }: { href: string }) {
+  const router = useRouter();
+  const t = translator(useLang());
+  const closeMenu = useCloseActionsMenu();
+  return (
+    <button
+      type="button"
+      className={ACTIONS_ROW_CLS}
+      onClick={() => {
+        closeMenu();
+        router.replace(href, { scroll: false });
+      }}
+    >
+      <Briefcase className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {t("vp_btn_startAJobFromThisVisit")}
     </button>
   );
 }

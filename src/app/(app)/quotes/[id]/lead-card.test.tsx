@@ -215,8 +215,11 @@ describe("opened clean, the form starts from the lead as it is now", () => {
   it("re-seeds from the current row before the sheet opens, and only when nothing typed would be lost", () => {
     // The card keeps the form mounted for as long as the estimate is open, and its save writes every
     // field it holds: a lead corrected elsewhere must not be written back whole from the old copy.
-    expect(open).toContain("if (editing && !dirty) {");
-    expect(open).toContain("const fresh = inquiryFormValue(inquiry);");
+    // cn-v1173: the customer's New Lead re-seeds the same way, and the fresh form is blank(), which for
+    // an edit is the lead as handed in now.
+    expect(open).toContain("if ((editing || forCustomer) && !dirty) {");
+    expect(open).toContain("const fresh = blank();");
+    expect(modal).toContain("const blank = (): InquiryFormValue => (forCustomer ? customerLeadFormValue(forCustomer) : inquiryFormValue(inquiry));");
     expect(open).toMatch(/if \(snap !== initialSnap\.current\) \{\s*initialSnap\.current = snap;\s*setForm\(fresh\);\s*setFormKey\(\(k\) => k \+ 1\);/);
     // Before the sheet opens: the fields are re-seeded, the sheet is never remounted.
     expect(open.indexOf("setForm(fresh)")).toBeLessThan(open.indexOf("setOpen(true)"));

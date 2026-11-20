@@ -109,11 +109,15 @@ function menuHolds(c: TourCtx, nortOff = false): string {
 /**
  * THE RUN READS THE SWITCHES TOO (How a Job Runs). A company with Leads off has no lead and no
  * inspection; one with Estimates off has no estimate to accept. The steps that remain for them say
- * only what their screens hold: where the job starts (New Estimate, or New Job, under Plus), and where
- * an address was first typed. Everything on reads exactly as before.
+ * only what their screens hold: where the job starts (New Estimate on the Estimates page, or New Job:
+ * under Plus when Leads is off, since the + holds New Job only then, cn-v1173, else on the Jobs page),
+ * and where an address was first typed. Everything on reads exactly as before.
  */
 const leadsOn = (c: TourCtx): boolean => featureOn(c.features, "leads");
 const estimatesOn = (c: TourCtx): boolean => featureOn(c.features, "estimates");
+/** What the +'s one typed start makes for this company (global-quick-add quickAddActions, cn-v1173):
+ *  a lead, or a job where Leads is off. */
+const plusStarts = (c: TourCtx): string => (leadsOn(c) ? "a new lead" : "a new job");
 /** Where the address was first typed, for this company's run. */
 const typedOnce = (c: TourCtx): string => (leadsOn(c) ? "on the phone call" : estimatesOn(c) ? "on the estimate" : "on the job");
 /** run-job's first sentence: the accepted estimate goes on its job, which builds itself when there is
@@ -124,8 +128,9 @@ const jobStarts = (c: TourCtx): string =>
     ? "You mark the estimate accepted and it goes on its job, which builds itself if there isn't one: same customer, same site address, " +
       (leadsOn(c) ? "the lead it came from, " : "") +
       "plus a work order and a material list off the estimate. "
-    : "They say go ahead, and you make the job: tap Plus, then New Job, with the customer, the site address " +
-      "and the work typed once. ";
+    : "They say go ahead, and you make the job: " +
+      (leadsOn(c) ? "open Jobs and tap New Job" : "tap Plus, then New Job") +
+      ", with the customer, the site address and the work typed once. ";
 /**
  * run-estimate's last sentence (cn-v1172): a sent estimate waits on Sales › Closing, and that list is
  * the reminder. Erik, 2026-11-19, asked whether Closing replaces the follow-up day on an estimate:
@@ -514,15 +519,17 @@ export const LESSONS: Lesson[] = [
     title: "Plus, Search or Ask, the bell",
     // Plus names no customer and no task (lane 3 takes those rows off it this release); the bell
     // is the record of every notice, not "what's waiting on you" (that is Needs You, on My Day).
-    say:
-      "Plus is where new work starts — a job, an appointment, an invoice, or a paper to snap — from any screen. " +
+    // cn-v1173: the +'s one typed start is New Lead (New Job with Leads off), so Plus names that one
+    // and no appointment or invoice: those are made on their own pages now.
+    say: (c) =>
+      "Plus is where new work starts — " + plusStarts(c) + ", or a paper to snap — from any screen. " +
       "Search or Ask finds your jobs, customers, estimates, invoices and appointments by name or " +
       "number, and you can ask me anything there. " +
       "And the bell keeps your notices, whether or not you switch on phone notifications.",
     plain: {
       title: "Plus, Search, the bell",
-      say:
-        "Plus is where new work starts — a job, an appointment, an invoice, or a paper to snap — from any screen. " +
+      say: (c) =>
+        "Plus is where new work starts — " + plusStarts(c) + ", or a paper to snap — from any screen. " +
         "Search finds your jobs, customers, estimates, invoices and appointments by name or number. " +
         "And the bell keeps your notices, whether or not you switch on phone notifications.",
     },
@@ -663,7 +670,7 @@ export const LESSONS: Lesson[] = [
         ? "Back in the truck you press Start the Estimate, and the answers from that inspection are " +
           "already in it, in your own words, taken as given rather than read back to you. Anything you " +
           "priced standing on site is already a line. "
-        : "It starts with the estimate: tap Plus, then New Estimate, and pick the customer. ") +
+        : "It starts with the estimate: open Estimates, tap New Estimate, and pick the customer. ") +
       "Press Generate Line Items and I don't touch your " +
       "estimate — I hand you a list of PROPOSED lines. Tick the ones you want, fix any number I got " +
       "wrong, and press Add. Nothing of mine lands until you do. I work off your own price list and " +
@@ -675,7 +682,7 @@ export const LESSONS: Lesson[] = [
           ? "Back in the truck you press Start the Estimate, and the answers from that inspection are " +
             "already in it, in your own words, taken as given rather than read back to you. Anything you " +
             "priced standing on site is already a line. "
-          : "It starts with the estimate: tap Plus, then New Estimate, and pick the customer. ") +
+          : "It starts with the estimate: open Estimates, tap New Estimate, and pick the customer. ") +
         "Press Generate Line Items and your estimate isn't " +
         "touched — you get a list of PROPOSED lines. Tick the ones you want, fix any number that's " +
         "wrong, and press Add. Nothing lands until you do. The lines come off your own price list, and " +

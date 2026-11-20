@@ -1,6 +1,8 @@
 import { readAllPages } from "@/lib/read-all-pages";
 import { revisionOf } from "@/lib/estimate/revision";
 import { notFound } from "next/navigation";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import { SettleUpButton } from "@/components/settle-up-button";
 import { smsReadiness } from "@/lib/sms";
 import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
@@ -25,11 +27,12 @@ import { tolerateMissingColumns } from "@/lib/inspection/schema";
 import { kitsReadWords, kitsWithoutMoney, readTaskKits, type TaskKitsRead } from "@/lib/estimate/task-kits";
 import { reportError } from "@/lib/observe";
 import { MarkCompleteButton } from "./mark-complete-button";
-import { MarkDoneRow, PutBackRow, WontHappenRow } from "./visit-header-actions";
+import { MarkDoneRow, PutBackRow, StartAJobRow, WontHappenRow } from "./visit-header-actions";
 import { ACTIONS_ROW_CLS, SectionActionsMenu } from "@/components/section-actions-menu";
 import type { NavTree } from "@/lib/nav-tree";
 import { wontHappenVerdict } from "@/lib/appointments/wont-happen";
 import { visitHome } from "@/lib/appointments/visit-home";
+import { inspectionHeaderStep, startAsked, startAskedHref, startCardShown, startRowShown, visitHeading } from "@/lib/appointments/inspection-page";
 import { NavHome } from "@/components/nav-home";
 import { captureQuoteId, hasCaptureData } from "@/lib/inspections";
 import { isLiveQuote } from "@/lib/invoice-import-rule";
@@ -357,6 +360,46 @@ export default async function AppointmentCapturePage({
      this page (Erik, 2026-11-10: deleting an inspection ended on the 404). */
   const home = visitHome(a.type, { day: dayStr, staff: viewerIsStaff });
 
+  /* WHAT AN INSPECTION'S PAGE LEADS WITH (cn-v1173; lib/appointments/inspection-page decides, this page
+     draws). The owner, 2026-11-19: the big start box on an inspection "makes no sense because there is
+     another button above it to mark inspection done and start job is still going to be a result of an
+     inspection". So for the office on an inspection with no job the box waits behind the dots menu's
+     Start a Job from This Visit (`start=1` brings it back in its old place); the header's one boxed
+     step walks the inspection to its estimate; the heading above the sheet says Inspection. */
+  const startFacts = {
+    isStaff: viewerIsStaff,
+    isInspection,
+    status: a.status ?? null,
+    hasJob: !!a.job_id,
+    startAsked: startAsked(sp),
+  };
+  const showStartCard = startCardShown(startFacts);
+  const showStartRow = startRowShown(startFacts);
+  const stepFacts = {
+    isStaff: viewerIsStaff,
+    isInspection,
+    status: a.status ?? null,
+    outcome: (a as { outcome?: string | null }).outcome ?? null,
+    estimatesOn,
+    estimate,
+    hasJob: !!a.job_id,
+  };
+  // THE LEAD'S ESTIMATES, as the Inspections list reads them (lib/inspections-read: every estimate of
+  // any status that names the lead settles its visits). Asked only when the answer could matter: one
+  // head count on this page's own session, no money column. A read that fails is filed and counts as
+  // no estimate known, so the button is offered and never hidden on a failed read.
+  let leadHasEstimate = false;
+  if (a.inquiry_id && inspectionHeaderStep({ ...stepFacts, leadHasEstimate: false }) === "start_estimate") {
+    const leadQuotes = await supabase.from("quotes").select("id", { count: "exact", head: true }).eq("inquiry_id", a.inquiry_id);
+    if (leadQuotes.error) reportError("appointment:lead-estimates", leadQuotes.error, { appointmentId: id });
+    else leadHasEstimate = (leadQuotes.count ?? 0) > 0;
+  }
+  const headerStep = inspectionHeaderStep({ ...stepFacts, leadHasEstimate });
+  // THE ESTIMATOR'S DOOR, built once: the header's Start the Estimate and the Inspector's own door
+  // below hold this same href, so the page says one name and one place for it, top and bottom.
+  // Pricing is the office's: nobody else is handed the door to the estimator.
+  const estimateHref = viewerIsStaff && estimatesOn ? `/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}` : null;
+
   /* THE NAME START THE JOB WILL GIVE, resolved the way createJobFromAppointment resolves it (the
      visit's card, else the lead's card, else the lead; the lead's own spelling still only-who), so
      the name this page promises is the name the job gets. A lead that got its card after the visit
@@ -482,11 +525,23 @@ export default async function AppointmentCapturePage({
               textReady={smsReadiness(org as { settings?: unknown } | null).ready}
             />
           )}
-          {/* A booked inspection's main button: done, so its row on the Inspections list waits on
-              its estimate (cn-v1171). A completed inspection has none: the Inspector's Start the Estimate
-              is its next step. A cancelled visit has none either. */}
-          {viewerIsStaff && isInspection && booked && (
+          {/* AN INSPECTION'S ONE BOXED STEP (cn-v1173; inspectionHeaderStep). Booked: Mark Inspection
+              Done, so its row on the Inspections list waits on its estimate (cn-v1171). Completed with
+              nothing decided: Start the Estimate, the very door the Inspector has below (one href, the
+              Inspector's own words), or Open the Estimate once one stands. Cancelled, decided, sold to a
+              job with no estimate, a lead that already has an estimate, or Estimates off: none. */}
+          {viewerIsStaff && headerStep === "mark_done" && (
             <MarkCompleteButton id={a.id} label={t("vp_btn_markInspectionDone")} />
+          )}
+          {viewerIsStaff && headerStep === "start_estimate" && estimateHref && (
+            <Link href={estimateHref}>
+              <Button type="button">{t("vi_btn_startTheEstimate")}</Button>
+            </Link>
+          )}
+          {viewerIsStaff && headerStep === "open_estimate" && estimate && (
+            <Link href={`/quotes/${estimate.id}`}>
+              <Button type="button">{t("vi_btn_openTheEstimate")}</Button>
+            </Link>
           )}
           {/* ⋯ ACTIONS, last on the row. Edit Details… is never rendered conditionally inside the
               open panel (its modal would unmount mid-edit); its footer Delete stays the deliberate
@@ -495,6 +550,10 @@ export default async function AppointmentCapturePage({
               it Cancelled with an Undo (lib/appointments/wont-happen). */}
           {viewerIsStaff && (
             <SectionActionsMenu tree={VISIT_ACTIONS_MENU}>
+              {/* Where the start box was taken away (cn-v1173): the one row that brings it back. Decided
+                  on the server, so nothing mounts or unmounts while the panel is open; the row closes
+                  the panel before the address changes. */}
+              {showStartRow && <StartAJobRow href={startAskedHref(`/appointments/${a.id}`, sp)} />}
               {!isInspection && booked && <MarkDoneRow id={a.id} />}
               <AppointmentButton
                 jobs={picker.jobOpts}
@@ -524,9 +583,11 @@ export default async function AppointmentCapturePage({
             </NavLink>
           )}
         </div>
-        {/* START THE WORK, FIRST. The visit that turns into a job and a running clock is one tap
-            here; the Inspector and the estimator are still below for the visits that need them. */}
-        {a.status !== "cancelled" && (
+        {/* START THE WORK. The visit that turns into a job and a running clock is one tap here; the
+            Inspector and the estimator are still below for the visits that need them. Not on the
+            office's inspection with no job (cn-v1173, startCardShown): there the dots menu's Start a
+            Job from This Visit puts `start=1` on the address and the card is drawn here as ever. */}
+        {showStartCard && (
           <div className="my-4">
             <VisitStartCard
               appointmentId={a.id}
@@ -623,7 +684,9 @@ export default async function AppointmentCapturePage({
           Nothing was dropped in the merge: the prose boxes, the photos and the typed sheet are all
           still here, reordered so the ask comes first and everything captured reads as one list. */}
       {/* The inspection and the estimate, for the visits that need them. Under their own heading
-          so the page reads: start the work (above), or walk it through and price it (here).
+          so the page reads: start the work (above), or walk it through and price it (here). On an
+          inspection the heading says Inspection whatever the Estimates switch says (cn-v1173,
+          visitHeading: "this is an inspection not an estimate").
           THE SWITCH BOARD (0352): the inspection is Leads', so with Leads off it shows only on a
           visit that already holds one (under the Off line); Estimates off drops Start the Estimate. */}
       {showInspector && (
@@ -631,7 +694,7 @@ export default async function AppointmentCapturePage({
           {/* WHAT IS THIS FOR? — asked once, above the sheet, while the title is still the bare word.
               Nothing is blocked: the sheet and Mark Inspection Done work with or without it. */}
           {viewerIsStaff && titleIsGeneric && a.status !== "cancelled" && <VisitTitleField appointmentId={a.id} />}
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{viewerIsStaff && estimatesOn ? t("vp_inspectionOrEstimate") : t("vp_inspection")}</h2>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{visitHeading({ isInspection, isStaff: viewerIsStaff, estimatesOn }) === "inspection_or_estimate" ? t("vp_inspectionOrEstimate") : t("vp_inspection")}</h2>
           {isInspection && (
             <FeatureOffLine feature="leads" features={orgSettings.features} isOwner={(meRow as { role?: string } | null)?.role === "owner"} />
           )}
@@ -689,8 +752,9 @@ export default async function AppointmentCapturePage({
                     ? { kind: "job" as const, name: t("vp_thisJob") }
                     : null
             }
-            // Pricing is the office's: nobody else is handed the door to the estimator.
-            estimateHref={viewerIsStaff && estimatesOn ? `/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}` : null}
+            // Pricing is the office's: nobody else is handed the door to the estimator. The same href
+            // the header's Start the Estimate holds (built once, above).
+            estimateHref={estimateHref}
             // The estimate already written up from this visit: its door reads Open the Estimate while
             // it stands; a declined or expired one hands Start the Estimate back (cn-v1069).
             estimate={estimate}

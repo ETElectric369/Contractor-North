@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Plus, Camera, Briefcase, CalendarPlus, ClipboardCheck, FileText, Receipt, UserSearch, X, type LucideIcon } from "lucide-react";
+import { Plus, Camera, Briefcase, UserSearch, X, type LucideIcon } from "lucide-react";
 import { SnapOrNoteProvider, openSnapOrNote, snapStillSending } from "@/components/snap-or-note";
 import { QuickMeasureRows, useLidarDoors } from "@/components/quick-measure-rows";
 import { QuickMeasureSheet } from "@/components/quick-measure-sheet";
@@ -27,20 +27,28 @@ import {
 import { discardModel } from "@/lib/quick-measure-save";
 
 /**
- * THE + (W1-11: eight rows to six). It lives in the top bar on every page.
+ * THE + (W1-11: eight rows to six; cn-v1173: the typed rows to ONE). It lives in the top bar on every
+ * page.
  *
  * The office: Snap or Note first (the one paper door: a photo, a PDF, a list or a note), then the
- * typed creates, each landing on its create form, never a list to hunt through (a ?new=1 the page
- * reads to open its form, or a route that IS the form). A switch that is off removes only its own
- * row (the switch board, 0352).
+ * Lidar group, then ONE typed start: New Lead, landing on its create form (the Leads page's ?new=1).
+ * The owner, 2026-11-19: "lets reduce the + menu on the top bar to only have the Lidar, snap and
+ * tools of choice and just new lead, the start of the new workflow", then "keep New Lead only".
+ * A company with the Leads switch off has no Leads page, so its one start is New Job instead (the
+ * row's `unlessFeature`, read by the one filter in quickAddActions): the office always has a start.
  *
- * CUT: New Customer (a customer is made inside New Job, New Estimate and New Invoice, and
- * Customers keeps its own Add) and New Reminder (My Day's Add line, the Reminders page's own line
- * and Nort make Reminders). /crm?new=1 and /tasks?new=1 still open those forms from a link.
+ * MOVED OUT OF THE WAY, NOT LOCKED (his founding rule: "fragment first so we dont piss anyone off
+ * forcing them to do something in order to do something else"). New Appointment, New Inspection,
+ * New Estimate and New Invoice left the + in cn-v1173; each is still made on its own page (the
+ * Schedule, Estimates, Billing; the command bar finds them too), and
+ * /schedule?new=appointment, /schedule?new=inspection, /quotes/new and /billing?new=1 still open
+ * those forms from a link. Earlier cuts: New Customer (Customers keeps its own Add) and New Reminder
+ * (My Day's Add line, the Reminders page and Nort make Reminders); /crm?new=1 and /tasks?new=1 still
+ * open those forms.
  *
  * The crew: the + IS Snap or Note (a photo of a receipt for the job he's on, or a note for the
- * office). He is never offered New Job, Appointment, Estimate, Invoice or Lead: those saves are the
- * office's (createJob is requireStaff; a tech's New Job failed on Save).
+ * office). He is never offered New Lead or New Job: those saves are the office's (createJob is
+ * requireStaff; a tech's New Job failed on Save).
  *
  * Papers waiting to be filed show up as Needs You rows on My Day; Add Cost stays on My Day's Now
  * card and the job's own page (job-scoped).
@@ -57,27 +65,26 @@ import { discardModel } from "@/lib/quick-measure-save";
  *
  * THE WORDS (cn-v1139): each verb is a key in the nav catalog (lib/words/nav.ts nv_add_), read
  * through the person's translator when the rows are built (quickAddActions), so the English is
- * byte for byte what the row said and a Spanish reader sees Nuevo Trabajo. No English literal
+ * byte for byte what the row said and a Spanish reader sees Nuevo Prospecto. No English literal
  * lives here: this file is one the leak scan reads (tests/tech-words-in-the-catalog.test.ts).
  */
-export const ACTIONS: { key: string; href: string; icon: LucideIcon; staffOnly?: boolean; feature?: FeatureKey }[] = [
+export const ACTIONS: { key: string; href: string; icon: LucideIcon; staffOnly?: boolean; feature?: FeatureKey; unlessFeature?: FeatureKey }[] = [
+  // THE START (cn-v1173): a lead, where the company runs Leads.
   { key: "nv_add_newLead", href: "/leads?new=1", icon: UserSearch, staffOnly: true, feature: "leads" },
-  { key: "nv_add_newJob", href: "/jobs?new=1", icon: Briefcase, staffOnly: true },
-  { key: "nv_add_newAppointment", href: "/schedule?new=appointment", icon: CalendarPlus, staffOnly: true },
-  // The Inspector's visit (Erik, 2026-10-15: "Add new inspection to plus menu"): the schedule's one
-  // create form, opened on the inspection type. Leads off = no inspections = no door.
-  { key: "nv_add_newInspection", href: "/schedule?new=inspection", icon: ClipboardCheck, staffOnly: true, feature: "leads" },
-  { key: "nv_add_newEstimate", href: "/quotes/new", icon: FileText, staffOnly: true, feature: "estimates" },
-  { key: "nv_add_newInvoice", href: "/billing?new=1", icon: Receipt, staffOnly: true },
+  // ...and New Job only where it does not: one start either way, never an empty list of them.
+  { key: "nv_add_newJob", href: "/jobs?new=1", icon: Briefcase, staffOnly: true, unlessFeature: "leads" },
 ];
 
 /** A verb as the menu draws it: the row's data with its words in the person's language. */
 export type QuickAddAction = (typeof ACTIONS)[number] & { label: string };
 
-/** The + menu's typed verbs for this person: role first, then the switches, each with its words in
- *  the translator's language (English when not handed one). No map = everything on. */
+/** The + menu's typed start for this person: role first, then the switches (a row's `feature` must be
+ *  on, its `unlessFeature` off), each with its words in the translator's language (English when not
+ *  handed one). No map = everything on, so New Lead. */
 export function quickAddActions(isStaff: boolean, features?: FeatureMap | null, t: (key: string) => string = translator("en")): QuickAddAction[] {
-  return ACTIONS.filter((a) => (isStaff || !a.staffOnly) && (!a.feature || featureOn(features, a.feature))).map((a) => ({ ...a, label: t(a.key) }));
+  return ACTIONS.filter(
+    (a) => (isStaff || !a.staffOnly) && (!a.feature || featureOn(features, a.feature)) && (!a.unlessFeature || !featureOn(features, a.unlessFeature)),
+  ).map((a) => ({ ...a, label: t(a.key) }));
 }
 
 /** What a tap on the + does: the office's menu, or (the crew) Snap or Note itself. */
@@ -170,7 +177,7 @@ const ROW =
   "relative z-10 flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15";
 
 /** The office's menu rows: Snap or Note first, then (where the phone can) the Lidar group, then the
- *  typed creates. */
+ *  one typed start. */
 export function QuickAddMenu({
   isStaff,
   features,
@@ -186,7 +193,7 @@ export function QuickAddMenu({
   /** A tap that couldn't go (no signal), said under the rows. */
   said?: string | null;
   /** The Lidar group (components/quick-measure-rows), drawn right under Snap or Note: the two capture
-   *  doors together, the typed creates after them. With none, the menu is what it always was. */
+   *  doors together, the typed start after them. With none, the menu is what it always was. */
   lidar?: ReactNode;
 }) {
   // The paper door's name (cn-v1138) and the typed verbs (cn-v1139) in the person's language.
@@ -220,7 +227,7 @@ export function GlobalQuickAdd({
 }: {
   placement?: "topbar";
   isStaff?: boolean;
-  /** The shell's switch map: a switched-off feature's "New …" verb isn't offered. */
+  /** The shell's switch map: it picks the one start (New Lead, or New Job with Leads off). */
   features?: FeatureMap;
   /** The company has lapsed and this person is on an open door (the layout's red bar): every verb
    *  of the + is a closed door, so the + is not drawn at all (skeptic #43, S1). */

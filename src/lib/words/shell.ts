@@ -9,7 +9,7 @@ import type { WordCatalog } from "./types";
  * account menu, the language door itself (Settings › You and the account menu) and what Spanish
  * covers today, the phone setup checklist, the two error pages, and Settings › You (Nort's tone and
  * greeting, the push switches, Face ID, the photo). Was s_language / s_languageDesc in lib/i18n.ts
- * until cn-v1138. The office's map (each page's title and line, the + menu's verbs, the Settings
+ * until cn-v1138. The office's map (each page's title and line, the + menu's typed start, the Settings
  * clusters, the roles) is the nav catalog (lib/words/nav.ts, nv_).
  *
  * The English is byte for byte what each screen said before the catalog (the tests that read a
@@ -165,7 +165,7 @@ export const words: WordCatalog = {
     sh_help_againNort: "Setup from the top. Change anything you told Nort.",
     sh_help_againQuiet: "The setup questions from the top. Change any answer.",
 
-    // ── The + (global-quick-add.tsx: a tech's + is the paper door itself; the office's verbs are nv_add_ in lib/words/nav.ts) ──
+    // ── The + (global-quick-add.tsx: a tech's + is the paper door itself; the office's one typed start is nv_add_ in lib/words/nav.ts) ──
     sh_snapOrNote: "Snap or Note",
     sh_quickAdd: "Quick Add",
 

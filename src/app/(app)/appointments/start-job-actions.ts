@@ -404,7 +404,9 @@ export async function askOfficeToStartJob(appointmentId: string): Promise<{ ok: 
     type: "visit_needs_job",
     title: fillSlots(office_t("vp_bellNeedsJobStarted"), { first, forWho: who ? ` ${fillSlots(office_t("vp_forCustomer"), { customer: who })}` : "" }),
     body: fillSlots(office_t(over ? "vp_bellVisitOverBody" : "vp_bellAtVisitBody"), { first, place }),
-    url: `/appointments/${visit.id}`,
+    // start=1: on an inspection with no job the office's page hides the start card unless the
+    // address asks for it (cn-v1173), and this bell names exactly that door while the tech waits.
+    url: `/appointments/${visit.id}?start=1`,
     windowMinutes: 15,
     mode: "once_per_window",
   });

@@ -428,7 +428,7 @@ describe("only the office starts a job", () => {
     const [org, who, n] = spies.ring.mock.calls[0];
     expect(org).toBe("org-et");
     expect(who).toEqual(["office-1"]);
-    expect(n).toMatchObject({ title: "Brian needs a job started for Tom Goodman", url: "/appointments/appt-tom", mode: "once_per_window" });
+    expect(n).toMatchObject({ title: "Brian needs a job started for Tom Goodman", url: "/appointments/appt-tom?start=1", mode: "once_per_window" });
   });
 
   it("on a visit that is over, the bell never says he is at it or can't clock in (audit v1018)", async () => {

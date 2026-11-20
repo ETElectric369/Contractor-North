@@ -31,9 +31,10 @@ import { heldModel, keepModelInPlus, measureAppLeft, measureHeld, measureStore, 
 import { esTitleCase } from "../../tests/title-case-words";
 
 /**
- * THE + (W1-11: eight rows to six) AND THE SWITCH BOARD (0352). The office: Snap or Note first, then
- * New Lead, New Job, New Appointment, New Estimate, New Invoice; a switched-off feature's row goes.
- * The crew: the + is Snap or Note itself, and no typed verb is his.
+ * THE + (W1-11: eight rows to six; cn-v1173: the typed rows to ONE) AND THE SWITCH BOARD (0352). The
+ * office: Snap or Note first, then the Lidar group, then ONE typed start: New Lead, or New Job where
+ * the Leads switch is off (never no start at all). The crew: the + is Snap or Note itself, and no
+ * typed verb is his.
  */
 const off = (...keys: (keyof FeatureMap)[]) => ({ ...ALL_ON, ...Object.fromEntries(keys.map((k) => [k, false])) }) as FeatureMap;
 const labels = (isStaff: boolean, f?: FeatureMap) => quickAddActions(isStaff, f).map((a) => a.label);
@@ -41,13 +42,24 @@ const words = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").tri
 const rows = (html: string) => Array.from(html.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)).map((m) => words(m[1]));
 
 describe("quickAddActions", () => {
-  it("the office, everything on (or no map): the six typed verbs, New Customer and New Reminder cut", () => {
-    // New Inspection (Erik, 2026-10-15: "Add new inspection to plus menu") rides Leads, like New Lead.
-    const six = ["New Lead", "New Job", "New Appointment", "New Inspection", "New Estimate", "New Invoice"];
-    expect(labels(true, ALL_ON)).toEqual(six);
-    expect(labels(true)).toEqual(six);
-    expect(labels(true)).not.toContain("New Customer");
-    expect(labels(true)).not.toContain("New Reminder");
+  it("the office, Leads on (or no map): exactly ONE typed start, New Lead (cn-v1173: \"keep New Lead only\")", () => {
+    expect(labels(true, ALL_ON)).toEqual(["New Lead"]);
+    expect(labels(true)).toEqual(["New Lead"]);
+    expect(labels(true, off("estimates"))).toEqual(["New Lead"]);
+    expect(quickAddActions(true).map((a) => a.href)).toEqual(["/leads?new=1"]);
+    // The four rows that left are not offered under any switch.
+    for (const f of [ALL_ON, off("leads"), off("estimates"), off("leads", "estimates"), undefined])
+      for (const gone of ["New Appointment", "New Inspection", "New Estimate", "New Invoice", "New Customer", "New Reminder"]) expect(labels(true, f)).not.toContain(gone);
+  });
+
+  it("the office, Leads off: exactly ONE typed start, New Job: a company with no Leads page still has a start", () => {
+    expect(labels(true, off("leads"))).toEqual(["New Job"]);
+    expect(labels(true, off("leads", "estimates"))).toEqual(["New Job"]);
+    expect(quickAddActions(true, off("leads")).map((a) => a.href)).toEqual(["/jobs?new=1"]);
+    // The fallback is data on the row, read by the one filter (never an if in the JSX).
+    expect(ACTIONS.find((a) => a.key === "nv_add_newJob")).toMatchObject({ unlessFeature: "leads" });
+    const src = readFileSync(join(process.cwd(), "src/components/global-quick-add.tsx"), "utf8");
+    expect(src).toContain("(!a.unlessFeature || !featureOn(features, a.unlessFeature))");
   });
 
   it("a tech gets no typed verb at all: his + is Snap or Note", () => {
@@ -57,20 +69,19 @@ describe("quickAddActions", () => {
     expect(plusOpens(true)).toBe("menu");
   });
 
-  it("Leads off: no New Lead and no New Inspection; Estimates off: no New Estimate; the rest stay", () => {
-    expect(labels(true, off("leads"))).toEqual(["New Job", "New Appointment", "New Estimate", "New Invoice"]);
-    expect(labels(true, off("estimates"))).toEqual(["New Lead", "New Job", "New Appointment", "New Inspection", "New Invoice"]);
+  it("every switch map gives the office exactly one typed start", () => {
+    for (const f of [ALL_ON, off("leads"), off("estimates"), off("leads", "estimates"), undefined, null]) expect(quickAddActions(true, f)).toHaveLength(1);
   });
 });
 
 describe("the + on screen", () => {
-  it("the office's menu: Snap or Note is the first row, then the verbs, every row 44px", () => {
+  it("the office's menu: Snap or Note is the first row, then the one start, every row 44px", () => {
     const html = renderToStaticMarkup(createElement(QuickAddMenu, { isStaff: true, onSnap: () => {}, onGo: () => {} }));
-    expect(rows(html)).toEqual(["Snap or Note", "New Lead", "New Job", "New Appointment", "New Inspection", "New Estimate", "New Invoice"]);
+    expect(rows(html)).toEqual(["Snap or Note", "New Lead"]);
     for (const b of html.match(/<button[^>]*>/g) ?? []) expect(b).toContain("min-h-11");
-    // A switch that is off removes only its own row.
+    // Leads off: the start is New Job.
     const leadsOff = renderToStaticMarkup(createElement(QuickAddMenu, { isStaff: true, features: off("leads"), onSnap: () => {}, onGo: () => {} }));
-    expect(rows(leadsOff)).toEqual(["Snap or Note", "New Job", "New Appointment", "New Estimate", "New Invoice"]);
+    expect(rows(leadsOff)).toEqual(["Snap or Note", "New Job"]);
   });
 
   it("a tech's + opens the paper door itself (no one-row menu), and names it; the office's + is Quick Add; both 44px", () => {
@@ -93,16 +104,24 @@ describe("the + on screen", () => {
     expect(en).toBe(renderToStaticMarkup(createElement(GlobalQuickAdd, { isStaff: false })));
   });
 
-  it("the office's verbs in Spanish (cn-v1139): every row Title Case, through the nav catalog by key; English byte for byte", () => {
+  it("the office's start in Spanish (cn-v1139): Title Case in both languages, through the nav catalog by key; English byte for byte", () => {
     const es = (el: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(LangProvider, { lang: "es" } as Parameters<typeof LangProvider>[0], el));
     const menu = rows(es(createElement(QuickAddMenu, { isStaff: true, onSnap: () => {}, onGo: () => {} })));
-    expect(menu).toEqual(["Foto o Nota", "Nuevo Prospecto", "Nuevo Trabajo", "Nueva Cita", "Nueva Inspección", "Nuevo Presupuesto", "Nueva Factura"]);
+    expect(menu).toEqual(["Foto o Nota", "Nuevo Prospecto"]);
+    expect(rows(es(createElement(QuickAddMenu, { isStaff: true, features: off("leads"), onSnap: () => {}, onGo: () => {} })))).toEqual(["Foto o Nota", "Nuevo Trabajo"]);
     for (const r of menu) expect(esTitleCase(r), r).toBe(true); // the significant words (cn-v1147)
     expect(quickAddActions(true, ALL_ON, translator("es")).map((a) => a.label)).toEqual(menu.slice(1));
+    expect(quickAddActions(true, off("leads"), translator("es")).map((a) => a.label)).toEqual(["Nuevo Trabajo"]);
     expect(quickAddActions(true, ALL_ON, translator("en")).map((a) => a.label)).toEqual(quickAddActions(true, ALL_ON).map((a) => a.label));
-    // Each row carries its key, and the key's English is the row's old literal.
-    expect(ACTIONS.map((a) => a.key)).toEqual(["nv_add_newLead", "nv_add_newJob", "nv_add_newAppointment", "nv_add_newInspection", "nv_add_newEstimate", "nv_add_newInvoice"]);
-    expect(ACTIONS.map((a) => dict("en")[a.key])).toEqual(["New Lead", "New Job", "New Appointment", "New Inspection", "New Estimate", "New Invoice"]);
+    // A tech: none, in either language.
+    expect(quickAddActions(false, ALL_ON, translator("es"))).toEqual([]);
+    // Each row carries its key, and the key's English is the row's old literal; Title Case both ways.
+    expect(ACTIONS.map((a) => a.key)).toEqual(["nv_add_newLead", "nv_add_newJob"]);
+    expect(ACTIONS.map((a) => dict("en")[a.key])).toEqual(["New Lead", "New Job"]);
+    for (const a of ACTIONS) {
+      expect(dict("en")[a.key]).toMatch(/^(?:[A-Z][a-z]*)(?: [A-Z][a-z]*)*$/);
+      expect(esTitleCase(dict("es")[a.key]), a.key).toBe(true);
+    }
     // No English literal is left in the file: the leak scan reads it (tests/tech-words-in-the-catalog.test.ts).
     const src = readFileSync(join(process.cwd(), "src/components/global-quick-add.tsx"), "utf8");
     expect(src).not.toContain('label: "New');
@@ -214,37 +233,37 @@ describe("Measure from the + (cn-v1160): the Lidar group in the office's menu", 
     expect(menu(false)).toBe(was);
     // The group itself, on a phone with no plugin and nothing held: nothing, not an empty title.
     expect(menu(group(NO_LIDAR_DOORS))).toBe(was);
-    expect(rows(was)).toEqual(["Snap or Note", "New Lead", "New Job", "New Appointment", "New Inspection", "New Estimate", "New Invoice"]);
+    expect(rows(was)).toEqual(["Snap or Note", "New Lead"]);
   });
 
   it("the group sits right under Snap or Note, before the typed creates, and changes nothing around it", () => {
     const was = menu();
     const html = menu(group(ALL));
-    expect(rows(html)).toEqual(["Snap or Note", "Measure", "Measure Area", "3D Scan", "New Lead", "New Job", "New Appointment", "New Inspection", "New Estimate", "New Invoice"]);
+    expect(rows(html)).toEqual(["Snap or Note", "Measure", "Measure Area", "3D Scan", "New Lead"]);
     // The rest of the menu is the same bytes, with the group set in after the first row.
     const afterSnap = was.indexOf("</button>") + "</button>".length;
     expect(html).toBe(was.slice(0, afterSnap) + renderToStaticMarkup(group(ALL)) + was.slice(afterSnap));
     // Every row of the menu is still 44px, and a Lidar row wears the menu's own row class (plus the look of a row that waits).
     const all = html.match(/<button[^>]*>/g) ?? [];
-    expect(all).toHaveLength(10);
+    expect(all).toHaveLength(5);
     for (const b of all) expect(b).toContain("min-h-11");
     const menuRow = all[0]!.match(/class="([^"]*)"/)![1];
     for (const b of all.slice(1, 4)) expect(b).toContain(`class="${menuRow} disabled:opacity-50"`);
     for (const b of all.slice(4)) expect(b).toContain(`class="${menuRow}"`);
-    // A switch that is off still removes only its own row.
+    // Leads off: the one start is New Job, and the group is untouched.
     const leadsOff = renderToStaticMarkup(createElement(QuickAddMenu, { isStaff: true, features: off("leads"), onSnap: noop, onGo: noop, lidar: group(ALL) }));
-    expect(rows(leadsOff)).toEqual(["Snap or Note", "Measure", "Measure Area", "3D Scan", "New Job", "New Appointment", "New Estimate", "New Invoice"]);
+    expect(rows(leadsOff)).toEqual(["Snap or Note", "Measure", "Measure Area", "3D Scan", "New Job"]);
   });
 
   it("a held model's two rows take 3D Scan's place in the same spot; the sentence a tap says still stands under everything", () => {
     expect(rows(menu(group(ALL, true))).slice(0, 6)).toEqual(["Snap or Note", "Measure", "Measure Area", "3D Model · Not Saved", "Discard Kept 3D Model", "New Lead"]);
     const said = renderToStaticMarkup(createElement(QuickAddMenu, { isStaff: true, onSnap: noop, onGo: noop, lidar: group(ALL), said: "No signal right now." }));
-    expect(said).toMatch(/New Invoice<\/button><p [^>]*role="status"[^>]*>No signal right now\.<\/p>$/);
+    expect(said).toMatch(/New Lead<\/button><p [^>]*role="status"[^>]*>No signal right now\.<\/p>$/);
   });
 
   it("the Spanish menu: the group in Spanish between Foto o Nota and Nuevo Prospecto", () => {
     const html = menu(group(ALL), "es");
-    expect(rows(html)).toEqual(["Foto o Nota", "Medir", "Medir Área", "Escaneo 3D", "Nuevo Prospecto", "Nuevo Trabajo", "Nueva Cita", "Nueva Inspección", "Nuevo Presupuesto", "Nueva Factura"]);
+    expect(rows(html)).toEqual(["Foto o Nota", "Medir", "Medir Área", "Escaneo 3D", "Nuevo Prospecto"]);
     for (const r of rows(html)) expect(esTitleCase(r), r).toBe(true);
   });
 

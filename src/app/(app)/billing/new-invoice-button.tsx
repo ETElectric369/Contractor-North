@@ -89,7 +89,7 @@ export function NewInvoiceButton({
   const claimant = useId();
   useEffect(() => () => newParam.release(claimant), [claimant]);
 
-  // Open straight from the quick-add menu's "New invoice" (/billing?new=1), then strip the param so
+  // Open straight from a link that asks for the form (/billing?new=1: the job page's unbilled card), then strip the param so
   // a refresh or back-button doesn't reopen the form. ?customer=<id> may ride along (the customer
   // page's ⋯ New Invoice door) to preselect that customer — it wins over a restored draft because a
   // deep link is an explicit "invoice THIS customer" intent.

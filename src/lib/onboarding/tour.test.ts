@@ -592,12 +592,13 @@ describe("the tour reads the switches", () => {
     expect(words).toContain("You typed that address once, on the job,");
   });
 
-  it("Leads off alone: no lead and no inspection in what's left; the estimate starts under Plus", () => {
+  it("Leads off alone: no lead and no inspection in what's left; the estimate starts on Estimates (off the + since cn-v1173)", () => {
     const words = runWords(off("leads"));
     expect(words).not.toMatch(/\blead\b/i);
     expect(words).not.toMatch(/inspection/i);
     expect(words).not.toContain("Start the Estimate");
-    expect(words).toContain("tap Plus, then New Estimate");
+    expect(words).toContain("open Estimates, tap New Estimate");
+    expect(words).not.toContain("tap Plus, then New Estimate");
     expect(words).toContain("You mark the estimate accepted and it goes on its job, which builds itself if there isn't one: same customer, same site address, plus a work order");
     expect(words).toContain("You typed that address once, on the estimate,");
   });
@@ -605,7 +606,9 @@ describe("the tour reads the switches", () => {
   it("Estimates off alone: no estimate to accept or to be the bill; the lead and inspection still read", () => {
     const words = runWords(off("estimates"));
     expect(words).not.toMatch(/estimate/i);
-    expect(words).toContain("tap Plus, then New Job");
+    // Leads on, so the +'s one start is New Lead (cn-v1173): New Job is the Jobs page's.
+    expect(words).toContain("open Jobs and tap New Job");
+    expect(words).not.toContain("tap Plus, then New Job");
     expect(words).toContain("Press Finish Job and the invoice is already written — every person's hours at the right rate plus every receipt");
     expect(words).toContain("You typed that address once, on the phone call,");
   });
@@ -659,8 +662,13 @@ describe("the tour reads the switches", () => {
     const bar = findStep("topbar");
     const on = sayOf(stepWords(bar, true).say, STRANGER);
     const plainWords = sayOf(stepWords(bar, false).say, STRANGER);
-    // The + holds Snap or Note first (W1-30), so the sentence names a paper to snap too (W1-32 words).
-    expect(on).toContain("Plus is where new work starts — a job, an appointment, an invoice, or a paper to snap — from any screen.");
+    // The + holds Snap or Note first (W1-30), so the sentence names a paper to snap too (W1-32 words);
+    // its one typed start is New Lead, or New Job with Leads off (cn-v1173), so it names that one.
+    expect(on).toContain("Plus is where new work starts — a new lead, or a paper to snap — from any screen.");
+    expect(plainWords).toContain("Plus is where new work starts — a new lead, or a paper to snap — from any screen.");
+    const leadsOff = { ...STRANGER, features: { ...ALL_ON, leads: false } };
+    expect(sayOf(stepWords(bar, true).say, leadsOff)).toContain("Plus is where new work starts — a new job, or a paper to snap — from any screen.");
+    for (const t of [on, plainWords]) expect(t).not.toMatch(/an appointment|an invoice/);
     expect(on).toContain("Search or Ask finds your jobs, customers, estimates, invoices and appointments by name or number, and you can ask me anything there.");
     expect(on).toContain("And the bell keeps your notices, whether or not you switch on phone notifications.");
     expect(plainWords).toContain("Search finds your jobs");
@@ -691,6 +699,12 @@ describe("the tour reads the switches", () => {
       }
     }
     for (const l of LESSONS) for (const nortOn of [true, false]) expect(lessonBlurb(l, nortOn)).not.toMatch(/\bcap\b/);
+  });
+
+  it("each helper's comment sits above its own declaration (cn-v1173 fixer)", () => {
+    const src = readFileSync(join(process.cwd(), "src/lib/onboarding/tour.ts"), "utf8");
+    expect(src).toMatch(/\/\*\* Where the address was first typed, for this company's run\. \*\/\nconst typedOnce = /);
+    expect(src).toMatch(/a lead, or a job where Leads is off\. \*\/\nconst plusStarts = /);
   });
 
   it("the lessons are rows under Show Me How now, so their titles are Title Case", () => {

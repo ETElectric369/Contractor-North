@@ -32,6 +32,17 @@ export const inquiryFormValue = (inquiry?: Inquiry): InquiryFormValue => ({
   source: !inquiry?.source || inquiry.source === MANUAL_SOURCE ? "" : inquiry.source,
 });
 
+/** A NEW lead for a customer already on file (cn-v1173, the customer page's New Lead): the person block
+ *  starts from the customer's stored row, read as personValue reads any stored row; the rest starts
+ *  blank. The customer's street and town are a SUGGESTION here, not this lead's stored place: the form
+ *  that draws this value hands the block seededTownIsSuggestion, so typing a different street (an
+ *  existing client, another property) drops the customer's city, state and ZIP instead of posting them
+ *  under the new street. Left untouched, the customer's place posts whole. */
+export const customerLeadFormValue = (customer: Parameters<typeof personValue>[0]): InquiryFormValue => ({
+  ...inquiryFormValue(),
+  ...personValue(customer),
+});
+
 /**
  * THE LEAD SOURCE SELECT'S OPTIONS, after its blank one (cn-v1170): the company's list, and the lead's
  * own current source as an option of its own when the list does not hold it (a website door, or a label
@@ -68,11 +79,14 @@ export function InquiryFields({
   onChange,
   sources = null,
   sourcesFailed = false,
+  seededTownIsSuggestion = false,
 }: {
   value: InquiryFormValue;
   onChange: (patch: Partial<InquiryFormValue>) => void;
   sources?: readonly string[] | null;
   sourcesFailed?: boolean;
+  /** The value was seeded from a customer (customerLeadFormValue): their town is a suggestion. */
+  seededTownIsSuggestion?: boolean;
 }) {
   const lang = useLang();
   const t = translator(lang);
@@ -81,7 +95,7 @@ export function InquiryFields({
     <div className="space-y-4">
       {/* Fragment-first: a bare phone or note is a valid lead (the modal checks for ANY of
           name/phone/message). */}
-      <PersonFields value={value} onChange={onChange} />
+      <PersonFields value={value} onChange={onChange} seededTownIsSuggestion={seededTownIsSuggestion} />
       <div>
         <Label htmlFor="message">{t("ld_scope")}</Label>
         <Textarea id="message" name="message" rows={2} value={value.message} onChange={(e) => onChange({ message: e.target.value })} placeholder={t("ld_scopePlaceholder")} />

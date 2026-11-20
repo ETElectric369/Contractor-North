@@ -259,7 +259,7 @@ export function NewJobButton({
   const claimant = useId();
   useEffect(() => () => newParam.release(claimant), [claimant]);
 
-  // Open straight from the quick-add menu's "New job" (/jobs?new=1), then strip
+  // Open straight from a link that asks for the form (/jobs?new=1: Add to Schedule, and the + at a company with Leads off), then strip
   // the param so a refresh or back-button doesn't reopen the form.
   useEffect(() => {
     if (searchParams.get("new") !== "1") {

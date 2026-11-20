@@ -459,8 +459,10 @@ describe("the visit page catalog (vp_), builder D's half", () => {
 
   it("the house words: one Spanish per English word across the catalogs, and no Spanish sentence ends on a clock", () => {
     const d = dict("es");
-    expect(vp.es.vp_btn_newAppointment).toBe(d.nv_add_newAppointment);
-    expect(vp.es.vp_btn_newInspection).toBe(d.nv_add_newInspection);
+    // The + menu's own New Appointment and New Inspection rows (and their nv_add_ keys) left the + in
+    // cn-v1173; the house words they set stay this catalog's.
+    expect(vp.es.vp_btn_newAppointment).toBe("Nueva Cita");
+    expect(vp.es.vp_btn_newInspection).toBe("Nueva Inspección");
     expect(vp.es.vp_btn_newLead).toBe(d.nv_add_newLead);
     expect(vp.es.vp_btn_clearTheDate).toBe(d.ag_cal_btn_clearTheDate);
     expect(vp.es.vp_draftRestored).toBe(d.ag_rail_draftRestored);

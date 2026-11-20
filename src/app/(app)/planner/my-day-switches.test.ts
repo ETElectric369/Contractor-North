@@ -432,12 +432,11 @@ describe("My Day's cards (structural: the page is a server component over the da
     expect(header).toMatch(/\{!isStaff && \(\s*<Link\s+href="\/planner\?view=week"\s+className="[^"]*min-h-11[^"]*px-2[^"]*"/);
     expect(pageCode.match(/t\("md_weekArrow"\)/g)).toHaveLength(1);
     expect(dict("en").md_weekArrow).toBe("Week →");
-    // The office still reaches both: THE week redirect stays, New Appointment stays on the + menu
-    // (lane 3's file) and the Schedule tile stays on the dock (lane 1b's file).
+    // The office still reaches both: THE week redirect stays, and the Schedule tile stays on the dock
+    // (lane 1b's file), where its own form makes a new appointment (cn-v1173 took New Appointment off
+    // the + menu; /schedule?new=appointment still opens that form from a link).
     expect(page).toContain('if (view === "week" && isStaff) redirect("/schedule?view=week");');
-    // The + menu's rows are keys since cn-v1139 (nv_add_newAppointment); the words live in lib/words/nav.ts.
-    expect(readFileSync(join(process.cwd(), "src/components/global-quick-add.tsx"), "utf8")).toContain('key: "nv_add_newAppointment"');
-    expect(dict("en").nv_add_newAppointment).toBe("New Appointment");
+    expect(readFileSync(join(process.cwd(), "src/app/(app)/schedule/page.tsx"), "utf8")).toContain('sp.new === "appointment"');
     const dock = readFileSync(join(process.cwd(), "src/lib/dock.ts"), "utf8");
     expect(dock).toContain('key: "schedule"');
     expect(dock).toContain('label: "Schedule"');

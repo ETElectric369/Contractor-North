@@ -1,6 +1,7 @@
 "use server";
 import { readUsualBillingKind } from "@/lib/schedule-options";
 import { dbError } from "@/lib/db-error";
+import { reportError } from "@/lib/observe";
 import { planDayTimes } from "../schedule/actions";
 
 import { customerAddressFrom } from "@/lib/inquiries/lead-address";
@@ -13,7 +14,7 @@ import { spreadTimes } from "@/lib/schedule/place-by-town";
 import { appointmentTypeFor, bookingTitle, workKind } from "@/lib/schedule/work-shape";
 import { standingFor } from "@/lib/leads/new-intake";
 import { reopenNotSold } from "@/lib/leads/not-sold";
-import { carryFromCustomer, matchKnownCustomer, type KnownCustomer } from "@/lib/inquiries/known-customer";
+import { carryFromCustomer, matchKnownCustomer, type CustomerMatch, type KnownCustomer } from "@/lib/inquiries/known-customer";
 import { createServiceClient } from "@/lib/supabase/server";
 import { customerForInquiry } from "@/lib/actions/win-customer";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
@@ -214,11 +215,38 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
   let carried: Record<string, string> = {};
   let link_note: string | undefined;
   try {
-    const { data: known } = await supabase
-      .from("customers")
-      .select("id, name, phone, email, address, city, state, zip, company_name")
-      .limit(5000);
-    const m = matchKnownCustomer(name, (known ?? []) as KnownCustomer[]);
+    /**
+     * THE CUSTOMER'S OWN NEW LEAD (cn-v1173). The owner, 2026-11-19: "i would like to promote the
+     * workflow starting with new lead which could be an existing client with a new job but it gets the
+     * information in the right place". A lead started from a customer's page (crm/[id], its Requests
+     * tab) posts that customer's id. When a read of it on HIS OWN session finds it (RLS: his company's
+     * customer, nobody else's), the lead links to THAT customer and the name match is skipped (a
+     * customer who shares a name with another is still the one he started from). The same carry rule
+     * fills the empty fields, with the same "Linked to …" sentence. An id that reads nothing (gone,
+     * merged away, another company's) is ignored, and the name match runs as before.
+     */
+    const postedId = String(formData.get("customer_id") ?? "").trim();
+    let posted: KnownCustomer | null = null;
+    if (postedId) {
+      const { data: row, error: postedErr } = await supabase
+        .from("customers")
+        .select("id, name, phone, email, address, city, state, zip, company_name")
+        .eq("id", postedId)
+        .maybeSingle();
+      // A read that fails is filed, never silent; the name match below still runs, as for an id that
+      // reads nothing.
+      if (postedErr) reportError("leads:create:posted-customer", postedErr);
+      posted = (row as KnownCustomer | null) ?? null;
+    }
+    let m: CustomerMatch;
+    if (posted) m = { kind: "one", customer: posted };
+    else {
+      const { data: known } = await supabase
+        .from("customers")
+        .select("id, name, phone, email, address, city, state, zip, company_name")
+        .limit(5000);
+      m = matchKnownCustomer(name, (known ?? []) as KnownCustomer[]);
+    }
     if (m.kind === "one") {
       linkedCustomerId = m.customer.id;
       const lang = await ws.lang();
@@ -262,6 +290,8 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
   // /schedule no longer needs waking: a new lead doesn't put anything on the calendar any more.
   // My Day does — the Needs-action inbox feeds off inquiries and their follow-up date.
   revalidatePath("/planner");
+  // The customer's page lists their leads (its Requests tab): a linked lead shows there too.
+  if (linkedCustomerId) revalidatePath(`/crm/${linkedCustomerId}`);
   return { ok: true, id: data.id, note: link_note };
 }
 

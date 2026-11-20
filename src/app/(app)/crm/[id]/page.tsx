@@ -24,6 +24,7 @@ import { PortalLinkButton } from "./portal-link-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { customerSectionTree } from "@/lib/nav-tree";
 import { NewJobButton } from "../../schedule/new-job-button";
+import { InquiryModal } from "../../leads/inquiry-modal";
 import { FIXED_PILL_CLASS, isFixedPrice } from "@/lib/doc-label";
 import { AppointmentButton } from "../../appointments/appointment-button";
 import { toJobOptions, toStaffOptions, listActiveTechs, readUsualBillingKind, unitStreetKeys } from "@/lib/schedule-options";
@@ -419,6 +420,30 @@ export default async function CustomerDetailPage({
       // Requests still in play: on the Leads list, or with a visit standing.
       count: countOpen(requests, (r) => isOpenRequest(stages.get(r.id))),
       content: (
+        <div className="space-y-3">
+          {/* A NEW LEAD FOR THIS CUSTOMER (cn-v1173), at the top right of the tab, as the job's
+              Estimates tab draws its New Estimate (never in the header row). The owner, 2026-11-19: "i
+              would like to promote the workflow starting with new lead which could be an existing
+              client with a new job but it gets the information in the right place". The Leads page's
+              own form and its own word, started from this customer and linked to them; a save lands
+              on the lead's file, where Schedule is. The office's, and only where the company runs Leads. */}
+          {viewerIsStaff && featureOn(sw.features, "leads") && (
+            <div className="flex justify-end">
+              <InquiryModal
+                customer={{
+                  id: c.id,
+                  name: c.name,
+                  company_name: c.company_name,
+                  phone: c.phone,
+                  email: c.email,
+                  address: c.address,
+                  city: c.city,
+                  state: c.state,
+                  zip: c.zip,
+                }}
+              />
+            </div>
+          )}
         <Card className="overflow-hidden">
           {requests === null ? (
             <p role="status" className="px-5 py-4 text-sm text-amber-700">
@@ -446,6 +471,7 @@ export default async function CustomerDetailPage({
             />
           )}
         </Card>
+        </div>
       ),
     },
   ];
