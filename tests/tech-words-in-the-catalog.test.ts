@@ -318,7 +318,7 @@ describe("every named screen's words come through the catalog", () => {
   const leaks = files.flatMap((f) => collectLeaks(readFileSync(join(ROOT, f), "utf8"), f).map((l) => ({ ...l, file: f })));
 
   it("the catalogs loaded and the scan read every screen they name", () => {
-    expect(CATALOGS.length).toBe(31);
+    expect(CATALOGS.length).toBe(32);
     expect(files.length).toBeGreaterThanOrEqual(FILES_FLOOR);
   });
 

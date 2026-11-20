@@ -22,6 +22,8 @@ const state = vi.hoisted(() => ({
   language: undefined as string | undefined,
   features: undefined as Record<string, boolean> | undefined,
   selects: [] as string[],
+  /** A table whose read fails (cn-v1172: a failed read is said, never drawn as nobody). */
+  failTable: null as string | null,
 }));
 
 function fakeClient() {
@@ -36,8 +38,10 @@ function fakeClient() {
       {},
       {
         get(_t, prop) {
-          if (prop === "then") return (ok: any, err: any) => Promise.resolve({ data: answer(table), error: null }).then(ok, err);
-          if (prop === "maybeSingle" || prop === "single") return async () => ({ data: answer(table)[0] ?? null, error: null });
+          const failed = state.failTable === table;
+          if (prop === "then")
+            return (ok: any, err: any) => Promise.resolve(failed ? { data: null, error: { message: "boom" } } : { data: answer(table), error: null }).then(ok, err);
+          if (prop === "maybeSingle" || prop === "single") return async () => (failed ? { data: null, error: { message: "boom" } } : { data: answer(table)[0] ?? null, error: null });
           if (prop === "select" && table === "appointments") return (cols: string) => (state.selects.push(cols), q);
           return () => q;
         },
@@ -158,6 +162,7 @@ beforeEach(() => {
   state.language = undefined;
   state.features = undefined;
   state.selects = [];
+  state.failTable = null;
 });
 const render = async (q: { view?: string } = {}) => {
   const page = (await InspectionsPage({ searchParams: Promise.resolve(q) })) as React.ReactElement;
@@ -191,16 +196,15 @@ describe("the rule for a row's buttons (list-rows)", () => {
 });
 
 describe("one list: who needs an inspection", () => {
-  it("every open inspection once, in the list's order, each a card of its own", async () => {
+  it("every open inspection once, in the list's order, each a card of its own; the inspected ones are on Estimates (cn-v1172)", async () => {
     const html = await render();
     const rows = rowsOf(html);
+    // Estimates on (the default): inspected and waiting on a price is the Estimates page's top list.
     expect(rows.map((r) => [r.id, r.state])).toEqual([
       ["cu-1", "coming_up"],
       ["cu-2", "coming_up"],
       ["nd-1", "needs_day"],
       ["nd-2", "needs_day"],
-      ["wu-1", "write_up"],
-      ["wu-2", "write_up"],
       ["ms-1", "missed"],
     ]);
     // The Leads list's card: space between, a bold border of its own.
@@ -217,8 +221,7 @@ describe("one list: who needs an inspection", () => {
       ["Hot tub circuit", null, "Fri, Nov 20 · 10:00 AM", "Pending pick", null, ["Start Inspection", "/appointments/cu-2"]],
       ["Theo Vance", "/crm/cust-3", "9d ago", "4 Bayberry Rd", "Needs a Day", ["Start Inspection", "/appointments/nd-1"]],
       ["2 Catbird Way", null, "2d ago", null, "Needs a Day", ["Start Inspection", "/appointments/nd-2"]],
-      ["Sam Tillery", "/leads/inq-1", "7d ago", "12 Larkspur Ln · no field notes", "Needs an Estimate", ["Create Estimate", "/quotes/new?capture=wu-1&inquiry=inq-1"]],
-      ["Attic fan", null, "2d ago", "No field notes", "Needs an Estimate", ["Create Estimate", "/quotes/new?capture=wu-2"]],
+      // The two inspected rows (Create Estimate) are drawn on the Estimates page: quotes-two-parts.test.
       ["Casey Loam", null, "4d ago", "Deck lighting · 7 Thistlewood Dr", "Day Passed", ["Start Inspection", "/appointments/ms-1"]],
     ]);
     // A name with no file is plain words, never a dead link.
@@ -234,12 +237,9 @@ describe("one list: who needs an inspection", () => {
       [null, "Empezar Inspección"],
       ["Falta el Día", "Empezar Inspección"],
       ["Falta el Día", "Empezar Inspección"],
-      ["Falta el Presupuesto", "Crear Presupuesto"],
-      ["Falta el Presupuesto", "Crear Presupuesto"],
       ["Ya Pasó el Día", "Empezar Inspección"],
     ]);
     expect(rows[1].what).toBe("Por elegir");
-    expect(rows[4].what).toBe("12 Larkspur Ln · sin notas de campo");
     for (const r of rows) expect(r.edge ?? "").not.toMatch(/ago|Yesterday|Today|Tomorrow|AM|PM/);
   });
 
@@ -250,8 +250,6 @@ describe("one list: who needs an inspection", () => {
       "cu-2": "move,del",
       "nd-1": "pickDay,del",
       "nd-2": "pickDay,del",
-      "wu-1": "open,lost",
-      "wu-2": "open,lost",
       "ms-1": "move,happened,lost,del",
     });
   });
@@ -281,8 +279,9 @@ describe("one list: who needs an inspection", () => {
     expect(es(happenedSaidKey(false))).toBe("Marcada como hecha.");
     expect(stateWordKey("coming_up", false)).toBeNull();
     // The page hands each row its finished toast; the menu says it and words nothing itself.
-    const page = readFileSync(join(process.cwd(), "src/app/(app)/inspections/page.tsx"), "utf8");
-    expect(page).toContain("happenedSaid: t(happenedSaidKey(estimateDoor)),");
+    // cn-v1172: the row builder left the page for ./row-words, which both pages use.
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/inspections/row-words.ts"), "utf8");
+    expect(page).toContain("happenedSaid: t(happenedSaidKey(estimatesOn)),");
     const menu = readFileSync(join(process.cwd(), "src/app/(app)/inspections/inspection-row-menu.tsx"), "utf8");
     expect(menu).toContain("markItHappened(row.id, io, row.happenedSaid)");
     expect(menu).not.toContain('io.t("ip_movedToWriteUp")');
@@ -292,7 +291,7 @@ describe("one list: who needs an inspection", () => {
     const html = await render();
     expect(html).toMatch(/<span class="text-xs font-medium text-slate-500" data-state-word="">Needs a Day<\/span>/);
     expect(html).not.toMatch(/amber-|red-|rounded-full/);
-    for (const f of ["page.tsx", "inspection-list.tsx"]) expect(readFileSync(join(process.cwd(), "src/app/(app)/inspections", f), "utf8")).not.toMatch(/amber-|red-/);
+    for (const f of ["page.tsx", "inspection-list.tsx", "row-words.ts"]) expect(readFileSync(join(process.cwd(), "src/app/(app)/inspections", f), "utf8")).not.toMatch(/amber-|red-/);
   });
 });
 
@@ -390,5 +389,73 @@ describe("what left the page, and the read", () => {
       for (const k of ["ip_btn_startInspection", "ip_btn_openInspection", "ip_btn_goToLeads", "ip_btn_createEstimate"]) expect(titleCaseIn(t(k), lang), `${lang} ${k}`).toBe(true);
       expect(titleCaseIn(t("ip_btn_notFiledFold").replace(" ({n})", ""), lang), `${lang} fold`).toBe(true);
     }
+  });
+});
+
+describe("nobody falls between Inspections and Estimates (cn-v1172)", () => {
+  const lineOf = (html: string) => {
+    const m = /<div data-to-estimate=""[^>]*>([\s\S]*?)<\/div>/.exec(html);
+    return m ? { text: decode(/<span>([\s\S]*?)<\/span>/.exec(m[1])?.[1] ?? ""), href: hrefOf(/<a [^>]*>/.exec(m[1])?.[0] ?? ""), door: decode(/<a [^>]*>([\s\S]*?)<\/a>/.exec(m[1])?.[1] ?? "") } : null;
+  };
+
+  it("Estimates on: under the list, how many are waiting on an estimate, and Go to Estimates", async () => {
+    const html = await render();
+    expect(lineOf(html)).toEqual({ text: "2 inspected and waiting on an estimate.", href: "/quotes", door: "Go to Estimates" });
+    // Plain slate, never amber.
+    expect(/<div data-to-estimate=""[^>]*>/.exec(html)![0]).toContain("text-slate-600");
+    state.language = "es";
+    expect(lineOf(await render())).toEqual({ text: "2 inspeccionadas y esperando un presupuesto.", href: "/quotes", door: "Ir a Presupuestos" });
+  });
+
+  it("Estimates off: the inspected ones stay on this list in their place, and there is no line", async () => {
+    state.features = { estimates: false };
+    const html = await render();
+    expect(rowsOf(html).map((r) => r.id)).toEqual(["cu-1", "cu-2", "nd-1", "nd-2", "wu-1", "wu-2", "ms-1"]);
+    expect(lineOf(html)).toBeNull();
+  });
+
+  it("only inspected ones open: the empty state says nobody is waiting on an inspection, AND points at the two on Estimates", async () => {
+    state.visits = structuredClone([WU_OLD, WU_NEW]);
+    const html = await render();
+    expect(rowsOf(html)).toEqual([]);
+    expect(decode(html)).toContain("Nobody is waiting on an inspection");
+    expect(lineOf(html)).toEqual({ text: "2 inspected and waiting on an estimate.", href: "/quotes", door: "Go to Estimates" });
+    expect(html).toContain('href="/leads"');
+  });
+
+  it("no inspected ones: no line", async () => {
+    state.visits = structuredClone([CU_SOON]);
+    expect(lineOf(await render())).toBeNull();
+  });
+
+  it("the page reads through the one reader both pages use, and words its rows with the one builder", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/inspections/page.tsx"), "utf8");
+    expect(src).toContain("readInspectionBuckets(supabase, { now })");
+    expect(src).toContain("inspectionList(buckets, now, tz, { estimatesOn })");
+    expect(src).toContain("inspectionRowBuilder({ t, lang, tz, now, estimatesOn })");
+    expect(src).not.toMatch(/bucketInspections|from\("appointments"\)|from\("quotes"\)/);
+  });
+});
+
+describe("a failed read is said, never drawn as nobody (cn-v1172)", () => {
+  for (const table of ["appointments", "quotes", "invoices", "organizations"]) {
+    it(`${table} unread`, async () => {
+      state.failTable = table;
+      const html = await render();
+      expect(rowsOf(html)).toEqual([]);
+      expect(decode(html)).toContain("The inspections couldn't load. Reload to try again.");
+      expect(decode(html)).not.toContain("Nobody is waiting on an inspection");
+      expect(foldOf(html)).toBeNull();
+    });
+  }
+
+  it("Spanish", async () => {
+    state.failTable = "quotes";
+    state.language = "es";
+    expect(decode(await render())).toContain("No se pudieron cargar las inspecciones. Recarga para intentar de nuevo.");
+  });
+
+  it("Title Case: the new door, both languages", () => {
+    for (const lang of ["en", "es"] as const) expect(titleCaseIn(translator(lang)("ip_btn_goToEstimates"), lang), lang).toBe(true);
   });
 });

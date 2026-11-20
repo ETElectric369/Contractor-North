@@ -259,9 +259,11 @@ export function visitTitle(title: string | null | undefined): string {
  *  (awaiting-answer, in-the-works) floats up; settled paperwork — an accepted estimate that
  *  already became a job, a declined/expired one — files away to the bottom. Erik: "accepted
  *  estimates already converted to jobs file away like finished jobs (BRAIN CLUTTER)". */
+// DRAFTS FIRST (cn-v1172): a sent estimate has a list of its own now (Closing, lib/estimate/closing),
+// so what the Estimates page puts on top is the work still on the office's desk: the ones not sent.
 export const QUOTE_STATUS_PRIORITY: Record<QuoteStatus, number> = {
-  sent: 0,      // waiting on the customer — the working pile
-  draft: 1,     // still being built
+  draft: 0,     // still being built — the office's own next step
+  sent: 1,      // waiting on the customer — worked from Closing
   accepted: 2,  // won — lives on as a job now
   declined: 3,
   expired: 4,

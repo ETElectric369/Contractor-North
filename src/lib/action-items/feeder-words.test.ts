@@ -27,6 +27,7 @@ function pick(table: string, cols: string): any {
   if (table === "invoices" && cols.includes("hold_until")) return state.rows.drafts ?? [];
   if (table === "quotes" && cols.includes("accepted_at")) return state.rows.accepted ?? [];
   if (table === "quotes" && cols.includes("valid_until")) return state.rows.awaiting ?? [];
+  if (table === "sent_messages") return state.rows.sends ?? [];
   if (table === "quotes" && cols.includes("quote_line_items")) return state.rows.estimateDrafts ?? [];
   if (table === "organized_items" && cols.includes("summary")) return state.rows.papers ?? [];
   if (table === "contracts") return state.rows.contracts ?? [];
@@ -100,7 +101,7 @@ const PLAN_KEYS = new Set([
   "ny_w_workNotBilled", "ny_w_visitBilledNotPaid", "ny_w_workBilledNotPaid", "ny_w_jobNotBilled", "ny_w_noCostsYet",
   "ny_w_lienPrelim", "ny_w_lienPrelimPast", "ny_w_lienRecord", "ny_w_lienRecordPast", "ny_w_leadNew", "ny_w_leadReached",
   "ny_w_requestNew", "ny_w_requestReached", "ny_w_toWriteUp", "ny_w_toWriteUpTitled", "ny_docEstimate", "ny_docQuote",
-  "ny_w_docNotSent", "ny_w_docNoAnswer", "ny_w_docFollowUp", "ny_w_docOfferEnds", "ny_w_docOfferEnded",
+  "ny_w_docNotSent", "ny_w_docNoAnswer", "ny_w_docOfferEnds", "ny_w_docOfferEnded",
   "ny_w_contractNotSigned", "ny_w_saidYes", "ny_w_saidYesNoRef", "ny_w_neverHadADay", "ny_w_datedNeverWorked",
   "ny_w_lastDay", "ny_w_workedNothingNext", "ny_w_quietSince", "ny_w_nToBuy", "ny_w_holdBack", "ny_w_holdNoDay",
   "ny_w_noReason", "ny_w_visitNotClosed", "ny_w_visitNotClosedTitled", "ny_w_toBuy", "ny_w_plusMore",
@@ -129,6 +130,7 @@ const FEEDERS = [
   "supplier-pay-item.ts",
   "no-job-hours-item.ts",
   "jobs-needing-a-day.ts",
+  "no-answer-yet.ts",
 ];
 
 describe("the keys a feeder emits", () => {
@@ -295,8 +297,8 @@ describe("the build: each row's who, what and amount (table A2)", () => {
 
   it("no answer yet: the customer, the doc and number, why it is here, and the SENT day in since", async () => {
     state.rows.awaiting = [
-      { id: "q2", quote_number: "E-041", doc_type: "estimate", status: "sent", total: 800, valid_until: dayAgo(-3), created_at: daysAgo(4), job_id: null, follow_up_at: null, customers: { name: "Sam Tillery" }, jobs: null },
-      { id: "q3", quote_number: "Q-007", doc_type: "quote", status: "sent", total: 500, valid_until: null, created_at: daysAgo(12), job_id: null, follow_up_at: null, customers: { name: "Theo Vance" }, jobs: null },
+      { id: "q2", quote_number: "E-041", doc_type: "estimate", status: "sent", total: 800, valid_until: dayAgo(-3), created_at: daysAgo(4), job_id: null, customers: { name: "Sam Tillery" }, jobs: null },
+      { id: "q3", quote_number: "Q-007", doc_type: "quote", status: "sent", total: 500, valid_until: null, created_at: daysAgo(12), job_id: null, customers: { name: "Theo Vance" }, jobs: null },
     ];
     const rows = await build();
     const ends = byId(rows, "q2");
@@ -311,22 +313,33 @@ describe("the build: each row's who, what and amount (table A2)", () => {
     expect([quiet.clock ?? null, quiet.level]).toEqual([null, "none"]);
   });
 
-  it("no answer yet, its clock: the follow-up day once it came, else the offer's end; when and since do not move", async () => {
+  it("no answer yet (cn-v1172, the Closing rule): the wait counts from the last logged send; the offer's end is the clock", async () => {
     state.rows.awaiting = [
-      // A follow-up day that came two days ago, an offer far off: the follow-up day is the clock.
-      { id: "q4", quote_number: "E-042", doc_type: "estimate", status: "sent", total: 700, valid_until: dayAgo(-30), created_at: daysAgo(9), job_id: null, follow_up_at: dayAgo(2), customers: { name: "Casey Loam" }, jobs: null },
-      // A follow-up day missed ten days ago and an offer ending in two days: the offer is the clock.
-      { id: "q5", quote_number: "E-043", doc_type: "estimate", status: "sent", total: 600, valid_until: dayAgo(-2), created_at: daysAgo(20), job_id: null, follow_up_at: dayAgo(10), customers: { name: "Dana Rook" }, jobs: null },
-      // An offer thirty days off and no follow-up day: a clock, but not yet Due.
-      { id: "q6", quote_number: "E-044", doc_type: "estimate", status: "sent", total: 500, valid_until: dayAgo(-30), created_at: daysAgo(15), job_id: null, follow_up_at: null, customers: { name: "Theo Vance" }, jobs: null },
+      // Written twenty days ago, sent again two days ago, offer far off: the customer has it fresh. Not listed.
+      { id: "q4", quote_number: "E-942", doc_type: "estimate", status: "sent", total: 700, valid_until: dayAgo(-30), created_at: daysAgo(20), job_id: null, customers: { name: "Casey Loam" }, jobs: null },
+      // Sent nine days ago: quiet a week. Its wait is the send, said as "Sent".
+      { id: "q5", quote_number: "E-943", doc_type: "estimate", status: "sent", total: 600, valid_until: dayAgo(-30), created_at: daysAgo(20), job_id: null, customers: { name: "Dana Rook" }, jobs: null },
+      // No send on record (marked Sent by hand): measured from the day it was written, never called a send.
+      { id: "q6", quote_number: "E-944", doc_type: "estimate", status: "sent", total: 500, valid_until: dayAgo(-30), created_at: daysAgo(15), job_id: null, customers: { name: "Theo Vance" }, jobs: null },
+      // The offer ended two days ago: listed whatever its age, above the routine chase.
+      { id: "q7", quote_number: "E-945", doc_type: "estimate", status: "sent", total: 400, valid_until: dayAgo(2), created_at: daysAgo(3), job_id: null, customers: { name: "Sam Tillery" }, jobs: null },
+    ];
+    state.rows.sends = [
+      { doc_id: "q4", sent_at: daysAgo(2) },
+      { doc_id: "q4", sent_at: daysAgo(19) },
+      { doc_id: "q5", sent_at: daysAgo(9) },
     ];
     const rows = await build();
-    const q4 = byId(rows, "q4");
-    expect(q4).toMatchObject({ clock: dayAgo(2), level: "soon", when: dayAgo(2), since: daysAgo(9) });
-    const q5 = byId(rows, "q5");
-    expect(q5).toMatchObject({ clock: dayAgo(-2), level: "soon", when: dayAgo(10), since: daysAgo(20) });
-    const q6 = byId(rows, "q6");
-    expect(q6).toMatchObject({ clock: dayAgo(-30), level: "none", when: dayAgo(-30), since: daysAgo(15) });
+    const all = [...rows, ...rows.flatMap((x) => x.children ?? [])];
+    expect(all.some((r) => r.id === "q4")).toBe(false);
+    expect(byId(rows, "q5")).toMatchObject({ since: daysAgo(9), dated: "Sent", clock: dayAgo(-30), level: "none", what: { key: "ny_w_docNoAnswer" } });
+    expect(byId(rows, "q6")).toMatchObject({ since: daysAgo(15), dated: null, clock: dayAgo(-30), level: "none" });
+    expect(byId(rows, "q7")).toMatchObject({ urgency: 2, what: { key: "ny_w_docOfferEnded", vars: { day: dayAgo(2) } }, since: daysAgo(3) });
+    // No Still Waiting, no Waiting row: Send Again is the Send sheet's, and nothing waits with a day.
+    for (const id of ["q5", "q6", "q7"]) {
+      expect(byId(rows, id).affordances).not.toContain("snooze");
+      expect(byId(rows, id).send).toMatchObject({ kind: "quote", id, openHref: `/quotes/${id}` });
+    }
   });
 
   it("a draft invoice (one set aside whose job finished, too) and a contract say who, what and the amount", async () => {

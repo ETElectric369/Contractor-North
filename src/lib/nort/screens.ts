@@ -14,7 +14,7 @@ import { dict, type Lang } from "@/lib/i18n";
  * It names; it never gates. A path a role cannot see redirects where the page says (a tech sent
  * to /schedule lands on My Day), and the data behind every screen is RLS's to show or hide.
  *
- * THE SPANISH NAMES (cn-v1139): a Spanish reader's dock says Ventas, Dinero, Presupuestos, so each
+ * THE SPANISH NAMES (cn-v1139): a Spanish reader's dock says Ventas, Admin, Presupuestos, so each
  * screen names the CATALOG KEY its Spanish is read from (`word`) — the dock row's own sh_dock_<id>,
  * a page title's nv_page_<slug>, or, for a record's own sheet, the word the app shows that record
  * by. Never a Spanish string typed here: the dock, the page title and Nort read ONE key, so "abre
@@ -78,7 +78,10 @@ export const SCREENS: Screen[] = [
       { name: "job-manage", say: "Manage ⋯ (office: Edit, Finish, Delete)" },
     ],
   },
-  { name: "Estimates", word: "sh_dock_sl-quotes", path: "/quotes", say: "?status=; the builder is /quotes/new; one estimate is /quotes/<id>", staffOnly: true, spots: [{ name: "new-estimate", say: "New Estimate" }] },
+  // cn-v1172: the page is two parts for the office, Inspections to Estimate on top and All Estimates below.
+  { name: "Estimates", word: "sh_dock_sl-quotes", path: "/quotes", say: "Inspections to Estimate on top (inspected, no estimate yet, each with Create Estimate), then All Estimates, drafts first; ?status= filters the list; the builder is /quotes/new; one estimate is /quotes/<id>", staffOnly: true, spots: [{ name: "new-estimate", say: "New Estimate" }] },
+  // cn-v1172: Sales › Closing, the inbox of estimates that are out with no answer yet ("Closing is the reminder").
+  { name: "Closing", word: "sh_dock_sl-closing", path: "/closing", say: "every estimate that is sent and not answered yet, the ones that need a person first, then the longest wait, each with Accepted (it goes on its job; a job is made if it has none), Not Sold and Send Again; the list is the reminder; with Estimates off it still opens and says so", staffOnly: true },
   {
     name: "Invoices",
     word: "sh_dock_m-inv",
@@ -106,6 +109,7 @@ export const SCREENS: Screen[] = [
       { name: "all-bills", say: "All Bills" },
     ],
   },
+  // cn-v1172: Customers is the first row under Admin (it left Sales), and the Admin tile opens here.
   { name: "Customers", word: "sh_dock_sl-customers", path: "/crm", say: "?q=<search>; one customer is /crm/<id>", staffOnly: true },
   // cn-v1170: the list is new intake only; one lead's page (its file) is its own route.
   { name: "Leads", word: "sh_dock_sl-leads", path: "/leads", say: "one lead's page is /leads/<id>; /leads/<id>?schedule=1 opens its Schedule sheet", staffOnly: true },
@@ -147,9 +151,9 @@ export const SCREENS: Screen[] = [
 ];
 
 /**
- * THE TILES WHOSE SPANISH IS NOT A SCREEN'S OWN (cn-v1139). A Spanish reader taps Ventas, Dinero
- * and Hoy, and no screen above is called that (Sales lands on Leads, Money on Invoices, Today on My
- * Day); Agenda is both the tile and its screen, named here so the tile and the page read as one
+ * THE TILES WHOSE SPANISH IS NOT A SCREEN'S OWN (cn-v1139). A Spanish reader taps Ventas, Admin
+ * and Hoy, and no screen above is called that (Sales lands on Leads, Admin on Customers since
+ * cn-v1172, Today on My Day); Agenda is both the tile and its screen, named here so the tile and the page read as one
  * door. Under es the prompt block carries one line for them, built from lib/dock (the tile's label
  * and where it lands) and the dock's own words (dockTileLabel), in this order.
  */

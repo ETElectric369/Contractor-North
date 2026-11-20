@@ -52,7 +52,10 @@ type PileDef = {
 /** Each pile's words, its verb and its list page. Title Case: they sit on buttons and links. */
 export const PILE_DEFS: Record<PileName, PileDef> = {
   estimates_not_sent: { label: "Estimates Not Sent", verb: "Send It", listHref: "/quotes?status=draft", listLabel: "See All on Estimates" },
-  no_answer_yet: { label: "No Answer Yet", verb: "Still Waiting", listHref: "/quotes?status=sent", listLabel: "See All on Estimates" },
+  // cn-v1172: these rows ARE the Closing list's estimates that need a person (lib/estimate/closing),
+  // so See All lands there; the row's button is the Closing page's Send Again (no Still Waiting:
+  // "Closing is the reminder yes").
+  no_answer_yet: { label: "No Answer Yet", verb: "Send Again", listHref: "/closing", listLabel: "See All in Closing" },
   won_needs_a_day: { label: "Won, Needs a Day", verb: "Pick a Day", listHref: "/quotes?status=accepted", listLabel: "See All on Estimates" },
   late_invoices: { label: "Late Invoices", verb: "Get Paid", listHref: "/billing", listLabel: "See All on Invoices" },
   invoices_not_sent: { label: "Invoices Not Sent", verb: "Send It", listHref: "/billing", listLabel: "See All on Invoices" },
@@ -71,7 +74,10 @@ export const PILE_DEFS: Record<PileName, PileDef> = {
     listLabel: "See All on Leads",
   },
   visits_to_close_out: { label: "Visits to Close Out", verb: "Close Out", listHref: null, listLabel: null },
-  inspections_to_write_up: { label: "Inspections to Write Up", verb: "Open Them", listHref: "/inspections", listLabel: "See All Inspections" },
+  // cn-v1172: an inspected visit with no estimate is on the Estimates page's top list (Inspections to
+  // Estimate) while Estimates is on, and off the Inspections list. This feeder runs only while
+  // Estimates is on (switches FEEDER_SWITCHES), so its See All always lands on Estimates.
+  inspections_to_write_up: { label: "Inspections to Write Up", verb: "Open Them", listHref: "/quotes", listLabel: "See All on Estimates" },
   jobs_needing_a_day: { label: "Jobs Needing a Day", verb: "Pick a Day", listHref: "/schedule", listLabel: "See All on Schedule" },
   holds_back: { label: "Holds Back", verb: "Snooze", listHref: "/jobs?status=on_hold", listLabel: "See All on Jobs" },
   papers_to_sort: { label: "Papers to Sort", verb: "Sort It", listHref: "/bills#sort-these", listLabel: "See All on Bills" },

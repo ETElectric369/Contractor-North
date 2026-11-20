@@ -97,7 +97,7 @@ export const WHEN_IS_A_DEADLINE: Record<ActionKind, boolean> = {
   inspection_writeup: false, // the day the inspection happened
   organize: false, // the day the paper arrived
   invoice_overdue: true, // the due date
-  quote_awaiting: true, // valid-until / the follow-up day
+  quote_awaiting: true, // valid-until (cn-v1172: no follow-up day)
   quote_accepted: false, // the day they said yes
   invoice_draft: false, // the day it was started
   visit_unbilled: false, // the day the work happened
@@ -179,7 +179,7 @@ export interface ActionItem {
   /** Staff only: the money on the row, or on a pile the sum of its children's (only when every child
    *  has one, the read was not capped and every child is here). Never set on a tech's row. */
   amount?: number | null;
-  /** quote_draft only (staff): what the Send sheet names before it sends (lane 4's SendSheet). */
+  /** quote_draft and quote_awaiting (staff): what the Send sheet names before it sends (lane 4's SendSheet). */
   send?: SendFacts | null;
   /** job_on_hold only: the reason already saved on the hold. Its Snooze asks why only when none is. */
   holdReason?: string | null;
@@ -379,11 +379,11 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // Money/legal items drill into their own surface to act (record a payment, serve a
   // notice, chase a signature) — no generic "do"/"dismiss" that would mislabel them.
   invoice_overdue: ["open"],
-  // Still Waiting (snooze) sets the FOLLOW-UP day (0366 quotes.follow_up_at), never valid_until,
-  // which is the customer's offer window on the public share. ⋯ Won It (do) marks it accepted (the
-  // quote page's own Accepted: it stamps the day and makes the job); ⋯ Lost (dismiss) marks it
-  // declined, the same decision the quote page's status dropdown makes, one tap closer.
-  quote_awaiting: ["snooze", "do", "dismiss", "open"],
+  // Send Again is the Send sheet (no verb). ⋯ Won It (do) marks it accepted (the quote page's own
+  // Accepted: it stamps the day and puts it on its job, making one if it has none); ⋯ Not Sold (dismiss) marks it declined, the same
+  // decision the quote page's status dropdown makes, one tap closer. No Snooze since cn-v1172: an
+  // estimate has no follow-up day, the Closing list is the reminder.
+  quote_awaiting: ["do", "dismiss", "open"],
   // Pick a Day lands on the won JOB (schedule, added by the build only when the estimate has one).
   // ⋯ Already Invoiced (its own sheet, not a verb) and ⋯ Lost (dismiss: marks it declined).
   quote_accepted: ["dismiss", "open"],

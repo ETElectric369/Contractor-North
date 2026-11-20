@@ -73,6 +73,12 @@ const NAV_ALIASES: Record<string, string[]> = {
   ],
   "/quotes": ["estimate", "proposal", "bid", "quote", "quotes", "presupuestos", "presupuesto", "cotización", "cotizaciones", "propuesta"],
   "/crm": ["customers", "clients", "people", "contact", "contacts", "clientes", "cliente", "contactos"],
+  // CLOSING (cn-v1172): the sent estimates with no answer yet. "Closing is the reminder", so the words a
+  // person types to chase an answer land here: the follow-up words, and the Spanish beside them.
+  "/closing": [
+    "closing", "close", "follow up", "follow-up", "no answer", "waiting on an answer", "sent estimates", "chase",
+    "cierre", "cerrar", "seguimiento", "sin respuesta", "presupuestos enviados",
+  ],
   // The Reminders page was "Tasks" until 0358, and people still type the old word.
   "/tasks": ["tasks", "to-do", "todo", "recordatorios", "tareas", "pendientes"],
   "/organize": ["organizar", "papeles"],
@@ -108,10 +114,21 @@ const SWITCH_ALIASES: { href: string; feature: FeatureKey; words: string[] }[] =
   { href: "/price-list", feature: "kits", words: ["kit", "kits"] },
   { href: "/recurring", feature: "recurring_billing", words: ["subscription", "repeat invoice", "auto invoice", "suscripción", "factura repetida"] },
 ];
-function aliasesFor(href: string, features: FeatureMap | null | undefined): string[] | undefined {
+/**
+ * A TILE'S OLD NAME STILL FINDS ITS PAGES (cn-v1172). "Lets change the name of the Dock tab Money to
+ * Admin", Erik 2026-11-19. A search matched a page by its tile's name (the row's `sub`), so "money"
+ * found every page under Money; the tile says Admin now, and these words ride on every page under it
+ * so "money" and "dinero" still land there. "admin" is the tile's own word (its sub matches it too).
+ * Keyed by the tile's key, like the badges and the tests.
+ */
+const TILE_ALIASES: Record<string, string[]> = {
+  invoices: ["money", "dinero", "admin", "administración"],
+};
+function aliasesFor(href: string, features: FeatureMap | null | undefined, tileWords: string[] = []): string[] | undefined {
   const extra = SWITCH_ALIASES.filter((a) => a.href === href && featureOn(features, a.feature)).flatMap((a) => a.words);
   const base = NAV_ALIASES[href];
-  return extra.length ? [...(base ?? []), ...extra] : base;
+  const words = [...(base ?? []), ...extra, ...tileWords.filter((w) => !base?.includes(w))];
+  return words.length ? words : undefined;
 }
 
 // ONE source of truth: the command bar's "go to" list is derived from the SAME dock that
@@ -127,12 +144,12 @@ function aliasesFor(href: string, features: FeatureMap | null | undefined): stri
 // "clock in" still finds Reloj and "reloj" finds Time Clock. `kind` is an id the icon and the chip
 // read, never shown raw.
 type DockLeaf = { id: string; label: string; href?: string; children?: DockLeaf[]; staffOnly?: boolean };
-function navLeaves(nodes: DockLeaf[], sub: string, features: FeatureMap | null | undefined, lang: Lang, sectionStaff?: boolean): Item[] {
+function navLeaves(nodes: DockLeaf[], sub: string, features: FeatureMap | null | undefined, lang: Lang, sectionStaff?: boolean, tileWords?: string[]): Item[] {
   return nodes.flatMap((n) =>
     n.children?.length
-      ? navLeaves(n.children, dockLabel(n, lang), features, lang, sectionStaff || n.staffOnly)
+      ? navLeaves(n.children, dockLabel(n, lang), features, lang, sectionStaff || n.staffOnly, tileWords)
       : n.href && !n.href.includes("?")
-        ? [{ kind: "Go to", label: dockLabel(n, lang), sub, href: n.href, staffOnly: sectionStaff || n.staffOnly, aliases: aliasesFor(n.href, features) }]
+        ? [{ kind: "Go to", label: dockLabel(n, lang), sub, href: n.href, staffOnly: sectionStaff || n.staffOnly, aliases: aliasesFor(n.href, features, tileWords) }]
         : [],
   );
 }
@@ -140,7 +157,7 @@ function navLeaves(nodes: DockLeaf[], sub: string, features: FeatureMap | null |
 // answers "jobs"/"work"/"projects" by itself and the hand-written entry that stood in for it is gone
 // — one leaf, not two. The GENERATED ?status= children still stay out (see the collision note above).
 /**
- * PETTY CASH, FOUND BY NAME (W1-34): it left the Money menu, so a company that already has petty-cash
+ * PETTY CASH, FOUND BY NAME (W1-34): it left the Money menu (the tile that is Admin since cn-v1172), so a company that already has petty-cash
  * rows (the layout's staff-only existence check) finds the page here, by its own words. A company
  * with none sees no row: a new cash purchase is a cost like any other (Snap or Note, Add by Hand).
  */
@@ -150,7 +167,7 @@ const pettyCashRow = (t: (key: string) => string): Item => ({
   sub: t("sh_dock_invoices"),
   href: "/petty-cash",
   staffOnly: true,
-  aliases: ["petty cash", "cash box", "cash", "atm", "caja chica", "efectivo", "cajero"],
+  aliases: ["petty cash", "cash box", "cash", "atm", "caja chica", "efectivo", "cajero", ...TILE_ALIASES.invoices],
 });
 
 /** The palette's "go to" list for this person: exported so the switch rule is pinned in a test.
@@ -161,12 +178,12 @@ export function commandNavItems(isStaff: boolean, features?: FeatureMap | null, 
   const t = translator(lang);
   if (lapsed) return visibleDock({ isStaff, features, lapsed: true }).flatMap((s) => navLeaves(s.children, dockTileLabel(s, lang), features, lang, s.staffOnly));
   const items: Item[] = [
-    ...visibleDock({ isStaff, features }).flatMap((s) => navLeaves(s.children, dockTileLabel(s, lang), features, lang, s.staffOnly)),
+    ...visibleDock({ isStaff, features }).flatMap((s) => navLeaves(s.children, dockTileLabel(s, lang), features, lang, s.staffOnly, TILE_ALIASES[s.key])),
     // Today is My Day alone on the dock (W1-03), so its two old pills are found here by name:
     // Reminders for everyone, Organize for the office (every save on it is requireStaff).
     { kind: "Go to", label: t("sh_reminders"), sub: t("sh_dock_today"), href: "/tasks", aliases: NAV_ALIASES["/tasks"] },
     { kind: "Go to", label: t("sh_organize"), sub: t("sh_dock_today"), href: "/organize", staffOnly: true, aliases: NAV_ALIASES["/organize"] },
-    // The Time Clock is a Money row of its own since cn-v1128 (dock.ts m-clock), so the dock feeds
+    // The Time Clock is an Admin row (the tile that was Money) of its own since cn-v1128 (dock.ts m-clock), so the dock feeds
     // the palette and its words (NAV_ALIASES["/timeclock"]) ride on that leaf; a tech has his Clock tile.
     // New Estimate isn't a dock leaf, but it's where plan take-offs live now (Upload Plans) —
     // give plan/blueprint/take-off searches somewhere real to land. It goes with Estimates, under

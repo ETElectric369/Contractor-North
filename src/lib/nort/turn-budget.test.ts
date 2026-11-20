@@ -197,15 +197,17 @@ describe("the walls the budget sits under", () => {
   const defs = [...AGENT_WRITE_ALLOWED].map((name) => ({ name, def: REGISTRY[name as keyof typeof REGISTRY] }));
 
   // cn-v1170: inquiry.snooze left (a lead has no follow-up day), so seventy-four.
-  it("every write Nort can make is a registry action, seventy-four of them", () => {
-    expect(defs).toHaveLength(74);
+  // cn-v1172: quote.followUp left (an estimate has no follow-up day: "Closing is the reminder yes"),
+  // so seventy-three. A removal the owner decided; nothing was added.
+  it("every write Nort can make is a registry action, seventy-three of them", () => {
+    expect(defs).toHaveLength(73);
     for (const { name, def } of defs) expect(def, name).toBeTruthy();
   });
 
-  it("sixteen stop the turn for a yes, and the fifty-eight the budget counts are the rest", () => {
+  it("sixteen stop the turn for a yes, and the fifty-seven the budget counts are the rest", () => {
     const gated = defs.filter(({ def }) => needsConsent(def, "agent", false)).map(({ name }) => name);
     expect(gated).toHaveLength(16);
-    expect(defs.length - gated.length).toBe(58);
+    expect(defs.length - gated.length).toBe(57);
     expect(gated).toEqual(
       expect.arrayContaining([
         "payment.record",

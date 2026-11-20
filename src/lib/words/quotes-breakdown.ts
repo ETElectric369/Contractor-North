@@ -21,7 +21,7 @@ export const words: WordCatalog = {
   en: {
     // ── A line's description box (LineDescInput): the book's dropdown and the note door ──
     qb_description: "Description",
-    qb_noPriceBookYet: "No price book yet. Upload or build one under Money → Price List and these will autocomplete.",
+    qb_noPriceBookYet: "No price book yet. Upload or build one under Admin → Price List and these will autocomplete.",
     qb_nothingMatches: "Nothing in your price list matches that.",
     qb_showingNofTotal: "Showing {n} of {total} — type to narrow it down.",
     qb_note: "Note",
@@ -98,7 +98,7 @@ export const words: WordCatalog = {
   es: {
     // ── A line's description box (LineDescInput): the book's dropdown and the note door ──
     qb_description: "Descripción",
-    qb_noPriceBookYet: "Aún no hay lista de precios. Súbela o ármala en Dinero → Lista de Precios y esto se autocompletará.",
+    qb_noPriceBookYet: "Aún no hay lista de precios. Súbela o ármala en Admin → Lista de Precios y esto se autocompletará.",
     qb_nothingMatches: "Nada en tu lista de precios coincide con eso.",
     qb_showingNofTotal: "Mostrando {n} de {total} — escribe para acotar.",
     qb_note: "Nota",

@@ -5,6 +5,7 @@ import {
   filedWithNobody,
   inspectionFileHref,
   inspectionList,
+  inspectionsToEstimate,
   type InspectionBuckets,
 } from "./inspections";
 import { visitStands } from "@/lib/leads/new-intake";
@@ -127,6 +128,47 @@ describe("inspectionList: one list, in the order a person works it", () => {
     const list = inspectionList(b, NOW, TZ);
     expect(list.map((x) => `${x.state}:${x.row.id}`)).toEqual(["coming_up:booked", "needs_day:waiting", "write_up:inspected", "missed:went-by"]);
     expect(b.filed.map((r) => r.id).sort()).toEqual(["called-off", "written-up"]);
+  });
+});
+
+describe("inspected people move to the Estimates page when Estimates is on (cn-v1172)", () => {
+  const rows = [
+    row("booked", { starts_at: "2026-03-12T17:00:00Z", inquiry_id: "l1" }),
+    row("waiting", { inquiry_id: "l2", created_at: "2026-03-01T10:00:00Z" }),
+    row("inspected-new", { status: "completed", starts_at: "2026-03-06T17:00:00Z", inquiry_id: "l3" }),
+    row("inspected-old", { status: "completed", starts_at: "2026-03-04T17:00:00Z", customer_id: "c1" }),
+    row("went-by", { starts_at: "2026-03-02T17:00:00Z", inquiry_id: "l4" }),
+    row("written-up", { status: "completed", starts_at: "2026-03-04T17:00:00Z", inquiry_id: "l5" }),
+  ];
+  const b = bucketInspections(rows, new Set(["l5"]), new Set(), NOW, new Set(), new Set(), TZ);
+
+  it("Estimates on: the Inspections list drops the inspected ones and keeps every other open visit", () => {
+    const list = inspectionList(b, NOW, TZ, { estimatesOn: true });
+    expect(list.map((x) => `${x.state}:${x.row.id}`)).toEqual(["coming_up:booked", "needs_day:waiting", "missed:went-by"]);
+  });
+
+  it("the Estimates page's top list is exactly that pile, oldest first", () => {
+    expect(inspectionsToEstimate(b).map((r) => r.id)).toEqual(["inspected-old", "inspected-new"]);
+  });
+
+  it("every open visit is on exactly one of the two pages, and nothing filed is on either", () => {
+    const onInspections = inspectionList(b, NOW, TZ, { estimatesOn: true }).map((x) => x.row.id);
+    const onEstimates = inspectionsToEstimate(b).map((r) => r.id);
+    expect(onInspections.filter((id) => onEstimates.includes(id))).toEqual([]);
+    expect([...onInspections, ...onEstimates].sort()).toEqual(["booked", "inspected-new", "inspected-old", "waiting", "went-by"]);
+    expect([...onInspections, ...onEstimates]).not.toContain("written-up");
+  });
+
+  it("Estimates off: there is no such page, so the inspected ones stay on the Inspections list", () => {
+    const off = inspectionList(b, NOW, TZ, { estimatesOn: false }).map((x) => `${x.state}:${x.row.id}`);
+    expect(off).toEqual(["coming_up:booked", "needs_day:waiting", "write_up:inspected-old", "write_up:inspected-new", "missed:went-by"]);
+    expect(inspectionList(b, NOW, TZ).map((x) => x.row.id)).toEqual(inspectionList(b, NOW, TZ, { estimatesOn: false }).map((x) => x.row.id));
+  });
+
+  it("the list it returns is a copy: sorting it does not reorder the bucket", () => {
+    const top = inspectionsToEstimate(b);
+    top.reverse();
+    expect(b.toWriteUp.map((r) => r.id)).toEqual(["inspected-old", "inspected-new"]);
   });
 });
 

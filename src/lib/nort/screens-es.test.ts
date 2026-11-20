@@ -5,7 +5,7 @@ import { dict } from "@/lib/i18n";
 import { SCREENS, TILE_WORD_KEYS, screenPromptBlock } from "@/lib/nort/screens";
 
 /**
- * NORT KNOWS THE SPANISH NAMES (cn-v1139). A Spanish reader's dock says Ventas, Dinero,
+ * NORT KNOWS THE SPANISH NAMES (cn-v1139). A Spanish reader's dock says Ventas, Admin,
  * Presupuestos; the prompt block that tells Nort where every screen is used to say Sales, Money,
  * Estimates and nothing else, so "abre Ventas" was a guess. Under es each `- name path` line keeps
  * its place and gains "(es: …)", read from the SAME catalog key the dock and the page title read,
@@ -106,30 +106,36 @@ describe("screenPromptBlock under es", () => {
     expect(staffEs).toContain("- Estimates /quotes (es: Presupuestos) (office only)");
     expect(staffEs).toContain("- Invoices /billing (es: Facturas) (office only)");
     expect(staffEs).toContain("- Leads /leads (es: Prospectos) (office only)");
+    // cn-v1172: Closing under Estimates; Customers (now first under Admin) keeps its row's word.
+    expect(staffEs).toContain("- Closing /closing (es: Cierre) (office only)");
+    expect(staffEs).toContain("- Customers /crm (es: Clientes) (office only)");
     expect(staffEs).toContain("- Schedule /schedule (es: Agenda) (office only)");
     expect(techEs).toContain("- My Day /planner (es: Mi Día)");
     expect(techEs).toContain("- Clock /timeclock (es: Reloj)");
   });
 
-  it("the tile line: Ventas = Sales, Dinero = Money, Agenda = Schedule (and Hoy = Today), from the dock's data and words", () => {
-    expect(staffEs).toContain("- The dock's tiles in this person's language: Ventas = Sales → /leads · Dinero = Money → /billing · Agenda = Schedule → /schedule · Hoy = Today → /planner");
+  it("the tile line: Ventas = Sales, Admin = Admin, Agenda = Schedule (and Hoy = Today), from the dock's data and words", () => {
+    // cn-v1172: the tile that was Money is Admin in both languages and opens on Customers (/crm). Its
+    // word is the same, so its part of the line is where the tile lands, not a translation.
+    expect(staffEs).toContain("- The dock's tiles in this person's language: Ventas = Sales → /leads · Admin = Admin → /crm · Agenda = Schedule → /schedule · Hoy = Today → /planner");
     for (const k of TILE_WORD_KEYS) {
       const tile = sectionByKey(k)!;
       expect(tile, k).toBeDefined();
       expect(staffEs).toContain(`${dockTileLabel(tile, "es")} = ${tile.label} → ${tile.href}`);
-      expect(dockTileLabel(tile, "es")).not.toBe(tile.label);
+      if (k === "invoices") expect(dockTileLabel(tile, "es")).toBe("Admin");
+      else expect(dockTileLabel(tile, "es")).not.toBe(tile.label);
     }
     // The three the office taps every day land where the dock lands them.
     expect(sectionByKey("sales")!.href).toBe("/leads");
-    expect(sectionByKey("invoices")!.href).toBe("/billing");
+    expect(sectionByKey("invoices")!.href).toBe("/crm");
     expect(sectionByKey("schedule")!.href).toBe("/schedule");
     // The line sits with the screens, before the shell's spots.
     expect(staffEs.indexOf("- The dock's tiles in this person's language:")).toBeLessThan(staffEs.indexOf("- On every screen:"));
   });
 
-  it("a tech's es block names a tech's doors only: his Hoy tile, no Ventas, Dinero or Agenda, no office screen", () => {
+  it("a tech's es block names a tech's doors only: his Hoy tile, no Ventas, Admin or Agenda, no office screen", () => {
     expect(techEs).toContain("- The dock's tiles in this person's language: Hoy = Today → /planner");
-    for (const w of ["Ventas", "Dinero", "Agenda", "(office only)", "/leads", "/billing"]) expect(techEs).not.toContain(w);
+    for (const w of ["Ventas", "Admin =", "Agenda", "(office only)", "/leads", "/billing", "/crm", "/closing"]) expect(techEs).not.toContain(w);
     for (const s of SCREENS) if (s.staffOnly) expect(techEs).not.toContain(pair(s));
   });
 });

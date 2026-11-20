@@ -65,8 +65,6 @@ export function resolveRowVerb(
   if (verb === "snooze") {
     if (!date) return null;
     // A lead has no Snooze since cn-v1170 (a lead on the Leads list IS the reminder).
-    // Still Waiting: the follow-up day only (quotes.follow_up_at); valid_until never moves.
-    if (kind === "quote_awaiting") return { name: "quote.followUp", input: { id, date } };
     // A hold whose day has come: another day, the reason written only when none is saved.
     if (kind === "job_on_hold") {
       const job = recordId(id, "onhold-");

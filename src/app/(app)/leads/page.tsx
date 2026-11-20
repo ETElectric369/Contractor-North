@@ -14,6 +14,56 @@ import { loadNewIntake, NOT_SOLD_STATUS } from "@/lib/leads/new-intake";
 import { reportError } from "@/lib/observe";
 import { viewerSwitches } from "@/lib/viewer-switches";
 import { featureOn } from "@/lib/features";
+import { readAllPages } from "@/lib/read-all-pages";
+import { leadsNotSoldByEstimate, NOT_SOLD_BY_ESTIMATE_COLUMNS } from "@/lib/leads/not-sold-by-estimate";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+/** The lead columns a fold row reads, either kind. */
+const FOLD_LEAD_COLUMNS = "id, name, company_name, message";
+/** Lead ids per `in` read: a long list in one URL is refused. */
+const ID_CHUNK = 50;
+
+/**
+ * THE LEADS AN ESTIMATE ENDED (cn-v1172). Erik, 2026-11-19: "if they are Not Sold then the data stays
+ * with them in that file for further sales reach out". A lead is never marked Not Sold by hand once an
+ * estimate is written for it (saving the estimate converts the lead), so a customer who said no to the
+ * price was on no list. lib/leads/not-sold-by-estimate decides which leads those are, from every
+ * estimate of the company (read whole: an estimate still in play, for the lead or for its customer,
+ * must never be cut out of the read and the lead called Not Sold on a guess). Nothing is stamped on
+ * the lead.
+ *
+ * `skip`: leads already on the page (the hand-marked fold, the open list), each listed once. `want`:
+ * how many the fold can still show, plus one so it can say it was cut. Newest answer first.
+ */
+async function readNotSoldByEstimate(
+  supabase: SupabaseClient,
+  skip: ReadonlySet<string>,
+  want: number,
+): Promise<{ leads: NotSoldLine[]; error: unknown }> {
+  if (want <= 0) return { leads: [], error: null };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = supabase as any;
+  // EVERY estimate, with or without a lead (cn-v1172 fixer): a duplicated estimate, or one started
+  // from the customer's page, carries no lead, and its customer is what ties it back to one.
+  const quotes = await readAllPages<{ inquiry_id: string | null; status: string | null; customer_id: string | null }>((from, to) =>
+    sb
+      .from("quotes")
+      .select(NOT_SOLD_BY_ESTIMATE_COLUMNS)
+      .order("updated_at", { ascending: false })
+      .order("id")
+      .range(from, to),
+  );
+  if (quotes.error) return { leads: [], error: quotes.error };
+  const ids = leadsNotSoldByEstimate(quotes.rows).filter((id) => !skip.has(id)).slice(0, want);
+  const byId = new Map<string, NotSoldLine>();
+  for (let i = 0; i < ids.length; i += ID_CHUNK) {
+    const { data, error } = await sb.from("inquiries").select(FOLD_LEAD_COLUMNS).in("id", ids.slice(i, i + ID_CHUNK));
+    if (error) return { leads: [], error };
+    for (const l of (data ?? []) as Omit<NotSoldLine, "byEstimate">[]) byId.set(l.id, { ...l, byEstimate: true });
+  }
+  // The rule's order (newest answer first), not the read's.
+  return { leads: ids.map((id) => byId.get(id)).filter((l): l is NotSoldLine => !!l), error: null };
+}
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +71,8 @@ export const dynamic = "force-dynamic";
  * THE LEADS LIST (cn-v1170). Erik, 2026-11-19: "NEW INTAKE ONLY (Remove Follow up-due)", and "if a
  * lead is still on the lead page that IS the reminder ... one badge one list simple". The list is
  * lib/leads/new-intake's (open, and no visit from it still stands: the badge reads the same rule),
- * newest first, one card per lead. Not Sold leads wait in a fold under it, kept on file.
+ * newest first, one card per lead. Not Sold leads wait in a fold under it, kept on file: the ones
+ * marked Not Sold by hand, then (cn-v1172, Estimates on) the ones whose estimate was declined.
  */
 export default async function InquiriesPage({
   searchParams,
@@ -42,7 +93,7 @@ export default async function InquiriesPage({
     // One more than the fold shows, so it can say it was cut.
     supabase
       .from("inquiries")
-      .select("id, name, company_name, message")
+      .select(FOLD_LEAD_COLUMNS)
       .eq("status", NOT_SOLD_STATUS)
       .is("converted_at", null)
       .order("updated_at", { ascending: false })
@@ -60,7 +111,19 @@ export default async function InquiriesPage({
   if (notSoldRead.error) reportError("leads:notSold", notSoldRead.error);
 
   const inquiries = intake.leads;
-  const notSoldRows = (notSoldRead.data ?? []) as NotSoldLine[];
+  const handRows = (notSoldRead.data ?? []) as NotSoldLine[];
+  // THE FOLD'S SECOND KIND (cn-v1172): only where the company writes estimates; off, no read at all.
+  // The fold's count and its cap cover both kinds, the hand-marked first.
+  const byEstimate =
+    featureOn(sw.features, "estimates") && !notSoldRead.error
+      ? await readNotSoldByEstimate(
+          supabase,
+          new Set([...handRows.map((l) => l.id), ...inquiries.map((i) => i.id)]),
+          NOT_SOLD_FOLD_CAP + 1 - handRows.length,
+        )
+      : { leads: [], error: null };
+  if (byEstimate.error) reportError("leads:notSoldByEstimate", byEstimate.error);
+  const notSoldRows = [...handRows, ...byEstimate.leads];
   const notSold = notSoldRows.slice(0, NOT_SOLD_FOLD_CAP);
 
   // The company's clock, and the server's now for each row's running clock (its first draw).
@@ -106,7 +169,15 @@ export default async function InquiriesPage({
         </ul>
       )}
 
-      <NotSoldFold leads={notSold} cut={notSoldRows.length > NOT_SOLD_FOLD_CAP} failed={!!notSoldRead.error} t={t} />
+      {/* A failed estimates read (cn-v1172 fixer) fails only its own part: the hand-marked rows, and
+          their Reopen, were read fine and are drawn, with one line saying what could not be read. */}
+      <NotSoldFold
+        leads={notSold}
+        cut={notSoldRows.length > NOT_SOLD_FOLD_CAP}
+        failed={!!notSoldRead.error}
+        estimatesFailed={!!byEstimate.error}
+        t={t}
+      />
     </div>
   );
 }

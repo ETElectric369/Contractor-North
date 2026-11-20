@@ -193,11 +193,14 @@ describe("the open Inspections pile wears no Done pill", () => {
   it("every tag on a row comes from the one rule — the page and its list write none themselves", () => {
     const page = read("app/(app)/inspections/page.tsx");
     const list = read("app/(app)/inspections/inspection-list.tsx");
+    // cn-v1172: the rows are worded by the one row builder both the Inspections page and the
+    // Estimates page's top list use.
+    const words = read("app/(app)/inspections/row-words.ts");
     // The one rule, handed the row's state (or the fold's ending), the reader's language and
     // translator (the tags' words only).
-    expect(page).toContain("tags: rowTagWords(a, tile, lang, t),");
-    // No pill on the page or its list. A tag written inline there is the bug.
-    for (const f of [page, list]) {
+    expect(words).toContain("tags: rowTagWords(a, tile, lang, t),");
+    // No pill on the page, its list or its rows' words. A tag written inline there is the bug.
+    for (const f of [page, list, words]) {
       expect(f).not.toMatch(/<Badge\b/);
       expect(f).not.toMatch(/\bDone\b/);
     }
@@ -213,11 +216,16 @@ describe("the open Inspections pile wears no Done pill", () => {
 });
 
 describe("the chrome's other numbers", () => {
-  it("the dock badges Needs You (/planner), the leads on the Leads list (/leads) and Reconcile — and nothing else", () => {
+  // cn-v1172: /closing joined the map. It counts only the sent estimates that need a person now
+  // (lib/estimate/closing countClosingAttention: quiet a week, or the offer ending), never every
+  // estimate that is out, so the Sales dot can clear while a customer is still thinking.
+  it("the dock badges Needs You (/planner), the leads on the Leads list (/leads), the Closing estimates that need a person (/closing) and Reconcile — and nothing else", () => {
     const layout = read("app/(app)/layout.tsx");
-    expect(layout).toContain('return { "/planner": needsAction, "/leads": freshLeads, "/reconcile": await reconcileP };');
-    // Three keys in the whole map, and the amber dot on a tile is their sum over the rows it draws.
-    expect([...layout.matchAll(/"\/(planner|leads|reconcile)":/g)].length).toBe(6);
+    expect(layout).toContain('return { "/planner": needsAction, "/leads": freshLeads, "/closing": await closingP, "/reconcile": await reconcileP };');
+    expect(layout).toContain("countClosingAttention(");
+    // Four keys in the whole map, and the amber dot on a tile is their sum over the rows it draws.
+    expect([...layout.matchAll(/"\/(planner|leads|closing|reconcile)":/g)].length).toBe(8);
+    expect([...layout.matchAll(/"\/[a-z-]+": (?:needsAction|freshLeads|0|await [a-zA-Z]+P)[,} ]/g)].length).toBe(8);
   });
 
   /**

@@ -270,10 +270,11 @@ export const SCREEN_ROOTS = [
   "planner", "schedule", "timeclock", "jobs", "quotes", "billing", "bills", "crm", "leads", "inspections",
   "appointments", "settings", "timecards", "price-list", "analytics", "reconcile", "team",
   "tasks", // Reminders (cn-v1128): the full list, everyone sees their own
+  "closing", // Sales > Closing (cn-v1172): the estimates that are out and not answered; office only
 ] as const;
 /** The office's screens: a tech's drive there is refused (and the model is told), never a dead page. */
 export const SCREEN_ROOTS_STAFF_ONLY = new Set<string>([
-  "schedule", "quotes", "billing", "bills", "crm", "leads", "inspections", "timecards", "price-list", "analytics", "reconcile", "team",
+  "schedule", "quotes", "billing", "bills", "crm", "leads", "inspections", "timecards", "price-list", "analytics", "reconcile", "team", "closing",
 ]);
 /** The query keys the pages read (tabs.tsx ?tab=, schedule view/date, planner view/week, …). */
 export const SCREEN_QUERY_KEYS = new Set<string>(["tab", "view", "date", "week", "status", "q", "open", "focus", "task", "type", "sort", "due"]);

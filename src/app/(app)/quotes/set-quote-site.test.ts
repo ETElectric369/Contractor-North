@@ -298,7 +298,7 @@ describe("setQuoteSite: what follows a save", () => {
 
   it("the estimate's page and the list are drawn again", async () => {
     await setQuoteSite("q1", null);
-    expect(vi.mocked(revalidatePath).mock.calls.map((c) => c[0])).toEqual(["/quotes/q1", "/quotes"]);
+    expect(vi.mocked(revalidatePath).mock.calls.map((c) => c[0])).toEqual(["/quotes/q1", "/quotes", "/closing"]);
   });
 });
 
@@ -387,7 +387,7 @@ describe("setQuoteSite: the bills made from the estimate lose their stored copie
     expect(vi.mocked(reportError).mock.calls).toEqual([["setQuoteSite:bills", { message: "the bills tripped" }, { quoteId: "q1" }]]);
     // The estimate's own copy went before the bills were asked for, and the pages are still drawn.
     expect(dropped()).toEqual([["quote", "q1", "org-1"]]);
-    expect(vi.mocked(revalidatePath).mock.calls.map((c) => c[0])).toEqual(["/quotes/q1", "/quotes"]);
+    expect(vi.mocked(revalidatePath).mock.calls.map((c) => c[0])).toEqual(["/quotes/q1", "/quotes", "/closing"]);
   });
 
   it("nothing is filed when the bills read well, with bills or without", async () => {

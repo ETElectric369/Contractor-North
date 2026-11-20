@@ -8,8 +8,7 @@ import { esTitleCase, titleCaseIn } from "../../tests/title-case-words";
 /**
  * THE DOCK'S WORDS IN THE PERSON'S LANGUAGE (cn-v1138; the office's rows too since cn-v1139).
  * lib/dock.ts keeps its English data; the shell's catalog holds sh_dock_<id> for EVERY tile and row
- * (and the lapsed dock's), a row's whenOff words as sh_dock_<id>_off and a tile's whenOnly words as
- * sh_dock_<tile>_only; dockLabel is the one reader every renderer asks. The English it answers is
+ * (and the lapsed dock's) and a row's whenOff words as sh_dock_<id>_off; dockLabel is the one reader every renderer asks. The English it answers is
  * the dock's own label, byte for byte, so nothing the office or a test reads moved.
  */
 const row = (id: string): DockNode => {
@@ -44,6 +43,11 @@ describe("dockLabel", () => {
     expect(dockLabel(row("ma-payroll"), "es")).toBe("Nómina");
     expect(dockLabel(row("sl-leads"), "es")).toBe("Prospectos");
     expect(dockLabel(row("sl-quotes"), "es")).toBe("Presupuestos");
+    // cn-v1172: Closing under Estimates, Customers at the top of Admin.
+    expect(dockLabel(row("sl-closing"), "es")).toBe("Cierre");
+    expect(dockLabel(row("sl-customers"), "es")).toBe("Clientes");
+    expect(dockLabel(row("m-ma-h"), "es")).toBe("Dinero");
+    expect(dockLabel(row("m-ma-h"), "en")).toBe("Money");
     expect(dockLabel(row("m-clock"), "es")).toBe("Reloj");
     expect(dockLabel(row("ck-cards"), "es")).toBe("Tarjetas de Tiempo");
     expect(dockLabel(row("m-bills"), "es")).toBe("Cuentas y Órdenes");
@@ -70,28 +74,29 @@ describe("dockLabel", () => {
     expect(dockLabel({ id: "m-bills", label: "Something Else" }, "es")).toBe("Something Else");
   });
 
-  it("a tile by its key: Today, Schedule, Clock, Sales, Jobs, Money, Office, You, Tools and the lapsed Plan", () => {
+  it("a tile by its key: Today, Schedule, Clock, Sales, Jobs, Admin, Office, You, Tools and the lapsed Plan", () => {
     expect(dockTileLabel(section("today"), "es")).toBe("Hoy");
     expect(dockTileLabel(section("schedule"), "es")).toBe("Agenda");
     expect(dockTileLabel(section("clock"), "es")).toBe("Reloj");
     expect(dockTileLabel(section("sales"), "es")).toBe("Ventas");
     expect(dockTileLabel(section("jobs"), "es")).toBe("Trabajos");
-    expect(dockTileLabel(section("invoices"), "es")).toBe("Dinero");
+    // ADMIN (cn-v1172), the tile that was Money; the same word in Spanish, the tile is narrow.
+    expect(dockTileLabel(section("invoices"), "es")).toBe("Admin");
     expect(dockTileLabel(section("you"), "es")).toBe("Tú");
     expect(dockTileLabel(section("office"), "es")).toBe("Oficina");
     expect(dockTileLabel(section("tools"), "es")).toBe("Herramientas");
     expect(dockTileLabel(section("plan"), "es")).toBe("Plan");
     expect(dockTileLabel(section("jobs"), "en")).toBe("Jobs");
-    expect(dockTileLabel(section("invoices"), "en")).toBe("Money");
-    // The Money tile has no `short` any more (it equalled the label): the phone bar's `s.short ?? tile` draws the tile's words.
+    expect(dockTileLabel(section("invoices"), "en")).toBe("Admin");
+    // The Admin tile has no `short` any more (it equalled the label): the phone bar's `s.short ?? tile` draws the tile's words.
     expect(section("invoices").short).toBeUndefined();
   });
 
-  it("a tile reduced to one row reads sh_dock_<tile>_only: Sales with Leads and Estimates off is Customers → Clientes", () => {
-    const sales = visibleDock({ isStaff: true, features: { ...ALL_ON, leads: false, estimates: false } }).find((s) => s.key === "sales")!;
-    expect(sales.label).toBe("Customers");
-    expect(dockTileLabel(sales, "es")).toBe("Clientes");
-    expect(dockTileLabel(sales, "en")).toBe("Customers");
+  it("no tile is reduced to one row's name any more (cn-v1172): Leads and Estimates off is no Sales tile, and no _only key is left", () => {
+    expect(visibleDock({ isStaff: true, features: { ...ALL_ON, leads: false, estimates: false } }).find((s) => s.key === "sales")).toBeUndefined();
+    for (const lang of ["en", "es"] as const) {
+      expect(Object.keys(dict(lang)).filter((k) => k.startsWith("sh_dock_") && k.endsWith("_only"))).toEqual([]);
+    }
   });
 
   it("every tile and row anybody can see — a tech's, the office's, the lapsed dock's — has a key whose English is the dock's own words", () => {
@@ -99,21 +104,20 @@ describe("dockLabel", () => {
       expect(dict("en")[`sh_dock_${s.key}`], `tile ${s.key}`).toBe(s.label);
       for (const c of s.children) expect(dict("en")[`sh_dock_${c.id}`], `row ${c.id}`).toBe(c.label);
     }
-    // The two variants and the Settings side-tab's group.
+    // The variant and the Settings side-tab's group.
     expect(dict("en")["sh_dock_m-bills_off"]).toBe(DOCK.flatMap((s) => s.children).find((c) => c.id === "m-bills")!.whenOff!.label);
-    expect(dict("en").sh_dock_sales_only).toBe(DOCK.find((s) => s.key === "sales")!.whenOnly!.label);
     expect(dict("en").sh_dock_settings).toBe("Settings");
     expect(dict("es").sh_dock_settings).toBe("Ajustes");
   });
 
-  it("every sh_dock_ key names a real tile or row (or its _off / _only variant, or the Settings side-tab's group) and is Title Case in both languages", () => {
+  it("every sh_dock_ key names a real tile or row (or its _off variant, or the Settings side-tab's group) and is Title Case in both languages", () => {
     const ids = new Set([...DOCK, LAPSED_DOCK].flatMap((s) => [s.key, ...s.children.map((c) => c.id)]));
     /** Sections a renderer synthesizes the way the dock's are drawn (settings-subnav.tsx's group). */
     const synthesized = new Set(["settings"]);
     const keys = Object.keys(dict("en")).filter((k) => k.startsWith("sh_dock_"));
     expect(keys.length).toBeGreaterThanOrEqual(60);
     for (const k of keys) {
-      const id = k.slice("sh_dock_".length).replace(/_(off|only)$/, "");
+      const id = k.slice("sh_dock_".length).replace(/_off$/, "");
       expect(ids.has(id) || synthesized.has(id), k).toBe(true);
       for (const lang of ["en", "es"] as const) expect((lang === "es" ? esTitleCase : titleCase)(dict(lang)[k]), `${lang}:${k} "${dict(lang)[k]}"`).toBe(true); // Spanish: the significant words (cn-v1147)
     }

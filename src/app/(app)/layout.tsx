@@ -40,7 +40,8 @@ import { ToastProvider } from "@/components/toast";
 import { Turned } from "@/components/turned";
 import { LangProvider } from "@/components/lang-provider";
 import { asLang } from "@/lib/locale";
-import { offFeatureKey } from "@/lib/features";
+import { featureOn, offFeatureKey } from "@/lib/features";
+import { countClosingAttention } from "@/lib/estimate/closing";
 import { countTeammates, shellDoors } from "@/lib/feature-doors";
 import { Suspense } from "react";
 import type { Profile, GeoPoint } from "@/lib/types";
@@ -289,6 +290,20 @@ export default async function AppLayout({
   // The unified "Needs action" inbox count, surfaced on the dock Home icon (it
   // already includes the organize/needs-review captures, so no separate badge).
   const tz = settings.timezone || "America/Los_Angeles";
+  // THE CLOSING SHARE OF THE SALES DOT (cn-v1172). Erik: "a place to see that sales need
+  // attention", and "Closing is the reminder yes". The estimates out with no answer that need a
+  // person NOW, by the one rule the page and Needs You read (lib/estimate/closing), so the dot and
+  // the list cannot disagree. Office only, with Estimates on; otherwise no read and no number. It is
+  // started here (it needs the company's today) and never rejects: a failed read is filed and adds 0.
+  const closingP: Promise<number> = (async () => {
+    if (!isStaff || !featureOn(features, "estimates")) return 0;
+    try {
+      return await countClosingAttention(supabase, { todayStr: todayStrInTz(tz) });
+    } catch (e) {
+      reportError("app-layout:closing-badge", e);
+      return 0;
+    }
+  })();
   // STAGE TWO (audit v921): the two reads that actually needed `settings` — the geofence gate and
   // this count's timezone — go together instead of one after the other.
   type OpenEntry = {
@@ -396,10 +411,10 @@ export default async function AppLayout({
       // The lead count ran beside this one (it started with the org read, and never rejects).
       const freshLeads = await freshLeadsP;
       // "/leads" dots only a Leads row that's drawn: with Leads off the dock has none to sum.
-      return { "/planner": needsAction, "/leads": freshLeads, "/reconcile": await reconcileP };
+      return { "/planner": needsAction, "/leads": freshLeads, "/closing": await closingP, "/reconcile": await reconcileP };
     } catch (e) {
       reportError("app-layout:action-items", e);
-      return { "/planner": 0, "/leads": await freshLeadsP, "/reconcile": await reconcileP };
+      return { "/planner": 0, "/leads": await freshLeadsP, "/closing": await closingP, "/reconcile": await reconcileP };
     }
   })();
 

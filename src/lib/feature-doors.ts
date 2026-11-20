@@ -66,6 +66,7 @@ export const FEATURE_ROUTES: readonly { path: string; feature: FeatureKey }[] = 
   { path: "/leads", feature: "leads" },
   { path: "/inspections", feature: "leads" },
   { path: "/quotes", feature: "estimates" },
+  { path: "/closing", feature: "estimates" }, // the sent estimates still waiting on an answer (cn-v1172)
   { path: "/work-orders", feature: "estimates" },
   { path: "/change-orders", feature: "estimates" },
   { path: "/purchasing", feature: "purchase_orders" },

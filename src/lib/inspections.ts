@@ -322,8 +322,9 @@ export type InspectionListState = (typeof INSPECTION_LIST_ORDER)[number];
  *
  *   coming_up   booked for today or later, or waiting on the customer's pick: soonest first.
  *   needs_day   on the books with no day: the one that has waited longest first.
- *   write_up    inspected, and nothing written from it yet: oldest first. It stays on the list, so
- *               nobody falls between Inspections and Estimates.
+ *   write_up    inspected, and nothing written from it yet: oldest first. WHERE IT IS DRAWN depends
+ *               on the Estimates switch (cn-v1172, below): on, it is the Estimates page's top list
+ *               and is left off this one; off, it stays here, so nobody falls between the two pages.
  *   missed      its day went by with nothing captured: newest first.
  *
  * In that order: who to go and inspect, who is waiting on a day, who is waiting on a price, and last
@@ -336,16 +337,25 @@ export type InspectionListState = (typeof INSPECTION_LIST_ORDER)[number];
  *
  * Nothing filed is on it. A finished, Not Sold or cancelled inspection is found in its person's file
  * (the lead's, the customer's, the job's); the few that hang on nobody are filedWithNobody's.
+ *
+ * INSPECTED PEOPLE MOVE TO ESTIMATES (cn-v1172). Erik, 2026-11-19, after the second meeting: "lets
+ * break the Estimate page into 2 parts consisting of completed inspections in its own new list called
+ * Inspections To Estimate, and the other section below is all Estimates". So with `estimatesOn` the
+ * write_up pile is NOT on this list: it is inspectionsToEstimate's, drawn on top of the Estimates
+ * page, and one person is never on both with two sets of buttons. With Estimates switched off there
+ * is no such page, and the pile stays here (its row says Inspected and never names an estimate).
  */
 export function inspectionList<T extends InspectionBucketRow & { created_at?: string | null }>(
   b: InspectionBuckets<T>,
   now: Date = new Date(),
   tz: string = "UTC",
+  opts: { estimatesOn?: boolean } = {},
 ): { row: T; state: InspectionListState }[] {
   const piles = tileInspections(b, now, tz);
   const nowMs = now.getTime();
   const out: { row: T; state: InspectionListState }[] = [];
   for (const state of INSPECTION_LIST_ORDER) {
+    if (state === "write_up" && opts.estimatesOn) continue; // the Estimates page's top list
     for (const row of piles[state]) {
       const ranOut = pickWentUnanswered({ status: row.status, outcome: row.outcome ?? null, starts_at: row.starts_at }, nowMs);
       if (ranOut && row.inquiry_id) continue;
@@ -353,6 +363,16 @@ export function inspectionList<T extends InspectionBucketRow & { created_at?: st
     }
   }
   return out;
+}
+
+/**
+ * INSPECTIONS TO ESTIMATE (cn-v1172): the Estimates page's top list. The very pile the Inspections
+ * list calls write_up (the visit happened and nothing was written from it), oldest first, from the
+ * same buckets Needs You reads. inspectionList leaves these off when Estimates is on, so every
+ * inspected visit is on exactly one of the two pages.
+ */
+export function inspectionsToEstimate<T extends InspectionBucketRow>(b: InspectionBuckets<T>): T[] {
+  return [...b.toWriteUp];
 }
 
 /**

@@ -116,14 +116,25 @@ const leadsOn = (c: TourCtx): boolean => featureOn(c.features, "leads");
 const estimatesOn = (c: TourCtx): boolean => featureOn(c.features, "estimates");
 /** Where the address was first typed, for this company's run. */
 const typedOnce = (c: TourCtx): string => (leadsOn(c) ? "on the phone call" : estimatesOn(c) ? "on the estimate" : "on the job");
-/** run-job's first sentence: the accepted estimate builds the job, or (Estimates off) New Job does. */
+/** run-job's first sentence: the accepted estimate goes on its job, which builds itself when there is
+ *  none (an estimate already on a job catches that job up, quotes/actions updateQuoteStatus: cn-v1172
+ *  fixer), or (Estimates off) New Job makes the job. */
 const jobStarts = (c: TourCtx): string =>
   estimatesOn(c)
-    ? "You mark the estimate accepted and the job builds itself — same customer, same site address, " +
+    ? "You mark the estimate accepted and it goes on its job, which builds itself if there isn't one: same customer, same site address, " +
       (leadsOn(c) ? "the lead it came from, " : "") +
       "plus a work order and a material list off the estimate. "
     : "They say go ahead, and you make the job: tap Plus, then New Job, with the customer, the site address " +
       "and the work typed once. ";
+/**
+ * run-estimate's last sentence (cn-v1172): a sent estimate waits on Sales › Closing, and that list is
+ * the reminder. Erik, 2026-11-19, asked whether Closing replaces the follow-up day on an estimate:
+ * "Closing is the reminder yes". The step is the Estimates switch's, and so is Closing, so it is
+ * never said to a company that has no Closing row.
+ */
+const CLOSING_LINE =
+  "Once it's sent it waits under Sales, on Closing, until they say yes or no. That list is the " +
+  "reminder, so there's no day to set for chasing it.";
 /** run-win up to its last sentence (which is the only part that names Nort). */
 const winSaved = (c: TourCtx): string =>
   `You typed that address once, ${typedOnce(c)}, and it was still with you at the invoice — ` +
@@ -594,14 +605,14 @@ export const LESSONS: Lesson[] = [
     title: "It starts with a phone call",
     say:
       "Let's walk one job the whole way. Work runs one direction through here — Sales, then Jobs, " +
-      "then Money — and it starts under Sales, on Leads, where a phone number on its own is enough " +
+      "then Admin — and it starts under Sales, on Leads, where a phone number on its own is enough " +
       "to save one. Turn that lead into a site visit and the address and what they told you ride " +
       "over with it. Offer them three times instead of playing phone tag — I write the text, you " +
       "send it, and whichever one they tap books itself onto your schedule.",
     plain: {
       say:
         "Let's walk one job the whole way. Work runs one direction through here — Sales, then Jobs, " +
-        "then Money — and it starts under Sales, on Leads, where a phone number on its own is enough " +
+        "then Admin — and it starts under Sales, on Leads, where a phone number on its own is enough " +
         "to save one. Turn that lead into a site visit and the address and what they told you ride " +
         "over with it. Offer them three times instead of playing phone tag — the app writes the text, " +
         "you send it, and whichever one they tap books itself onto your schedule.",
@@ -656,7 +667,8 @@ export const LESSONS: Lesson[] = [
       "Press Generate Line Items and I don't touch your " +
       "estimate — I hand you a list of PROPOSED lines. Tick the ones you want, fix any number I got " +
       "wrong, and press Add. Nothing of mine lands until you do. I work off your own price list and " +
-      "I flag anything that isn't in it yet as my guess and not your price.",
+      "I flag anything that isn't in it yet as my guess and not your price. " +
+      CLOSING_LINE,
     plain: {
       say: (c) =>
         (leadsOn(c)
@@ -667,7 +679,8 @@ export const LESSONS: Lesson[] = [
         "Press Generate Line Items and your estimate isn't " +
         "touched — you get a list of PROPOSED lines. Tick the ones you want, fix any number that's " +
         "wrong, and press Add. Nothing lands until you do. The lines come off your own price list, and " +
-        "anything that isn't in it yet is flagged as a guess, not your price.",
+        "anything that isn't in it yet is flagged as a guess, not your price. " +
+        CLOSING_LINE,
     },
   },
   {

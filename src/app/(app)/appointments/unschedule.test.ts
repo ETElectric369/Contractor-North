@@ -73,14 +73,17 @@ describe("Clear the Date", () => {
     expect(search).toContain('a.starts_at ? formatDate(a.starts_at) : "Waiting for a Day"');
     expect(search).toContain(": `/appointments/${a.id}`");
     const walks = read("src/app/(app)/inspections/page.tsx");
+    // cn-v1172: the read is the one reader both pages use; the rows' words are the one row builder's.
+    const reader = read("src/lib/inspections-read.ts");
+    const words = read("src/app/(app)/inspections/row-words.ts");
     // The Inspections page reads its 500 with the waiting visits FIRST, so a visit waiting for a day is
     // never the one the cap cuts; the order on screen is the list's own (cn-v1171), not the read's.
-    expect(walks).toContain('.order("starts_at", { ascending: false, nullsFirst: true })');
-    expect(walks).toContain("const listed = inspectionList(buckets, now, tz);");
+    expect(reader).toContain('.order("starts_at", { ascending: false, nullsFirst: true })');
+    expect(walks).toContain("const listed = inspectionList(buckets, now, tz, { estimatesOn });");
     // A waiting visit's row says Needs a Day and how long it has waited since it was made: never a
     // blank day and never 1970. A filed one with no day (the fold) says none.
-    expect(walks).toContain('if (state === "needs_day") return ageOf(a.created_at);');
-    expect(walks).toMatch(/const ageOf = \(iso: string \| null \| undefined\): string \| null => \{\s*const day = dayOf\(iso\);/);
+    expect(words).toContain('if (state === "needs_day") return ageOf(a.created_at);');
+    expect(words).toMatch(/const ageOf = \(iso: string \| null \| undefined\): string \| null => \{\s*const day = dayOf\(iso\);/);
     expect(walks).toContain("day: dayWords(a.starts_at, todayStr, tz, lang),");
     expect(translator("en")("ip_needsADay")).toBe("Needs a Day");
     expect(read("src/app/(app)/appointments/[id]/page.tsx")).toContain('<span>{t("vp_waitingForADay")}</span>');

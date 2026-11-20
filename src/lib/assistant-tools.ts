@@ -49,7 +49,7 @@ import { parseShelf } from "@/lib/stock-take";
 import { readBillShelfOff } from "@/lib/job-cost";
 import { boughtLines, breakerCard, groupLabel } from "@/lib/panel/breakers";
 import { jobLabel } from "@/lib/schedule-options";
-import { quoteFollowUpState } from "@/lib/action-items/due-filters";
+import { loadClosing, type ClosingRow } from "@/lib/estimate/closing";
 import { NEW_INTAKE_COUNT_CAP, leadStage, loadNewIntake, standingFor, type LeadStage } from "@/lib/leads/new-intake";
 import { KIND_WORDS, PROGRESS_WORDS, WORK_WORDS, circuitName, sizeWords, sourceWords, spaceMap, titleWords } from "@/lib/panel/model";
 import { spaceWords } from "@/lib/panel/directory";
@@ -604,7 +604,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "needs_attention",
     description:
-      "THE business-analyst sweep — the ONE call that finds everything slipping through the cracks, as NAMED lists (not just counts). Returns six buckets, each with the specific items to act on: past_due_jobs (active jobs whose scheduled end is in the past — likely finished-but-not-marked or running over), unbilled_complete_jobs (completed work with no invoice — money on the table), overdue_invoices (sent/partial past due), stale_estimates (quotes still draft/sent 14+ days with no answer — chase or drop), leads_on_the_list (the leads on the Leads list, oldest first: not scheduled yet and not Not Sold; the next step is to book the inspection or mark it Not Sold), and clocks_running (someone on the clock " + LONG_SHIFT_HOURS + "h+ counted from the start of the shift, across Switch Jobs, or since an earlier day — probably forgot to clock out; each row says since when and why; the office clocks them out at the real time with Clock Out <first name> on Timecards, and can clock anyone out that way at any time). An estimate given a day to ask again is NOT in those buckets until its day: it comes back under waiting with back_on (already handled; never tell them to chase it). A lead has no follow-up day. Use for ANY 'what needs my attention / what am I missing / what's slipping / what should I be on top of / anything overdue or unbilled or stale' — call this FIRST and read back the non-empty buckets by NAME, most-urgent first.",
+      "THE business-analyst sweep — the ONE call that finds everything slipping through the cracks, as NAMED lists (not just counts). Returns six buckets, each with the specific items to act on: past_due_jobs (active jobs whose scheduled end is in the past — likely finished-but-not-marked or running over), unbilled_complete_jobs (completed work with no invoice — money on the table), overdue_invoices (sent/partial past due), stale_estimates (three kinds: kind 'draft', estimates still a draft and untouched 14+ days, to send or drop; kind 'sent', the estimates out with no answer that Sales > Closing says need a person now, each with days_waiting and why: offer_ended, offer_ends or quiet (a week or more with no answer), to Send Again, mark Accepted or mark Not Sold there; kind 'job', won jobs waiting 14+ days for a day), leads_on_the_list (the leads on the Leads list, oldest first: not scheduled yet and not Not Sold; the next step is to book the inspection or mark it Not Sold), and clocks_running (someone on the clock " + LONG_SHIFT_HOURS + "h+ counted from the start of the shift, across Switch Jobs, or since an earlier day — probably forgot to clock out; each row says since when and why; the office clocks them out at the real time with Clock Out <first name> on Timecards, and can clock anyone out that way at any time). An estimate has no follow-up day and nothing about one is parked or waiting: an estimate out with no answer sits on Sales > Closing until it is Accepted or Not Sold, and only the ones that need a person now are in stale_estimates. A lead has no follow-up day. Use for ANY 'what needs my attention / what am I missing / what's slipping / what should I be on top of / anything overdue or unbilled or stale' — call this FIRST and read back the non-empty buckets by NAME, most-urgent first.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -2651,7 +2651,6 @@ export async function runDataTool(
         const safe = async <T,>(fn: () => Promise<T>, fallback: T): Promise<T> => { try { return await fn(); } catch { return fallback; } };
         // THE COMPANY'S TODAY (not UTC's): a day someone picked comes back on that day where they are.
         const todayStr = await safe(() => orgTodayStr(supabase), new Date(now).toISOString().slice(0, 10));
-        const dayOf = (v: unknown) => String(v ?? "").slice(0, 10);
 
         let unbilled: any[] = [], overdueInvoices: any[] = [];
         try {
@@ -2667,25 +2666,41 @@ export async function runDataTool(
           return (data ?? []).map((j: any) => ({ job: j.job_number, name: j.name, customer: j.customers?.name ?? null, days_overdue: daysSince(j.scheduled_end) }));
         }, []);
 
-        // "Stale estimate" has TWO shapes: a formal quote row still sent/draft, OR a JOB stuck in the
-        // 'estimate' stage. Both are unanswered estimates going cold — surface both, 14+ days idle.
-        // EVERY WAIT HAS A DAY (Wave 1): an estimate given a day to ask again (Still Waiting, Nort's
-        // quote.followUp -> follow_up_at) is not slipping until that day comes: it goes in `waiting` with
-        // its day, the way Needs You holds it in the Waiting fold. Before 0366 (no follow_up_at) the
-        // read falls back to the old columns and nothing is parked.
-        const quoteRead = await safe(async () => {
-          const cols = "quote_number, total, updated_at, valid_until, customers(name)";
-          const read = (c: string) => supabase.from("quotes").select(c)
-            .in("status", ["draft", "sent"]).lt("updated_at", iso(now - 14 * 864e5))
+        // "Stale estimate" has THREE shapes: a draft untouched 14+ days, an estimate OUT that the Closing
+        // list says needs a person now, OR a JOB stuck in the 'estimate' stage.
+        // THE CLOSING LIST IS THE REMINDER (cn-v1172, Erik: "Closing is the reminder yes"): an estimate
+        // has no follow-up day, so nothing is parked. The sent ones come from the one reader the Closing
+        // page, the Sales dot and Needs You use (lib/estimate/closing loadClosing), so the sweep and the
+        // page agree; a failed read is said, never an empty bucket.
+        const staleDrafts = await safe(async () => {
+          const { data } = await supabase.from("quotes").select("quote_number, total, updated_at, valid_until, customers(name)")
+            .eq("status", "draft").lt("updated_at", iso(now - 14 * 864e5))
             .order("updated_at", { ascending: true }).limit(15);
-          let r = await read(`${cols}, follow_up_at`);
-          if (r.error) r = await read(cols);
-          return (r.data ?? []) as any[];
+          return ((data ?? []) as any[]).map((q: any) => ({ ref: q.quote_number, name: null, customer: q.customers?.name ?? null, total: money(q.total), days_since_touch: daysSince(q.updated_at), expired: !!(q.valid_until && q.valid_until < todayStr), kind: "draft" }));
         }, [] as any[]);
-        const parkedQuotes = quoteRead.filter((q: any) => quoteFollowUpState(q.follow_up_at, todayStr) === "later");
-        const staleQuotes = quoteRead
-          .filter((q: any) => quoteFollowUpState(q.follow_up_at, todayStr) !== "later")
-          .map((q: any) => ({ ref: q.quote_number, name: null, customer: q.customers?.name ?? null, total: money(q.total), days_since_touch: daysSince(q.updated_at), expired: !!(q.valid_until && q.valid_until < todayStr), kind: "quote" }));
+        const closingRead = await safe(
+          async () => {
+            const r = await loadClosing(supabase, { todayStr });
+            if (r.error) throw r.error;
+            return { rows: r.rows, failed: false };
+          },
+          { rows: [] as ClosingRow[], failed: true },
+        );
+        const staleQuotes = closingRead.rows
+          .filter((r) => r.state.needsAttention)
+          .slice(0, 20)
+          .map((r) => ({
+            ref: r.quote_number,
+            name: r.title,
+            customer: r.customerName,
+            total: money(r.total),
+            days_waiting: r.state.daysWaiting,
+            // Why it needs a person: the offer ended, it ends within days, or a week with no answer.
+            why: r.state.why,
+            sent_on_record: r.state.sentLogged,
+            expired: r.state.offer === "ended",
+            kind: "sent",
+          }));
         const staleJobEstimates = await safe(async () => {
           // Lifecycle rework: the waiting room is to_be_scheduled now — a won job sitting
           // unscheduled for 2+ weeks is exactly the "falling through the cracks" signal.
@@ -2694,7 +2709,7 @@ export async function runDataTool(
             .order("created_at", { ascending: true }).limit(15);
           return (data ?? []).map((j: any) => ({ ref: j.job_number, name: j.name, customer: j.customers?.name ?? null, days_since_touch: daysSince(j.created_at), kind: "job" }));
         }, [] as any[]);
-        const stale_estimates = [...staleJobEstimates, ...staleQuotes];
+        const stale_estimates = [...staleJobEstimates, ...staleQuotes, ...staleDrafts];
 
         // THE LEADS LIST (cn-v1170): the one rule the page, the badge and Needs You read
         // (lib/leads/new-intake), oldest first. A lead has no follow-up day, so none is parked: a
@@ -2710,11 +2725,6 @@ export async function runDataTool(
         const leads_on_the_list = leadRead.rows
           .slice(0, 20)
           .map((l: any) => ({ name: l.name, phone: l.phone, status: l.status, days_since_it_came_in: daysSince(l.created_at), never_contacted: !l.last_contacted_at }));
-
-        // Parked with a day: NOT slipping. Named only so Nort can say when each comes back if asked.
-        const waiting = {
-          estimates: parkedQuotes.map((q: any) => ({ ref: q.quote_number, customer: q.customers?.name ?? null, total: money(q.total), back_on: dayOf(q.follow_up_at) })),
-        };
 
         // THE SHIFT, NOT THE PIECE (audit v994 SW1). A Switch Job cuts the running entry (0288), so an
         // open row may be only the part since the last switch: the clock_in prefilter missed a
@@ -2757,15 +2767,15 @@ export async function runDataTool(
           note: total === 0
             ? "Nothing's slipping — billing, jobs, estimates and leads are all current."
             : "Read back the NON-EMPTY buckets by name, most urgent first: past-due jobs + overdue invoices, then unbilled work, then stale estimates, then leads. One line each with the next action. In voice mode, top 2-3 only.",
-          waiting_note: "`waiting` holds estimates the person already parked with a day (back_on). They are not slipping: never tell them to chase one or set a day for it; say when it comes back only if asked. A lead has no day: one still on the Leads list is in leads_on_the_list.",
+          closing_note: "An estimate has no follow-up day: one that is out with no answer sits on Sales > Closing until it is Accepted or Not Sold. stale_estimates of kind 'sent' are the ones Closing says need a person now (why: offer_ended, offer_ends or quiet); the next action is Send Again, Accepted or Not Sold there. A lead has no day either: one still on the Leads list is in leads_on_the_list.",
           past_due_jobs,
           unbilled_complete_jobs: unbilled,
           overdue_invoices: overdueInvoices,
           stale_estimates,
           leads_on_the_list,
           ...(leadRead.failed ? { leads_note: "The leads could not be read just now: say so, and point them at the Leads page." } : {}),
+          ...(closingRead.failed ? { estimates_note: "The estimates that are out could not be read just now: say so, and point them at Sales > Closing." } : {}),
           clocks_running,
-          waiting,
         });
       }
 

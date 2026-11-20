@@ -318,8 +318,12 @@ describe("F. the page is the one rule's list (cn-v1170)", () => {
   });
 
   it("the Not Sold fold: unconverted Not Sold leads, most recently updated first, fifty and a cut", () => {
-    expect(page).toMatch(/\.select\("id, name, company_name, message"\)\s*\.eq\("status", NOT_SOLD_STATUS\)\s*\.is\("converted_at", null\)\s*\.order\("updated_at", \{ ascending: false \}\)\s*\.limit\(NOT_SOLD_FOLD_CAP \+ 1\)/);
-    expect(page).toContain("<NotSoldFold leads={notSold} cut={notSoldRows.length > NOT_SOLD_FOLD_CAP} failed={!!notSoldRead.error} t={t} />");
+    // cn-v1172: the columns are one constant, shared with the fold's second kind (Not Sold by estimate).
+    expect(page).toContain('const FOLD_LEAD_COLUMNS = "id, name, company_name, message";');
+    expect(page).toMatch(/\.select\(FOLD_LEAD_COLUMNS\)\s*\.eq\("status", NOT_SOLD_STATUS\)\s*\.is\("converted_at", null\)\s*\.order\("updated_at", \{ ascending: false \}\)\s*\.limit\(NOT_SOLD_FOLD_CAP \+ 1\)/);
+    // The count and the cap cover both kinds (cn-v1172); a failed estimates read fails only its own
+    // part, so the hand-marked rows are still drawn (cn-v1172 fixer).
+    expect(page).toMatch(/<NotSoldFold\s+leads=\{notSold\}\s+cut=\{notSoldRows\.length > NOT_SOLD_FOLD_CAP\}\s+failed=\{!!notSoldRead\.error\}\s+estimatesFailed=\{!!byEstimate\.error\}\s+t=\{t\}\s+\/>/);
     // No customers list is read: no door uses it.
     expect(page).not.toContain("listCustomerOptions");
   });

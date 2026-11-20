@@ -27,7 +27,9 @@ import { readNoJobHours, type NoJobHours } from "@/lib/no-job-hours";
 import { isOpenToBuy, newestListPerJob } from "@/lib/materials-checklist";
 import { INQUIRY_ROW_COLUMNS, feederOn, inquiryActionItem, type InquiryRow } from "./switches";
 import { NEW_INTAKE_COUNT_CAP, loadNewIntake } from "@/lib/leads/new-intake";
-import { draftInvoiceState, heldJobState, lateInvoiceFilter, quoteFollowUpState, quoteNoAnswerFilter } from "./due-filters";
+import { draftInvoiceState, heldJobState, lateInvoiceFilter, quoteNoAnswerFilter } from "./due-filters";
+import { CLOSING_QUIET_DAYS } from "@/lib/estimate/closing";
+import { noAnswerYetItem } from "./no-answer-yet";
 import { isMissingColumn } from "@/lib/job-tasks";
 import { featureOn, featuresFromOffKey } from "@/lib/features";
 import { COSTED_INVOICE_COLUMNS, NEEDS_RETURN_DAYS, costedJobIds, daysAgoStr, detectStrayTime, detectUnbilledWork, rollupWorkedJobs } from "./leak-detectors";
@@ -98,12 +100,9 @@ const ORGANIZE_LABEL: Record<string, string> = {
 // point it's worth chasing regardless of whether a due_date was ever entered.
 const INVOICE_STALE_DAYS = 30;
 
-// A sent quote/estimate with no reply for this many days has gone quiet — time to
-// nudge the customer before the lead cools off entirely.
-const QUOTE_QUIET_DAYS = 7;
-// ...and one whose valid-until window closes within this many days (or already passed) is listed
-// whatever its age: QUOTE_EXPIRY_SOON_DAYS, which lives in the one rule since cn-v1162 (the rule
-// marks the same window Due, and it cannot import this build).
+// A sent estimate with no answer CLOSING_QUIET_DAYS after its last send, or whose valid-until window
+// closes within QUOTE_EXPIRY_SOON_DAYS (or already passed), needs a person: the Closing list's one
+// rule (lib/estimate/closing, cn-v1172), which the Closing page and the Sales dot read too.
 
 /** How many jobs the Jobs Needing a Day read looks at (newest first); more says "N+". */
 const JOBS_DAY_READ_CAP = 200;
@@ -594,32 +593,20 @@ async function buildActionItems(ctx: {
           .order("created_at", { ascending: true })
           .limit(50)
       : empty,
-    // Quotes/estimates sent but not answered. follow_up_at (0366, Still Waiting and Nort's
-    // quote.followUp) is read when the column exists; before 0366 the same read runs without it,
-    // the old rule alone decides, and no Still Waiting is drawn. The Now rule runs IN the read
-    // (quoteNoAnswerFilter), so its exact count is the No Answer Yet pile's, never every sent
-    // estimate; the ones whose follow-up day is later are the fold's, read beside it.
+    // Estimates sent and not answered: the Closing list's candidates (cn-v1172). The database keeps a
+    // pre-filter (quoteNoAnswerFilter: written CLOSING_QUIET_DAYS ago, or the offer ends soon or
+    // ended). A last send is never earlier than the day it was written, so every estimate the one
+    // rule (closingState) calls quiet is in this read; the rule then decides each row by its last
+    // logged send, read below. No follow-up day: "Closing is the reminder yes".
+    // The job rides along (job_id, its status): the one settled rule (quoteSettled) reads it.
     isStaff
-      ? (async () => {
-          const read = (cols: string, rule: string) =>
-            supabase.from("quotes").select(cols, { count: "exact" }).eq("status", "sent").or(rule).order("created_at", { ascending: true }).limit(50);
-          // The job rides along (job_id, its status): the one settled rule (quoteSettled) reads it.
-          const base = "id, quote_number, doc_type, status, total, valid_until, created_at, job_id, customer_id, customers(name), jobs:job_id(status)";
-          const [withDay, later] = await Promise.all([
-            read(`${base}, follow_up_at`, quoteNoAnswerFilter(todayStr, QUOTE_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS, true)),
-            supabase
-              .from("quotes")
-              .select(`${base}, follow_up_at`)
-              .eq("status", "sent")
-              .gt("follow_up_at", todayStr)
-              .order("follow_up_at", { ascending: true })
-              .limit(50),
-          ]);
-          if (withDay.error && isMissingColumn(withDay.error)) {
-            return { ...(await read(base, quoteNoAnswerFilter(todayStr, QUOTE_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS, false))), noFollowUp: true, later: { data: [], error: null } };
-          }
-          return { ...withDay, later: later as Read };
-        })()
+      ? supabase
+          .from("quotes")
+          .select("id, quote_number, doc_type, status, total, valid_until, created_at, job_id, customer_id, customers(name), jobs:job_id(status)", { count: "exact" })
+          .eq("status", "sent")
+          .or(quoteNoAnswerFilter(todayStr, CLOSING_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS))
+          .order("created_at", { ascending: true })
+          .limit(50)
       : empty,
     // Accepted estimates — THE WIN. The job's scheduled_start and status (joined) say whether it has
     // been handled; a held job waits with its own day; quoteSettled says whether the money moved.
@@ -734,7 +721,7 @@ async function buildActionItems(ctx: {
     receiptsP,
     waitsP,
   ])) as [
-    Read, Read, Read, Read, Read, Read & { noFollowUp?: boolean; later?: Read }, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, DoneRead, Read,
+    Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, DoneRead, Read,
     Read & { withDay: boolean }, Read | null, NeedsYouWaits,
   ];
 
@@ -774,7 +761,6 @@ async function buildActionItems(ctx: {
     ...new Set(
       [
         ...((quoteR.data ?? []) as any[]),
-        ...((quoteR.later?.data ?? []) as any[]),
         ...((acceptedR.data ?? []) as any[]),
         ...((draftQuoteR.data ?? []) as any[]),
       ]
@@ -784,15 +770,38 @@ async function buildActionItems(ctx: {
   ];
   const namingInvoices = new Map<string, SettledInvoice[]>();
   const revisionsOf = new Map<string, { status?: string | null }[]>();
+  // THE LAST LOGGED SEND of each sent estimate read (sent_messages, 0407; cn-v1172): the Closing
+  // rule measures the wait from it, as the Closing page does. A failed read is said to the ops sink
+  // and reads as no send on record (the wait is then measured from the day it was written).
+  const lastSentOf = new Map<string, string>();
+  const sentIds = ((quoteR.data ?? []) as any[]).map((q) => (q?.id ? String(q.id) : "")).filter(Boolean);
   {
     const orgId = quoteIdsInPlay.length ? await orgIdP : null;
     if (orgId) {
-      const [namedR, revR] = (await Promise.all([
+      const [namedR, revR, sendR] = (await Promise.all([
         supabase.from("invoices").select("id, quote_id, job_id, status, created_at, invoice_kind").eq("org_id", orgId).in("quote_id", quoteIdsInPlay).limit(500),
         supabase.from("quotes").select("id, revises_quote_id, status").eq("org_id", orgId).in("revises_quote_id", quoteIdsInPlay).limit(500),
-      ]).catch((e) => [{ data: null, error: e }, { data: null, error: e }])) as Read[];
+        sentIds.length
+          ? supabase
+              .from("sent_messages")
+              .select("doc_id, sent_at")
+              .eq("org_id", orgId)
+              .eq("doc_kind", "quote")
+              .in("doc_id", sentIds)
+              .order("sent_at", { ascending: false })
+              .limit(2000)
+          : Promise.resolve({ data: [], error: null }),
+      ]).catch((e) => [{ data: null, error: e }, { data: null, error: e }, { data: null, error: e }])) as Read[];
       if (namedR.error) reportError("action-items.quoteInvoices", namedR.error);
       if (revR.error && !isMissingColumn(revR.error)) reportError("action-items.quoteRevisions", revR.error);
+      if (sendR.error) reportError("action-items.quoteSends", sendR.error);
+      for (const r of (sendR.data ?? []) as { doc_id?: string | null; sent_at?: string | null }[]) {
+        const k = r.doc_id ? String(r.doc_id) : "";
+        const at = typeof r.sent_at === "string" ? r.sent_at : "";
+        if (!k || !Number.isFinite(Date.parse(at))) continue;
+        const had = lastSentOf.get(k);
+        if (!had || Date.parse(at) > Date.parse(had)) lastSentOf.set(k, at);
+      }
       for (const r of (namedR.data ?? []) as SettledInvoice[]) {
         const k = String(r.quote_id ?? "");
         if (k) namingInvoices.set(k, [...(namingInvoices.get(k) ?? []), r]);
@@ -1078,72 +1087,18 @@ async function buildActionItems(ctx: {
   }
   counts.late_invoices = codeCount(invR);
 
-  // ── Sent estimates gone quiet — once the customer has had it QUOTE_QUIET_DAYS+ with no answer, or
-  // the valid-until window is closing/past. THE FOLLOW-UP DAY (0366 quotes.follow_up_at, Still
-  // Waiting or Nort's quote.followUp; never valid_until, the customer's offer) wins: a day after
-  // today waits in the fold with that day, and on its day it is back even if it isn't 7 days quiet.
+  // ── NO ANSWER YET: the Closing list's estimates that need a person now (cn-v1172), by the one rule
+  // the Closing page and the Sales dot read (no-answer-yet noAnswerYetItem -> closingState): the offer
+  // ended or ends soon, or CLOSING_QUIET_DAYS since the last send. Settled ones (won and billed,
+  // closed, replaced) are off by quoteSettled. No follow-up day and no Waiting row: the list is the
+  // reminder (Erik: "Closing is the reminder yes").
   {
-    const followUpReady = !quoteR.noFollowUp;
-    // The Now read (its rule in SQL) and the fold's read (a follow-up day after today), one pass: the
-    // per-row rule below still decides, and an estimate in both reads is placed once.
-    const seenQuotes = new Set<string>();
-    for (const q of [...((quoteR.data ?? []) as any[]), ...((quoteR.later?.data ?? []) as any[])]) {
-      if (seenQuotes.has(String(q.id))) continue;
-      seenQuotes.add(String(q.id));
-      // Won and billed, closed, or replaced: nothing is waiting on an answer (quoteSettled).
-      if (settledOf(q).settled) continue;
-      const daysOut = q.created_at ? Math.floor((todayMs - Date.parse(q.created_at)) / 86_400_000) : 0;
-      const daysToExpiry = q.valid_until ? Math.floor((Date.parse(q.valid_until) - todayMs) / 86_400_000) : null;
-      const quiet = daysOut >= QUOTE_QUIET_DAYS;
-      const expiring = daysToExpiry != null && daysToExpiry <= QUOTE_EXPIRY_SOON_DAYS;
-      const followUp = quoteFollowUpState(q.follow_up_at, todayStr);
-      const who = one(q.customers as any)?.name ?? null;
-      const doc = (q.doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote";
-      if (followUp === "later") {
-        const row = waitingRow({
-          id: q.id,
-          kind: "quote_awaiting",
-          title: [who, q.quote_number || doc].filter(Boolean).join(" · "),
-          why: "No Answer Yet",
-          backOn: q.follow_up_at,
-          href: `/quotes/${q.id}`,
-        });
-        if (row) waiting.push(row);
-        continue;
-      }
-      if (followUp === "none" && !quiet && !expiring) continue; // still fresh — give the customer room
-      items.push({
-        id: q.id,
-        kind: "quote_awaiting",
-        title: `${doc} ${q.quote_number} awaiting reply`,
-        subtitle: who ?? formatCurrency(Number(q.total ?? 0)),
-        // The customer in bold; why it is here as a key: the follow-up day came, the offer ends or
-        // ended (its day a slot), else no answer yet. The sent day is `since`, below.
-        who: who || null,
-        what: {
-          key: followUp === "due" ? "ny_w_docFollowUp" : daysToExpiry != null && daysToExpiry < 0 ? "ny_w_docOfferEnded" : expiring ? "ny_w_docOfferEnds" : "ny_w_docNoAnswer",
-          vars: {
-            docKey: doc === "Estimate" ? "ny_docEstimate" : "ny_docQuote",
-            ref: q.quote_number ?? null,
-            ...(followUp !== "due" && expiring ? { day: q.valid_until ?? null } : {}),
-          },
-        },
-        // The follow-up day he picked, when that's why it's here; else the expiry (that's the clock
-        // that matters); fall back to created so undated offers still sort by age.
-        when: (followUp === "due" ? q.follow_up_at : null) ?? q.valid_until ?? q.created_at ?? null,
-        since: q.created_at ?? null,
-        // ITS CLOCK (cn-v1162): the follow-up day he picked, once it came, or the offer's last day.
-        // Quiet a week is why it is listed, never a clock: the sent day is the office's own.
-        clock: dueClock("quote_awaiting", [followUp === "due" ? q.follow_up_at : null, q.valid_until], { todayStr, tz }),
-        // Past its valid-until the offer is dying — bump it above the routine chase.
-        urgency: daysToExpiry != null && daysToExpiry < 0 ? 2 : 1,
-        done: false,
-        href: `/quotes/${q.id}`,
-        // Still Waiting needs the follow-up day's column (0366); without it, Won It and Lost.
-        affordances: followUpReady ? AFFORDANCES.quote_awaiting : AFFORDANCES.quote_awaiting.filter((v) => v !== "snooze"),
-        amount: Number(q.total ?? 0),
-        dated: "Sent",
-      });
+    for (const q of (quoteR.data ?? []) as any[]) {
+      const row = noAnswerYetItem(
+        { ...q, id: String(q.id), customerName: one(q.customers as any)?.name ?? null },
+        { settled: settledOf(q).settled, lastSentAt: lastSentOf.get(String(q.id)) ?? null, todayStr, tz },
+      );
+      if (row) items.push(row);
     }
     counts.no_answer_yet = codeCount(quoteR);
   }

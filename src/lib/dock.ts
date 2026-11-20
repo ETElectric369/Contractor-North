@@ -37,6 +37,7 @@ import {
   CreditCard,
   Download,
   Settings,
+  Handshake,
   type LucideIcon,
 } from "lucide-react";
 import { titleCase } from "@/lib/utils";
@@ -57,7 +58,7 @@ export interface DockNode {
   techOnly?: boolean;
   /** Extra route prefixes this page owns for active-section matching — routes that live
    *  under a different path than the child's href (e.g. Bills & POs owns /purchasing:
-   *  PO detail pages live there but belong to Money). Never rendered as links. */
+   *  PO detail pages live there but belong to Admin). Never rendered as links. */
   owns?: string[];
   /** The switch this row belongs to (lib/features): off, the row is not drawn (visibleDock). */
   feature?: FeatureKey;
@@ -94,12 +95,6 @@ export interface DockSection {
    * one row for each instead. A sixth tile shrank every tile under the 44px tap size.
    */
   inMenu?: boolean;
-  /**
-   * THE TILE'S NAME WHEN ONE ROW IS ALL THAT'S LEFT. Sales with Leads and Estimates both off is
-   * only its Customers row, so the tile says Customers (and lands there, which visibleDock does
-   * anyway). A section field, never company code: any tile reduced to `rowId` reads `label`.
-   */
-  whenOnly?: { rowId: string; label: string };
 }
 
 /** The Jobs rows' words stay single-sourced in jobStatusLabel (Title Cased here, Erik's law for
@@ -116,7 +111,7 @@ const JOB_STATUS_ICONS: Record<JobStatus, LucideIcon> = {
 };
 
 // The dock, re-nerved to Alexa's office-designed map (June 26), then cut to five tiles for staff
-// and four for a tech (Wave 1, W1-07/W1-08): Today · Schedule · Sales · Jobs · Money for the
+// and four for a tech (Wave 1, W1-07/W1-08): Today · Schedule · Sales · Jobs · Admin for the
 // office, Today · Clock · Jobs · You for the crew. Flat sections — every title is ONE CLICK to its
 // main page; its pages live in the left sidebar (desktop) or the top strip (mobile). Office and
 // Tools are still sections here, but they live behind the initials (inMenu), not on the bar.
@@ -149,7 +144,7 @@ export const DOCK: DockSection[] = [
   },
   {
     // THE CREW'S CLOCK (W1-08). Staff clock in on My Day's Now card, whose footer keeps a
-    // Timeclock link (Switch Job, Split); the office reads hours under Money › Timecards. So the
+    // Timeclock link (Switch Job, Split); the office reads hours under Admin › Timecards. So the
     // tile is a tech's only, and a tech's /timeclock still lights it: the role filter runs first,
     // so Timecards' claim on /timeclock (it is staff-only) never reaches him.
     key: "clock",
@@ -165,18 +160,24 @@ export const DOCK: DockSection[] = [
     icon: TrendingUp,
     href: "/leads",
     staffOnly: true,
-    // Leads and Estimates both off: the one row left is Customers, so the tile says so.
-    whenOnly: { rowId: "sl-customers", label: "Customers" },
     // The pipeline in order: Leads → Inspections (the site visit between a lead and its
     // estimate — an inspection IS an appointment type, Erik 2026-07-14; one word for it (lib/statuses): the
-    // route stays /inspections and the id stays sl-inspections) → Estimates, and the people it all
-    // ends up with: Customers (the Contacts tile folded in here, W1-07). Customers carries no
-    // switch, so Sales never disappears; /crm/[id] lights it.
+    // route stays /inspections and the id stays sl-inspections) → Estimates → Closing.
+    //
+    // CLOSING (cn-v1172): every estimate that is out with no answer yet, the inbox a salesperson
+    // works until it is Accepted or Not Sold. Erik, 2026-11-19: "a new sub-nav tab right below
+    // Estimates called Closing as an inbox for estimates that havent been accepted", and "Closing
+    // is the reminder yes", so it replaces the follow-up day an estimate used to carry. It is the
+    // Estimates switch's, like the Estimates row.
+    //
+    // CUSTOMERS LEFT SALES (cn-v1172): "Lets move the customers tab out of sales and onto the top of
+    // the sub-nav list under Money". Every row left here has a switch, so a company with Leads and
+    // Estimates both off has no Sales tile at all (the tile that read "Customers" is gone with it).
     children: [
       { id: "sl-leads", label: "Leads", icon: UserPlus, href: "/leads", feature: "leads" },
       { id: "sl-inspections", label: "Inspections", icon: ClipboardCheck, href: "/inspections", feature: "leads" },
       { id: "sl-quotes", label: "Estimates", icon: FileText, href: "/quotes", feature: "estimates" },
-      { id: "sl-customers", label: "Customers", icon: Users, href: "/crm" },
+      { id: "sl-closing", label: "Closing", icon: Handshake, href: "/closing", feature: "estimates" },
     ],
   },
   {
@@ -209,15 +210,21 @@ export const DOCK: DockSection[] = [
     ],
   },
   {
-    // Renamed in spirit to "Money" — this is where the owner looks for everything dollar-shaped.
-    // The money-admin cluster (Payroll / Tax report / Analytics / Recurring) was promoted UP here
-    // out of Office's 3rd-level bucket so it's one reach from the billing hub.
+    // ADMIN (cn-v1172), the tile that was Money: "Lets change the name of the Dock tab Money to
+    // Admin", Erik 2026-11-19. The key stays `invoices` (badges, tests and the shell read it). The
+    // money-admin cluster (Payroll / Tax report / Analytics / Recurring) was promoted UP here out of
+    // Office's 3rd-level bucket so it's one reach from the billing hub.
+    //
+    // It OPENS ON CUSTOMERS, its first row: "move the customers tab out of sales and onto the top of
+    // the sub-nav list under Money". The row id stays sl-customers (Nort's screens and the words
+    // name it); /crm/[id] lights this tile now.
     key: "invoices",
-    label: "Money",
+    label: "Admin",
     icon: Receipt,
-    href: "/billing",
+    href: "/crm",
     staffOnly: true,
     children: [
+      { id: "sl-customers", label: "Customers", icon: Users, href: "/crm" },
       // Day-to-day billing.
       { id: "m-billing-h", label: "Billing", icon: Receipt, header: true },
       // ONE INVOICES PAGE (W1-29): who owes you, what's late, and what came in. Accounts Receivable
@@ -234,7 +241,7 @@ export const DOCK: DockSection[] = [
       // the crew's now — "time clock point to money with timecards on the subnav", Erik 2026-09-30.
       { id: "ck-cards", label: "Timecards", icon: CalendarClock, href: "/timecards", staffOnly: true },
       // Purchase Orders off: the row reads "Bills" and still owns /purchasing, so a PO opened by
-      // a link lights Money (with the Off line on top).
+      // a link lights Admin (with the Off line on top).
       { id: "m-bills", label: "Bills & POs", icon: Wallet, href: "/bills", owns: ["/purchasing"], whenOff: { feature: "purchase_orders", label: "Bills" } },
       // RECONCILE (cn-v1037): the two-records-that-should-agree work that used to be a collapsed
       // fold at the bottom of Bills. A SIBLING of Bills, never a tile of its own — it is occasional
@@ -244,8 +251,9 @@ export const DOCK: DockSection[] = [
       // No `feature` key: this is not a paid tier and KISS says no new switch.
       { id: "m-recon", label: "Reconcile", icon: ArrowLeftRight, href: "/reconcile", staffOnly: true },
       { id: "m-price", label: "Price List", icon: Tags, href: "/price-list" },
-      // Money admin — promoted out of Office (Alexa's open "under billing?" call, now answered).
-      { id: "m-ma-h", label: "Money Admin", icon: Calculator, header: true },
+      // Money admin — promoted out of Office (Alexa's open "under billing?" call, now answered). The
+      // heading says Money (cn-v1172): the tile above it is Admin now, and "Admin" twice reads as a typo.
+      { id: "m-ma-h", label: "Money", icon: Calculator, header: true },
       { id: "ma-payroll", label: "Payroll", icon: Banknote, href: "/payroll", feature: "crew_payroll" },
       // No switch: the Tax Report carries the mileage deduction, which is not Sales Tax.
       { id: "ma-tax", label: "Tax Report", icon: Calculator, href: "/tax-report" },
@@ -290,7 +298,7 @@ export const DOCK: DockSection[] = [
       // The office's Handbook row (it writes the handbook). A tech's is under You, so he sees it once.
       { id: "o-handbook", label: "Handbook", icon: BookOpen, href: "/handbook", staffOnly: true, feature: "crew_payroll" },
       // Stock — the money-admin cluster (Payroll/Tax/Analytics/Recurring) was promoted
-      // up to the Money section; only Inventory (warehouse stock, not a dollar ledger) stays here.
+      // up to the Admin section; only Inventory (warehouse stock, not a dollar ledger) stays here.
       { id: "o-stock-h", label: "Stock", icon: Boxes, header: true, staffOnly: true },
       { id: "ma-stock", label: "Shop Stock", icon: Boxes, href: "/inventory", staffOnly: true, feature: "shop_stock" },
       // Diagnostics. Settings is NO LONGER a link here (zero-duplication law): it lives
@@ -376,7 +384,8 @@ export const LAPSED_DOCK: DockSection = {
  *   switches  a row or tile whose switch is off is not drawn. A heading left with no rows under
  *             it goes; a tile whose rows were all switched off goes; a tile whose own landing page
  *             was switched off lands on its first row still drawn (Sales with Leads off: /quotes;
- *             with Estimates off too: /crm, and the tile reads Customers). "Bills & POs" reads "Bills".
+ *             with Estimates off too, every Sales row is off and the tile goes). "Bills & POs" reads
+ *             "Bills".
  *
  * inMenu sections (Office, Tools) are returned like any other: the active section, the strip, the
  * sheet, the lg column and search all need them. Only the rail and the phone bar skip them
@@ -414,11 +423,6 @@ export function visibleDock({ isStaff, features, lapsed = false }: { isStaff: bo
       (c) => c.href && basePath(c.href) === basePath(s.href) && (!mine(c) || !on(c.feature)),
     );
     const href = landingHidden ? (children.find((c) => c.href)?.href ?? s.href) : s.href;
-    // One row left, and it is the one the section names itself after then: Sales → Customers.
-    const drawn = children.filter((c) => c.href);
-    if (s.whenOnly && drawn.length === 1 && drawn[0].id === s.whenOnly.rowId) {
-      return [{ ...s, label: s.whenOnly.label, short: undefined, href, children }];
-    }
     return [{ ...s, href, children }];
   });
 }
@@ -436,10 +440,10 @@ export const menuSections = (sections: DockSection[]): DockSection[] => sections
  *   3. else the ONE row whose page this is, whatever its query: a tech's bare /settings lights
  *      Your Settings (/settings?tab=you). Two or more such rows (the Jobs statuses on bare /jobs)
  *      light nothing rather than guess.
- *   4. else the ONE row that OWNS this route. THE CLOCK POINTS AT MONEY (Erik, 2026-09-30: "lets also
+ *   4. else the ONE row that OWNS this route. THE CLOCK POINTS AT MONEY, the tile now called Admin (Erik, 2026-09-30: "lets also
  *      have time clock point to money with timecards on the subnav"). activeSection already put the
- *      office on Money while they are on the Timeclock — Timecards owns /timeclock — but no row lit,
- *      so the strip said "Money" over nothing. The office's clock now lights Timecards, which is where
+ *      office on Admin while they are on the Timeclock — Timecards owns /timeclock — but no row lit,
+ *      so the strip said the tile's name over nothing. The office's clock now lights Timecards, which is where
  *      their hours turn into money. No new nav entry: the nav doctrine forbids a second door to one
  *      page, and a tech's own /timeclock still lights his Clock tile by rule 2.
  */
@@ -465,7 +469,7 @@ export function activeRowHref(rows: DockNode[], pathname: string, current: strin
  * A section owns a pathname when the pathname is the section href, sits under it, is one
  * of the section's child pages, sits under one of them (the detail routes: /quotes/[id],
  * /forms/[id]…), or matches a child's `owns` alias prefixes (/purchasing/[id] belongs to
- * Money's Bills & POs). /work-orders/[id] is NOT owned anymore — work orders left the
+ * Admin's Bills & POs). /work-orders/[id] is NOT owned anymore — work orders left the
  * dock (hub-only), so those routes light nothing by design.
  *
  * Returns undefined when nothing owns the route — light NOTHING rather than lie. (The old

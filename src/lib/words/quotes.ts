@@ -65,6 +65,8 @@ export const words: WordCatalog = {
     "src/components/share-icon-button.tsx",
     "src/components/preview-button.tsx",
     "src/app/(app)/appointments/new-inspection-button.tsx",
+    // cn-v1172 (EST): the Estimates page's two parts
+    "src/app/(app)/quotes/to-estimate-section.tsx",
   ],
   sameInBoth: ["qt_colTotal", "qt_breakerExample"],
   en: {
@@ -329,6 +331,11 @@ export const words: WordCatalog = {
     qt_btn_bookAnInspection: "Book an Inspection",
     // cn-v1171 (fixer, skeptic #74): Use This Customer drops the address typed here
     qt_addressOnFilePrints: "The address you typed was not saved: this customer keeps the address on file. Edit the customer to change it.",
+    // cn-v1172 (EST): the Estimates page in two parts
+    qt_toEstimateHeading: "Inspections to Estimate",
+    qt_toEstimateNone: "No inspections are waiting on an estimate.",
+    qt_toEstimateFailed: "The inspections waiting on an estimate couldn't load. Reload to try again.",
+    qt_allEstimatesHeading: "All Estimates",
   },
   es: {
     qt_status_draft: "borrador",
@@ -561,5 +568,10 @@ export const words: WordCatalog = {
     qt_btn_bookAnInspection: "Agendar una Inspección",
     // cn-v1171 (fixer, skeptic #74): Use This Customer drops the address typed here
     qt_addressOnFilePrints: "La dirección que escribiste no se guardó: este cliente conserva la que ya tiene. Edita el cliente para cambiarla.",
+    // cn-v1172 (EST): the Estimates page in two parts
+    qt_toEstimateHeading: "Inspecciones por Presupuestar",
+    qt_toEstimateNone: "No hay inspecciones esperando un presupuesto.",
+    qt_toEstimateFailed: "No se pudieron cargar las inspecciones que esperan un presupuesto. Recarga para intentar de nuevo.",
+    qt_allEstimatesHeading: "Todos los Presupuestos",
   },
 };

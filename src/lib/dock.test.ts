@@ -70,7 +70,7 @@ describe("DOCK jobs section ← JOB_STATUSES", () => {
  *  Today — it sat as Clock's 3rd pill, a planning surface hidden behind the timeclock's impulse
  *  door (the time-section gut's "lostness cause a"). W1-08 then split the WHEN-DID pair by who
  *  uses it: the Clock tile is the crew's (staff clock in on My Day's Now card), and Timecards is
- *  the office's, under Money. This pins placement, gating AND zero-duplication. */
+ *  the office's, under Admin (the tile that was Money, cn-v1172). This pins placement, gating AND zero-duplication. */
 describe("DOCK time doors — Schedule after Today, Clock is the crew's, Timecards the office's", () => {
   const clock = DOCK.find((s) => s.key === "clock");
 
@@ -88,7 +88,7 @@ describe("DOCK time doors — Schedule after Today, Clock is the crew's, Timecar
     expect((clock?.children ?? []).map((c) => c.href)).toEqual(["/timeclock"]);
   });
 
-  it("Time Clock is a Money row right after Invoices, then Timecards; office-only; nothing owns /timeclock (cn-v1128)", () => {
+  it("Time Clock is an Admin row right after Invoices, then Timecards; office-only; nothing owns /timeclock (cn-v1128)", () => {
     const money = DOCK.find((s) => s.key === "invoices")!.children;
     const at = money.findIndex((c) => c.id === "ck-cards");
     expect(money[at]).toMatchObject({ label: "Timecards", href: "/timecards", staffOnly: true });
@@ -108,14 +108,14 @@ describe("DOCK time doors — Schedule after Today, Clock is the crew's, Timecar
    * nothing. It is the only badge under this tile, and the only one it may grow: a number on chrome
    * has to be a human decision today (lib/action-items/types.ts), which a ledger total is not.
    */
-  it("Money has one row for the money coming in (Invoices), and no Accounts Receivable, Payments or Petty Cash row", () => {
+  it("Admin has one row for the money coming in (Invoices), and no Accounts Receivable, Payments or Petty Cash row", () => {
     const money = DOCK.find((s) => s.key === "invoices")!.children;
     const ids = money.map((c) => c.id);
     for (const gone of ["m-ar", "m-pay", "ma-petty"]) expect(ids, gone).not.toContain(gone);
     const hrefs = money.map((c) => c.href).filter(Boolean).map((h) => basePath(h!));
     for (const gone of ["/billing/ar", "/payments", "/petty-cash"]) expect(hrefs, gone).not.toContain(gone);
     expect(money.filter((c) => c.href && basePath(c.href) === "/billing").map((c) => c.id)).toEqual(["m-inv"]);
-    // The old routes still light Money (they're under /billing, or redirect there before they render).
+    // The old routes still light Admin (they're under /billing, or redirect there before they render).
     expect(activeSection("/billing/ar")?.key).toBe("invoices");
   });
 
@@ -131,10 +131,10 @@ describe("DOCK time doors — Schedule after Today, Clock is the crew's, Timecar
    *
    * The two-records-that-should-agree work was a collapsed fold at the bottom of /bills. It is
    * occasional office work — nobody taps it in a truck — so it belongs one row below the page it
-   * came off, inside Money, and nowhere near the main dock. Staff only, because techs never see
+   * came off, inside Admin, and nowhere near the main dock. Staff only, because techs never see
    * prices, and with no feature switch: this is not a paid tier and KISS says no new switch.
    */
-  it("Reconcile is one row under Money, straight after Bills, staff-only, with no switch", () => {
+  it("Reconcile is one row under Admin, straight after Bills, staff-only, with no switch", () => {
     const money = DOCK.find((s) => s.key === "invoices")!.children;
     const at = money.findIndex((c) => c.id === "m-recon");
     expect(money[at]).toMatchObject({ label: "Reconcile", href: "/reconcile", staffOnly: true });
@@ -193,36 +193,72 @@ describe("DOCK office — Team present, Settings link absent (settings doctrine)
 
 /** Drift guard #2c: the Sales pipeline order — Leads · Inspections · Estimates (Erik
  *  2026-07-14: appointments and inspections are ONE platform; the Inspections tab is the
- *  site-visit step between a lead and its estimate), then Customers, the Contacts tile
- *  folded in (W1-07). Pins presence, order and the zero-duplication law. */
-describe("DOCK sales — Leads · Inspections · Estimates · Customers", () => {
+ *  site-visit step between a lead and its estimate) · Closing (cn-v1172: "a new sub-nav tab right
+ *  below Estimates called Closing"). Customers left Sales for the top of Admin the same day ("Lets
+ *  move the customers tab out of sales and onto the top of the sub-nav list under Money"). Pins
+ *  presence, order and the zero-duplication law. */
+describe("DOCK sales — Leads · Inspections · Estimates · Closing", () => {
   const sales = DOCK.find((s) => s.key === "sales");
   const children = sales?.children ?? [];
 
-  it("children are exactly Leads · Inspections · Estimates · Customers, in pipeline order", () => {
-    expect(children.map((c) => c.href)).toEqual(["/leads", "/inspections", "/quotes", "/crm"]);
+  it("children are exactly Leads · Inspections · Estimates · Closing, in pipeline order", () => {
+    expect(children.map((c) => c.href)).toEqual(["/leads", "/inspections", "/quotes", "/closing"]);
     // One word for the site visit (lib/statuses): the row reads Inspections; the route and the id stay.
     expect(children.find((c) => c.id === "sl-inspections")).toMatchObject({
       label: "Inspections",
       href: "/inspections",
     });
-    // Customers carries no switch: Sales never disappears with Leads and Estimates off.
-    expect(children.find((c) => c.id === "sl-customers")).toMatchObject({ label: "Customers", href: "/crm" });
-    expect(children.find((c) => c.id === "sl-customers")?.feature).toBeUndefined();
+    // Closing sits right under Estimates and is the Estimates switch's, like the Estimates row.
+    const at = children.findIndex((c) => c.id === "sl-closing");
+    expect(children[at - 1]?.id).toBe("sl-quotes");
+    expect(children[at]).toMatchObject({ label: "Closing", href: "/closing", feature: "estimates" });
+    // Customers is not a Sales row any more.
+    expect(children.map((c) => c.id)).not.toContain("sl-customers");
   });
 
-  it("the Contacts tile is gone: /crm and /inspections each have exactly one dock home", () => {
+  it("the Contacts tile is gone: /crm, /inspections and /closing each have exactly one dock home", () => {
     expect(DOCK.some((s) => s.key === "contacts")).toBe(false);
     const homes = (path: string) =>
       DOCK.flatMap((s) => s.children).filter((c) => c.href && basePath(c.href) === path).map((c) => c.id);
     expect(homes("/inspections")).toEqual(["sl-inspections"]);
     expect(homes("/crm")).toEqual(["sl-customers"]);
+    expect(homes("/closing")).toEqual(["sl-closing"]);
   });
 
-  it("/inspections and a customer's page (/crm/abc) light Sales", () => {
+  it("/inspections and /closing light Sales; a customer's page (/crm/abc) lights Admin", () => {
     expect(activeSection("/inspections")?.key).toBe("sales");
-    expect(activeSection("/crm")?.key).toBe("sales");
-    expect(activeSection("/crm/abc", visibleDock({ isStaff: true }))?.key).toBe("sales");
+    expect(activeSection("/closing")?.key).toBe("sales");
+    expect(activeSection("/crm")?.key).toBe("invoices");
+    expect(activeSection("/crm/abc", visibleDock({ isStaff: true }))?.key).toBe("invoices");
+  });
+});
+
+/** ADMIN, the tile that was Money (cn-v1172): "Lets change the name of the Dock tab Money to Admin"
+ *  and "move the customers tab ... onto the top of the sub-nav list under Money". The key stays
+ *  `invoices`; Customers keeps its id sl-customers. */
+describe("DOCK admin: Customers first, the tile opens on /crm", () => {
+  const admin = DOCK.find((s) => s.key === "invoices")!;
+
+  it("is labelled Admin and opens on Customers", () => {
+    expect(admin).toMatchObject({ label: "Admin", href: "/crm", staffOnly: true });
+    expect(visibleDock({ isStaff: true }).find((s) => s.key === "invoices")).toMatchObject({ label: "Admin", href: "/crm" });
+  });
+
+  it("Customers is its first row, above the Billing heading, with no switch", () => {
+    expect(admin.children.slice(0, 2).map((c) => c.id)).toEqual(["sl-customers", "m-billing-h"]);
+    expect(admin.children[0]).toMatchObject({ label: "Customers", href: "/crm" });
+    expect(admin.children[0].feature).toBeUndefined();
+  });
+
+  it("the money-admin heading says Money, not Money Admin", () => {
+    expect(admin.children.find((c) => c.id === "m-ma-h")).toMatchObject({ label: "Money", header: true });
+  });
+
+  it("with every switch off it still opens on Customers", () => {
+    const everythingOff = Object.fromEntries(FEATURE_KEYS.map((k) => [k, false])) as FeatureMap;
+    const t = visibleDock({ isStaff: true, features: everythingOff }).find((s) => s.key === "invoices")!;
+    expect(t.href).toBe("/crm");
+    expect(t.children[0].id).toBe("sl-customers");
   });
 });
 
@@ -241,12 +277,12 @@ describe("activeSection — child detail routes light the right section", () => 
     expect(key("/compliance")).toBe("office");
   });
 
-  it("/schedule lights its OWN tile; /timecards lights Money", () => {
+  it("/schedule lights its OWN tile; /timecards lights Admin", () => {
     expect(key("/schedule")).toBe("schedule");
     expect(key("/timecards")).toBe("invoices");
   });
 
-  it("/timeclock lights Money for staff and Clock for a tech — the role filter runs first", () => {
+  it("/timeclock lights Admin for staff and Clock for a tech — the role filter runs first", () => {
     // Staff reach the Timeclock from the Now card's link; Timecards (staff-only) owns the route
     // for them. A tech never sees that row, so his Clock tile claims it.
     expect(activeSection("/timeclock", visibleDock({ isStaff: true }))?.key).toBe("invoices");
@@ -273,12 +309,12 @@ describe("activeSection — child detail routes light the right section", () => 
     expect(key("/materials/abc123")).toBeUndefined();
   });
 
-  it("purchasing (PO details) belongs to Money via the Bills & POs owns-alias", () => {
+  it("purchasing (PO details) belongs to Admin via the Bills & POs owns-alias", () => {
     expect(key("/purchasing")).toBe("invoices");
     expect(key("/purchasing/abc123")).toBe("invoices");
   });
 
-  it("invoice details belong to Money, form details to Office, task categories to Today", () => {
+  it("invoice details belong to Admin, form details to Office, task categories to Today", () => {
     expect(key("/billing/abc123")).toBe("invoices");
     expect(key("/forms/abc123")).toBe("office");
     expect(key("/tasks/site-prep")).toBe("today");
@@ -335,7 +371,7 @@ describe("activeRowHref — one lit row, or none", () => {
 
   // Erik, 2026-09-30: "time clock point to money with timecards on the subnav"; 2026-10-26: "Time Clock
   // in Money beside Timecards" — the page has its own row now (cn-v1128), so it lights that row.
-  it("the office standing on the TIME CLOCK lights Money's own Time Clock row (cn-v1128)", () => {
+  it("the office standing on the TIME CLOCK lights Admin's own Time Clock row (cn-v1128)", () => {
     expect(activeRowHref(rows("invoices", true), "/timeclock", "/timeclock")).toBe("/timeclock");
     // A detail route under it too (a split's own page), and the query-carrying case.
     expect(activeRowHref(rows("invoices", true), "/timeclock/abc", "/timeclock/abc")).toBe("/timeclock");
@@ -431,7 +467,7 @@ describe("the You tile is a tech's door and nobody else's", () => {
 describe("the tiles on the bar, and the sections behind the initials", () => {
   const keys = (s: { key: string }[]) => s.map((x) => x.key);
 
-  it("staff: Today, Schedule, Sales, Jobs, Money; Office and Tools in the menu, never tiles", () => {
+  it("staff: Today, Schedule, Sales, Jobs, Admin; Office and Tools in the menu, never tiles", () => {
     const staff = visibleDock({ isStaff: true });
     expect(keys(dockTiles(staff))).toEqual(["today", "schedule", "sales", "jobs", "invoices"]);
     expect(keys(menuSections(staff))).toEqual(["office", "tools"]);
@@ -456,20 +492,21 @@ describe("the tiles on the bar, and the sections behind the initials", () => {
     expect(activeSection("/tools", staff)?.key).toBe("tools");
   });
 
-  it("Leads and Estimates both off: the Sales tile reads Customers and lands on /crm", () => {
-    const sales = visibleDock({ isStaff: true, features: off("leads", "estimates") }).find((s) => s.key === "sales")!;
-    expect(sales).toMatchObject({ label: "Customers", href: "/crm" });
-    expect(sales.short).toBeUndefined();
-    expect(sales.children.map((c) => c.id)).toEqual(["sl-customers"]);
+  it("Leads and Estimates both off: no Sales tile at all (cn-v1172: Customers moved to Admin)", () => {
+    const d = visibleDock({ isStaff: true, features: off("leads", "estimates") });
+    expect(d.find((s) => s.key === "sales")).toBeUndefined();
+    expect(keys(dockTiles(d))).toEqual(["today", "schedule", "jobs", "invoices"]);
     // Either one on, it is still Sales.
     for (const f of [off("leads"), off("estimates"), ALL_ON]) {
       expect(visibleDock({ isStaff: true, features: f }).find((s) => s.key === "sales")?.label).toBe("Sales");
     }
   });
 
-  it("the badge sums don't move: only /planner (Today) and /leads (Sales) carry counts", () => {
+  it("the badge sums: /planner (Today), /leads and /closing (both Sales) carry counts", () => {
     const staff = dockTiles(visibleDock({ isStaff: true }));
-    const counted = staff.filter((s) => s.children.some((c) => c.href === "/planner" || c.href === "/leads")).map((s) => s.key);
+    const counted = staff
+      .filter((s) => s.children.some((c) => c.href === "/planner" || c.href === "/leads" || c.href === "/closing"))
+      .map((s) => s.key);
     expect(counted).toEqual(["today", "sales"]);
   });
 });
@@ -557,23 +594,24 @@ describe("visibleDock — role and switches, one filter", () => {
 
   it("Leads off: Leads and Inspections go, and Sales lands on Estimates", () => {
     const d = visibleDock({ isStaff: true, features: off("leads") });
-    expect(tile(d, "sales")?.children.map((c) => c.id)).toEqual(["sl-quotes", "sl-customers"]);
+    expect(tile(d, "sales")?.children.map((c) => c.id)).toEqual(["sl-quotes", "sl-closing"]);
     expect(tile(d, "sales")?.href).toBe("/quotes");
   });
 
-  it("Leads and Estimates both off: Sales stays as Customers, landing on /crm", () => {
+  it("Leads and Estimates both off: Sales goes; Customers stays, first under Admin (cn-v1172)", () => {
     const d = visibleDock({ isStaff: true, features: off("leads", "estimates") });
-    expect(tile(d, "sales")).toMatchObject({ label: "Customers", href: "/crm" });
-    expect(tile(d, "sales")?.children.map((c) => c.id)).toEqual(["sl-customers"]);
+    expect(tile(d, "sales")).toBeUndefined();
+    expect(tile(d, "invoices")?.children[0]?.id).toBe("sl-customers");
+    expect(activeSection("/crm/abc", d)?.key).toBe("invoices");
   });
 
-  it("Estimates off alone: Sales keeps its landing page (/leads) and loses only the row", () => {
+  it("Estimates off alone: Sales keeps its landing page (/leads) and loses Estimates and Closing", () => {
     const d = visibleDock({ isStaff: true, features: off("estimates") });
     expect(tile(d, "sales")?.href).toBe("/leads");
-    expect(tile(d, "sales")?.children.map((c) => c.id)).toEqual(["sl-leads", "sl-inspections", "sl-customers"]);
+    expect(tile(d, "sales")?.children.map((c) => c.id)).toEqual(["sl-leads", "sl-inspections"]);
   });
 
-  it("Purchase Orders off: the row reads Bills and still owns /purchasing (a PO link lights Money)", () => {
+  it("Purchase Orders off: the row reads Bills and still owns /purchasing (a PO link lights Admin)", () => {
     const d = visibleDock({ isStaff: true, features: off("purchase_orders") });
     const bills = tile(d, "invoices")?.children.find((c) => c.id === "m-bills");
     expect(bills).toMatchObject({ label: "Bills", href: "/bills", owns: ["/purchasing"] });
@@ -676,7 +714,7 @@ describe("activeNav — the pathname first, then the home the page declared, els
     expect(lit(at("/appointments/abc123", "s-week"))).toBe("schedule>/schedule");
     // Sales' sub-nav is its four rows with Inspections lit; the Schedule has one row, so no sub-nav.
     const sales = activeNav(at("/appointments/abc123", "sl-inspections"), staff).section!;
-    expect(sales.children.filter((c) => c.href).map((c) => c.id)).toEqual(["sl-leads", "sl-inspections", "sl-quotes", "sl-customers"]);
+    expect(sales.children.filter((c) => c.href).map((c) => c.id)).toEqual(["sl-leads", "sl-inspections", "sl-quotes", "sl-closing"]);
     expect(activeNav(at("/appointments/abc123", "s-week"), staff).section!.children.filter((c) => c.href)).toHaveLength(1);
     // A tech's visit lives on My Day.
     expect(lit(at("/appointments/abc123", "t-day"), tech)).toBe("today>/planner");

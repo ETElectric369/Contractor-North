@@ -276,8 +276,27 @@ describe("well-formed", () => {
     it("points at the dock tile it is talking about", () => {
       expect(findStep("run-lead").anchor).toBe("dock-sales");
       expect(findStep("run-job").anchor).toBe("dock-jobs");
-      // The Money section's key really is `invoices` (dock.ts) even though its label is "Money".
+      // The Admin section's key really is `invoices` (dock.ts) even though its label is "Admin" (cn-v1172, was Money).
       expect(findStep("run-money").anchor).toBe("dock-invoices");
+    });
+
+    it("names the tile by its name now, Admin, and says a sent estimate waits on Closing (cn-v1172)", () => {
+      for (const c of [STRANGER, KNOWN]) {
+        const lead = findStep("run-lead");
+        for (const say of [lead.say, lead.plain!.say!]) {
+          const line = sayOf(say, c);
+          expect(line).toContain("Sales, then Jobs, then Admin");
+          expect(line).not.toContain("Money");
+        }
+        const est = findStep("run-estimate");
+        for (const say of [est.say, est.plain!.say!]) {
+          const line = sayOf(say, c);
+          expect(line).toContain("it waits under Sales, on Closing, until they say yes or no");
+          expect(line).toContain("That list is the reminder");
+        }
+      }
+      expect(DOCK.find((s) => s.key === "invoices")?.label).toBe("Admin");
+      expect(DOCK.find((s) => s.key === "sales")?.children.find((r) => r.href === "/closing")?.feature).toBe("estimates");
     });
 
     it("names the job's clock by the words on it: Clock In at the top, never TIME (W1-20)", () => {
@@ -579,7 +598,7 @@ describe("the tour reads the switches", () => {
     expect(words).not.toMatch(/inspection/i);
     expect(words).not.toContain("Start the Estimate");
     expect(words).toContain("tap Plus, then New Estimate");
-    expect(words).toContain("You mark the estimate accepted and the job builds itself — same customer, same site address, plus a work order");
+    expect(words).toContain("You mark the estimate accepted and it goes on its job, which builds itself if there isn't one: same customer, same site address, plus a work order");
     expect(words).toContain("You typed that address once, on the estimate,");
   });
 

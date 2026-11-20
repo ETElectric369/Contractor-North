@@ -46,7 +46,9 @@ describe("visitHome — the visit's type decides, nothing else", () => {
   });
 
   it("the Inspections list holds exactly the kinds the rule sends there", () => {
-    expect(src("src/app/(app)/inspections/page.tsx")).toContain('.in("type", [...ESTIMATE_VISIT_TYPES])');
+    // cn-v1172: the page reads through the one reader the Estimates page's top list reads too.
+    expect(src("src/app/(app)/inspections/page.tsx")).toContain("readInspectionBuckets(supabase, { now })");
+    expect(src("src/lib/inspections-read.ts")).toContain('.in("type", [...ESTIMATE_VISIT_TYPES])');
   });
 });
 

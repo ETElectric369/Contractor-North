@@ -3,16 +3,17 @@ import { vi } from "vitest";
 import { runDataTool } from "@/lib/assistant-tools";
 
 /**
- * EVERY WAIT HAS A DAY, AND NORT'S SWEEP KNOWS IT (Wave 1 seam fix). Needs You keeps an estimate
- * given a day to ask again (quotes.follow_up_at) in its Waiting fold until that day, and the sweep
- * returns it under `waiting` with its day. A LEAD HAS NO DAY since cn-v1170: the sweep's lead bucket
- * is the Leads list itself (lib/leads/new-intake), the same list the page, the badge and Needs You read.
+ * NORT'S SWEEP READS THE LISTS THE PAGES READ. A LEAD HAS NO DAY since cn-v1170: the sweep's lead
+ * bucket is the Leads list itself (lib/leads/new-intake), the same list the page, the badge and Needs
+ * You read. AN ESTIMATE HAS NO DAY since cn-v1172 ("Closing is the reminder yes"): the sweep's sent
+ * estimates are the Closing list's that need a person (lib/estimate/closing loadClosing), and nothing
+ * is parked with a day.
  */
 
 type Answer = { data?: any; error?: any };
 
-/** A pretend client: each table answers from `answers`; quotes can refuse the follow_up_at column. */
-function fakeDb(answers: Record<string, Answer>, opts: { noFollowUpColumn?: boolean } = {}) {
+/** A pretend client: each table answers from `answers`, or from `opts.pick` by table and columns. */
+function fakeDb(answers: Record<string, Answer>, opts: { pick?: (table: string, cols: string) => Answer | undefined } = {}) {
   const selects: Record<string, string[]> = {};
   return {
     selects,
@@ -26,8 +27,8 @@ function fakeDb(answers: Record<string, Answer>, opts: { noFollowUpColumn?: bool
         },
         maybeSingle: async () => ({ data: Array.isArray(answers[table]?.data) ? answers[table].data[0] ?? null : answers[table]?.data ?? null, error: null }),
         then: (ok: any, err: any) => {
-          if (table === "quotes" && opts.noFollowUpColumn && cols.includes("follow_up_at"))
-            return Promise.resolve({ data: null, error: { code: "42703" } }).then(ok, err);
+          const picked = opts.pick?.(table, cols);
+          if (picked) return Promise.resolve({ data: picked.data ?? [], error: picked.error ?? null }).then(ok, err);
           return Promise.resolve({ data: answers[table]?.data ?? [], error: answers[table]?.error ?? null }).then(ok, err);
         },
       };
@@ -47,12 +48,11 @@ beforeAll(() => {
 });
 afterAll(() => vi.useRealTimers());
 
-/** The sweep's own estimate reads (the money board reads quotes too). */
-const sweepReads = (db: any): string[] => (db.selects.quotes ?? []).filter((c: string) => c.startsWith("quote_number, total, updated_at"));
+import { CLOSING_COLUMNS } from "@/lib/estimate/closing";
 
 const sweep = async (db: any) => JSON.parse(await runDataTool("needs_attention", {}, db));
 
-describe("needs_attention honours the day a person picked", () => {
+describe("needs_attention reads the lists the pages read", () => {
   it("the lead bucket is the Leads list: every open lead with no inspection standing, oldest first; a lead never waits", async () => {
     const db = fakeDb({
       organizations: { data: [ORG] },
@@ -70,7 +70,7 @@ describe("needs_attention honours the day a person picked", () => {
     expect(r.leads_on_the_list.map((l: any) => l.name)).toEqual(["Dana Rook", "Casey Loam"]);
     expect(r.leads_on_the_list[0]).toMatchObject({ never_contacted: true });
     expect(r.leads_to_follow_up).toBeUndefined();
-    expect(r.waiting.leads).toBeUndefined();
+    expect(r.waiting).toBeUndefined();
     // The read is the rule's: no follow-up day is asked for.
     expect((db.selects.inquiries ?? []).join(" ")).not.toContain("next_follow_up_at");
   });
@@ -82,36 +82,52 @@ describe("needs_attention honours the day a person picked", () => {
     expect(r.leads_note).toMatch(/could not be read/);
   });
 
-  it("an estimate given a later day to ask again waits; a quiet one with no day, or a day that has come, is stale", async () => {
-    const db = fakeDb({
-      organizations: { data: [ORG] },
-      quotes: {
-        data: [
-          { quote_number: "Q-101", total: "4200", updated_at: OLD, valid_until: null, follow_up_at: "2026-11-01", customers: { name: "Tupelo" } },
-          { quote_number: "Q-102", total: "900", updated_at: OLD, valid_until: null, follow_up_at: null, customers: { name: "Birch" } },
-          { quote_number: "Q-103", total: "1500", updated_at: OLD, valid_until: null, follow_up_at: "2026-09-20", customers: { name: "Alder" } },
-        ],
-      },
-    });
-    const r = await sweep(db);
-    expect(r.stale_estimates.filter((e: any) => e.kind === "quote").map((e: any) => e.ref)).toEqual(["Q-102", "Q-103"]);
-    expect(r.waiting.estimates).toEqual([{ ref: "Q-101", customer: "Tupelo", total: 4200, back_on: "2026-11-01" }]);
-    expect(sweepReads(db)[0]).toContain("follow_up_at");
-  });
-
-  it("before 0366 (no follow_up_at column) the estimate read falls back and nothing is parked", async () => {
+  it("the sent estimates are the Closing list's that need a person; a stale draft is its own; nothing is parked", async () => {
+    // Company today: Sep 27 (Pacific).
+    const sent = [
+      // Written in August, sent again two days ago: the customer has it fresh. Not stale.
+      { id: "q-1", quote_number: "E-901", title: "Larkspur Panel", status: "sent", total: "4200", valid_until: null, created_at: OLD, job_id: null, customer_id: "c-1", inquiry_id: null, customers: { name: "Dana Rook" }, jobs: null },
+      // Written in August, no send on record: quiet.
+      { id: "q-2", quote_number: "E-902", title: "Snowbell Shed", status: "sent", total: "900", valid_until: null, created_at: OLD, job_id: null, customer_id: "c-2", inquiry_id: null, customers: { name: "Theo Vance" }, jobs: null },
+      // Written yesterday, its offer ended: needs a person.
+      { id: "q-3", quote_number: "E-903", title: "Bayberry Gate", status: "sent", total: "1500", valid_until: "2026-09-20", created_at: "2026-09-26T18:00:00Z", job_id: null, customer_id: null, inquiry_id: "l-9", customers: null, jobs: null },
+    ];
     const db = fakeDb(
+      { organizations: { data: [ORG] } },
       {
-        organizations: { data: [ORG] },
-        quotes: { data: [{ quote_number: "Q-102", total: "900", updated_at: OLD, valid_until: null, customers: { name: "Birch" } }] },
+        pick: (table, cols) => {
+          if (table === "quotes" && cols === CLOSING_COLUMNS) return { data: sent };
+          if (table === "quotes" && cols.startsWith("quote_number, total, updated_at"))
+            return { data: [{ quote_number: "E-904", total: "300", updated_at: OLD, valid_until: null, customers: { name: "Casey Loam" } }] };
+          if (table === "quotes") return { data: [] };
+          if (table === "sent_messages") return { data: [{ doc_id: "q-1", sent_at: "2026-09-25T17:00:00Z" }] };
+          return undefined;
+        },
       },
-      { noFollowUpColumn: true },
     );
     const r = await sweep(db);
-    expect(r.stale_estimates.map((e: any) => e.ref)).toEqual(["Q-102"]);
-    expect(r.waiting.estimates).toEqual([]);
-    expect(sweepReads(db)).toHaveLength(2);
-    expect(sweepReads(db)[1]).not.toContain("follow_up_at");
+    const out = r.stale_estimates.filter((e: any) => e.kind === "sent");
+    // The Closing list's own order: the longest wait first.
+    expect(out.map((e: any) => [e.ref, e.why])).toEqual([
+      ["E-902", "quiet"],
+      ["E-903", "offer_ended"],
+    ]);
+    expect(out[0]).toMatchObject({ customer: "Theo Vance", total: 900, sent_on_record: false });
+    expect(r.stale_estimates.filter((e: any) => e.kind === "draft").map((e: any) => e.ref)).toEqual(["E-904"]);
+    expect(r.waiting).toBeUndefined();
+    expect(r.closing_note).toMatch(/Sales > Closing/);
+    // No read names the follow-up day; the draft read asks for drafts only.
+    expect((db.selects.quotes ?? []).join(" ")).not.toContain("follow_up_at");
+  });
+
+  it("a failed Closing read is said, never an empty bucket", async () => {
+    const db = fakeDb(
+      { organizations: { data: [ORG] } },
+      { pick: (table, cols) => (table === "quotes" && cols === CLOSING_COLUMNS ? { error: { message: "boom" } } : undefined) },
+    );
+    const r = await sweep(db);
+    expect(r.stale_estimates.filter((e: any) => e.kind === "sent")).toEqual([]);
+    expect(r.estimates_note).toMatch(/could not be read/);
   });
 });
 

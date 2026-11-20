@@ -5,7 +5,7 @@ import { todayStrInTz } from "@/lib/tz";
 /**
  * WHO ELSE IS ON THE CLOCK, for My Day's Now card (Erik, 2026-10-13: "the who's on the clock should
  * just live with the timeclock"). The card is the office's clock, so the crew's presence sits in it
- * — the same getCrewStatus read Money › Timecards draws (cn-v503), which keeps its block beside the
+ * — the same getCrewStatus read Admin › Timecards draws (cn-v503), which keeps its block beside the
  * hours it becomes. Pure: the page reads, this shapes, the card draws.
  *
  * The caller is counted but never listed — their own punch IS the card above. Rows run longest-on

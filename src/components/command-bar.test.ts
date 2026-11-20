@@ -31,7 +31,8 @@ describe("commandNavItems", () => {
     expect(find(staff, "/bills")?.aliases).toEqual(expect.arrayContaining(["purchase order", "po", "vendor"]));
     expect(find(staff, "/price-list")?.aliases).toEqual(expect.arrayContaining(["kit", "kits", "pricing"]));
     // The page's own words first, then the switch's, in both languages (cn-v1139).
-    expect(find(staff, "/recurring")?.aliases).toEqual(["recurrentes", "recurrente", "repetir", "subscription", "repeat invoice", "auto invoice", "suscripción", "factura repetida"]);
+    // Then the tile's own words (cn-v1172: Admin, the tile that was Money, still found by "money").
+    expect(find(staff, "/recurring")?.aliases).toEqual(["recurrentes", "recurrente", "repetir", "subscription", "repeat invoice", "auto invoice", "suscripción", "factura repetida", "money", "dinero", "admin", "administración"]);
     expect(find(staff, "/bills")?.label).toBe("Bills & POs");
   });
 
@@ -115,7 +116,7 @@ describe("commandNavItems", () => {
       expect(hrefs(matchNavItems(tech, term)), term).toContain("/timeclock");
     }
     expect(staff.filter((i) => i.href === "/timeclock")).toHaveLength(1);
-    expect(find(staff, "/timeclock")).toMatchObject({ label: "Time Clock", sub: "Money" });
+    expect(find(staff, "/timeclock")).toMatchObject({ label: "Time Clock", sub: "Admin" });
     expect(tech.filter((i) => i.href === "/timeclock")).toHaveLength(1);
     expect(find(tech, "/timeclock")).toMatchObject({ label: "Time Clock", sub: "Clock" });
   });
@@ -127,7 +128,8 @@ describe("commandNavItems", () => {
       expect(items.filter((i) => i.href === "/crm"), String(isStaff)).toHaveLength(isStaff ? 1 : 0);
     }
     expect(find(commandNavItems(false, ALL_ON), "/handbook")?.sub).toBe("You");
-    expect(find(commandNavItems(true, ALL_ON), "/crm")).toMatchObject({ label: "Customers", sub: "Sales" });
+    // cn-v1172: Customers is the first row under Admin.
+    expect(find(commandNavItems(true, ALL_ON), "/crm")).toMatchObject({ label: "Customers", sub: "Admin" });
     // Office and Tools live behind the initials, but search still finds their pages.
     expect(hrefs(commandNavItems(true, ALL_ON))).toEqual(expect.arrayContaining(["/team", "/inventory", "/tools"]));
   });
@@ -139,14 +141,14 @@ describe("commandNavItems", () => {
     for (const term of ["owed", "who owes", "aging", "paid", "received", "deposit", "collections", "accounts receivable", "payments"]) {
       expect(hrefs(matchNavItems(staff, term)), term).toContain("/billing");
     }
-    expect(find(staff, "/billing")).toMatchObject({ label: "Invoices", sub: "Money" });
+    expect(find(staff, "/billing")).toMatchObject({ label: "Invoices", sub: "Admin" });
   });
 
   it("Petty Cash left the menu (W1-34): no row by default, one row with its words for a company that has petty cash", () => {
     for (const isStaff of [true, false]) expect(hrefs(commandNavItems(isStaff, ALL_ON)), String(isStaff)).not.toContain("/petty-cash");
     const withCash = commandNavItems(true, ALL_ON, true);
     expect(withCash.filter((i) => i.href === "/petty-cash")).toHaveLength(1);
-    expect(find(withCash, "/petty-cash")).toMatchObject({ label: "Petty Cash", sub: "Money" });
+    expect(find(withCash, "/petty-cash")).toMatchObject({ label: "Petty Cash", sub: "Admin" });
     expect(find(withCash, "/petty-cash")?.aliases).toEqual(expect.arrayContaining(["petty cash", "cash box", "cash", "atm"]));
     for (const term of ["petty cash", "cash box", "atm"]) expect(hrefs(matchNavItems(withCash, term)), term).toContain("/petty-cash");
     // A tech never reads petty cash: no row, whatever the company has.
@@ -191,6 +193,8 @@ const TYPED_WORDS: Record<string, readonly string[]> = {
   "/inspections": ["walk-through", "walk-throughs", "walkthrough", "walk through", "inspection", "inspections", "site visit"],
   "/quotes": ["estimates", "estimate", "quote", "proposal", "bid"],
   "/crm": ["customers", "clients", "contacts"],
+  // cn-v1172: Sales › Closing, found by its name and by the words a person types to chase an answer.
+  "/closing": ["closing", "follow up", "no answer", "cierre", "seguimiento"],
   "/jobs": ["jobs", "work", "projects"],
   "/billing": ["invoices", "owed", "payments", "aging"],
   "/timecards": ["timecards", "hours", "timesheet"],
@@ -400,11 +404,13 @@ describe("the palette in Spanish: the office's rows (cn-v1139)", () => {
     expect(byHref(es, "/schedule")).toMatchObject({ label: "Agenda", sub: "Agenda" });
     expect(byHref(es, "/leads")).toMatchObject({ label: "Prospectos", sub: "Ventas" });
     expect(byHref(es, "/quotes")).toMatchObject({ label: "Presupuestos", sub: "Ventas" });
-    expect(byHref(es, "/crm")).toMatchObject({ label: "Clientes", sub: "Ventas" });
-    expect(byHref(es, "/billing")).toMatchObject({ label: "Facturas", sub: "Dinero" });
-    expect(byHref(es, "/timecards")).toMatchObject({ label: "Tarjetas de Tiempo", sub: "Dinero" });
-    expect(byHref(es, "/bills")).toMatchObject({ label: "Cuentas y Órdenes", sub: "Dinero" });
-    expect(byHref(es, "/payroll")).toMatchObject({ label: "Nómina", sub: "Dinero" });
+    // cn-v1172: Closing under Ventas; Customers first under Admin (the tile that was Dinero, Admin in both languages).
+    expect(byHref(es, "/closing")).toMatchObject({ label: "Cierre", sub: "Ventas" });
+    expect(byHref(es, "/crm")).toMatchObject({ label: "Clientes", sub: "Admin" });
+    expect(byHref(es, "/billing")).toMatchObject({ label: "Facturas", sub: "Admin" });
+    expect(byHref(es, "/timecards")).toMatchObject({ label: "Tarjetas de Tiempo", sub: "Admin" });
+    expect(byHref(es, "/bills")).toMatchObject({ label: "Cuentas y Órdenes", sub: "Admin" });
+    expect(byHref(es, "/payroll")).toMatchObject({ label: "Nómina", sub: "Admin" });
     expect(byHref(es, "/team")).toMatchObject({ label: "Equipo", sub: "Oficina" });
     expect(byHref(es, "/inventory")).toMatchObject({ label: "Inventario", sub: "Oficina" });
     expect(byHref(es, "/tools")).toMatchObject({ label: "Calculadoras y Herramientas", sub: "Herramientas" });
@@ -412,18 +418,30 @@ describe("the palette in Spanish: the office's rows (cn-v1139)", () => {
     expect(es.map((i) => i.label).filter((l) => en.some((e) => e.label === l))).toEqual([]);
   });
 
-  it("the two hand-written subs come through the dock's keys: New Estimate under Ventas, Petty Cash under Dinero (English byte for byte)", () => {
+  it("the two hand-written subs come through the dock's keys: New Estimate under Ventas, Petty Cash under Admin (English byte for byte)", () => {
     expect(byHref(es, "/quotes/new")).toMatchObject({ label: "Nuevo Presupuesto", sub: "Ventas" });
-    expect(byHref(es, "/petty-cash")).toMatchObject({ label: "Caja Chica", sub: "Dinero" });
+    expect(byHref(es, "/petty-cash")).toMatchObject({ label: "Caja Chica", sub: "Admin" });
     expect(byHref(en, "/quotes/new")).toMatchObject({ label: "New Estimate", sub: "Sales" });
-    expect(byHref(en, "/petty-cash")).toMatchObject({ label: "Petty Cash", sub: "Money" });
+    expect(byHref(en, "/petty-cash")).toMatchObject({ label: "Petty Cash", sub: "Admin" });
     expect(barSrc).not.toContain('sub: "Money"');
     expect(barSrc).not.toContain('sub: "Sales"');
   });
 
-  it("a row wearing its whenOff words and a tile reduced to one row read their variants: Cuentas; Clientes", () => {
-    expect(byHref(commandNavItems(true, off("purchase_orders"), false, false, "es"), "/bills")).toMatchObject({ label: "Cuentas", sub: "Dinero" });
-    expect(byHref(commandNavItems(true, off("leads", "estimates"), false, false, "es"), "/crm")).toMatchObject({ label: "Clientes", sub: "Clientes" });
+  it("a row wearing its whenOff words reads its variant: Cuentas; with Leads and Estimates off Customers is still under Admin (cn-v1172)", () => {
+    expect(byHref(commandNavItems(true, off("purchase_orders"), false, false, "es"), "/bills")).toMatchObject({ label: "Cuentas", sub: "Admin" });
+    expect(byHref(commandNavItems(true, off("leads", "estimates"), false, false, "es"), "/crm")).toMatchObject({ label: "Clientes", sub: "Admin" });
+  });
+
+  it("the tile's old name still finds its pages: money and dinero land on Customers, Invoices and Timecards; admin too (cn-v1172)", () => {
+    // The palette shows six rows at most, in the tile's own order (Customers first).
+    for (const term of ["money", "dinero", "admin"]) {
+      for (const href of ["/crm", "/billing", "/timecards"]) {
+        expect(hrefs(matchNavItems(en, term)), `${term} → ${href}`).toContain(href);
+        expect(hrefs(matchNavItems(es, term)), `${term} → ${href}`).toContain(href);
+      }
+    }
+    // And never a page under another tile.
+    expect(hrefs(matchNavItems(en, "money"))).not.toContain("/leads");
   });
 
   it("a Spanish alias lands on every row, on an English screen too, and the search folds accents both ways", () => {
@@ -439,6 +457,7 @@ describe("the palette in Spanish: the office's rows (cn-v1139)", () => {
       "/inspections": ["inspecciones", "visita"],
       "/quotes": ["presupuestos", "cotización"],
       "/crm": ["clientes", "contactos"],
+      "/closing": ["cierre", "seguimiento"],
       "/jobs": ["trabajos", "proyectos"],
       "/billing": ["facturas", "dinero"],
       "/timecards": ["tarjetas de tiempo", "horas"],
@@ -526,32 +545,33 @@ describe("the palette's Spanish is proven end to end", () => {
   const staffEn = commandNavItems(true, ALL_ON, true, false, "en");
   const under = (items: ReturnType<typeof commandNavItems>, sub: string) => hrefs(items.filter((i) => i.sub === sub)).sort();
 
-  it("a staff seat under es: the Schedule, Sales and Money sections carry Agenda, Ventas and Dinero as their sub words, and no English section word is left", () => {
+  it("a staff seat under es: the Schedule, Sales and Admin sections carry Agenda, Ventas and Admin as their sub words, and no English section word is left", () => {
     expect(under(staffEs, "Agenda")).toEqual(["/schedule"]);
-    expect(under(staffEs, "Ventas")).toEqual(["/crm", "/inspections", "/leads", "/quotes", "/quotes/new"]);
-    expect(under(staffEs, "Dinero")).toEqual([
-      "/analytics", "/billing", "/bills", "/payroll", "/petty-cash", "/price-list", "/reconcile", "/recurring", "/tax-report", "/timecards", "/timeclock",
+    // cn-v1172: Closing joined Sales; Customers moved to the top of Admin (the tile that was Money).
+    expect(under(staffEs, "Ventas")).toEqual(["/closing", "/inspections", "/leads", "/quotes", "/quotes/new"]);
+    expect(under(staffEs, "Admin")).toEqual([
+      "/analytics", "/billing", "/bills", "/crm", "/payroll", "/petty-cash", "/price-list", "/reconcile", "/recurring", "/tax-report", "/timecards", "/timeclock",
     ]);
-    // The same rows the English seat has under Schedule, Sales and Money: only the words moved.
+    // The same rows the English seat has under Schedule, Sales and Admin: only the words moved (Admin is Admin in both).
     expect(under(staffEs, "Agenda")).toEqual(under(staffEn, "Schedule"));
     expect(under(staffEs, "Ventas")).toEqual(under(staffEn, "Sales"));
-    expect(under(staffEs, "Dinero")).toEqual(under(staffEn, "Money"));
+    expect(under(staffEs, "Admin")).toEqual(under(staffEn, "Admin"));
     for (const w of SECTION_WORDS_EN) expect(staffEs.some((i) => i.sub === w), `an English section word "${w}" on a Spanish palette`).toBe(false);
     expect(staffEs.map((i) => i.label).filter((l) => staffEn.some((e) => e.label === l))).toEqual([]);
   });
 
-  it('typing "nomina" (no accent) finds Nómina first; typing "dinero" finds the Money rows, every one of them under Dinero', () => {
-    expect(matchNavItems(staffEs, "nomina")[0]).toMatchObject({ label: "Nómina", sub: "Dinero", href: "/payroll" });
+  it('typing "nomina" (no accent) finds Nómina first; typing "dinero" finds the Admin rows (the tile that was Dinero), every one of them under Admin', () => {
+    expect(matchNavItems(staffEs, "nomina")[0]).toMatchObject({ label: "Nómina", sub: "Admin", href: "/payroll" });
     expect(matchNavItems(staffEs, "Nómina")[0]).toMatchObject({ href: "/payroll" });
     expect(matchNavItems(staffEs, "NOMINA")[0]).toMatchObject({ href: "/payroll" });
     const dinero = matchNavItems(staffEs, "dinero");
     expect(dinero.length).toBeGreaterThan(0);
-    expect(dinero.map((i) => i.sub)).toEqual(dinero.map(() => "Dinero"));
+    expect(dinero.map((i) => i.sub)).toEqual(dinero.map(() => "Admin"));
     expect(hrefs(dinero)).toContain("/billing");
-    // The palette shows six rows at most; each one shown is a Money row, in the Money section's own order.
-    const money = under(staffEs, "Dinero");
+    // The palette shows six rows at most; each one shown is an Admin row, in the Admin section's own order.
+    const money = under(staffEs, "Admin");
     for (const h of hrefs(dinero)) expect(money, h).toContain(h);
-    expect(hrefs(dinero)).toEqual(hrefs(staffEs.filter((i) => i.sub === "Dinero")).slice(0, dinero.length));
+    expect(hrefs(dinero)).toEqual(hrefs(staffEs.filter((i) => i.sub === "Admin")).slice(0, dinero.length));
     // On the office's English screen the same word still lands on Invoices (the alias): a Spanish speaker is never lost there either.
     expect(hrefs(matchNavItems(staffEn, "dinero"))).toContain("/billing");
   });

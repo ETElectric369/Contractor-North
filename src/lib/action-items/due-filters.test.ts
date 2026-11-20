@@ -1,11 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { draftInvoiceState, heldJobState, lateInvoiceFilter, quoteFollowUpState, quoteNoAnswerFilter } from "./due-filters";
+import { draftInvoiceState, heldJobState, lateInvoiceFilter, quoteNoAnswerFilter } from "./due-filters";
+import { closingState } from "@/lib/estimate/closing";
 
 /**
- * THE DAY A PERSON PICKED IS THE DAY IT COMES BACK (release/w1a seam fixes). Nort's quote.followUp
- * and the hold picker promise a day; Needs You has to keep it. A lead has no day since cn-v1170.
+ * THE DAY A PERSON PICKED IS THE DAY IT COMES BACK (release/w1a seam fixes). The hold picker
+ * promises a day; Needs You has to keep it. A lead has no day since cn-v1170, an estimate none since
+ * cn-v1172 (the Closing list is the reminder).
  *
  * The feeders filter in the database with PostgREST `.or()` strings, so these tests run those very
  * strings over rows with a small evaluator of the grammar they use (col.is.null, col.lte.v,
@@ -78,27 +80,19 @@ describe("a lead has no follow-up day (cn-v1170): the Leads list is the reminder
   });
 });
 
-describe("an estimate's follow-up day (0366 quotes.follow_up_at, Nort's quote.followUp)", () => {
-  it("a day after today keeps it off the list; today or earlier brings it back; no day leaves the old rule", () => {
-    expect(quoteFollowUpState(TOMORROW, TODAY)).toBe("later");
-    expect(quoteFollowUpState(TODAY, TODAY)).toBe("due");
-    expect(quoteFollowUpState("2026-09-01", TODAY)).toBe("due");
-    expect(quoteFollowUpState(null, TODAY)).toBe("none");
-    expect(quoteFollowUpState(undefined, TODAY)).toBe("none");
-  });
-
-  it("the quote_awaiting feeder reads follow_up_at (without it before 0366, and then no Still Waiting) and lets the day win over the quiet rule", () => {
+describe("an estimate has no follow-up day (cn-v1172: \"Closing is the reminder yes\")", () => {
+  it("nothing in Needs You reads or writes it: no follow-up state, no later read, no Waiting row, no Still Waiting", () => {
     const query = src("src/lib/action-items/query.ts");
-    expect(query).toContain("read(`${base}, follow_up_at`, quoteNoAnswerFilter(todayStr, QUOTE_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS, true)),");
-    expect(query).toContain("if (withDay.error && isMissingColumn(withDay.error)) {");
-    expect(query).toContain(
-      "return { ...(await read(base, quoteNoAnswerFilter(todayStr, QUOTE_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS, false))), noFollowUp: true, later: { data: [], error: null } };",
-    );
-    expect(query).toContain("const followUp = quoteFollowUpState(q.follow_up_at, todayStr);");
-    // A later day waits in the fold with that day; no day and still fresh stays off.
-    expect(query).toMatch(/if \(followUp === "later"\) \{[\s\S]{0,400}waiting\.push\(row\);\s*continue;/);
-    expect(query).toContain('if (followUp === "none" && !quiet && !expiring) continue;');
-    expect(query).toContain('affordances: followUpReady ? AFFORDANCES.quote_awaiting : AFFORDANCES.quote_awaiting.filter((v) => v !== "snooze")');
+    const filters = src("src/lib/action-items/due-filters.ts");
+    expect(filters).not.toContain("quoteFollowUpState");
+    expect(filters).not.toContain("withFollowUp");
+    expect(query).not.toContain("follow_up_at");
+    expect(query).not.toContain("quoteFollowUpState");
+    expect(query).not.toContain("QUOTE_QUIET_DAYS");
+    expect(query).not.toMatch(/kind: "quote_awaiting",[\s\S]{0,80}backOn/);
+    // The one rule decides each row, fed by the last logged send.
+    expect(query).toContain(".or(quoteNoAnswerFilter(todayStr, CLOSING_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS))");
+    expect(query).toContain("lastSentAt: lastSentOf.get(String(q.id)) ?? null");
   });
 });
 
@@ -133,14 +127,6 @@ describe("a pile's count is the count of its rows, not the whole population (the
     const stale = daysOld >= 30 && !(daysOverDue != null && daysOverDue <= 0);
     return pastDue || stale;
   };
-  const noAnswerByCode = (r: Row, withFollowUp: boolean) => {
-    const followUp = withFollowUp ? quoteFollowUpState(r.follow_up_at, TODAY) : "none";
-    if (followUp === "later") return false; // the Waiting fold's, read on its own
-    if (followUp === "due") return true;
-    const quiet = (r.created_at ? days(todayMs - Date.parse(r.created_at)) : 0) >= 7;
-    const toExpiry = r.valid_until ? days(Date.parse(r.valid_until) - todayMs) : null;
-    return quiet || (toExpiry != null && toExpiry <= 5);
-  };
   const stamps = [
     "2026-08-01T15:00:00+00:00",
     "2026-08-28T00:00:00+00:00",
@@ -163,26 +149,29 @@ describe("a pile's count is the count of its rows, not the whole population (the
     }
   });
 
-  it("an estimate with no answer: the Now read keeps exactly the rows the feeder shows on Now (with and before 0366)", () => {
-    const withDay = quoteNoAnswerFilter(TODAY, 7, 5, true);
-    const before = quoteNoAnswerFilter(TODAY, 7, 5, false);
+  it("an estimate with no answer: the read keeps every row the Closing rule lists, whatever its last send (a send is never before it was written)", () => {
+    const f = quoteNoAnswerFilter(TODAY, 7, 5);
     for (const created_at of stamps) {
       for (const valid_until of dates) {
-        for (const follow_up_at of dates) {
-          const r = { created_at, valid_until, follow_up_at };
-          expect(passes(withDay, r), JSON.stringify(r)).toBe(noAnswerByCode(r, true));
-          expect(passes(before, r), JSON.stringify(r)).toBe(noAnswerByCode(r, false));
+        const r = { created_at, valid_until };
+        // The filter itself: written a week ago (UTC midnight), or the offer ends within five days.
+        const toExpiry = valid_until ? days(Date.parse(valid_until) - todayMs) : null;
+        expect(passes(f, r), JSON.stringify(r)).toBe(Date.parse(created_at) <= todayMs - 7 * 86_400_000 || (toExpiry != null && toExpiry <= 5));
+        for (const lastSentAt of [null, created_at, ...stamps.filter((t) => Date.parse(t) >= Date.parse(created_at))]) {
+          const st = closingState({ id: "q", status: "sent", created_at, valid_until }, { settled: false, lastSentAt, todayStr: TODAY });
+          if (st.needsAttention) expect(passes(f, r), JSON.stringify({ ...r, lastSentAt })).toBe(true);
         }
       }
     }
   });
 
-  it("the feeders read with them, so the exact count is the pile's count; the fold's estimates are their own read", () => {
+  // A late invoice's filter is EXACT (the test above), so its read's count is the pile's count. No
+  // Answer Yet's is a PRE-FILTER (cn-v1172): it keeps every row the Closing rule lists, and the rule
+  // then drops rows in code (a fresh send, a settled estimate), so its pile counts what the rule kept.
+  it("the feeders read with them: the late-invoice filter as the exact read, the no-answer filter as the pre-filter before the Closing rule", () => {
     const query = src("src/lib/action-items/query.ts");
     expect(query).toContain(".or(lateInvoiceFilter(todayStr, INVOICE_STALE_DAYS))");
-    expect(query).toContain("quoteNoAnswerFilter(todayStr, QUOTE_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS, true)");
-    expect(query).toContain("quoteNoAnswerFilter(todayStr, QUOTE_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS, false)");
-    expect(query).toMatch(/\.gt\("follow_up_at", todayStr\)/);
+    expect(query).toContain("quoteNoAnswerFilter(todayStr, CLOSING_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS)");
     // A won estimate past the read is its job's Jobs Needing a Day row: never a "1+" pile of wins.
     expect(query).not.toContain("counts.won_needs_a_day = codeCount(acceptedR)");
   });

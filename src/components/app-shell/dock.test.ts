@@ -56,7 +56,7 @@ describe("plainBadges — the renderer only ever sees a count map", () => {
 });
 
 /**
- * THE BAR, DRAWN (W1-07/W1-08): five tiles for staff (Today, Schedule, Sales, Jobs, Money), four
+ * THE BAR, DRAWN (W1-07/W1-08): five tiles for staff (Today, Schedule, Sales, Jobs, Admin), four
  * for a tech (Today, Clock, Jobs, You), every one a 44px target. Office and Tools are rows behind
  * the initials, never tiles, but their pages keep their section: on /team the page column still
  * lists Office's pages.
@@ -71,7 +71,7 @@ describe("the dock's tiles", () => {
     nav.search = "";
   });
 
-  it("staff: Today, Schedule, Sales, Jobs, Money — never Office or Tools", () => {
+  it("staff: Today, Schedule, Sales, Jobs, Admin — never Office or Tools", () => {
     expect(tiles(render("owner"))).toEqual(["today", "schedule", "sales", "jobs", "invoices"]);
     expect(tiles(render("office", ALL_ON))).toEqual(["today", "schedule", "sales", "jobs", "invoices"]);
   });
@@ -103,9 +103,15 @@ describe("the dock's tiles", () => {
     expect(html).toContain("relative z-10 h-5 w-5 shrink-0");
   });
 
-  it("with Leads and Estimates off the Sales tile says Customers and lands on /crm", () => {
+  it("with Leads and Estimates off there is no Sales tile; Admin opens on /crm (cn-v1172)", () => {
     const html = render("owner", { ...ALL_ON, leads: false, estimates: false });
-    expect(html).toMatch(/<a href="\/crm"[^>]*data-tour="dock-sales"[^>]*aria-label="Customers"/);
+    expect(tiles(html)).toEqual(["today", "schedule", "jobs", "invoices"]);
+    expect(html).not.toContain('data-tour="dock-sales"');
+    expect(html).toMatch(/<a href="\/crm"[^>]*data-tour="dock-invoices"[^>]*aria-label="Admin"/);
+  });
+
+  it("the Admin tile (the tile that was Money) opens on /crm and says Admin (cn-v1172)", () => {
+    expect(render("owner")).toMatch(/<a href="\/crm"[^>]*data-tour="dock-invoices"[^>]*aria-label="Admin"/);
   });
 
   /**

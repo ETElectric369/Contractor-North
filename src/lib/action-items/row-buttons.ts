@@ -74,7 +74,7 @@ export type RowButtonsCtx = { leadsOn?: boolean; isStaff: boolean; lang?: string
  * Spanish (an estimate is Enviarlo, an invoice Enviarla), so it is told apart by the pile's name.
  */
 const PILE_VERB_KEY: Record<string, string> = {
-  "Still Waiting": "ny_btn_stillWaiting",
+  "Send Again": "ny_btn_sendAgain",
   "Pick a Day": "ny_btn_pickADay",
   "Get Paid": "ny_btn_getPaid",
   "Bill It": "ny_btn_billIt",
@@ -181,8 +181,11 @@ export function rowButtons(item: ActionItem, ctx: RowButtonsCtx): RowButtons {
           : [],
       };
     case "quote_awaiting":
+      // cn-v1172: the Closing page's own doors. Send Again is the Send sheet (it logs the send, and
+      // the wait starts again); Won It and Not Sold behind ⋯. No Still Waiting: an estimate has no
+      // follow-up day ("Closing is the reminder yes").
       return {
-        primary: has(item, "snooze") ? { label: L("ny_btn_stillWaiting"), act: { type: "comeBack", verb: "snooze", askWhy: false, button: L("ny_btn_stillWaiting") } } : null,
+        primary: item.send ? { label: L("ny_btn_sendAgain"), act: { type: "send" } } : open(L("ny_btn_sendAgain"), item.href),
         also: null,
         more: [
           has(item, "do")

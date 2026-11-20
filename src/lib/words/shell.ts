@@ -4,9 +4,8 @@ import type { WordCatalog } from "./types";
  * THE SHELL'S WORDS (sh_): everything a person reads around the page — the dock's tiles and rows
  * (sh_dock_<row id>, read through lib/dock-words dockLabel so lib/dock.ts keeps its English data for
  * the office and the title-case test; since cn-v1139 EVERY tile and row is keyed, the office's
- * included, plus a row's whenOff words as sh_dock_<id>_off and a tile's whenOnly words as
- * sh_dock_<tile>_only, and sh_dock_settings for the Settings page's own side-tab group), Search Or
- * Ask and its help rows (sh_help_, lib/onboarding/help-rows), the + , the Bell, the top bar, the
+ * included, plus a row's whenOff words as sh_dock_<id>_off, and sh_dock_settings for the Settings
+ * page's own side-tab group), Search Or Ask and its help rows (sh_help_, lib/onboarding/help-rows), the + , the Bell, the top bar, the
  * account menu, the language door itself (Settings › You and the account menu) and what Spanish
  * covers today, the phone setup checklist, the two error pages, and Settings › You (Nort's tone and
  * greeting, the push switches, Face ID, the photo). Was s_language / s_languageDesc in lib/i18n.ts
@@ -48,8 +47,9 @@ export const words: WordCatalog = {
     // The fence's idle line reads one shell word, Open Settings (sh_btn_openSettings, 2026-11-16).
     "src/components/geofence-monitor.tsx",
   ],
-  // "Plan" is the same word; Tap to Pay on iPhone is Apple's name; Nort is Nort; the two maps apps are their names.
-  sameInBoth: ["sh_dock_plan", "sh_push_tap_to_pay", "sh_kind_nort", "sh_btn_googleMaps", "sh_btn_appleMaps"],
+  // "Plan" is the same word; Tap to Pay on iPhone is Apple's name; Nort is Nort; the two maps apps are their names;
+  // "Admin" is the tile that was Money (cn-v1172), kept short in Spanish too because the dock tile is narrow.
+  sameInBoth: ["sh_dock_plan", "sh_push_tap_to_pay", "sh_kind_nort", "sh_btn_googleMaps", "sh_btn_appleMaps", "sh_dock_invoices"],
   en: {
     sh_language: "Language",
     sh_languageDesc: "Your preferred language for the app and the AI assistant.",
@@ -65,10 +65,9 @@ export const words: WordCatalog = {
     sh_dock_schedule: "Schedule",
     sh_dock_clock: "Clock",
     sh_dock_sales: "Sales",
-    // The Sales tile reduced to its one Customers row (dock.ts whenOnly): sh_dock_<tile>_only.
-    sh_dock_sales_only: "Customers",
     sh_dock_jobs: "Jobs",
-    sh_dock_invoices: "Money",
+    // ADMIN (cn-v1172), the tile that was Money: "Lets change the name of the Dock tab Money to Admin".
+    sh_dock_invoices: "Admin",
     sh_dock_office: "Office",
     sh_dock_you: "You",
     sh_dock_tools: "Tools",
@@ -99,7 +98,7 @@ export const words: WordCatalog = {
     "sh_dock_m-bills_off": "Bills",
     "sh_dock_m-recon": "Reconcile",
     "sh_dock_m-price": "Price List",
-    "sh_dock_m-ma-h": "Money Admin",
+    "sh_dock_m-ma-h": "Money",
     "sh_dock_ma-payroll": "Payroll",
     "sh_dock_ma-tax": "Tax Report",
     "sh_dock_ma-analytics": "Analytics",
@@ -418,6 +417,9 @@ export const words: WordCatalog = {
     sh_leadSourceAlready: "That one is already on the list.",
     sh_leadSourceListFull: "The list holds {n}. Take one off to add another.",
     sh_leadSourcesNotSaved: "That didn't save: {error}",
+
+    // ── The dock's Closing row (cn-v1172): Sales › Closing, right under Estimates. Equals nv_page_closing. ──
+    "sh_dock_sl-closing": "Closing",
   },
   es: {
     sh_language: "Idioma",
@@ -431,9 +433,8 @@ export const words: WordCatalog = {
     sh_dock_schedule: "Agenda",
     sh_dock_clock: "Reloj",
     sh_dock_sales: "Ventas",
-    sh_dock_sales_only: "Clientes",
     sh_dock_jobs: "Trabajos",
-    sh_dock_invoices: "Dinero",
+    sh_dock_invoices: "Admin",
     sh_dock_office: "Oficina",
     sh_dock_you: "Tú",
     sh_dock_tools: "Herramientas",
@@ -461,7 +462,7 @@ export const words: WordCatalog = {
     "sh_dock_m-bills_off": "Cuentas",
     "sh_dock_m-recon": "Conciliar",
     "sh_dock_m-price": "Lista de Precios",
-    "sh_dock_m-ma-h": "Administración",
+    "sh_dock_m-ma-h": "Dinero",
     "sh_dock_ma-payroll": "Nómina",
     "sh_dock_ma-tax": "Reporte de Impuestos",
     "sh_dock_ma-analytics": "Análisis",
@@ -753,5 +754,7 @@ export const words: WordCatalog = {
     sh_leadSourceAlready: "Ese ya está en la lista.",
     sh_leadSourceListFull: "La lista tiene {n} como máximo. Quita uno para agregar otro.",
     sh_leadSourcesNotSaved: "No se guardó: {error}",
+
+    "sh_dock_sl-closing": "Cierre",
   },
 };

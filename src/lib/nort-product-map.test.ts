@@ -37,18 +37,23 @@ describe("Nort's product map after the shell wave", () => {
     expect(translator("en")("sh_talkToNort")).toBe("Talk to Nort");
   });
 
-  it("puts Customers under Sales, Timecards under Money, and Office and Tools behind the initials", () => {
-    // The facts, not the line shapes: lane 7 rewrites the Money lines next order.
+  it("puts Customers and Timecards under Admin (cn-v1172), and Office and Tools behind the initials", () => {
+    // The facts, not the line shapes. cn-v1172: the tile that was Money is Admin, and Customers is its first row.
     const lineWith = (s: string) => NORT_PRODUCT_MAP.split("\n").find((l) => l.includes(s)) ?? "";
     expect(NORT_PRODUCT_MAP).not.toMatch(/^- Contacts:/m);
-    expect(lineWith("Customers (/crm)")).toContain("Sales");
-    expect(lineWith("Timecards (/timecards)")).toContain("Money");
+    expect(lineWith("Customers (/crm)")).toMatch(/^- Admin → Customers \(\/crm\)/);
+    expect(lineWith("Timecards (/timecards)")).toMatch(/^- Admin → Timecards/);
+    // No line names the tile by its old name, and no line puts Customers under Sales.
+    expect(NORT_PRODUCT_MAP).not.toMatch(/^- Money →/m);
+    expect(NORT_PRODUCT_MAP).not.toContain("Sales → Customers");
     expect(NORT_PRODUCT_MAP).toContain("- Office and Tools: behind your initials");
     expect(NORT_PRODUCT_MAP).toContain("shows only with Calculators on");
     // True in code.
-    const sales = DOCK.find((s) => s.key === "sales")!;
-    expect(sales.children.find((c) => c.href === "/crm")?.label).toBe("Customers");
-    expect(DOCK.find((s) => s.key === "invoices")!.children.find((c) => c.href === "/timecards")?.label).toBe("Timecards");
+    const admin = DOCK.find((s) => s.key === "invoices")!;
+    expect(admin).toMatchObject({ label: "Admin", href: "/crm" });
+    expect(admin.children[0]).toMatchObject({ label: "Customers", href: "/crm" });
+    expect(DOCK.find((s) => s.key === "sales")!.children.some((c) => c.href === "/crm")).toBe(false);
+    expect(admin.children.find((c) => c.href === "/timecards")?.label).toBe("Timecards");
     for (const k of ["office", "tools"]) expect(DOCK.find((s) => s.key === k)?.inMenu, k).toBe(true);
     expect(DOCK.find((s) => s.key === "tools")?.feature).toBe("calculators");
     // Staff clock in on My Day: the Clock tile is the crew's.
@@ -208,7 +213,7 @@ describe("Nort's product map after the shell wave", () => {
      then the code that makes them true. Lane 6 (one lead link, Nort's words) is NOT in this release;
      when it lands and rewrites these lines, it keeps these facts or changes the code first. */
   it("Add by Hand says it CAN put stock in, because now it does (W1-FU-misc B)", () => {
-    const line = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Money → Bills (/bills)"))!;
+    const line = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Admin → Bills (/bills)"))!;
     // The old claim was the opposite, and the typed sheet now disproves it.
     expect(line).not.toMatch(/never adds stock/);
     for (const part of ["Shop Stock, which asks What Is It, How Many and the unit", "while the Shop Stock switch is on"]) {
@@ -273,7 +278,7 @@ describe("Nort's product map after the shell wave", () => {
    * on purpose which of the two it is.
    */
   const OWED: Record<string, string> = {
-    "/price-list": "named only inside Settings → Money's line (\"price list (CSV import)\"), not as the Money → Price List page",
+    "/price-list": "named only inside Settings → Money's line (\"price list (CSV import)\"), not as the Admin → Price List page",
     "/payroll": "no line at all — Nort cannot point at Payroll",
     "/tax-report": "no line at all — the Analytics line names For Your Accountant, which is a different door",
     "/recurring": "no line at all",
@@ -308,7 +313,7 @@ describe("Nort's product map after the shell wave", () => {
   });
 
   it("Reconcile is one of them: the page for two records that should agree", () => {
-    const line = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Money → Reconcile (/reconcile"))!;
+    const line = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Admin → Reconcile (/reconcile"))!;
     expect(line).toBeTruthy();
     expect(Object.keys(OWED)).not.toContain("/reconcile");
     // Its five sections, in the words the page draws them in, and in its order.
@@ -325,7 +330,7 @@ describe("Nort's product map after the shell wave", () => {
     // The gap is answered where the record lives, which the kinds table says by name.
     expect(RECONCILE_KINDS["supplier-gap"].answeredOn).toEqual({ screen: "Suppliers", href: "/bills#suppliers" });
     expect(line).toContain("answered on the Suppliers card on Bills");
-    // True in code: docked under Money, office only, and badged over the kinds answered here.
+    // True in code: docked under Admin (the tile that was Money), office only, and badged over the kinds answered here.
     const money = DOCK.find((s) => s.key === "invoices")!;
     expect(money.children.find((c) => c.href === "/reconcile")).toMatchObject({ label: "Reconcile", staffOnly: true });
     expect(readFileSync(join(process.cwd(), "src/app/(app)/reconcile/page.tsx"), "utf8")).toContain(
@@ -390,10 +395,61 @@ describe("Nort's map after the Leads rework", () => {
     expect(readFileSync(join(process.cwd(), "src/lib/inquiries/sources.ts"), "utf8")).toContain('"site_chat"');
   });
 
+  it("a lead whose estimate was declined is in the Not Sold fold with no Reopen (cn-v1172)", () => {
+    expect(leads).toContain("A lead whose estimate was declined or expired is in that fold too, marked Estimate Not Sold, with no Reopen");
+  });
+
   it("the chat route teaches no follow-up day for a lead, and no inquiry.snooze", () => {
     const route = readFileSync(join(process.cwd(), "src/app/api/chat/route.ts"), "utf8");
     expect(route).not.toContain("inquiry.snooze");
     expect(route).toContain("a lead has NO follow-up day: it stays on the Leads list until it is scheduled (its inspection booked) or marked Not Sold");
     expect(route).toContain("inquiry.markLost (kept on file, marked Not Sold)");
+  });
+});
+
+/**
+ * THE PAGES (cn-v1172). Erik, 2026-11-19: "lets break the Estimate page into 2 parts consisting of
+ * completed inspections in its own new list called Inspections To Estimate", "a new sub-nav tab right
+ * below Estimates called Closing as an inbox for estimates that havent been accepted", and, asked
+ * whether Closing replaces the follow-up day on an estimate, "Closing is the reminder yes". Nort says
+ * where each of those lives, and never offers an estimate a follow-up day.
+ */
+describe("Nort's map after the pages (cn-v1172)", () => {
+  const line = (start: string) => NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith(start)) ?? "";
+  const estimates = line("- Sales → Estimates (/quotes)");
+  const closing = line("- Sales → Closing (/closing");
+  const inspections = line("- Sales → Inspections");
+  const needsYou = line("- My Day → Needs You");
+
+  it("Estimates is two parts: Inspections to Estimate on top, All Estimates below with drafts first", () => {
+    expect(estimates).toContain("On top, Inspections to Estimate");
+    expect(estimates).toContain("All Estimates, the list with drafts first");
+    expect(estimates).toContain("Create Estimate");
+  });
+
+  it("Closing is on the map, right after Estimates, with its three doors, and the list is the reminder", () => {
+    const lines = NORT_PRODUCT_MAP.split("\n");
+    expect(lines.indexOf(closing)).toBe(lines.indexOf(estimates) + 1);
+    expect(closing).toContain("office only");
+    expect(closing).toContain("Three doors: Accepted");
+    expect(closing).toContain("Not Sold");
+    expect(closing).toContain("Send Again");
+    expect(closing).toContain("the list IS the reminder");
+    // True in code: the dock row it names.
+    const row = DOCK.find((s) => s.key === "sales")!.children.find((c) => c.href === "/closing");
+    expect(row).toMatchObject({ label: "Closing", feature: "estimates" });
+  });
+
+  it("an inspected visit with no estimate is on Estimates while the switch is on, and on Inspections while it is off", () => {
+    expect(inspections).toContain("NOT on this list while Estimates is switched on");
+    expect(inspections).toContain("Inspections to Estimate");
+    expect(inspections).toContain("with Estimates off it stays here");
+  });
+
+  it("an estimate has no follow-up day and no Still Waiting anywhere on the map; the Sales badge counts Closing too", () => {
+    expect(NORT_PRODUCT_MAP).not.toContain("Still Waiting");
+    expect(NORT_PRODUCT_MAP).not.toContain("quote.followUp");
+    expect(needsYou).toContain("an estimate that is out with no answer has NO follow-up day: it sits on Sales → Closing");
+    expect(line("- Sales → Leads (/leads)")).toContain("The Sales badge is the number on this list plus the Closing estimates that need a person now");
   });
 });

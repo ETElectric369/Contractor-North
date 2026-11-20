@@ -47,7 +47,9 @@ describe("an inspection_writeup row never points at /quotes/new", () => {
 
 describe("every other link to /quotes/new?capture= is an explicit button, never a row body", () => {
   it("the Inspections list: the link is the row's own labelled boxed button; the row's name opens the person's file", () => {
-    const page = src("src/app/(app)/inspections/page.tsx");
+    // cn-v1172: the row builder moved out of the page (inspections/row-words), because the Estimates
+    // page's top list draws the same rows with the same doors.
+    const page = src("src/app/(app)/inspections/row-words.ts");
     // The capture link is only ever the boxed button Create Estimate; every other boxed button and the
     // ⋯'s Open Inspection go to the visit (cn-v1171: the one list).
     expect(page).toContain("const visitHref = `/appointments/${a.id}`;");
@@ -77,7 +79,7 @@ describe("every other link to /quotes/new?capture= is an explicit button, never 
       }
     };
     walk("src");
-    expect(hits.sort()).toEqual(["src/app/(app)/appointments/[id]/page.tsx", "src/app/(app)/inspections/page.tsx"]);
+    expect(hits.sort()).toEqual(["src/app/(app)/appointments/[id]/page.tsx", "src/app/(app)/inspections/row-words.ts"]);
   });
 });
 

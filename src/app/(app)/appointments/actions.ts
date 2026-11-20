@@ -250,6 +250,7 @@ export async function createAppointment(formData: FormData): Promise<Result> {
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   return { ok: true, id: data.id, ...(warning ? { warning } : {}), ...(cust.notice ? { notice: cust.notice } : {}) };
 }
 
@@ -408,6 +409,7 @@ export async function createInspectionNow(
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections");
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   return { ok: true, id: appt.id };
 }
 
@@ -492,6 +494,7 @@ export async function createAppointmentProposal(
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   return { ok: true, token: res.token, ...(warning ? { warning } : {}), ...(cust.notice ? { notice: cust.notice } : {}) };
 }
 
@@ -750,6 +753,7 @@ export async function linkAppointmentTo(
   revalidatePath("/schedule");
   revalidatePath("/planner");
   revalidatePath("/inspections");
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   revalidatePath("/leads");
   revalidatePath(`/appointments/${id}`);
   return { ok: true, id, ...(note ? { note } : {}), ...(warnings.length ? { warning: warnings.join(" ") } : {}) };
@@ -977,6 +981,7 @@ export async function setAppointmentPlace(
   revalidatePath("/schedule");
   revalidatePath("/planner");
   revalidatePath("/inspections");
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   revalidatePath(`/appointments/${id}`);
   return { ok: true, id };
 }
@@ -1035,6 +1040,7 @@ export async function saveInspectionCapture(
   revalidatePath("/schedule");
   revalidatePath("/planner");
   revalidatePath("/inspections");
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   revalidatePath(`/appointments/${id}`);
   return { ok: true, id };
 }
@@ -1168,6 +1174,7 @@ async function saveInspectionAnswersInner(
   if (!data?.length) return { ok: false, error: await ws.say("ag_srv_apptNotFound") };
   revalidatePath(`/appointments/${id}`);
   revalidatePath("/inspections");
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   return { ok: true, id };
 }
 
@@ -1306,6 +1313,7 @@ function revalidateInspection(id: string) {
   revalidatePath("/schedule");
   revalidatePath("/planner");
   revalidatePath("/inspections");
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   revalidatePath(`/appointments/${id}`);
 }
 
@@ -1367,6 +1375,7 @@ async function saveAnswersAsCrewLead(
     if (!data) return { ok: false, error: await ws.say("ag_srv_didntSaveReload") };
     revalidatePath(`/appointments/${id}`);
     revalidatePath("/inspections");
+    revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
     return { ok: true, id };
   });
 }
@@ -1438,6 +1447,7 @@ export async function updateAppointment(id: string, formData: FormData): Promise
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   revalidatePath(`/appointments/${id}`); // the capture page hosts Edit Details — show the save
   return { ok: true, ...(warning ? { warning } : {}), ...(cust.notice ? { notice: cust.notice } : {}) };
 }
@@ -1465,6 +1475,7 @@ export async function setAppointmentTitle(id: string, title: string): Promise<Re
   revalidatePath("/schedule");
   revalidatePath("/planner");
   revalidatePath("/inspections");
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   revalidatePath(`/appointments/${id}`);
   return { ok: true, id };
 }
@@ -1526,6 +1537,7 @@ export async function setAppointmentOutcome(
   if (inquiryId) revalidatePath("/leads");
   revalidatePath("/planner");
   revalidatePath("/inspections");
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   return {
     ok: true,
     ...(leadMarked ? { leadMarked: true } : {}),
@@ -1596,6 +1608,7 @@ export async function setAppointmentStatus(
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   return { ok: true, previousStatus, note };
 }
 
@@ -1665,6 +1678,7 @@ export async function rescheduleAppointment(
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   return {
     ok: true,
     ...(withdrawn?.length
@@ -1921,6 +1935,7 @@ export async function createJobFromAppointment(
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   const note = [absorbNote, ...work.notes, tasksNote, materialsNote].filter(Boolean).join(" ");
   return { ok: true, id: job.id, ...(note ? { note } : {}) };
 }
@@ -1938,6 +1953,7 @@ export async function deleteAppointment(id: string): Promise<Result> {
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   return { ok: true };
 }
 
@@ -1946,6 +1962,7 @@ function revalidateVisit(id: string) {
   revalidatePath("/schedule");
   revalidatePath("/planner");
   revalidatePath("/inspections");
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   revalidatePath(`/appointments/${id}`);
 }
 
@@ -2116,6 +2133,7 @@ export async function unscheduleAppointment(id: string): Promise<Result> {
   revalidatePath("/schedule");
   revalidatePath("/planner");
   revalidatePath("/inspections");
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   revalidatePath(`/appointments/${id}`);
   return { ok: true };
 }

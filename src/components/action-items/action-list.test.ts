@@ -364,7 +364,7 @@ describe("ActionList — piles (W1-14)", () => {
 describe("ActionList — a verb's refusal is always said, and the server's list decides what shows", () => {
   const list = () => readFileSync(join(process.cwd(), "src/components/action-items/action-list.tsx"), "utf8");
 
-  it("a sheet's verb (⋯, Snooze, Still Waiting, Set Aside Until…, Assign, a confirm, Pick a Day) waits for the server: its row and sheet stay to say a refusal", () => {
+  it("a sheet's verb (⋯, Snooze, Set Aside Until…, Assign, a confirm, Pick a Day) waits for the server: its row and sheet stay to say a refusal", () => {
     for (const verb of ["snooze", "dismiss", "schedule", "do"] as const) {
       expect(verbLanding({ kind: "invoice_draft" }, verb, { sheet: true }).optimistic, verb).toBe(false);
     }

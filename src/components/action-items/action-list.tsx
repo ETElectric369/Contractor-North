@@ -38,12 +38,12 @@ const EN = translator("en");
 /** The page a pile's See All opens, said by the pile's name in the reader's language. */
 const LIST_LABEL_KEY: Partial<Record<PileName, string>> = {
   estimates_not_sent: "ny_btn_seeAllOnEstimates",
-  no_answer_yet: "ny_btn_seeAllOnEstimates",
+  no_answer_yet: "ny_btn_seeAllInClosing",
   won_needs_a_day: "ny_btn_seeAllOnEstimates",
   late_invoices: "ny_btn_seeAllOnInvoices",
   invoices_not_sent: "ny_btn_seeAllOnInvoices",
   leads_to_call: "ny_btn_seeAllOnLeads",
-  inspections_to_write_up: "ny_btn_seeAllInspections",
+  inspections_to_write_up: "ny_btn_seeAllOnEstimates",
   jobs_needing_a_day: "ny_btn_seeAllOnSchedule",
   holds_back: "ny_btn_seeAllOnJobs",
   papers_to_sort: "ny_btn_seeAllOnBills",
@@ -85,7 +85,7 @@ type Run = (item: ActionItem, verb: Affordance, payload?: DispatchPayload, opts?
 type RunOpts = {
   /** A pile's child: acting on it drops it (the pile counts down in place), it never sinks. */
   child?: boolean;
-  /** Sent from a sheet (⋯, a Snooze or Still Waiting picker, Assign, a confirm, Pick a Day): the
+  /** Sent from a sheet (⋯, a Snooze picker, Assign, a confirm, Pick a Day): the
    *  sheet lives inside its row, and it says the refusal. */
   sheet?: boolean;
 };

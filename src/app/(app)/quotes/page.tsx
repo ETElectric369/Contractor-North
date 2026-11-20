@@ -10,9 +10,24 @@ import { QUOTE_STATUSES, QUOTE_STATUS_PRIORITY, estimateStatusLabel, type QuoteS
 import { QuotesList } from "./quotes-list";
 import { switchesFromRow } from "@/lib/viewer-switches";
 import { featureOn } from "@/lib/features";
+import { inspectionsToEstimate } from "@/lib/inspections";
+import { readInspectionBuckets } from "@/lib/inspections-read";
+import { reportError } from "@/lib/observe";
+import { inspectionRowBuilder } from "../inspections/row-words";
+import type { ListRow } from "../inspections/list-rows";
+import { AllEstimatesHeading, ToEstimateSection } from "./to-estimate-section";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Sales → Estimates. TWO PARTS (cn-v1172). Erik, 2026-11-19, after the second meeting: "lets break the
+ * Estimate page into 2 parts consisting of completed inspections in its own new list called
+ * Inspections To Estimate, and the other section below is all Estimates like they are now". For the
+ * office, with the Estimates switch on and no filter chosen, the inspected visits nobody has priced
+ * are listed on top (./to-estimate-section, the Inspections page's own rows, read through the one
+ * reader lib/inspections-read so the two pages never disagree), then All Estimates, drafts first. A
+ * tech sees neither the section nor anything it would add; a filtered view is the list alone.
+ */
 export default async function QuotesPage({
   searchParams,
 }: {
@@ -41,6 +56,11 @@ export default async function QuotesPage({
   const lang = await currentLangFor(user?.id);
   const t = translator(lang);
 
+  // INSPECTIONS TO ESTIMATE (cn-v1172): office only, Estimates on, no filter. A tech never reads it.
+  // Started beside the list's own read; ONE now for its buckets and its rows' words.
+  const now = new Date();
+  const toEstimateRead = isStaff && estimatesOn && !filter && !statusFilter ? readInspectionBuckets(supabase, { now }) : null;
+
   // inquiry:inquiry_id — so a deferred-customer estimate (customer_id null until accepted) still
   // shows WHO it's for (the lead's name) instead of a blank dash.
   let query = supabase.from("quotes").select("*, customers(name, company_name), inquiry:inquiry_id(name)");
@@ -50,9 +70,11 @@ export default async function QuotesPage({
   const { data } = await query.order("created_at", { ascending: false }).limit(2000);
 
   const quotes = (data ?? []) as any[];
-  // Default view: settled paperwork files away. Stable-sort by lifecycle weight (mirrors the
-  // jobs list) so an accepted estimate that already became a job — or a declined/expired one —
-  // sinks below the live pipeline instead of cluttering it. Newest-first within each band.
+  // Default view: DRAFTS FIRST (cn-v1172: a draft is the office's own next step; one that is out
+  // waiting on the customer is worked from Sales → Closing), then sent, then settled paperwork.
+  // Stable-sort by lifecycle weight (lib/statuses QUOTE_STATUS_PRIORITY) so an accepted estimate that
+  // already became a job, or a declined/expired one, sinks below the live pipeline instead of
+  // cluttering it. Newest-first within each band.
   if (!statusFilter) {
     quotes.sort(
       (a, b) =>
@@ -67,6 +89,18 @@ export default async function QuotesPage({
   // them so the office can keep one and sweep the rest in a tap. Never nag when
   // there are none — the card is hidden entirely.
   const clusters = buildDuplicateClusters(quotes, t("qt_unknownCustomer"));
+
+  let toEstimate: { rows: ListRow[]; tz: string; failed: boolean } | null = null;
+  if (toEstimateRead) {
+    const read = await toEstimateRead;
+    if (read.error) reportError(`quotes:toEstimate:${read.error.where}`, read.error.cause);
+    const { rowOf } = inspectionRowBuilder({ t, lang, tz: read.tz, now, estimatesOn });
+    toEstimate = {
+      rows: read.error ? [] : inspectionsToEstimate(read.buckets).map((a) => rowOf(a, "write_up")),
+      tz: read.tz,
+      failed: !!read.error,
+    };
+  }
 
   return (
     <div>
@@ -90,6 +124,13 @@ export default async function QuotesPage({
             <X className="h-3.5 w-3.5 text-slate-400" />
           </Link>
         </div>
+      )}
+
+      {toEstimate && (
+        <>
+          <ToEstimateSection rows={toEstimate.rows} tz={toEstimate.tz} failed={toEstimate.failed} t={t} />
+          <AllEstimatesHeading t={t} />
+        </>
       )}
 
       {quotes.length === 0 ? (

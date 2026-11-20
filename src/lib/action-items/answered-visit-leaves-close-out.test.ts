@@ -236,14 +236,23 @@ describe("the write-up feeder and the Inspections page read the outcome column",
 
   // cn-v1171: the page is one list now (lib/inspections inspectionList over the buckets); the two facts
   // pinned are the same: its read selects outcome, and its rows go through bucketInspections.
+  // cn-v1172: the Inspections page and the Estimates page's top list read through ONE reader
+  // (lib/inspections-read readInspectionBuckets), so the same two facts are pinned there: its read
+  // selects outcome, and the rows it read go to bucketInspections with nothing filtering in between.
   it("the Inspections page selects outcome and buckets with the same function", () => {
-    const page = readFileSync(join(process.cwd(), "src/app/(app)/inspections/page.tsx"), "utf8");
-    const cols = selected(page.slice(page.indexOf('.from("appointments")')));
+    const reader = readFileSync(join(process.cwd(), "src/lib/inspections-read.ts"), "utf8");
+    const cols = (/export const VISIT_COLUMNS =\s*"([^"]*)"/.exec(reader)?.[1] ?? "").split(/,\s*/);
     for (const c of BUCKET_READS) expect(cols, c).toContain(c);
-    expect(page).toMatch(/const buckets = bucketInspections\(\s*rows,/);
-    expect(page).toContain("inspectionList(buckets, now, tz)");
-    // The rows handed over are the read's own: nothing filters the outcome in between.
-    expect(page).toMatch(/const rows = \(apptData \?\? \[\]\) as any\[\];/);
+    expect(reader).toMatch(/\.from\("appointments"\)\s*\.select\(VISIT_COLUMNS\)/);
+    expect(reader).toContain("const visits = visitsRes.data as InspectionVisit[];");
+    expect(reader).toMatch(/const buckets = bucketInspections\(\s*visits,/);
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/inspections/page.tsx"), "utf8");
+    expect(page).toContain("readInspectionBuckets(supabase, { now })");
+    expect(page).toContain("inspectionList(buckets, now, tz, { estimatesOn })");
+    // The Estimates page asks the same reader, never a read of its own.
+    const quotes = readFileSync(join(process.cwd(), "src/app/(app)/quotes/page.tsx"), "utf8");
+    expect(quotes).toContain("readInspectionBuckets(supabase, { now })");
+    expect(quotes).not.toContain('.from("appointments")');
   });
 
   it("driven: an answered visit with field notes is not a write-up row, whatever its status", async () => {

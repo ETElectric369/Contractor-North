@@ -1919,6 +1919,7 @@ export async function sizeAppointment(
   if (!data?.length) return { ok: false, error: await ws.say("ag_srv_visitGone") };
   revalidatePath("/schedule");
   revalidatePath("/inspections");
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   return { ok: true };
 }
 

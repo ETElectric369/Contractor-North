@@ -3,11 +3,12 @@ import { jobWords } from "./words";
 /**
  * THE DAY A PERSON PICKED IS THE DAY IT COMES BACK (Wave 1 seam fixes on release/w1a).
  *
- * Two waits have a day: an estimate's follow-up (quote.followUp → quotes.follow_up_at, 0366) and a
- * job's hold (setJobHold → jobs.hold_until, 0366). Nort and the pickers say "comes back Monday", so
- * Needs You has to agree: a wait whose day is after today is off Now (it waits in the Waiting fold
- * with that day), and on its day it is back. A lead has no day since cn-v1170 (lib/leads/new-intake:
- * a lead still on the Leads list IS the reminder).
+ * A job's hold has a day (setJobHold → jobs.hold_until, 0366). Nort and the pickers say "comes back
+ * Monday", so Needs You has to agree: a wait whose day is after today is off Now (it waits in the
+ * Waiting fold with that day), and on its day it is back. A lead has no day since cn-v1170
+ * (lib/leads/new-intake: a lead still on the Leads list IS the reminder), and an estimate none since
+ * cn-v1172 (lib/estimate/closing: an estimate on the Closing list IS the reminder; Erik: "Closing is
+ * the reminder yes").
  */
 
 /**
@@ -21,17 +22,6 @@ export function heldJobState(holdUntil: string | null | undefined, todayStr: str
   const day = String(holdUntil ?? "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return "no_day";
   return day > todayStr ? "later" : "back";
-}
-
-/**
- * An estimate waiting on the customer, given its follow-up day (0366's quotes.follow_up_at):
- *   "later"  the day is after today: off the list until then (the day he picked stands);
- *   "due"    the day is today or earlier: on the list, whatever the 7-quiet-days rule says;
- *   "none"   no day picked: the old rule (7 quiet days, or valid-until close or past) decides.
- */
-export function quoteFollowUpState(followUpAt: string | null | undefined, todayStr: string): "later" | "due" | "none" {
-  if (!followUpAt) return "none";
-  return followUpAt.slice(0, 10) > todayStr ? "later" : "due";
 }
 
 /** Midnight UTC of the day `days` from `todayStr`: the instant the feeders' day math measures from. */
@@ -57,14 +47,14 @@ export function lateInvoiceFilter(todayStr: string, staleDays: number): string {
 }
 
 /**
- * A SENT ESTIMATE ON NEEDS YOU: its follow-up day has come; or, with no follow-up day, the customer
- * has had it `quietDays` or more, or its valid-until is `soonDays` away or past. `withFollowUp` false:
- * before 0366 (no follow_up_at column), the old rule alone. A follow-up day after today is the
- * Waiting fold's, which reads those on their own.
+ * A SENT ESTIMATE NEEDS YOU MAY LIST: written `quietDays` or more ago, or its valid-until is
+ * `soonDays` away or past. The database's pre-filter for the Closing rule (lib/estimate/closing
+ * closingState), which then decides each row by its last logged send: a send is never earlier than
+ * the day the estimate was written, so every estimate the rule calls quiet passes this filter. No
+ * follow-up day (cn-v1172: "Closing is the reminder yes").
  */
-export function quoteNoAnswerFilter(todayStr: string, quietDays: number, soonDays: number, withFollowUp: boolean): string {
-  const oldRule = `created_at.lte.${dayShift(todayStr, -quietDays).toISOString()},valid_until.lte.${dayShift(todayStr, soonDays).toISOString().slice(0, 10)}`;
-  return withFollowUp ? `follow_up_at.lte.${todayStr},and(follow_up_at.is.null,or(${oldRule}))` : oldRule;
+export function quoteNoAnswerFilter(todayStr: string, quietDays: number, soonDays: number): string {
+  return `created_at.lte.${dayShift(todayStr, -quietDays).toISOString()},valid_until.lte.${dayShift(todayStr, soonDays).toISOString().slice(0, 10)}`;
 }
 
 /**

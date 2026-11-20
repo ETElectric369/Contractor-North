@@ -65,11 +65,14 @@ describe("the site visit is an Inspection", () => {
     expect(nav.en.nv_page_inspections).toBe("Inspections");
     // The row's boxed button's words come from lib/words/inspections; the catalog pins the English.
     // (cn-v1171 removed the header's Book an Inspection: an inspection is booked from a lead.)
-    expect(page).toContain('"ip_btn_startInspection"');
+    // cn-v1172: the row's words are the one row builder's, which the Estimates page uses too.
+    expect(read("src/app/(app)/inspections/row-words.ts")).toContain('"ip_btn_startInspection"');
     expect(inspectionsWords.en.ip_btn_startInspection).toBe("Start Inspection");
     expect(page).not.toContain("ip_btn_bookAnInspection");
     expect(FEATURES.find((f) => f.key === "leads")?.label).toBe("Leads & Inspections");
-    expect(PILE_DEFS.inspections_to_write_up).toMatchObject({ label: "Inspections to Write Up", listLabel: "See All Inspections" });
+    // cn-v1172: an inspected visit with no estimate is drawn on the Estimates page's top list, so the
+    // pile's See All lands there. The pile's own name still reads Inspection.
+    expect(PILE_DEFS.inspections_to_write_up).toMatchObject({ label: "Inspections to Write Up", listHref: "/quotes", listLabel: "See All on Estimates" });
   });
 
   it("a new inspection's stock title is the word and who it's with", () => {
@@ -101,7 +104,7 @@ describe("the site visit is an Inspection", () => {
     // row are deliberately NOT on this list: a display word must never be saved back.
     for (const f of [
       "src/app/(app)/activity/page.tsx",
-      "src/app/(app)/inspections/page.tsx",
+      "src/app/(app)/inspections/row-words.ts", // cn-v1172: both pages' rows are worded here
       "src/app/(app)/planner/page.tsx",
       "src/app/(app)/schedule/page.tsx",
       "src/app/(app)/calendar/calendar-view.tsx",

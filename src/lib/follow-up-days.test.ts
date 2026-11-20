@@ -1,13 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 /**
- * EVERY WAIT HAS A DAY (NY-feeders, 0366): the server piece Needs You wires (lane 5).
- *
- *   setQuoteFollowUp  the day to ask again about an unanswered estimate: writes follow_up_at and
- *                     NOTHING else (never valid_until, the customer's offer window), today or later,
- *                     a zero-row write said, and before 0366 a refusal in words.
+ * EVERY WAIT HAS A DAY (NY-feeders, 0366), AND TWO WAITS NO LONGER HAVE ONE.
  *
  * A lead's follow-up day (snoozeInquiry) is gone since cn-v1170: the Leads list is the reminder.
+ * An estimate's (setQuoteFollowUp, quote.followUp) is gone since cn-v1172: the Closing list is the
+ * reminder (Erik, 2026-11-19: "Closing is the reminder yes"). The column stays in the database.
  */
 type Row = Record<string, unknown>;
 const s = vi.hoisted(() => ({
@@ -47,54 +45,26 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }
 vi.mock("next/server", () => ({ after: vi.fn() }));
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
 
-const { setQuoteFollowUp } = await import("@/app/(app)/quotes/actions");
-const { todayStrInTz } = await import("@/lib/tz");
-const { addDays } = await import("@/lib/come-back-days");
-const today = () => todayStrInTz(s.tz);
-
-beforeEach(() => {
-  s.writes = [];
-  s.hits = 1;
-  s.missing = false;
-});
-
-describe("setQuoteFollowUp", () => {
-  it("writes the follow-up day and nothing else: never valid_until", async () => {
-    expect(await setQuoteFollowUp("q-1", addDays(today(), 3))).toEqual({ ok: true });
-    expect(s.writes).toEqual([{ table: "quotes", patch: { follow_up_at: addDays(today(), 3) }, filters: [["eq", "id", "q-1"]] }]);
-  });
-
-  it("a past day is refused and nothing is written", async () => {
-    expect(await setQuoteFollowUp("q-1", addDays(today(), -1))).toEqual({ ok: false, error: "Pick today or later" });
-    expect(await setQuoteFollowUp("q-1", "next tuesday")).toEqual({ ok: false, error: "Pick a day." });
-    expect(s.writes).toEqual([]);
-  });
-
-  it("a zero-row write is said", async () => {
-    s.hits = 0;
-    expect(await setQuoteFollowUp("q-gone", today())).toEqual({ ok: false, error: "That estimate could not be found." });
-  });
-
-  it("before 0366 (no follow_up_at column) the refusal says the database needs its update", async () => {
-    s.missing = true;
-    expect(await setQuoteFollowUp("q-1", today())).toEqual({
-      ok: false,
-      error: "This needs a quick database update before an estimate can take a follow-up day.",
-    });
-  });
+describe("an estimate has no follow-up day (cn-v1172)", () => {
+  it("the server action is gone, and nothing the estimate doors write names follow_up_at", async () => {
+    const actions = await import("@/app/(app)/quotes/actions");
+    expect("setQuoteFollowUp" in actions).toBe(false);
+    expect(s.writes.some((w) => "follow_up_at" in w.patch)).toBe(false);
+  }, 30_000);
 });
 
 describe("the registry and Nort", () => {
   // cn-v1170: a lead has no follow-up day any more (a lead on the Leads list IS the reminder), so
   // inquiry.snooze left the registry; inquiry.markLost (Not Sold) stays.
-  it("quote.followUp and inquiry.markLost are registry writes Nort may run, each behind its switch; inquiry.snooze is gone", async () => {
+  it("inquiry.markLost is a registry write Nort may run behind its switch; inquiry.snooze and quote.followUp are gone", async () => {
     const { AGENT_WRITE_ALLOWED, AGENT_TOOL_FEATURE } = await import("@/lib/actions/agent-tools");
     const { quoteActions } = await import("@/lib/actions/entities/quote");
     const { inquiryActions } = await import("@/lib/actions/entities/inquiry");
-    for (const name of ["quote.followUp", "inquiry.markLost"]) expect(AGENT_WRITE_ALLOWED.has(name), name).toBe(true);
-    expect(AGENT_TOOL_FEATURE["quote.followUp"]).toBe("estimates");
+    expect(AGENT_WRITE_ALLOWED.has("inquiry.markLost")).toBe(true);
+    expect(AGENT_WRITE_ALLOWED.has("quote.followUp")).toBe(false);
+    expect("quote.followUp" in AGENT_TOOL_FEATURE).toBe(false);
     expect(AGENT_TOOL_FEATURE["inquiry.markLost"]).toBe("leads");
-    expect(quoteActions["quote.followUp"]).toMatchObject({ auth: "staff", effect: "write" });
+    expect(quoteActions["quote.followUp"]).toBeUndefined();
     expect(inquiryActions["inquiry.markLost"]).toMatchObject({ auth: "staff", effect: "write" });
     expect(inquiryActions["inquiry.snooze"]).toBeUndefined();
     expect(AGENT_WRITE_ALLOWED.has("inquiry.snooze")).toBe(false);

@@ -71,6 +71,28 @@ function InspectionCard({ row, tz }: { row: ListRow; tz: string }) {
   );
 }
 
+/** An outline door on a 44px target, beside or under the boxed one (never a second filled one). */
+const OUTLINE =
+  "btn-gloss inline-flex h-11 items-center justify-center whitespace-nowrap rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 hover:border-brand hover:text-brand";
+
+/**
+ * NOBODY FALLS BETWEEN THE TWO PAGES (cn-v1172). With Estimates on, an inspected visit nobody has
+ * priced is on the Estimates page's top list ("Inspections To Estimate", Erik's words) and not here.
+ * While any are there, this page says how many, with the door, under the list and in the empty state.
+ * Plain slate: nothing about it is a deadline. Drawn only when there is one.
+ */
+export function ToEstimateLine({ n, t }: { n: number; t: (key: string) => string }) {
+  if (n <= 0) return null;
+  return (
+    <div data-to-estimate="" className="mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 px-1 text-sm text-slate-600">
+      <span>{fillText(t("ip_toEstimateWaiting"), { n: String(n) })}</span>
+      <Link href="/quotes" className={OUTLINE}>
+        {t("ip_btn_goToEstimates")}
+      </Link>
+    </div>
+  );
+}
+
 /**
  * FILED UNDER NOBODY (cn-v1171). The page's Filed side is gone (Erik said yes: a finished inspection
  * is found in its person's file). The few with no lead, no customer and no job have no file, so they

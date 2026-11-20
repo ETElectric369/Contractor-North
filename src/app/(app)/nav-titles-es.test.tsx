@@ -37,13 +37,13 @@ const literal = (title: string, description: string) => renderToStaticMarkup(cre
 /** `noId`: the page never resolves a session of its own, so it reads the no-id door currentLang(). */
 type Page = { file: string; slug: string; title: string; desc: string; es: string; noId?: true };
 const PAGES: Page[] = [
-  { file: "leads/page.tsx", slug: "leads", title: "Leads", desc: "New requests to follow up and convert — nothing converts automatically.", es: "Prospectos", noId: true },
+  { file: "leads/page.tsx", slug: "leads", title: "Leads", desc: "New requests. Each one stays here until it is scheduled or Not Sold.", es: "Prospectos", noId: true },
   { file: "crm/page.tsx", slug: "crm", title: "Customers", desc: "Everyone you work for, linked to their jobs, estimates and invoices.", es: "Clientes", noId: true },
   {
     file: "inspections/page.tsx",
     slug: "inspections",
     title: "Inspections",
-    desc: "Everyone waiting on an inspection: start it here, then write it up into an estimate.",
+    desc: "Everyone waiting on an inspection: start it here.",
     es: "Inspecciones",
   },
   {

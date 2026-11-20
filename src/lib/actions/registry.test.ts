@@ -389,8 +389,7 @@ describe("action registry — the waits Nort can move (job.snoozeHold, invoice.s
     }
   });
 
-  it("a snooze moves a day and a lead's ending is Not Sold, never a delete", () => {
-    expect(REGISTRY["quote.followUp"].description).toMatch(/only the follow-up day/);
+  it("a lead's ending is Not Sold, never a delete", () => {
     expect(REGISTRY["inquiry.markLost"].description).toMatch(/kept \(not deleted\)/);
     expect(REGISTRY["inquiry.markLost"].description).toMatch(/Not Sold/);
     expect(REGISTRY["inquiry.markLost"].label).toBe("Mark a lead Not Sold");
@@ -407,6 +406,14 @@ describe("action registry — the waits Nort can move (job.snoozeHold, invoice.s
     expect(contact.input.safeParse({ id: "i-1" }).success).toBe(true);
     expect(JSON.stringify(contact.input.safeParse({ id: "i-1", follow_up_date: "2026-12-01" }).data)).not.toContain("follow_up_date");
     expect(contact.description).not.toMatch(/follow-up date/i);
+  });
+
+  // cn-v1172: an estimate has no follow-up day either (Erik: "Closing is the reminder yes"): the
+  // estimate out with no answer sits on Sales > Closing, so quote.followUp is gone.
+  it("an estimate has no follow-up day: no quote.followUp in the registry, the allowed writes or the feature map", () => {
+    expect(REGISTRY["quote.followUp"]).toBeUndefined();
+    expect(AGENT_WRITE_ALLOWED.has("quote.followUp")).toBe(false);
+    expect(offered("owner")).not.toContain("quote__followUp");
   });
 
   it("inquiry.create takes the form's fields: the address parts, the scope, notes and a source; no kind, no how long", () => {
@@ -485,13 +492,15 @@ describe("action registry — job.setCustomer", () => {
     expect(offered("tech")).not.toContain("job__setCustomer");
   });
 
-  it("EXACTLY this one name: the list's SIZE is pinned (74 before cn-v1157, 75 with it, 74 since cn-v1170)", () => {
+  it("EXACTLY this one name: the list's SIZE is pinned (74 before cn-v1157, 75 with it, 74 since cn-v1170, 73 since cn-v1172)", () => {
     // Membership cannot hold "exactly one": a second name let in beside it would pass every line above.
     // The count is the pin. A new agent write is a decision (the freeze on agent-write expansion), so
     // whoever lets one in moves this number on purpose, in the same change, and says why.
     // cn-v1170 took one OUT and added none: inquiry.snooze, because a lead has no follow-up day any
     // more (Erik, 2026-11-19: "the follow up reminders dont really work, one badge one list simple").
-    expect(AGENT_WRITE_ALLOWED.size).toBe(74);
+    // cn-v1172 took one more OUT and added none: quote.followUp, because an estimate has no
+    // follow-up day any more (Erik, 2026-11-19: "Closing is the reminder yes").
+    expect(AGENT_WRITE_ALLOWED.size).toBe(73);
     // The count is of real doors: a name on the list that is no action in the registry would hold
     // the number steady while a real one came or went.
     for (const name of AGENT_WRITE_ALLOWED) expect(REGISTRY[name], name).toBeTruthy();

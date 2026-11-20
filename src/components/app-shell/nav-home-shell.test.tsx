@@ -71,13 +71,14 @@ describe("an inspection's page: Sales, with Inspections lit", () => {
     const html = dock();
     expect(litTiles(html)).toEqual(["sales"]);
     expect(html).toContain(">Sales</div>");
-    for (const row of ["Leads", "Inspections", "Estimates", "Customers"]) expect(html, row).toContain(`>${row}</span>`);
+    // cn-v1172: Closing under Estimates; Customers moved to the top of Admin.
+    for (const row of ["Leads", "Inspections", "Estimates", "Closing"]) expect(html, row).toContain(`>${row}</span>`);
     expect(litRows(html)).toEqual(["/inspections"]);
   });
 
   it("the phone's strip is the four Sales chips, Inspections the lit one", () => {
     const html = strip();
-    expect(chips(html)).toEqual(["/leads", "/inspections", "/quotes", "/crm"]);
+    expect(chips(html)).toEqual(["/leads", "/inspections", "/quotes", "/closing"]);
     expect(litRows(html)).toEqual(["/inspections"]);
     expect(html).toContain("app-subnav");
   });
@@ -89,7 +90,7 @@ describe("an inspection's page: Sales, with Inspections lit", () => {
     expect(html).toMatch(/<a href="\/inspections" class="[^"]*seaglass-active[^"]*">[\s\S]*?>Inspecciones<\/span>/);
     const chipsEs = strip(true, "es");
     expect(chipsEs).toMatch(/<a href="\/inspections" class="[^"]*seaglass-active[^"]*">[\s\S]*?>Inspecciones<\/span>/);
-    for (const en of [">Inspections<", ">Leads<", ">Estimates<", ">Customers<"]) expect(chipsEs).not.toContain(en);
+    for (const en of [">Inspections<", ">Leads<", ">Estimates<", ">Closing<"]) expect(chipsEs).not.toContain(en);
   });
 
   it("with Leads switched off the Inspections row is put away, and so is its light (as on /inspections itself)", () => {
@@ -152,7 +153,7 @@ describe("nothing else changes", () => {
       nav.pathname = pathname;
       nav.search = search;
       expect(litTiles(dock()), pathname).toEqual(["sales"]);
-      expect(chips(strip()), pathname).toEqual(["/leads", "/inspections", "/quotes", "/crm"]);
+      expect(chips(strip()), pathname).toEqual(["/leads", "/inspections", "/quotes", "/closing"]);
     }
   });
 });

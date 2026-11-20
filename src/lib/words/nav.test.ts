@@ -47,6 +47,8 @@ const PAGE_FILES: Record<string, string> = {
   accountant: "analytics/accountant/page.tsx",
   organize: "organize/page.tsx",
   pettyCash: "petty-cash/page.tsx",
+  // cn-v1172: Sales › Closing; the page reads t("nv_page_closing") and t("nv_desc_closing").
+  closing: "closing/page.tsx",
   quotesNew: "quotes/new/page.tsx",
   quotes: "quotes/page.tsx",
   estimates: "quotes/page.tsx",

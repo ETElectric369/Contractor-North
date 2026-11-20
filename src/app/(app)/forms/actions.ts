@@ -161,6 +161,7 @@ export async function createStarterInspectionSheet(): Promise<Result> {
   revalidatePath("/forms");
   revalidatePath("/appointments");
   revalidatePath("/inspections");
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   return { ok: true, id: data.id };
 }
 

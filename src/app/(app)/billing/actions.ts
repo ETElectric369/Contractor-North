@@ -4698,6 +4698,7 @@ export async function settleUp(input: {
     revalidatePath("/schedule");
     revalidatePath("/planner");
     revalidatePath("/inspections");
+    revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
     revalidatePath(`/appointments/${apptId}`);
   }
   revalidateMoney(inv.id);

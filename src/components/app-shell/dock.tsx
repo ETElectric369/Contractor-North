@@ -151,7 +151,7 @@ function DockInner({ branding, role, badges: badgesProp, features, lapsed = fals
                   key={s.key}
                   href={s.href}
                   // PER-SECTION ANCHORS, so the tour can walk the pipeline — Sales, then Jobs,
-                  // then Money — instead of waving at the whole rail once. Both renderings carry
+                  // then Admin — instead of waving at the whole rail once. Both renderings carry
                   // the same name; the spotlight takes whichever is visible.
                   data-tour={`dock-${s.key}`}
                   title={tile}

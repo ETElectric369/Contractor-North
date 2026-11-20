@@ -18,16 +18,17 @@ import {
 /**
  * THE COME-BACK PICKER (NY-hold, 0366): why it waits, and the day it comes back. One control for
  * every wait in the app: putting a job on hold here ("Hold It"), and, next wave, a Needs You row's
- * "Snooze" and "Still Waiting" (lane 5). Erik: "too quiet gets things lost", so there is no "No
+ * "Snooze" (lane 5; an estimate's "Still Waiting" used it too until cn-v1172, when Closing became
+ * the reminder). Erik: "too quiet gets things lost", so there is no "No
  * Date": In a Week is picked until someone picks another day.
  *
  *   Why?        "Waiting on the permit". In hold mode (requireWhy) the button waits for words, and the
  *               line under it says why: the reason IS the reminder the job comes back with (setJobHold
- *               refuses a hold with no reason). Snooze and Still Waiting show it only when no reason is
+ *               refuses a hold with no reason). Snooze shows it only when no reason is
  *               saved yet (askWhy), and never require it.
  *   the chips   Tomorrow · Mon · In a Week (picked) · Pick a Day (THE one DayField, cn-v1153: the
  *               phone's own picker; today or later when the company's today is known here).
- *   the button  its words are the caller's: Hold It, Snooze, Still Waiting.
+ *   the button  its words are the caller's: Hold It, Snooze.
  *
  * WHOSE TODAY. Given `todayStr` (the company's today, from the server) the picker works the day out
  * itself, says it ("Comes back Oct 3"), refuses a past one, and sends the date. Without it, it sends
@@ -55,7 +56,7 @@ export function ComeBackPicker({
   onCancel,
   autoFocus = false,
 }: {
-  /** The button's words: "Hold It", "Snooze", "Still Waiting". */
+  /** The button's words: "Hold It", "Snooze". */
   label: string;
   onSubmit: (v: ComeBackSubmit) => void | Promise<void>;
   /** Hold mode: Why? is shown and the button waits for it. */

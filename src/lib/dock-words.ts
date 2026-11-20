@@ -9,12 +9,12 @@ import { dict, type Lang } from "@/lib/i18n";
  * asks here, so the dock's data stays one list and the words stay one catalog.
  *
  * THE VARIANT RULE. A row wearing its whenOff words ("Bills" for "Bills & POs") reads
- * sh_dock_<id>_off; a tile reduced to one row (Sales → Customers) reads sh_dock_<tile>_only. The
- * keys are tried in that order and the first whose ENGLISH equals the label the row is wearing
- * wins, so a swap visibleDock made is never undone and a row handed other words keeps them. A row
- * the catalog has no key for (a test's stand-in) reads its own label.
+ * sh_dock_<id>_off. The keys are tried in that order and the first whose ENGLISH equals the label
+ * the row is wearing wins, so a swap visibleDock made is never undone and a row handed other words
+ * keeps them. A row the catalog has no key for (a test's stand-in) reads its own label. (The
+ * `_only` variant went with the Sales tile that read Customers, cn-v1172: Customers moved to Admin.)
  */
-const VARIANTS = ["", "_off", "_only"] as const;
+const VARIANTS = ["", "_off"] as const;
 
 export function dockLabel(row: { id: string; label: string }, lang: Lang): string {
   const en = dict("en");

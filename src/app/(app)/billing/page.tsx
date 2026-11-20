@@ -45,7 +45,7 @@ function LateChip({ days }: { days: number }) {
 
 /**
  * ONE INVOICES PAGE (W1-29): who owes you, and what came in. Accounts Receivable and Payments folded
- * in here (/billing/ar and /payments redirect), so the Money menu has one row for the money coming in.
+ * in here (/billing/ar and /payments redirect), so the Admin menu (the tile that was Money) has one row for the money coming in.
  *
  *   · OWED TO YOU: the one figure (the pipeline's outstanding: sent or partly paid, a balance above
  *     zero, never a draft), what of it is late in red, and one thin bar of current against late. Its

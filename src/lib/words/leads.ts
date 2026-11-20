@@ -31,8 +31,8 @@ import type { WordCatalog } from "./types";
  * (a lead, masculine: el prospecto); Volver A Llamar = Call Back; Reunión = Meeting (the chip's short
  * word, as jb_apptMeeting's long one).
  *
- * WORDS COINED HERE (builder B, cn-v1146, the screens): Follow Up = Seguimiento (nv_desc_leads' "dar
- * seguimiento"); Follow-Ups Due = Seguimientos Pendientes; Mark Contacted / Mark Lost = Marcar Como
+ * WORDS COINED HERE (builder B, cn-v1146, the screens): Follow Up = Seguimiento (nv_desc_leads said "dar
+ * seguimiento" until cn-v1172); Follow-Ups Due = Seguimientos Pendientes; Mark Contacted / Mark Lost = Marcar Como
  * Contactado / Perdido; Referral tally = Conteo de referidos; Referrer = Referente; Book It = Agendar and
  * Let Them Pick = Que Ellos Elijan; Not Sure Yet = Aún No Sé; Arrival window = Ventana de llegada; Zip =
  * Código postal; State = Estado (EE. UU.); Town = Ciudad (agenda's); Schedule (the page) = Agenda, Schedule (the verb) = Agendar.
@@ -268,6 +268,10 @@ export const words: WordCatalog = {
     ld_btn_fileVisitCancelled: "Cancelled",
     // cn-v1171 (fixer, skeptic #74)
     ld_wonPending: "Its inspection was marked Won and no job was picked. Open the inspection to pick the job.",
+    // cn-v1172 (EST): the Not Sold fold's second kind (fixer: one word for an ending, Not Sold)
+    ld_notSoldByEstimate: "Estimate Not Sold",
+    // cn-v1172 (fixer): the estimates' part of the fold could not be read; the hand-marked still are
+    ld_notSoldByEstimateUnread: "The leads whose estimate was not sold couldn't load. Reload to try again.",
   },
   es: {
     ld_status_new: "nuevo",
@@ -460,5 +464,9 @@ export const words: WordCatalog = {
     ld_btn_fileVisitCancelled: "Cancelada",
     // cn-v1171 (fixer, skeptic #74)
     ld_wonPending: "Su inspección se marcó como Ganada y no se eligió un trabajo. Abre la inspección para elegir el trabajo.",
+    // cn-v1172 (EST): the Not Sold fold's second kind (fixer: one word for an ending, Not Sold)
+    ld_notSoldByEstimate: "Presupuesto No Vendido",
+    // cn-v1172 (fixer): the estimates' part of the fold could not be read; the hand-marked still are
+    ld_notSoldByEstimateUnread: "No se pudieron cargar los prospectos cuyo presupuesto no se vendió. Recarga para intentar de nuevo.",
   },
 };

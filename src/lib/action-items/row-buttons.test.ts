@@ -39,7 +39,7 @@ describe("the table", () => {
       [row("visit_unbilled"), "Bill It"],
       [row("visit_unbilled", { chip: "Billed, Not Paid" }), "Get Paid"],
       [row("quote_draft", { send: { kind: "quote", id: "q1", number: "E-012", customerName: "Dana", amount: 1200, lineCount: 4, openHref: "/quotes/q1" } }), "Send It"],
-      [row("quote_awaiting"), "Still Waiting"],
+      [row("quote_awaiting"), "Send Again"],
       [row("quote_accepted", { affordances: ["schedule", "open"], targetId: "job-1" }), "Pick a Day"],
       [row("inquiry"), "Schedule"],
       [row("appointment"), "Close Out"],
@@ -123,9 +123,14 @@ describe("the table", () => {
     expect(labels(rowButtons(row("job_unbilled_work", { waitKey: "job_unbilled_work:j1", affordances: ["snooze", "open"] }), staff).more)).toEqual(["Snooze"]);
   });
 
-  it("Still Waiting picks a day and asks no why; before 0366 it isn't drawn", () => {
-    expect(rowButtons(row("quote_awaiting"), staff).primary?.act).toEqual({ type: "comeBack", verb: "snooze", askWhy: false, button: "Still Waiting" });
-    expect(rowButtons(row("quote_awaiting", { affordances: ["dismiss", "open"] }), staff).primary).toBeNull();
+  // cn-v1172: an estimate has no follow-up day ("Closing is the reminder yes"). The row's button is the
+  // Closing page's Send Again, the Send sheet; no Still Waiting and no Snooze anywhere on it.
+  it("No Answer Yet: Send Again opens the Send sheet; no Still Waiting, no snooze", () => {
+    const send = { kind: "quote" as const, id: "q9", number: "E-912", customerName: "Dana Rook", amount: 900, lineCount: null, openHref: "/quotes/q9" };
+    expect(rowButtons(row("quote_awaiting", { send }), staff).primary).toEqual({ label: "Send Again", act: { type: "send" } });
+    expect(AFFORDANCES.quote_awaiting).not.toContain("snooze");
+    const all = [rowButtons(row("quote_awaiting", { send }), staff).primary, ...rowButtons(row("quote_awaiting", { send }), staff).more];
+    expect(all.map((d) => d?.act.type)).not.toContain("comeBack");
   });
 
   // cn-v1170: a lead's doors are the Leads list's (Erik: "remove everything else except Schedule and
@@ -422,7 +427,7 @@ describe("the doors in Spanish", () => {
       [row("visit_unbilled", { chip: "Billed, Not Paid" }), "Cobrar"],
       [row("quote_draft"), "Enviarlo"],
       [row("invoice_draft"), "Enviarla"],
-      [row("quote_awaiting"), "Sigo Esperando"],
+      [row("quote_awaiting"), "Enviar de Nuevo"],
       [row("inquiry"), "Agendar"],
       [row("appointment"), "Cerrar la Visita"],
       [row("inspection_writeup"), "Abrir la Inspección"],

@@ -44,6 +44,8 @@ export const words: WordCatalog = {
     "src/app/(app)/inspections/page.tsx",
     "src/app/(app)/inspections/inspection-list.tsx",
     "src/app/(app)/inspections/inspection-row-menu.tsx",
+    // cn-v1172 (EST): the one row builder, used by this page and the Estimates page's top list
+    "src/app/(app)/inspections/row-words.ts",
   ],
   sameInBoth: [],
   en: {
@@ -86,6 +88,10 @@ export const words: WordCatalog = {
     // cn-v1171 (fixer, skeptic #74): with Estimates off, nothing says an estimate is needed
     ip_inspected: "Inspected",
     ip_markedHappened: "Marked as happened.",
+    // cn-v1172 (EST): the inspected ones are on the Estimates page; a failed read is said
+    ip_toEstimateWaiting: "{n} inspected and waiting on an estimate.",
+    ip_btn_goToEstimates: "Go to Estimates",
+    ip_readFailed: "The inspections couldn't load. Reload to try again.",
   },
   es: {
     ip_lib_pendingPick: "por elegir",
@@ -126,5 +132,9 @@ export const words: WordCatalog = {
     // cn-v1171 (fixer, skeptic #74): with Estimates off, nothing says an estimate is needed
     ip_inspected: "Inspeccionada",
     ip_markedHappened: "Marcada como hecha.",
+    // cn-v1172 (EST): the inspected ones are on the Estimates page; a failed read is said
+    ip_toEstimateWaiting: "{n} inspeccionadas y esperando un presupuesto.",
+    ip_btn_goToEstimates: "Ir a Presupuestos",
+    ip_readFailed: "No se pudieron cargar las inspecciones. Recarga para intentar de nuevo.",
   },
 };

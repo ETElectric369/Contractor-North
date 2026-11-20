@@ -65,7 +65,6 @@ describe("every (kind, verb) the row table can send maps to a registry action", 
       "inspection_writeup:dismiss",
       "inspection_writeup:wontHappen",
       "organize:dismiss",
-      "quote_awaiting:snooze",
       "quote_awaiting:dismiss",
       "quote_accepted:schedule",
       "invoice_draft:snooze",
@@ -132,8 +131,8 @@ describe("the mappings that matter", () => {
     for (const n of ["job.snoozeHold", "job.takeOffHold", "invoice.setAside", "job.snoozeNeedsYou"]) expect(REGISTRY[n], n).toBeDefined();
   });
 
-  it("Still Waiting sets the follow-up day only; the endless rows keep their day in needs_you_waits", () => {
-    expect(map("quote_awaiting", "snooze", "q-1")).toEqual({ name: "quote.followUp", input: { id: "q-1", date: "2026-10-03" } });
+  it("an estimate has no follow-up day (cn-v1172); the endless rows keep their day in needs_you_waits", () => {
+    expect(map("quote_awaiting", "snooze", "q-1")).toBeNull();
     expect(map("materials_needed", "snooze", "materials-job-1")).toMatchObject({ name: "job.snoozeNeedsYou", input: { id: "job-1", kind: "materials_needed", date: "2026-10-03" } });
     expect(map("job_unbilled_work", "snooze", "nocosts-job-1")).toMatchObject({ name: "job.snoozeNeedsYou", input: { id: "job-1", kind: "job_unbilled_work" } });
   });

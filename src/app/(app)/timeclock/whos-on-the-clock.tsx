@@ -8,7 +8,7 @@ import { todayStrInTz, weekWindowInTz, type WeekStart } from "@/lib/tz";
 
 /**
  * WHO'S ON THE CLOCK, ON THE TIME CLOCK (Erik, 2026-10-27: "keep the who's on the clock with Time
- * Clock instead of Timecards"). The crew pulse cn-v503 drew at the top of Money › Timecards — who is
+ * Clock instead of Timecards"). The crew pulse cn-v503 drew at the top of Admin › Timecards — who is
  * on the clock RIGHT NOW, one person per row at reading size, each row the way to clock that person
  * out (2026-09-24: "an option to [end] an employees time clock and clock out for them") — lives on
  * the page he punches from. The office only: a tech's Clock page is unchanged, and his "who else is

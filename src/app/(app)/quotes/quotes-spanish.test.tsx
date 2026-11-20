@@ -115,7 +115,7 @@ describe("the keys say the literal each one replaced", () => {
       qt_copiedPasteIt: "Copied — paste it into a text or email.",
       qt_confirmEmailInvoiceAmount: "Send this {money} invoice to {who} by email? This marks it Sent.",
       qt_btn_startAnInspection: "Start an Inspection",
-      qb_noPriceBookYet: "No price book yet. Upload or build one under Money → Price List and these will autocomplete.",
+      qb_noPriceBookYet: "No price book yet. Upload or build one under Admin → Price List and these will autocomplete.",
       qb_hoursStand: "· your hours stand; the kit’s parts follow the units",
       qb_btn_saveTheKit: "Save the Kit",
       qb_priceSetByHand: "Price set by hand — the breakdown stays off the paper",

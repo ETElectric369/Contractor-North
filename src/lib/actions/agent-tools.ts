@@ -120,7 +120,6 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "quote.attachJob", // pin a saved estimate to a job ("leave it with the job") — reversible link
   "quote.setCustomer", // attach/fix the customer on a saved quote without re-creating it
   "quote.convertToJob",
-  "quote.followUp", // the day to ask again about an unanswered estimate (0366); never its valid-until
   "contract.generate",
   "form.submit", // fill a checklist by voice
   // Sublinking: put a sub/supplier/inspector on a job (and remove). The contact book + the
@@ -191,7 +190,6 @@ export const AGENT_TOOL_FEATURE: Readonly<Record<string, FeatureKey>> = {
   "inquiry.convert": "leads",
   "inquiry.markLost": "leads",
   "quote.create": "estimates",
-  "quote.followUp": "estimates",
   "quote.addItem": "estimates",
   "quote.updateItem": "estimates",
   "quote.deleteItem": "estimates",

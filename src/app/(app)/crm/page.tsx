@@ -66,9 +66,11 @@ export default async function CrmPage({
 
   return (
     <div>
-      {/* CUSTOMERS, UNDER SALES (W1-07): the Contacts tile folded into Sales as its Customers row,
-          so the page wears the row's name. The description names no Leads tab: that tab is hidden
-          with Leads off, and a customer is a customer whichever switches are on. */}
+      {/* CUSTOMERS, THE FIRST ROW UNDER ADMIN (cn-v1172; under Sales from W1-07 until then). The owner,
+          2026-11-19: "Lets move the customers tab out of sales and onto the top of the sub-nav list
+          under Money", in the same breath renaming that tile Admin. The page wears the row's name.
+          The description names no Leads tab: that tab is hidden with Leads off, and a customer is a
+          customer whichever switches are on. */}
       <PageHeader title={t("nv_page_crm")} description={t("nv_desc_crm")}>
         <div className="flex flex-wrap items-center gap-2">
           <NewCustomerButton />

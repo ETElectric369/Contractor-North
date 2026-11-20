@@ -306,7 +306,7 @@ export default async function TimeclockPage() {
   // reach /timecards (office-only), so this is the only place they see their own hours.
   // Staff read it too now: the right-hand card that used to carry their week total is gone,
   // and the office punches a clock as well. Edits stay office work on purpose (no edit
-  // affordances here) — staff reach the whole crew's ledger on Money › Timecards.
+  // affordances here) — staff reach the whole crew's ledger on Admin › Timecards.
   type MyTimecardRow = {
     id: string;
     in: string;
@@ -366,7 +366,7 @@ export default async function TimeclockPage() {
   return (
     <div className="mx-auto max-w-4xl">
       {/* A CLOCK, AND ONLY A CLOCK (Wave 2, W2-01): no button in the header. The office adds hours
-          with Add Time Entry on Money › Timecards. */}
+          with Add Time Entry on Admin › Timecards. */}
       <PageHeader title={t("tc_title")} description={t("tc_desc")} />
 
       <div className="space-y-6">
@@ -420,7 +420,7 @@ export default async function TimeclockPage() {
           </Suspense>
         )}
 
-        {/* WHO'S ON THE CLOCK — the office's live crew pulse, here instead of Money › Timecards
+        {/* WHO'S ON THE CLOCK — the office's live crew pulse, here instead of Admin › Timecards
             (Erik, 2026-10-27). Drawn only when the read ran (staff: crewR.crew is undefined for a
             tech); a failed read is said inside the block. */}
         {crewR.crew !== undefined && (
@@ -434,8 +434,8 @@ export default async function TimeclockPage() {
           />
         )}
 
-        {/* NO STAFF DOOR ROW (Wave 2): each door has its home. Money › Timecards (the crew's hours, and
-            Add Time Entry), Money › Payroll, and the Everyone's Day icon in the schedule header. */}
+        {/* NO STAFF DOOR ROW (Wave 2): each door has its home. Admin › Timecards (the crew's hours, and
+            Add Time Entry), Admin › Payroll, and the Everyone's Day icon in the schedule header. */}
 
         {/* MY TIMECARD (everyone) — the caller's own week of punches, grouped by day, read-only:
             date, in-out, lunch, hours, the job by NAME, and the week total that used to live in

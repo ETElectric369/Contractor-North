@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1172", date: "2026-11-19", line: "Estimates has two parts: Inspections to Estimate on top, All Estimates below. A sent estimate waits on the new Closing page until it is answered. Customers moved to the top of Admin (was Money)." },
   { version: "cn-v1171", date: "2026-11-19", line: "Inspections is one list of who needs one, with Start Inspection. A customer's page now keeps their requests and inspections, and New Customer checks your list before it makes a duplicate." },
   { version: "cn-v1170", date: "2026-11-19", line: "Leads is new intake only: each lead has a running clock, Schedule, Not Sold and Edit Details, and its own file page. Follow-up days are gone, the form is shorter, and Lost is now called Not Sold." },
   { version: "cn-v1169", date: "2026-11-19", line: "A job booked for a day nobody worked stays on My Day as Carried Over, with Do Today, and is offered at clock-in. The site fence's 15 minutes start at your tap. Revise shows only on a locked estimate." },

@@ -48,7 +48,6 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
 import { jobNameFrom } from "@/lib/job-name";
-import { checkComeBackDay } from "@/lib/come-back-days";
 import { isMissingColumn } from "@/lib/job-tasks";
 import { orgTrade, tradeWordsOr, withArticle } from "@/lib/org-trade";
 import { closeVisitsBehindQuote, outcomeForQuoteStatus } from "@/lib/appointments/behind-quote";
@@ -145,6 +144,7 @@ export async function setQuoteType(id: string, docType: "estimate" | "quote") {
   await bustDocPdf("quote", id); // even a draft may have a cached preview
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
+  revalidatePath("/closing");
   return { ok: true };
 }
 
@@ -254,6 +254,7 @@ export async function textQuote(
   await markQuoteSent(supabase, id, quote.status);
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
+  revalidatePath("/closing");
   return { ok: true };
 }
 
@@ -307,6 +308,7 @@ export async function quoteShareText(
     if (!wrote?.length) return { ok: false, error: await ws.say("qs_shareNotMarked", { number: String(quote.quote_number ?? "") }) };
     revalidatePath(`/quotes/${id}`);
     revalidatePath("/quotes");
+    revalidatePath("/closing");
   }
 
   // One org query for both the name and the link base — textQuote's shape, so the link is built
@@ -391,6 +393,8 @@ export async function emailQuote(
   });
   await markQuoteSent(supabase, id, quote.status);
   revalidatePath(`/quotes/${id}`);
+  // A send starts the Closing clock again (cn-v1172): the list reads the last logged send.
+  revalidatePath("/closing");
   return { ok: true };
 }
 
@@ -814,6 +818,7 @@ async function appendQuoteLine(
   await recalcQuote(supabase, quoteId);
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
+  revalidatePath("/closing");
   return { ok: true };
 }
 
@@ -940,6 +945,7 @@ export async function appendQuoteLines(
   const follow = behind ? await jobFollows(supabase, behind, ctx) : {};
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
+  revalidatePath("/closing");
   return { ok: true, ids, ...follow };
 }
 
@@ -1120,6 +1126,7 @@ export async function updateQuoteItem(
   }
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
+  revalidatePath("/closing");
   return { ok: true, ...follow };
 }
 
@@ -1152,6 +1159,7 @@ export async function deleteQuoteItem(
   const follow = behind ? await jobFollows(supabase, behind, ctx) : {};
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
+  revalidatePath("/closing");
   return { ok: true, ...follow };
 }
 
@@ -1203,6 +1211,7 @@ export async function updateQuoteMeta(
   await recalcQuote(supabase, quoteId);
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
+  revalidatePath("/closing");
   return { ok: true };
 }
 
@@ -1236,6 +1245,7 @@ export async function setQuoteCustomer(
   await bustDocPdf("quote", quoteId); // bill-to renders on the PDF (audit 7)
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
+  revalidatePath("/closing");
   return { ok: true };
 }
 
@@ -1317,6 +1327,7 @@ export async function setQuoteSite(
   for (const bill of (bills ?? []) as { id: string }[]) await bustDocPdf("invoice", bill.id, ctx.orgId);
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
+  revalidatePath("/closing");
   return { ok: true };
 }
 
@@ -1406,6 +1417,7 @@ export async function setQuoteJob(
     : {};
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
+  revalidatePath("/closing");
   if (jobId) revalidatePath(`/jobs/${jobId}`);
   if (left) revalidatePath(`/jobs/${left.jobId}`);
   const said = [follow.said, leftBehind.said].filter(Boolean).join(" ");
@@ -1456,6 +1468,7 @@ export async function deleteQuote(id: string): Promise<{ ok: boolean; error?: st
   if (error) return { ok: false, error: dbError(error) };
   if (victim?.inquiry_id) await releaseLeadIfOrphaned(supabase, victim.inquiry_id);
   revalidatePath("/quotes");
+  revalidatePath("/closing");
   return { ok: true };
 }
 
@@ -1543,6 +1556,7 @@ export async function resolveDuplicateDrafts(
   const { error } = await supabase.from("quotes").delete().in("id", losers);
   if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/quotes");
+  revalidatePath("/closing");
   return { ok: true, deleted: losers.length };
 }
 
@@ -1834,6 +1848,7 @@ export async function saveQuote(input: SaveQuoteInput) {
   const stored = await recalcQuote(supabase, quote.id);
 
   revalidatePath("/quotes");
+  revalidatePath("/closing");
   // Return the SAVED money figures (the recalc rollup that was written) +
   // the trigger-assigned number, so every caller — Nort's quote.create especially —
   // reads the real total back instead of re-deriving it. The announce-vs-save drift:
@@ -2448,40 +2463,6 @@ async function pushQuoteAccepted(id: string): Promise<void> {
   }
 }
 
-/**
- * FOLLOW UP ON AN ESTIMATE ON A DAY (NY-feeders, 0366): the customer hasn't answered, and this is the
- * day to ask again. It writes quotes.follow_up_at and nothing else: NEVER valid_until, which is the
- * customer's own offer window, printed on the estimate they hold (moving it would change the offer,
- * not the reminder). The day is the company's today or later. A zero-row write is said, and before
- * 0366 (no such column) the refusal says the database needs its update.
- */
-export async function setQuoteFollowUp(quoteId: string, date: string): Promise<{ ok: boolean; error?: string }> {
-  const ctx = await requireStaff();
-  if ("error" in ctx) return { ok: false, error: ctx.error };
-  const ws = wordsOf(ctx.supabase, ctx.userId);
-  const { data: org } = await ctx.supabase.from("organizations").select("settings").eq("id", ctx.orgId ?? "").maybeSingle();
-  const today = todayStrInTz(getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone);
-  const day = checkComeBackDay(today, date);
-  if (!day.ok) {
-    // The refusal in the caller's words (the language is read only when it refuses).
-    const lang = await ws.lang();
-    const again = checkComeBackDay(today, date, lang, translator(lang));
-    return { ok: false, error: again.ok ? day.error : again.error };
-  }
-  const { data, error } = await ctx.supabase.from("quotes").update({ follow_up_at: day.day }).eq("id", quoteId).select("id");
-  if (error) {
-    return {
-      ok: false,
-      error: isMissingColumn(error) ? await ws.say("qs_followUpNeedsUpdate") : dbError(error),
-    };
-  }
-  if (!data?.length) return { ok: false, error: await ws.say("qs_estimateNotFound") };
-  revalidatePath("/planner");
-  revalidatePath("/quotes");
-  revalidatePath(`/quotes/${quoteId}`);
-  return { ok: true };
-}
-
 export async function updateQuoteStatus(id: string, status: string) {
   if (!(QUOTE_STATUSES as readonly string[]).includes(status))
     return { ok: false as const, error: `Status must be one of: ${QUOTE_STATUSES.filter((s) => s !== "superseded").join(", ")}.` };
@@ -2573,9 +2554,12 @@ export async function updateQuoteStatus(id: string, status: string) {
     // no materials, and nothing on My Day. The status flip already landed; surface the failure
     // so the office knows to finish the hand-off instead of believing the work is scheduled.
     let jobWarn: string | null = null;
+    /** The job the estimate is on now: the Closing page's Accepted links to it (cn-v1172). */
+    let jobId: string | undefined;
     try {
       // links quotes.job_id + spins up WO/materials; on a linked estimate, the job catches up
       const jobRes = await createJobFromQuote(id, linked ? { sizeBefore: linked.sizeBefore, tasksBefore: linked.tasksBefore, partsBefore: linked.partsBefore } : undefined);
+      if (jobRes?.ok && jobRes.id) jobId = String(jobRes.id);
       if (jobRes && jobRes.ok === false) jobWarn = jobRes.error ?? (await ws.say("qs_jobNotCreated"));
       // The job was made and something it should carry (its tasks) could not be listed: said, not sunk.
       else if (jobRes?.note) jobWarn = jobRes.note;
@@ -2592,12 +2576,15 @@ export async function updateQuoteStatus(id: string, status: string) {
     revalidatePath("/schedule");
     revalidatePath(`/quotes/${id}`);
     revalidatePath("/quotes");
+    revalidatePath("/closing");
     if (jobWarn) {
-      return { ok: true as const, warning: await ws.say("qs_acceptedJobAttention", { why: jobWarn }), ...(said ? { said } : {}) };
+      return { ok: true as const, warning: await ws.say("qs_acceptedJobAttention", { why: jobWarn }), ...(said ? { said } : {}), ...(jobId ? { jobId } : {}) };
     }
+    if (jobId) return { ok: true as const, jobId, ...(said ? { said } : {}) };
   }
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
+  revalidatePath("/closing");
   return { ok: true as const, ...(said ? { said } : {}) };
 }
 
@@ -2778,6 +2765,7 @@ export async function keepBothEstimates(revisionId: string): Promise<{ ok: boole
   revalidatePath("/planner");
   revalidatePath("/schedule");
   revalidatePath("/quotes");
+  revalidatePath("/closing");
   revalidatePath(`/quotes/${rev.id}`);
   revalidatePath(`/quotes/${originalId}`);
   return { ok: true, said: said.join(" "), ...(notes.length ? { warning: notes.join(" ") } : {}) };

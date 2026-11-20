@@ -3,34 +3,20 @@ import { redirect } from "next/navigation";
 import { ClipboardCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
-import { getOrgSettings } from "@/lib/org-settings";
-import { todayStrInTz } from "@/lib/tz";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { translator } from "@/lib/i18n";
 import { fillSlots } from "@/lib/lang-words";
 import { currentLangFor } from "@/lib/current-lang";
-import { ESTIMATE_VISIT_TYPES, appointmentTypeLabel, isDecidableVisitType, visitTitle } from "@/lib/statuses";
-import {
-  bucketInspections,
-  filedUnder,
-  filedWithNobody,
-  inspectionFileHref,
-  inspectionList,
-  inspectionRowWords,
-  rowTagWords,
-  type FiledUnder,
-  type InspectionListState,
-} from "@/lib/inspections";
-import { dayWords, relativeWhen } from "@/lib/action-items/dated-when";
+import { filedUnder, filedWithNobody, inspectionList, inspectionsToEstimate, type FiledUnder } from "@/lib/inspections";
+import { readInspectionBuckets, VISIT_READ_CAP } from "@/lib/inspections-read";
+import { reportError } from "@/lib/observe";
+import { dayWords } from "@/lib/action-items/dated-when";
 import { featureOn } from "@/lib/features";
-import { FiledWithNobodyFold, InspectionList, PRIMARY } from "./inspection-list";
-import { happenedSaidKey, primaryOf, rowDoors, stateWordKey, type FoldRow, type ListRow } from "./list-rows";
+import { FiledWithNobodyFold, InspectionList, PRIMARY, ToEstimateLine } from "./inspection-list";
+import { inspectionRowBuilder } from "./row-words";
+import type { FoldRow, ListRow } from "./list-rows";
 
 export const dynamic = "force-dynamic";
-
-/** How many visits the page reads at most. When exactly this many come back, the list says so
- *  (ip_capped: the visits waiting for a day and the latest by date are the ones kept). */
-const READ_CAP = 500;
 
 /** How a filed inspection ended, as the fold says it (filedUnder's three endings). */
 const ENDED_KEY: Record<FiledUnder, string> = {
@@ -50,9 +36,14 @@ const ENDED_KEY: Record<FiledUnder, string> = {
  * (lib/inspections inspectionList, over the buckets My Day's Needs You reads too, so the two never
  * disagree). Filed inspections that hang on nobody wait in one fold under the list.
  *
- * Everything a row says is worded HERE, on the server, in the reader's language and the company's
- * timezone, and the rows are handed finished strings: nothing on the phone formats a date, so the
- * server's render and the phone's cannot differ.
+ * INSPECTED, WAITING ON A PRICE, IS ON THE ESTIMATES PAGE (cn-v1172). Erik, after the second meeting:
+ * "lets break the Estimate page into 2 parts consisting of completed inspections in its own new list
+ * called Inspections To Estimate". With the Estimates switch on, an inspected visit nobody has priced
+ * is drawn on top of the Estimates page and left off this list; with it off there is no such list and
+ * it stays here. Both pages read through ONE reader (lib/inspections-read), so they cannot disagree,
+ * and while any are over there this page says how many, with the door, so nobody falls between them.
+ *
+ * Every row is worded on the server by the one row builder both pages use (./row-words).
  */
 export default async function InspectionsPage({
   searchParams,
@@ -78,141 +69,31 @@ export default async function InspectionsPage({
   const lang = await currentLangFor(user?.id);
   const t = translator(lang);
 
-  const [{ data: apptData }, { data: quoteLinks }, { data: org }] = await Promise.all([
-    supabase
-      .from("appointments")
-      // customer_id: where a row's name leads (inspectionFileHref), and whether a filed one hangs on
-      // nobody (filedWithNobody); left out, every customer's inspection would read as nobody's.
-      .select(
-        "id, type, title, status, starts_at, ends_at, created_at, location, capture, inquiry_id, job_id, customer_id, outcome, customers(name), inquiries(name)",
-      )
-      .in("type", [...ESTIMATE_VISIT_TYPES])
-      // THE CAP NEVER CUTS OPEN WORK THAT HAS NO DAY. Newest start first with the visits waiting
-      // for a day (no start, 0368) ahead of them all, so the 500 kept are every visit waiting for a
-      // day plus the latest by date; what the cap cuts is the oldest by date. The order on screen is
-      // the list's own (inspectionList), never this one.
-      .order("starts_at", { ascending: false, nullsFirst: true })
-      .limit(READ_CAP),
-    // Which inquiries/jobs already have an estimate — the "written up" signal. Ids too:
-    // a lead-less Inspect-now write-up is matched via capture.quote_id (no inquiry/job link).
-    supabase.from("quotes").select("id, inquiry_id, job_id"),
-    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
-  ]);
-
-  const orgS = getOrgSettings((org as { settings?: unknown } | null)?.settings);
-  const tz = orgS.timezone;
-  // THE SWITCH BOARD (0352), from the settings and role already read. Inspections are part of
-  // Leads: off, this list still opens from a link, under the Off line, and the empty state sends
-  // nobody to Leads. Estimates off: no Create Estimate on a row.
-  const sw = { features: orgS.features, isOwner: me.role === "owner" };
-  const leadsOn = featureOn(sw.features, "leads");
-  const estimateDoor = featureOn(sw.features, "estimates");
-  const rows = (apptData ?? []) as any[];
-  const estimateInquiryIds = new Set<string>(
-    (quoteLinks ?? []).map((q: any) => q.inquiry_id).filter(Boolean),
-  );
-  const estimateJobIds = new Set<string>((quoteLinks ?? []).map((q: any) => q.job_id).filter(Boolean));
-  const estimateQuoteIds = new Set<string>((quoteLinks ?? []).map((q: any) => q.id).filter(Boolean));
-  // Same four endings as the inbox (0205) — this list and Needs-action must never disagree
-  // about what is outstanding, which is why they share bucketInspections.
-  const { data: billedJobs } = await supabase
-    .from("invoices")
-    .select("job_id")
-    .not("job_id", "is", null)
-    .not("status", "in", "(draft,void)")
-    .limit(5000);
   // ONE "now" for the buckets, the list and the rows' words, so the three cannot disagree.
   const now = new Date();
-  const buckets = bucketInspections(
-    rows,
-    estimateInquiryIds,
-    estimateJobIds,
-    now,
-    estimateQuoteIds,
-    new Set(((billedJobs ?? []) as { job_id: string }[]).map((r) => r.job_id).filter(Boolean)),
-    tz, // "before today" is the company's midnight (a day that passed)
-  );
+  const read = await readInspectionBuckets(supabase, { now });
+  if (read.error) reportError(`inspections:read:${read.error.where}`, read.error.cause);
+  const { buckets, tz } = read;
+
+  // THE SWITCH BOARD (0352), from the settings the reader read. Inspections are part of Leads: off,
+  // this list still opens from a link, under the Off line, and the empty state sends nobody to Leads.
+  // Estimates off: no Create Estimate on a row, and the inspected ones stay on this list.
+  const leadsOn = featureOn(read.settings.features, "leads");
+  const estimatesOn = featureOn(read.settings.features, "estimates");
+
   // EVERY OPEN VISIT ONCE, IN ONE STATE (lib/inspections inspectionList). The page tests no status
   // and no outcome of its own. A visit still `upcoming` whose day went by before today is a day that
   // passed, by the same now and the same company midnight the buckets read.
-  const listed = inspectionList(buckets, now, tz);
+  const listed = inspectionList(buckets, now, tz, { estimatesOn });
+  // The ones on the Estimates page's top list, counted here so this page can point at them.
+  const toEstimate = estimatesOn ? inspectionsToEstimate(buckets).length : 0;
 
-  // THE ROW'S RIGHT EDGE, said here once. A Coming Up visit says when it is: its time alone today
-  // (one earlier today that nobody closed out says its time too), its day and its time after. A
-  // write-up and a missed visit say how long ago their day was, and a visit with no day how long ago
-  // it was made: an age, so the DAY alone is handed over (the company's day) and no time of day rides
-  // along ("9d ago", never "9d ago · 10:00 AM"). The day a thing happened is never "overdue". An age
-  // whose day is still ahead (a visit marked done before its day) says that day, never "Tomorrow",
-  // which would read as when it is due. A filed visit (the fold) says its day.
-  const todayStr = todayStrInTz(tz, now);
-  const said = { lang, words: t };
-  const dayOf = (iso: string | null | undefined): string | null => {
-    const at = iso ? new Date(iso) : null;
-    return at && !Number.isNaN(at.getTime()) ? todayStrInTz(tz, at) : null;
-  };
-  const ageOf = (iso: string | null | undefined): string | null => {
-    const day = dayOf(iso);
-    return day && day > todayStr ? dayWords(day, todayStr, tz, lang) : relativeWhen(day, todayStr, tz, false, said);
-  };
-  const edgeOf = (a: any, state: InspectionListState): string | null => {
-    if (state === "coming_up") return relativeWhen(a.starts_at, todayStr, tz, false, said);
-    if (state === "needs_day") return ageOf(a.created_at);
-    return ageOf(a.starts_at); // write_up, missed: how long ago its day was
-  };
-
-  /**
-   * WHO AND WHAT, every word finished (lib/inspections inspectionRowWords): who in bold, then what it
-   * is. visitTitle: a title stamped during the three days the visit was a Walk-Through still says
-   * today's word. The words the old pills said ride in the phrase (rowTagWords, handed the row's
-   * state, or for the fold how it ended), never as a pill. stampLabels: a stored title was stamped
-   * with the type's ENGLISH label, whoever reads it now.
-   */
-  const wordsOf = (a: any, tile: InspectionListState | FiledUnder) =>
-    inspectionRowWords({
-      title: visitTitle(a.title),
-      typeLabel: appointmentTypeLabel(a.type, lang, t),
-      stampLabels: [appointmentTypeLabel(a.type, "en")],
-      customer: a.customers?.name ?? a.inquiries?.name ?? null,
-      street: a.location ?? null,
-      tags: rowTagWords(a, tile, lang, t),
-      lang,
-    });
-
-  /** One visit on the list, every word finished, its buttons decided (list-rows). */
-  const rowOf = (a: any, state: InspectionListState): ListRow => {
-    const words = wordsOf(a, state);
-    const decidable = isDecidableVisitType(a.type);
-    const kind = primaryOf(state, { decidable, estimatesOn: estimateDoor });
-    const visitHref = `/appointments/${a.id}`;
-    // THE BOXED BUTTON. Create Estimate: the capture prefills the estimator scope; the inquiry keeps
-    // the lead threading (quotes/new also recovers it from the capture appointment when absent).
-    // Start Inspection and Open Inspection both open the visit, where the inspection is done.
-    const primary =
-      kind === "estimate"
-        ? { label: t("ip_btn_createEstimate"), href: `/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}` }
-        : { label: t(kind === "start" ? "ip_btn_startInspection" : "ip_btn_openInspection"), href: visitHref };
-    const wordKey = stateWordKey(state, estimateDoor);
-    return {
-      id: a.id,
-      state,
-      who: words.who,
-      whoHref: inspectionFileHref(a),
-      what: words.what,
-      edge: edgeOf(a, state),
-      stateWord: wordKey ? t(wordKey) : null,
-      primary,
-      visitHref,
-      doors: rowDoors(state, { primary: kind, decidable, hasStart: !!a.starts_at }),
-      startsAt: a.starts_at ?? null,
-      endsAt: a.ends_at ?? null,
-      happenedSaid: t(happenedSaidKey(estimateDoor)),
-    };
-  };
+  const { todayStr, wordsOf, rowOf } = inspectionRowBuilder({ t, lang, tz, now, estimatesOn });
   const listRows: ListRow[] = listed.map(({ row, state }) => rowOf(row, state));
 
   // FILED UNDER NOBODY: no lead, no customer, no job, so no file to find them in. Its day and how it
   // ended (filedUnder: the outcome first, whatever the status).
-  const foldRows: FoldRow[] = filedWithNobody(buckets.filed).map((a: any) => {
+  const foldRows: FoldRow[] = filedWithNobody(buckets.filed).map((a) => {
     const ended = filedUnder(a);
     const words = wordsOf(a, ended);
     return {
@@ -231,7 +112,12 @@ export default async function InspectionsPage({
           lead, and started from its row. */}
       <PageHeader title={t("nv_page_inspections")} description={t("nv_desc_inspections")} />
 
-      {listRows.length === 0 ? (
+      {read.error ? (
+        // A FAILED READ IS NEVER "NOBODY IS WAITING" (cn-v1172): said, never drawn as an empty list.
+        <p role="status" data-read-failed="" className="rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+          {t("ip_readFailed")}
+        </p>
+      ) : listRows.length === 0 ? (
         <EmptyState
           icon={ClipboardCheck}
           title={t("ip_noOpenInspections")}
@@ -242,11 +128,15 @@ export default async function InspectionsPage({
               {t("ip_btn_goToLeads")}
             </Link>
           )}
+          <ToEstimateLine n={toEstimate} t={t} />
         </EmptyState>
       ) : (
-        <InspectionList rows={listRows} tz={tz} />
+        <>
+          <InspectionList rows={listRows} tz={tz} />
+          <ToEstimateLine n={toEstimate} t={t} />
+        </>
       )}
-      {rows.length === READ_CAP && <p className="mt-3 px-1 text-xs text-slate-600">{fillSlots(t("ip_capped"), { n: READ_CAP })}</p>}
+      {read.capped && <p className="mt-3 px-1 text-xs text-slate-600">{fillSlots(t("ip_capped"), { n: VISIT_READ_CAP })}</p>}
       <FiledWithNobodyFold rows={foldRows} t={t} />
     </div>
   );

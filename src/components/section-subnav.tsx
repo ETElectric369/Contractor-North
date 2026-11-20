@@ -15,7 +15,7 @@ import { SectionSheet } from "./section-sheet";
  *  ≤4 pages (Sales, a tech's You…; a one-page section draws nothing): the horizontal pill strip, flex-1 filling the full phone
  *  width — 2–4 pills share it evenly with no horizontal scroll, so they stay glanceable.
  *
- *  >4 pages (Jobs' 13, Office's 12, Money's 9): the strip died as a blind sideways scroll,
+ *  >4 pages (Jobs' 13, Office's 12, Admin's: the tile that was Money): the strip died as a blind sideways scroll,
  *  so it's replaced 1:1 by <SectionSheet> — a slim left-edge handle (the one lit "where am
  *  I" chip) opening a vertical slide-over of the same pages, headers as dividers. Never
  *  both: when the handle renders, no strip does (zero duplication).

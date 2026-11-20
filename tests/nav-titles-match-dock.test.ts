@@ -21,7 +21,13 @@ describe("a nav title's Spanish is its dock row's Spanish", () => {
     shellByEnglish.set(fold(en), list);
   }
 
-  const navKeys = Object.keys(nav.en).filter((k) => !k.startsWith("nv_desc_"));
+  /**
+   * TWO THINGS, ONE ENGLISH WORD (cn-v1172). The tile that was Money is "Admin" in both languages (the
+   * dock tile is narrow), and a person whose role is admin is an Administrador. A tile is not a role,
+   * and no page title is "Admin", so the role is the one nv_ word left out of this rule, by name.
+   */
+  const NOT_THE_SAME_THING = new Set(["nv_role_admin"]);
+  const navKeys = Object.keys(nav.en).filter((k) => !k.startsWith("nv_desc_") && !NOT_THE_SAME_THING.has(k));
 
   it("every nv_ word whose English is a sh_ word's English carries that word's Spanish", () => {
     const mismatches: string[] = [];
@@ -55,13 +61,21 @@ describe("a nav title's Spanish is its dock row's Spanish", () => {
       ["nv_page_settings", "sh_dock_settings"],
       ["nv_page_quotesNew", "sh_newEstimate"],
       ["nv_page_pettyCash", "sh_pettyCash"],
-      ["nv_set_money", "sh_dock_invoices"],
+      // Settings › Money and the Admin tile's Money heading (cn-v1172: the tile itself is Admin now).
+      ["nv_set_money", "sh_dock_m-ma-h"],
+      ["nv_page_closing", "sh_dock_sl-closing"],
       ["nv_role_office", "sh_dock_office"],
     ];
     for (const [n, s] of pairs) {
       expect(fold(nav.en[n]), `${n} / ${s} English`).toBe(fold(shell.en[s]));
       expect(nav.es[n], `${n} / ${s} Spanish`).toBe(shell.es[s]);
     }
+  });
+
+  it("the Admin tile and the admin role: the tile reads Admin in both languages, the role Administrador (cn-v1172)", () => {
+    expect(shell.en.sh_dock_invoices).toBe("Admin");
+    expect(shell.es.sh_dock_invoices).toBe("Admin");
+    expect(nav.es.nv_role_admin).toBe("Administrador");
   });
 
   it("a page title not on the dock still follows the glossary: Manual del Empleado for the Handbook page, Documentos del Empleado for Employee Docs (Employee = Empleado, one word)", () => {

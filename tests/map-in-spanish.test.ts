@@ -29,12 +29,11 @@ const ENGLISH_GLUE = new Set(["and", "the", "of", "for", "to", "in", "on", "your
 
 const wordsOf = (s: string) => s.split(/[\s·]+/).filter((w) => /\p{L}/u.test(w));
 
-/** Every English word the dock's data carries: tiles, rows, headers, a row's whenOff words, a tile's whenOnly words, a tile's short. */
+/** Every English word the dock's data carries: tiles, rows, headers, a row's whenOff words, a tile's short. */
 const ENGLISH_LABELS = new Set<string>();
 for (const s of [...DOCK, LAPSED_DOCK]) {
   ENGLISH_LABELS.add(s.label);
   if (s.short) ENGLISH_LABELS.add(s.short);
-  if (s.whenOnly) ENGLISH_LABELS.add(s.whenOnly.label);
   for (const c of s.children) {
     ENGLISH_LABELS.add(c.label);
     if (c.whenOff) ENGLISH_LABELS.add(c.whenOff.label);
@@ -61,7 +60,7 @@ for (const isStaff of [true, false]) {
   const who = isStaff ? "staff" : "tech";
   SEATS.push({ name: `${who}, everything on`, isStaff, features: ALL_ON });
   for (const k of FEATURE_KEYS) SEATS.push({ name: `${who}, ${k} off`, isStaff, features: { ...ALL_ON, [k]: false } as FeatureMap });
-  SEATS.push({ name: `${who}, Leads and Estimates off (the Sales tile reads Customers)`, isStaff, features: { ...ALL_ON, leads: false, estimates: false } as FeatureMap });
+  SEATS.push({ name: `${who}, Leads and Estimates off (no Sales tile, cn-v1172)`, isStaff, features: { ...ALL_ON, leads: false, estimates: false } as FeatureMap });
   SEATS.push({ name: `${who}, lapsed`, isStaff, features: ALL_ON, lapsed: true });
 }
 
@@ -99,11 +98,12 @@ describe("the dock in Spanish: the one a staff seat, a tech and a lapsed company
     for (const seat of SEATS) for (const r of resolve(seat)) expect(r.en, `${seat.name} › ${r.where}`).toBe(r.own);
   });
 
-  it("a staff seat's tiles: Hoy, Agenda, Ventas, Trabajos, Dinero, Oficina, Herramientas — and the Money and Office headers in Spanish", () => {
+  it("a staff seat's tiles: Hoy, Agenda, Ventas, Trabajos, Admin, Oficina, Herramientas — and the Admin and Office headers in Spanish", () => {
     const rows = resolve({ name: "staff", isStaff: true, features: ALL_ON });
-    expect(rows.filter((r) => r.where.startsWith("tile")).map((r) => r.es)).toEqual(["Hoy", "Agenda", "Ventas", "Trabajos", "Dinero", "Oficina", "Herramientas"]);
+    // Admin (cn-v1172, the tile that was Money) is the same word in Spanish by the catalog's declaration.
+    expect(rows.filter((r) => r.where.startsWith("tile")).map((r) => r.es)).toEqual(["Hoy", "Agenda", "Ventas", "Trabajos", "Admin", "Oficina", "Herramientas"]);
     expect(rows.filter((r) => r.where.startsWith("header")).map((r) => r.es)).toEqual([
-      "Facturación", "Administración", "Obligaciones", "Recursos Humanos", "Inventario", "Historial",
+      "Facturación", "Dinero", "Obligaciones", "Recursos Humanos", "Inventario", "Historial",
     ]);
     expect(rows.find((r) => r.where === "row ma-payroll")?.es).toBe("Nómina");
     expect(rows.find((r) => r.where === "row j-to_be_scheduled")?.es).toBe("Por Programar");
@@ -116,7 +116,7 @@ describe("the dock in Spanish: the one a staff seat, a tech and a lapsed company
     expect(rows.find((r) => r.where === "row ck-clock")?.es).toBe("Reloj");
     expect(rows.find((r) => r.where === "row y-settings")?.es).toBe("Tus Ajustes");
     expect(rows.find((r) => r.where === "row y-handbook")?.es).toBe("Manual");
-    // Nothing of the office's leaks onto his: no Money, no Schedule, no staff-only Office row.
+    // Nothing of the office's leaks onto his: no Admin, no Schedule, no staff-only Office row.
     expect(rows.map((r) => r.where)).not.toEqual(expect.arrayContaining(["tile invoices", "tile schedule", "row o-team", "header o-diag-h"]));
   });
 
@@ -128,11 +128,13 @@ describe("the dock in Spanish: the one a staff seat, a tech and a lapsed company
     }
   });
 
-  it("the variants a switch puts on a row or a tile read Spanish too: Cuentas for Bills, Clientes for the Sales tile reduced to Customers", () => {
+  it("the variant a switch puts on a row reads Spanish too: Cuentas for Bills; Customers is Clientes, first under Admin", () => {
     const bills = resolve({ name: "po off", isStaff: true, features: { ...ALL_ON, purchase_orders: false } as FeatureMap }).find((r) => r.where === "row m-bills");
     expect(bills).toMatchObject({ en: "Bills", es: "Cuentas" });
-    const sales = resolve({ name: "sales → customers", isStaff: true, features: { ...ALL_ON, leads: false, estimates: false } as FeatureMap }).find((r) => r.where === "tile sales");
-    expect(sales).toMatchObject({ en: "Customers", es: "Clientes" });
+    // cn-v1172: Leads and Estimates off is no Sales tile; Customers lives under Admin whatever the switches.
+    const off = resolve({ name: "leads and estimates off", isStaff: true, features: { ...ALL_ON, leads: false, estimates: false } as FeatureMap });
+    expect(off.find((r) => r.where === "tile sales")).toBeUndefined();
+    expect(off.find((r) => r.where === "row sl-customers")).toMatchObject({ en: "Customers", es: "Clientes" });
   });
 
   it("no tile carries a `short`: the phone bar draws `s.short ?? tile`, and a short is English data no catalog translates", () => {

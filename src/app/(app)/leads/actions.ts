@@ -491,6 +491,7 @@ export async function deleteInquiry(id: string): Promise<Result> {
   revalidatePath("/leads");
   revalidatePath("/schedule");
   revalidatePath("/inspections");
+  revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   return { ok: true };
 }
 

@@ -68,7 +68,6 @@ export const FEEDER_SAY_KEYS = [
   "ny_w_toWriteUpTitled",
   "ny_w_docNotSent",
   "ny_w_docNoAnswer",
-  "ny_w_docFollowUp",
   "ny_w_docOfferEnds",
   "ny_w_docOfferEnded",
   "ny_w_contractNotSigned",
