@@ -97,7 +97,8 @@ describe("an estimate has no follow-up day (cn-v1172: \"Closing is the reminder 
 });
 
 describe("a held job comes back on the day its hold picked (0366 jobs.hold_until)", () => {
-  it("a day after today waits in the fold; today or earlier is back; no day at all is back too (No Day Set)", () => {
+  // RE-NAMED ON PURPOSE (cn-v1179): "no_day" is still its own state; the feeder now folds it (hold-pips.test).
+  it("a day after today waits in the fold; today or earlier is back; no day at all is its own state (No Day Set)", () => {
     expect(heldJobState("2026-10-18", TODAY)).toBe("later");
     expect(heldJobState(TOMORROW, TODAY)).toBe("later");
     expect(heldJobState(TODAY, TODAY)).toBe("back");

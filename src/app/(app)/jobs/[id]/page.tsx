@@ -182,6 +182,7 @@ export default async function JobDetailPage({
     { data: staff },
     { data: bills, correctionsReady },
     jobTasks,
+    flaggedTasksR,
     {
       data: { user },
     },
@@ -244,6 +245,10 @@ export default async function JobDetailPage({
     // THE JOB'S ONE TASK LIST (0358): the Overview card, the Tasks chip's count and the Tasks tab
     // all read this. Safe on a database without 0358 (readJobTasks falls back to the old columns).
     readJobTasks(supabase, id),
+    // WHICH OF THEM ARE FLAGGED for Needs You (cn-v1179: priority > 0 on a job task, set on the Tasks
+    // tab by the office). Its own small read so the shared list reader (lib/job-tasks) is untouched;
+    // a failed read draws no flag at all rather than a wrong one, and the toggle still works.
+    supabase.from("tasks").select("id").eq("job_id", id).gt("priority", 0).limit(500),
     // WHO IS LOOKING rides the first wave (cn-v945): the viewer's role picks the select list for
     // the materials items and the permits below (projection law — a tech's rows never carry
     // money), so the role read must land BEFORE those queries, and the role read needs the user.
@@ -1020,8 +1025,9 @@ export default async function JobDetailPage({
   // PAID AHEAD (cn-v1177): the job's payment requests, read through the form's own seed (one read, one
   // shape), for the office only. A failed read is said on the tab, never an empty card.
   const requestSeed = viewerIsStaff ? await readPaymentRequestSeed(j.id).catch(() => null) : null;
-  /** What the job's payment requests still have to come off a bill (cn-v1177): the header's Get Paid says it. */
-  const paidAhead = requestSeed && requestSeed.ok ? requestSeed.leftToNet : 0;
+  // The header's Get Paid no longer takes a paid-ahead figure from here (cn-v1179): the one this page had
+  // was the requests' leftToNet, money only ASKED, and the sheet said it over bills that took nothing off.
+  // The sheet reads the true figure for the bill the payment lands on when it opens (readGetPaidFacts).
   // THE CARDS' DECISIONS READ THE DRAW POOL ONLY (cn-v1177, skeptic #80): the Not Billed Yet card, its
   // door and New Invoice's seed get the draw money no bill took off (lumpToNet), as Finish does. A
   // payment request never "covers" work: the bill is built for the work and the sync takes the request
@@ -1215,6 +1221,7 @@ export default async function JobDetailPage({
     stamps: jobTasks.stamps,
     failed: jobTasks.failed,
     jobStatus: (j.status ?? null) as string | null,
+    flaggedIds: (((flaggedTasksR as any)?.data ?? []) as { id: string }[]).map((r) => String(r.id)),
   };
 
   // WHICH PHOTOS THE CUSTOMER SEES (0300's job_shared_photos): the office's own table, read only
@@ -2386,7 +2393,6 @@ export default async function JobDetailPage({
               methods={payDoor.methods}
               venmoConfigured={payDoor.venmoConfigured}
               textReady={payDoor.textReady}
-              paidAhead={paidAhead}
             />
           )}
           {/* The Inspector — every note, photo and intake answer from any entrance point, one tap

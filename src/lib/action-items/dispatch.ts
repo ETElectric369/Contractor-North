@@ -3,10 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { executeAction } from "@/lib/actions/execute";
 import { blocksCrewWipe } from "./assign-guard";
-import { resolveRowVerb, type DispatchPayload } from "./dispatch-map";
+import { OPEN_STEPS_EN, refusalWhy, resolveRowVerb, type DispatchPayload, type DispatchWhy } from "./dispatch-map";
 import type { ActionKind, Affordance } from "./types";
 
-type Result = { ok: boolean; error?: string; note?: string };
+type Result = { ok: boolean; error?: string; note?: string; why?: DispatchWhy };
 
 /**
  * The inbox switchboard, a THIN SHIM over the unified Action Registry. A (kind, verb) pair maps to a
@@ -41,6 +41,11 @@ export async function dispatchAction(input: {
   if (!mapped) return { ok: false, error: "That action isn't available here." };
 
   const res = await executeAction(mapped.name, mapped.input, { source });
+  // A QUESTION A ROW CANNOT ANSWER (skeptic #82, S5): the handler's needsCascade comes back on the registry's
+  // result (executeAction hands the handler's whole answer back) and stopped here. Named, never retried
+  // with cascade: the list says the catalog's sentence for `why`, in the reader's language.
+  const why = refusalWhy(kind, verb, res as { ok: boolean; needsCascade?: unknown });
+  if (why) return { ok: false, error: OPEN_STEPS_EN, why };
   if (res.ok) revalidatePath("/planner");
   const note = res.warning ?? res.speak ?? res.recorded;
   return { ok: res.ok, error: res.error, ...(res.ok && note ? { note } : {}) };

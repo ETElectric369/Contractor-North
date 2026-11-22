@@ -2,7 +2,7 @@ import { cache } from "react";
 import { viewerSortsBank } from "@/lib/bank-viewer";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, NeedsYou, PileName, WaitingItem } from "./types";
-import { AFFORDANCES, KIND_GROUP, appointmentAffordances, sortActionItems, waitingForViewer, waitingRow } from "./types";
+import { AFFORDANCES, KIND_GROUP, appointmentAffordances, sortActionItems, waitingForViewer, waitingRow, waitingRowNoDay } from "./types";
 import { QUOTE_EXPIRY_SOON_DAYS, dueClock, levelOf, summarize, withoutMoneyForTech } from "./needs-you-rule";
 import { isOlder, splitKeptCount } from "./older";
 import { loadCarriedOver, needsYouWithoutCarried } from "@/lib/schedule/carried-over";
@@ -29,13 +29,14 @@ import { noJobStrayDoors } from "@/lib/already-billed";
 import { noJobHoursActionItem } from "./no-job-hours-item";
 import { readNoJobHours, type NoJobHours } from "@/lib/no-job-hours";
 import { isOpenToBuy, newestListPerJob } from "@/lib/materials-checklist";
+import { materialsJobStatusOk } from "./materials-needed-rule";
 import { INQUIRY_ROW_COLUMNS, feederOn, inquiryActionItem, type InquiryRow } from "./switches";
 import { NEW_INTAKE_COUNT_CAP, loadNewIntake } from "@/lib/leads/new-intake";
 import { draftInvoiceState, heldJobState, lateInvoiceFilter, quoteNoAnswerFilter, saleHasMoney } from "./due-filters";
 import { PREPAYMENT_KIND } from "@/lib/prepayments";
 import { CLOSING_QUIET_DAYS } from "@/lib/estimate/closing";
 import { noAnswerYetItem } from "./no-answer-yet";
-import { isMissingColumn } from "@/lib/job-tasks";
+import { OPEN_TASK_JOB, isMissingColumn, whereJobTaskOpen } from "@/lib/job-tasks";
 import { featureOn, featuresFromOffKey } from "@/lib/features";
 import { COSTED_INVOICE_COLUMNS, NEEDS_RETURN_DAYS, costedJobIds, daysAgoStr, detectStrayTime, detectUnbilledWork, rollupWorkedJobs } from "./leak-detectors";
 import { NEEDS_A_DAY_STATUSES, companyDay, jobsNeedingADay, type NeedDayJob } from "./jobs-needing-a-day";
@@ -111,6 +112,9 @@ const INVOICE_STALE_DAYS = 30;
 // closes within QUOTE_EXPIRY_SOON_DAYS (or already passed), needs a person: the Closing list's one
 // rule (lib/estimate/closing, cn-v1172), which the Closing page and the Sales dot read too.
 
+/** How many flagged job tasks one build reads (oldest first); more says "N+" (cn-v1179). */
+export const FLAGGED_TASKS_READ = 50;
+
 /** How many jobs the Jobs Needing a Day read looks at (newest first); more says "N+". */
 const JOBS_DAY_READ_CAP = 200;
 /** Ids per request when a read names many records: no request's address grows too long. */
@@ -165,11 +169,15 @@ export function localTimeOfDay(iso: string | null | undefined, tz: string | unde
  * the existing tables onto one ActionItem[] (Now) and one WaitingItem[] (the fold). RLS scopes to the
  * org; a tech's view is scoped to his own visits.
  *
- * TASKS ARE DELIBERATELY NOT FED HERE. To-dos live in exactly three places —
- * Tasks & Reminders on My Day, /tasks (grouped by due), and the schedule's per-day
- * due lines. The old task feeder counted every undated task as "due now" forever,
- * which is exactly what the badge invariant (types.ts) forbids: no count may be
- * the length of an unbounded or undated set. Do not re-add a task feeder.
+ * TASKS ARE NOT FED HERE, SAVE THE FLAGGED ONES. To-dos live in Tasks & Reminders on My Day, /tasks
+ * (grouped by due), each job's Tasks tab, and the schedule's per-day due lines. The old task feeder
+ * counted every undated task as "due now" forever, which is exactly what the badge invariant (types.ts)
+ * forbids: no count may be the length of an unbounded or undated set. Do not re-add it.
+ * The one exception (cn-v1179, job_task_flagged): a JOB task the office flagged (priority > 0), open by
+ * the one rule (whereJobTaskOpen), staff only, never a Reminder. A flag is a person's decision about
+ * that one task, so the set is as long as the flags somebody set; its read is capped and counted
+ * ("N+" when cut). The owner, 2026-11-22: "there are some tasks id like to flag as a reminder to do for
+ * certain jobs sometimes [...] so maybe these tasks should go in the needs you under operations instead".
  */
 /**
  * ONE FAN-OUT PER REQUEST (2026-09-08 — Erik: "taking a super long time to load anything on the
@@ -569,9 +577,9 @@ async function buildActionItems(ctx: {
     : Promise.resolve({ mode: "none" });
 
   // THE HELD JOBS (NY-hold, 0366): every job on hold, with its reason, its day and who held it (the
-  // profile through jobs_hold_by_fkey). A day today or earlier, or no day at all, is a Reminder on
-  // Now; a later day waits in the fold. Before 0366 (no columns) the old rule runs alone: a hold
-  // untouched for a week, with no Snooze.
+  // profile through jobs_hold_by_fkey). A day today or earlier is a Reminder on Now; a later day, or
+  // no day at all (cn-v1179), waits in the fold. Before 0366 (no columns) the old rule runs alone: a
+  // hold untouched for a week, on Now, with no Snooze.
   const heldP: Promise<Read & { withDay: boolean }> = isStaff
     ? orgIdP.then(async (orgId) => {
         const base = "id, job_number, name, updated_at, hold_reason, customers(name)";
@@ -611,6 +619,37 @@ async function buildActionItems(ctx: {
           .limit(RECEIPTS_READ_CAP) as PromiseLike<Read>;
       })
     : Promise.resolve(null);
+
+  // THE FLAGGED JOB TASKS (cn-v1179): every open task on a job that is not over that the office flagged
+  // (priority > 0, the flag a Reminder already had), oldest first, through the ONE open rule
+  // (whereJobTaskOpen over OPEN_TASK_JOB), with the job's words beside it. Never a Reminder (job_id is
+  // set: the inner embed keeps a task only with its job). Staff only, the company named by hand. Capped
+  // and counted, so a cut pile says "N+".
+  // ONE EMBED, WIDENED: the job's words ride the open rule's own inner embed (the shape My Day's job-task
+  // read ran in production with, cn-v1175), never a second embed of the same table beside it. No screen
+  // has seen this read yet and a stand-in cannot say what PostgREST accepts, so it takes the proven shape.
+  const flaggedP: Promise<Read> = isStaff
+    ? orgIdP.then((orgId) => {
+        let q = whereJobTaskOpen(
+          supabase
+            .from("tasks")
+            .select(`id, title, job_id, created_at, ${OPEN_TASK_JOB.replace(/\)$/, ", job_number, name, customers(name))")}`, { count: "exact" })
+            .not("job_id", "is", null)
+            .gt("priority", 0),
+        );
+        if (orgId) q = q.eq("org_id", orgId);
+        return Promise.resolve(q.order("created_at", { ascending: true }).limit(FLAGGED_TASKS_READ) as PromiseLike<Read>).then(
+          (r) => {
+            if (r.error) reportError("action-items.flaggedTasks", r.error);
+            return r;
+          },
+          (e: unknown) => {
+            reportError("action-items.flaggedTasks", e);
+            return { data: [], error: e, count: 0 } as Read;
+          },
+        );
+      })
+    : empty;
 
   // ENDLESS ROWS GET A SNOOZE (0367): this company's waits whose day hasn't come. Not ready (the
   // table isn't there yet, or the read failed): no Snooze door, and nothing folds.
@@ -1365,14 +1404,14 @@ async function buildActionItems(ctx: {
   const needDayIds = needDayPre.map((f) => f.job.id);
   // Materials-routing candidates: jobs the crew is about to stand on (today/tomorrow, segments), and
   // (below) jobs worked in the last two days. Never a held job: it waits with its own day.
+  // Which statuses may ask is ONE rule (materialsJobStatusOk), shared with the morning notice.
   const matCandidates = new Map<string, { job: { id: string; job_number?: string | null; name?: string | null }; when: string | null }>();
-  const matStatusOk = (s: string | null | undefined) => s !== "cancelled" && s !== "complete" && s !== "invoiced" && s !== "on_hold";
   for (const j of (matJobsR.data ?? []) as any[]) {
-    if (matStatusOk(j.status)) matCandidates.set(j.id, { job: j, when: j.scheduled_start ?? null });
+    if (materialsJobStatusOk(j.status)) matCandidates.set(j.id, { job: j, when: j.scheduled_start ?? null });
   }
   for (const s of (matSegR.data ?? []) as any[]) {
     const j = one(s.jobs as any) as any;
-    if (!j || !matStatusOk(j.status) || matCandidates.has(j.id)) continue;
+    if (!j || !materialsJobStatusOk(j.status) || matCandidates.has(j.id)) continue;
     // The day the crew is next on it: the segment's start if still ahead, else today.
     matCandidates.set(j.id, { job: j, when: s.start_date && s.start_date > todayStr ? s.start_date : todayStr });
   }
@@ -1697,7 +1736,7 @@ async function buildActionItems(ctx: {
   // there, so leftover unpurchased items are live.
   const workedJobs = (wJobsR.data ?? []) as any[];
   for (const j of workedJobs) {
-    if (worked.get(j.id)?.workedInUnbilledWindow && matStatusOk(j.status) && !matCandidates.has(j.id)) {
+    if (worked.get(j.id)?.workedInUnbilledWindow && materialsJobStatusOk(j.status) && !matCandidates.has(j.id)) {
       matCandidates.set(j.id, { job: j, when: null });
     }
   }
@@ -1851,9 +1890,12 @@ async function buildActionItems(ctx: {
   }
   counts.materials_to_buy = codeCount(matJobsR, 50).capped || codeCount(matSegR, 50).capped ? { capped: true } : {};
 
-  // 5) HOLDS (NY-hold, 0366). A hold whose day has come (or that has no day) is a Reminder on Now,
-  // with its reason and its Snooze and Take Off Hold; a later day waits in the fold. "Put on hold by
-  // Erik" only when the hold says who. Money and legal clocks on a held job are never quieted.
+  // 5) HOLDS (NY-hold, 0366). A hold whose day has come is a Reminder on Now, with its reason and its
+  // Snooze and Take Off Hold; a later day waits in the fold, and so does a hold with NO day (cn-v1179,
+  // decision D: the owner, by picture, "seems like thats abetter spot for it"), saying its reason and
+  // "No Day Set" and counted by no number. Before 0366 (no hold-day columns) the old rule stands: every
+  // hold it reads is a Now row. "Put on hold by Erik" only when the hold says who. Money and legal
+  // clocks on a held job are never quieted.
   {
     const withDay = heldR.withDay;
     // A lost read says so: a hold whose day came would otherwise go quiet, the one thing a hold with a
@@ -1885,8 +1927,18 @@ async function buildActionItems(ctx: {
           continue;
         }
       }
+      // A HOLD WITH NO DAY WAITS TOO (cn-v1179): the one row the fold holds without a day
+      // (types.ts waitingRowNoDay, whose only caller this is). The legacy read (no hold-day columns)
+      // never comes here: it cannot tell "no day" from "no column", so its rows stay on Now as before.
+      if (withDay && state === "no_day") {
+        const row = waitingRowNoDay({ id: `onhold-${j.id}`, kind: "job_on_hold", title: jobWords(j), why: reason || "No reason saved", href: `/jobs/${j.id}` });
+        if (row) {
+          waiting.push(row);
+          continue;
+        }
+      }
       const by = withDay ? firstNameOf(one(j.holder as any)?.full_name) : null;
-      const back = !withDay ? null : state === "no_day" ? "No Day Set" : until! < todayStr ? `Back since ${shortDay(until!)}` : "Back Today";
+      const back = !withDay ? null : until! < todayStr ? `Back since ${shortDay(until!)}` : "Back Today";
       const toBuy = toBuyCount.get(String(j.id)) ?? 0;
       items.push({
         id: `onhold-${j.id}`,
@@ -1902,11 +1954,11 @@ async function buildActionItems(ctx: {
           tail: one(j.customers as any)?.name ?? null,
         },
         when: null,
-        // Its age, for the order (oldest first). A hold with no day (held before 0366, so among the
-        // oldest) ages from its last touch, the proxy for "held since". Words stay "No Day Set".
+        // Its age, for the order (oldest first). A legacy hold (no day column) ages from its last
+        // touch, the proxy for "held since".
         since: until ?? dayOf(j.updated_at),
-        // ITS CLOCK (cn-v1162): the come-back day somebody picked, once it has come. A hold with no
-        // day has no clock (its last touch is not one): plain.
+        // ITS CLOCK (cn-v1162): the come-back day somebody picked, once it has come. A legacy hold has
+        // no clock (its last touch is not one): plain.
         clock: withDay && state === "back" ? until : null,
         urgency: 1,
         done: false,
@@ -1917,6 +1969,52 @@ async function buildActionItems(ctx: {
       });
     }
     counts.holds_back = codeCount(heldR);
+  }
+
+  // 5b) FLAGGED JOB TASKS (cn-v1179): one row per open flagged task, "<job> · <task>": the job in bold,
+  // the task's own words (data, never translated) and the customer under it. No day and no clock:
+  // plain, never amber, never aged into the Older fold, no Snooze. Check Off and Open the Job (its
+  // Tasks tab). Two or more roll into Flagged Tasks, counted as its count. A lost read claims nothing:
+  // one Couldn't Check line. (Its read was started beside the fan-out; this only waits for it.)
+  const flaggedR = await flaggedP;
+  if (isStaff && flaggedR.error) {
+    items.push({
+      id: "flagtasks-unread",
+      kind: "job_task_flagged",
+      title: "Flagged Tasks · Couldn't Check",
+      subtitle: "Couldn't read the flagged job tasks just now. Open a job's Tasks tab to see them.",
+      whoSay: { key: "ny_who_unread", vars: { labelKey: "ny_btn_pile_flaggedTasks" } },
+      what: { key: "ny_w_unreadFlaggedTasks" },
+      who: null,
+      when: null,
+      urgency: 1,
+      done: false,
+      href: "/jobs",
+      affordances: ["open"],
+    });
+  } else if (isStaff) {
+    for (const t of (flaggedR.data ?? []) as any[]) {
+      const job = one(t.jobs as any) as any;
+      const jobId = String(t.job_id ?? "");
+      if (!jobId) continue;
+      const task = String(t.title ?? "").trim();
+      const customer = one(job?.customers as any)?.name ?? null;
+      items.push({
+        id: `flagtask-${t.id}`,
+        kind: "job_task_flagged",
+        title: [jobWords(job), task].filter(Boolean).join(" · "),
+        subtitle: [task, customer].filter(Boolean).join(" · ") || null,
+        who: jobWords(job),
+        when: null,
+        clock: null,
+        since: dayOf(t.created_at),
+        urgency: 0,
+        done: false,
+        href: `/jobs/${jobId}?tab=tasks`,
+        affordances: AFFORDANCES.job_task_flagged,
+      });
+    }
+    counts.flagged_tasks = codeCount(flaggedR);
   }
 
   // 6) RECEIPTS NOT ON A BILL — a receipt or bill on a job that nothing accounts for (a crew photo
@@ -2057,8 +2155,11 @@ async function buildActionItems(ctx: {
   // THE OLDER FOLD (cn-v1175, older.ts): the rows that waited thirty days leave the board and its numbers.
   const now = rolled.filter((it) => !it.older);
   const olderRows = rolled.filter((it) => !!it.older);
-  // The fold, soonest back first. A tech's holds no money kind and no dollar figure, ever.
-  const fold = waitingForViewer([...waiting, ...folded.waiting], isStaff).sort((a, b) => a.backOn.localeCompare(b.backOn) || a.title.localeCompare(b.title));
+  // The fold, soonest back first, a hold with no day after every row that has one (cn-v1179). A tech's
+  // holds no money kind and no dollar figure, ever.
+  const fold = waitingForViewer([...waiting, ...folded.waiting], isStaff).sort(
+    (a, b) => (a.backOn === null ? 1 : 0) - (b.backOn === null ? 1 : 0) || (a.backOn ?? "").localeCompare(b.backOn ?? "") || a.title.localeCompare(b.title),
+  );
   return { now, waiting: fold, older: olderRows };
 }
 

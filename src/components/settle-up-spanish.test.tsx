@@ -84,7 +84,9 @@ describe("the Get Paid sheet speaks Spanish to a Spanish reader", () => {
     expect(text(job)).toContain("Enviar la Factura y Mostrar QR de Tarjeta");
     expect(text(job)).toContain("Una tarjeta se cobra sobre la factura abierta del trabajo");
     const visit = text(es(createElement(SettleUpButton as never, { source: "appointment", id: "a-1", cardEnabled: true, methods: ["Cash"] })));
-    expect(visit).toContain("Una tarjeta escribe la factura, la envía y marca la visita como hecha");
+    // cn-v1179 (G5): a card never writes a bill; the line says what is true.
+    expect(visit).toContain("Una tarjeta se cobra sobre la factura de esta visita y la marca como hecha. Si aún no hay factura, registra el monto abajo o crea la factura primero.");
+    expect(text(job)).toContain("Si no hay, registra el monto abajo o crea la factura primero.");
     expect(visit).not.toMatch(/Send the Bill|Get Paid/);
   });
 
@@ -212,8 +214,9 @@ describe("the Settle Up catalog (su_)", () => {
       su_getPaidAmount: "Get Paid {amount}",
       su_cardsNotOnForCompany: "Cards aren't switched on for this company yet: Settings → Getting Paid → Set Up Card Payments takes about five minutes.",
       su_apple_tapToPay: "Tap to Pay",
-      su_cardOnJobLine: "A card is taken on the job's open bill (or writes one if there's none), then the card door goes in front of the customer.",
-      su_cardOnVisitLine: "A card writes the bill, sends it, and marks the visit done — then the card door goes in front of the customer.",
+      // cn-v1179 (G5): the two lines that promised a bill a card never writes now say what is true.
+      su_cardOnJobLine: "A card is taken on the job's open bill. With none, record the amount below, or make the invoice first.",
+      su_cardOnVisitLine: "A card is taken on this visit's bill and marks the visit done. With no bill yet, record the amount below, or make the invoice first.",
       su_btn_gettingItReady: "Getting It Ready…",
       su_btn_showCardQr: "Show Card QR",
       su_btn_sendBillShowCardQr: "Send the Bill & Show Card QR",
@@ -322,8 +325,6 @@ describe("the Settle Up catalog (su_)", () => {
       su_enterWhatTheyPaid: "Enter what they paid.",
       su_enterWhatTheyrePaying: "Enter what they're paying.",
       su_addVenmoFirst: "Add your Venmo username in Settings → Payment methods first.",
-      su_paidMethodDone: "Paid — {amount} {method}. Done.",
-      su_paidVenmoDone: "Paid — {amount} Venmo. Done.",
       su_venmoHandleAmount: "Venmo @{handle} — {amount}",
       su_venmoQrCode: "Venmo QR code",
       su_venmoTheyScan: "They scan, they pay. Venmo can't tell the app when it lands — tap the button when it does.",
@@ -338,13 +339,17 @@ describe("the Settle Up catalog (su_)", () => {
     // added (Request a Payment, its link in the job hub's sheet, Paid Ahead: su_rp_, su_pa_, su_btn_rp…,
     // su_btn_request…) replaced no literal; they are new words, pinned in components/request-payment.test.
     // The money lane's refusal words for requestPayment (su_req_) are new words of the same release.
-    const NEW_1177 = /^su_(?:rp_|pa_|req_|btn_rp|btn_request)/;
+    // cn-v1179 added the Get Paid sheet's own sentences and doors (su_gp_, su_btn_gp_), new words too,
+    // pinned in components/settle-up-says.test; it removed "Paid — $X cash. Done." and its Venmo twin
+    // (the sheet now says which bill took the money and what became of the job, never "Done" alone).
+    const NEW_1177 = /^su_(?:rp_|pa_|req_|btn_rp|btn_request|gp_|btn_gp_)/;
     expect(Object.keys(replaced).sort()).toEqual(Object.keys(su.en).filter((k) => !NEW_1177.test(k)).sort());
     expect(Object.keys(su.en).filter((k) => /^su_(?:rp_|pa_|btn_rp|btn_request)/.test(k))).toHaveLength(44);
     for (const [k, literal] of Object.entries(replaced)) expect(dict("en")[k], k).toBe(literal);
     // The sentences the old sheet assembled, re-assembled through the slots, are the old sentences.
     expect(fillText(dict("en").su_paidByCardDone, { amount: "$420.00" })).toBe("Paid — $420.00 by card. Done.");
-    expect(fillText(dict("en").su_paidMethodDone, { amount: "$50.00", method: "cash" })).toBe("Paid — $50.00 cash. Done.");
+    expect(dict("en").su_paidMethodDone).toBeUndefined();
+    expect(dict("en").su_paidVenmoDone).toBeUndefined();
     expect(fillText(dict("en").su_sendingAsBill, { inv: dict("en").su_theInvoice })).toBe("Sending the invoice as the bill.");
     expect(fillText(dict("en").su_payLinkSms, { inv: fillText(dict("en").su_invoiceDash, { n: "1042" }), amount: "$150.00", url: "https://x" })).toBe(
       "Invoice 1042 — $150.00. Pay by card here: https://x",

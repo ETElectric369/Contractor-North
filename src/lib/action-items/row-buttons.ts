@@ -51,7 +51,8 @@ export type RowDoor = { label: string; act: RowAct };
 export type RowButtons = {
   /** The row's one named button, or null (a tech's visit only opens; a rollup carries its own cards). */
   primary: RowDoor | null;
-  /** A second button drawn beside it: only a hold whose day has come (Snooze and Take Off Hold). */
+  /** A second button drawn beside it: a hold whose day has come (Snooze and Take Off Hold), and a
+   *  flagged job task (Check Off and Open the Job). */
   also: RowDoor | null;
   /** What ⋯ holds. Empty: no ⋯ at all. */
   more: RowDoor[];
@@ -313,6 +314,15 @@ export function rowButtons(item: ActionItem, ctx: RowButtonsCtx): RowButtons {
       const off = has(item, "do") ? ({ label: L("ny_btn_takeOffHold"), act: { type: "run", verb: "do" } } as RowDoor) : null;
       return { primary: s ?? off, also: s ? off : null, more: [] };
     }
+    case "job_task_flagged":
+      // A FLAGGED JOB TASK (cn-v1179): Check Off (do: the registry's task.complete, toggleTask's own
+      // door, so the job's Tasks tab and this row are one record) and Open the Job, its Tasks tab. No ⋯:
+      // no Snooze and no ending; taking the flag off on the job is the way out.
+      return {
+        primary: has(item, "do") ? { label: L("ny_btn_checkOff"), act: { type: "run", verb: "do" } } : null,
+        also: open(L("ag_btn_openTheJob"), item.href),
+        more: [],
+      };
     case "invoice_overdue":
       return { ...none, primary: open(L("ny_btn_getPaid"), item.href) };
     case "invoice_draft":

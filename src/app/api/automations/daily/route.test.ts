@@ -23,6 +23,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * right after the billing notices and before the day-ahead digest and the error sweep, handed the
  * same client and start, their own try and their own row (cron-usage-notices).
  *
+ * THIRTEEN STEPS NOW (cn-v1179): the morning materials notice (the jobs the crew stands on today that
+ * still have lines to buy, to the office) runs right after the day-ahead digest and before the error
+ * sweep, handed the cron's client, the run's own start and the translator, its own try and its own
+ * row (cron-materials-today).
+ *
  * HOURLY, ON TWO CLOCKS (2026-11-02, the day after DST ended). The cron runs every hour: the COMPANY
  * steps (recurring, stale bank transfers, billing, usage, day ahead, Nort's review, the shelf) run for
  * each company on the run at ITS 8 AM and are handed only those companies; the GLOBAL steps (fees,
@@ -38,6 +43,7 @@ const steps = vi.hoisted(() => ({
   billing: vi.fn(),
   usage: vi.fn(),
   dayAhead: vi.fn(),
+  materials: vi.fn(),
   review: vi.fn(),
   shelf: vi.fn(),
   sweep: vi.fn(),
@@ -57,6 +63,7 @@ vi.mock("@/lib/error-retention", () => ({ sweepErrorEvents: steps.errorSweep }))
 vi.mock("@/lib/bug-watch-digest", () => ({ sendBugWatchDigest: steps.digest }));
 vi.mock("@/lib/recurring-engine", () => ({ generateDueTemplates: steps.recurring }));
 vi.mock("@/lib/action-items/digest", () => ({ sendDayAheadDigests: steps.dayAhead }));
+vi.mock("@/lib/action-items/materials-morning", () => ({ sendMaterialsMorning: steps.materials }));
 vi.mock("@/lib/nort/review", () => ({ generateNortReviewsForAllOrgs: steps.review }));
 vi.mock("@/lib/storage-sweep", () => ({ sweepOrphanedUploads: steps.sweep }));
 vi.mock("@/lib/processor-fee-capture", () => ({ backfillProcessorFees: steps.fees }));
@@ -88,6 +95,7 @@ const STEP_ROWS: [string, string][] = [
   ["billing_notices_error", "cron-billing-notices"],
   ["usage_notices_error", "cron-usage-notices"],
   ["day_ahead_error", "cron-day-ahead"],
+  ["materials_today_error", "cron-materials-today"],
   ["error_sweep_error", "cron-error-sweep"],
   ["bug_watch_digest_error", "cron-bug-watch-digest"],
   ["nort_reviews_error", "cron-nort-review"],
@@ -104,6 +112,7 @@ function everyStepWorks() {
   steps.billing.mockResolvedValue({ orgs: 3, due: 1, sent: 1, skipped: { comped: 1 }, failed: 0 });
   steps.usage.mockResolvedValue(USAGE_RUN);
   steps.dayAhead.mockResolvedValue({ orgs: 1, pushed: 1 });
+  steps.materials.mockResolvedValue(MATERIALS_RUN);
   steps.review.mockResolvedValue({ made: 1, failed: 0, left: 0 });
   steps.shelf.mockResolvedValue({ problems: [], skipped: null });
   steps.sweep.mockResolvedValue({ removed: 0 });
@@ -121,6 +130,7 @@ function everyStepFails() {
   steps.billing.mockRejectedValue(fell("billing"));
   steps.usage.mockRejectedValue(fell("usage"));
   steps.dayAhead.mockRejectedValue(fell("day ahead"));
+  steps.materials.mockRejectedValue(fell("materials"));
   steps.review.mockRejectedValue(fell("review"));
   steps.shelf.mockRejectedValue(fell("shelf"));
   steps.sweep.mockRejectedValue(fell("sweep"));
@@ -136,6 +146,9 @@ function everyStepFails() {
 /** The usage step's answer (cn-v1140): companies read, told, the four skips, failed. */
 const USAGE_RUN = { orgs: 3, told: 1, skipped: { fine: 1, lapsed: 1, degraded: 0, already: 0 }, failed: 0 };
 
+/** The morning materials notice's answer (cn-v1179). */
+const MATERIALS_RUN = { orgs: 1, sent: 1, nothing: 0, already: 0, failed: 0, lapsed_skipped: 0 };
+
 const errorKeys = (body: Record<string, unknown>) => Object.keys(body).filter((k) => k.endsWith("_error"));
 
 /** Stand-in companies, one per zone. 2026-11-02 is the Monday after DST ended. */
@@ -149,7 +162,7 @@ const at = (utc: string) => Date.parse(`2026-11-02T${utc}:00Z`);
 const companiesHanded = (fn: { mock: { calls: any[][] } }, argIndex: number) =>
   [...(fn.mock.calls[0][argIndex].orgIds as Set<string>)].sort();
 
-const COMPANY_STEPS = ["recurring", "stale", "billing", "usage", "dayAhead", "review", "shelf"] as const;
+const COMPANY_STEPS = ["recurring", "stale", "billing", "usage", "dayAhead", "materials", "review", "shelf"] as const;
 const GLOBAL_STEPS = ["fees", "errorSweep", "digest", "sweep"] as const;
 
 beforeEach(() => {
@@ -253,12 +266,13 @@ describe("GET /api/automations/daily", () => {
     steps.billing.mockImplementation(async () => (order.push("billing_notices"), { orgs: 0, due: 0, sent: 0, skipped: { comped: 0 }, failed: 0 }));
     steps.usage.mockImplementation(async () => (order.push("usage_notices"), USAGE_RUN));
     steps.dayAhead.mockImplementation(async () => (order.push("day_ahead"), { orgs: 1, pushed: 1 }));
+    steps.materials.mockImplementation(async () => (order.push("materials_today"), MATERIALS_RUN));
     steps.errorSweep.mockImplementation(async () => (order.push("error_sweep"), { closed_deleted: 0, trace_deleted: 0 }));
     steps.digest.mockImplementation(async () => (order.push("bug_watch_digest"), { sent: 0, skipped: "not Monday" }));
     steps.review.mockImplementation(async () => (order.push("nort_review"), { made: 1, failed: 0, left: 0 }));
     steps.shelf.mockImplementation(async () => (order.push("stock_reconcile"), { problems: [], skipped: null }));
     await GET(req());
-    expect(order).toEqual(["billing_notices", "usage_notices", "day_ahead", "error_sweep", "bug_watch_digest", "nort_review", "stock_reconcile"]);
+    expect(order).toEqual(["billing_notices", "usage_notices", "day_ahead", "materials_today", "error_sweep", "bug_watch_digest", "nort_review", "stock_reconcile"]);
   });
 
   it("the usage notices (cn-v1140) run right AFTER the billing notices and before the error sweep, handed the cron's client and the run's own start; a failed step is its own row and the steps after it still run", async () => {
@@ -294,6 +308,35 @@ describe("GET /api/automations/daily", () => {
     expect(body.day_ahead).toEqual({ orgs: 1, pushed: 1 }); // the step after it still ran
     expect(body.error_sweep).toEqual({ closed_deleted: 2, trace_deleted: 9 });
     expect(steps.reportBlockerAwaited).not.toHaveBeenCalled();
+  });
+
+  it("the morning materials notice (cn-v1179) runs right AFTER the day-ahead digest, handed the cron's client, the run's own start and the translator; a failed step is its own row and the steps after it still run", async () => {
+    everyStepWorks();
+    const before = Date.now();
+    let res = await GET(req());
+    expect(steps.materials).toHaveBeenCalledTimes(1);
+    const [client, opts] = steps.materials.mock.calls[0];
+    expect(client).toBe(state.client);
+    expect(opts.nowMs).toBeGreaterThanOrEqual(before);
+    expect(opts.nowMs).toBeLessThanOrEqual(Date.now());
+    expect(opts.nowMs).toBe(steps.billing.mock.calls[0][1]); // the one start the run judged the 8 AM on
+    expect(opts.wordsFor("es")("sh_push_materials_today")).toBe("Materiales por Comprar Hoy");
+    expect(steps.materials.mock.invocationCallOrder[0]).toBeGreaterThan(steps.dayAhead.mock.invocationCallOrder[0]);
+    expect(steps.materials.mock.invocationCallOrder[0]).toBeLessThan(steps.review.mock.invocationCallOrder[0]);
+    let body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.materials_today).toEqual(MATERIALS_RUN);
+
+    for (const fn of Object.values(steps)) fn.mockReset();
+    everyStepWorks();
+    steps.materials.mockRejectedValue(new Error("organizations could not be read: timeout"));
+    res = await GET(req());
+    body = await res.json();
+    expect(res.status).toBe(500);
+    expect(errorKeys(body)).toEqual(["materials_today_error"]);
+    expect(steps.reportError).toHaveBeenCalledWith("cron-materials-today", expect.any(Error));
+    expect(body.day_ahead).toEqual({ orgs: 1, pushed: 1 }); // the step before it is untouched
+    expect(body.nort_reviews).toEqual({ made: 1, failed: 0, left: 0 }); // the steps after it still ran
   });
 
   it("the billing notices are handed the cron's client and the run's own start, and a failed step is its own row", async () => {
@@ -384,6 +427,7 @@ describe("GET /api/automations/daily", () => {
       billing_notices: { orgs: 3, due: 1, sent: 1, skipped: { comped: 1 }, failed: 0 },
       usage_notices: { orgs: 3, told: 1, skipped: { fine: 1, lapsed: 1, degraded: 0, already: 0 }, failed: 0 },
       day_ahead: { orgs: 1, pushed: 1 },
+      materials_today: MATERIALS_RUN,
       nort_reviews: { made: 1, failed: 0, left: 0 },
       stock_reconcile: { problems: 0 },
       rate_limit_gc: true,
@@ -443,6 +487,7 @@ describe("GET /api/automations/daily", () => {
       expect(companiesHanded(steps.billing, 2)).toEqual(["larkspur"]);
       expect(companiesHanded(steps.usage, 2)).toEqual(["larkspur"]);
       expect(companiesHanded(steps.dayAhead, 1)).toEqual(["larkspur"]);
+      expect(companiesHanded(steps.materials, 1)).toEqual(["larkspur"]);
       expect(companiesHanded(steps.review, 1)).toEqual(["larkspur"]);
       expect(companiesHanded(steps.shelf, 1)).toEqual(["larkspur"]);
       expect(body).not.toHaveProperty("processor_fees");
@@ -533,7 +578,7 @@ describe("GET /api/automations/daily", () => {
       const res = await GET(req());
       const body = await res.json();
       expect(res.status).toBe(500);
-      expect(errorKeys(body)).toEqual(["recurring_error", "stale_bank_transfers_error", "billing_notices_error", "usage_notices_error", "day_ahead_error", "nort_reviews_error", "stock_reconcile_error"]);
+      expect(errorKeys(body)).toEqual(["recurring_error", "stale_bank_transfers_error", "billing_notices_error", "usage_notices_error", "day_ahead_error", "materials_today_error", "nort_reviews_error", "stock_reconcile_error"]);
       expect(steps.reportBlockerAwaited).toHaveBeenCalledTimes(1);
     });
   });

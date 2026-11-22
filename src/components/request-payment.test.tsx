@@ -250,14 +250,18 @@ describe("the job hub's Get Paid: one quiet link, and the sheet's own behavior u
     const es = textOf(renderToStaticMarkup(createElement(LangProvider as never, { lang: "es" }, createElement(SettleUpButton as never, { source: "job", id: "j-1", compact: true, cardEnabled: true }))));
     expect(es).toContain("Solicitar un Anticipo o Pago de Materiales");
   });
-  it("money paid ahead and not yet used is said in the job's sheet, in both languages; the sheet prefills nothing from the work", () => {
+  /**
+   * cn-v1179 (G5): the page's paidAhead was the requests' leftToNet, money only ASKED, and the line said
+   * "It comes off this bill" over a sent bill that takes nothing off. The sheet no longer reads the prop:
+   * it reads, when it opens, the money actually paid and left, only where it comes off the bill the
+   * payment lands on (billing/request-actions readGetPaidFacts; the words: components/settle-up-says.test).
+   */
+  it("the page's paidAhead (money only asked) is no longer said in the job's sheet; the amount box starts empty until the sheet's own read", () => {
     const job = (over: Record<string, unknown>) => ({ source: "job", id: "j-1", compact: true, cardEnabled: true, methods: ["Cash"], ...over });
-    expect(textOf(renderToStaticMarkup(createElement(SettleUpButton as never, job({ paidAhead: 1000 }))))).toContain("Paid ahead and not yet used: $1,000.00. It comes off this bill.");
-    expect(textOf(renderToStaticMarkup(createElement(SettleUpButton as never, job({ paidAhead: 0 }))))).not.toContain("Paid ahead");
-    expect(textOf(renderToStaticMarkup(createElement(SettleUpButton as never, job({}))))).not.toContain("Paid ahead");
+    expect(textOf(renderToStaticMarkup(createElement(SettleUpButton as never, job({ paidAhead: 1000 }))))).not.toContain("Paid ahead");
     const es = textOf(renderToStaticMarkup(createElement(LangProvider as never, { lang: "es" }, createElement(SettleUpButton as never, job({ paidAhead: 250 })))));
-    expect(es).toContain("Pagado por adelantado y aún sin usar: $250.00. Se descuenta de esta factura.");
-    // The job's amount box starts empty: no figure from the work to lower.
+    expect(es).not.toContain("Pagado por adelantado");
+    // Nothing typed for them before the read: the box is filled only from the job's one open bill.
     const html = renderToStaticMarkup(createElement(SettleUpButton as never, job({ paidAhead: 1000 })));
     expect(html.match(/<input[^>]*id="rp-amount"[^>]*>/)?.[0]).toMatch(/value=""/);
   });

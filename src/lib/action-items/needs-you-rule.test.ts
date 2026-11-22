@@ -44,18 +44,19 @@ const it0 = (kind: ActionKind, o: Partial<LevelIn> = {}): LevelIn => ({ kind, id
 const lv = (kind: ActionKind, o: Partial<LevelIn> = {}) => levelOf(it0(kind, o), ctx);
 
 describe("the four tiles", () => {
-  it("every kind sits in exactly one tile, sized 5 / 5 / 7 / 5", () => {
+  // RE-PINNED ON PURPOSE (cn-v1179): a flagged job task joins Operations, so it holds 8.
+  it("every kind sits in exactly one tile, sized 5 / 5 / 8 / 5", () => {
     expect(Object.keys(KIND_GROUP)).toEqual(Object.keys(AFFORDANCES));
     const size = (g: Group) => KINDS.filter((k) => KIND_GROUP[k] === g).length;
-    expect(GROUP_ORDER.map(size)).toEqual([5, 5, 7, 5]);
-    expect(KINDS).toHaveLength(22);
+    expect(GROUP_ORDER.map(size)).toEqual([5, 5, 8, 5]);
+    expect(KINDS).toHaveLength(23);
   });
 
   it("the tiles hold what the plan says", () => {
     const of = (g: Group) => KINDS.filter((k) => KIND_GROUP[k] === g).sort();
     expect(of("get_paid")).toEqual(["invoice_draft", "invoice_overdue", "job_unbilled_work", "lien_deadline", "visit_unbilled"]);
     expect(of("win_work")).toEqual(["contract_unsigned", "inquiry", "inspection_writeup", "quote_awaiting", "quote_draft"]);
-    expect(of("run_jobs")).toEqual(["appointment", "job_on_hold", "job_to_schedule", "materials_needed", "permit_inspection", "quote_accepted", "time_stray"]);
+    expect(of("run_jobs")).toEqual(["appointment", "job_on_hold", "job_task_flagged", "job_to_schedule", "materials_needed", "permit_inspection", "quote_accepted", "time_stray"]);
     expect(of("keep_books")).toEqual(["organize", "receipt_unbilled", "stock_short", "supplier_paper", "supplier_pay"]);
   });
 
@@ -189,6 +190,10 @@ describe("the level table", () => {
     // invoice_draft: a set-aside day that came. A draft back because its job finished has none.
     expect(lv("invoice_draft", { urgency: 0, clock: ago(2), when: ago(40) })).toBe("soon");
     expect(lv("invoice_draft", { urgency: 1, clock: null, when: ago(0) })).toBe("none");
+    // job_task_flagged (cn-v1179): a flag records no day, so it is plain whatever a feeder hands it.
+    expect(lv("job_task_flagged", { urgency: 2, when: ago(1), clock: ago(0), since: ago(60) })).toBe("none");
+    expect(DUE_KINDS).not.toContain("job_task_flagged");
+    expect(NOW_KINDS).not.toContain("job_task_flagged");
     // job_on_hold: a come-back day that came; a hold with no day is plain.
     expect(lv("job_on_hold", { clock: ago(0), since: ago(0) })).toBe("soon");
     expect(lv("job_on_hold", { clock: null, since: ago(60) })).toBe("none");

@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Camera, CheckCircle2, ChevronDown, ChevronRight, Circle, Loader2, Package, Plus } from "lucide-react";
+import { Camera, CheckCircle2, ChevronDown, ChevronRight, Circle, Flag, Loader2, Package, Plus } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -25,7 +25,7 @@ import {
   type TaskPhoto,
 } from "@/lib/job-tasks";
 import { buyLineName, buyLineWords, buyMaterialsTitle, tickBuyLine, type BuyLine, type BuyMaterials } from "@/lib/materials-checklist";
-import { createTask, deleteTask, setTaskDonePhoto, toggleTask, updateTask, type ToggleTaskResult } from "../../tasks/actions";
+import { createTask, deleteTask, setJobTaskFlag, setTaskDonePhoto, toggleTask, updateTask, type ToggleTaskResult } from "../../tasks/actions";
 import { setMaterialItemPurchased } from "../../materials/actions";
 import { uploadJobPhotos } from "./upload-job-photos";
 import { PhotoTaskSheet } from "./photo-task-sheet";
@@ -43,9 +43,17 @@ const withId = (s: ReadonlySet<string>, id: string, on: boolean): ReadonlySet<st
 
 /**
  * THE JOB'S ONE TASK LIST (0358). Erik: tasks "embed with the job so if multiple people are on the job
- * a crew leader can assign them verbally". No assignee, no due date, no priority: a title, a checkbox,
- * maybe a photo. Everyone on the job sees the same list and checks things off; the server records who
- * and when. Techs get exactly this card (tech-job-access: all pertinent job info; a task has no price).
+ * a crew leader can assign them verbally". No assignee, no due date: a title, a checkbox, maybe a
+ * photo, and (since cn-v1179) ONE flag. Everyone on the job sees the same list and checks things off;
+ * the server records who and when. Techs get exactly this card (tech-job-access: all pertinent job
+ * info; a task has no price).
+ *
+ * THE FLAG (cn-v1179; the owner, 2026-11-22: "there are some tasks id like to flag as a reminder to do
+ * for certain jobs sometimes [...] so maybe these tasks should go in the needs you under operations
+ * instead and reminders can just be reminders"). A job task's `priority` (0018), the column a
+ * Reminder's flag already is: > 0 = flagged, and every OPEN flagged job task is a Needs You row under
+ * Operations. Each open row carries the office's toggle (Flag for Needs You / Remove the Flag, through
+ * setJobTaskFlag); a tech sees the filled mark and never the toggle. A tap says where it went.
  *
  * THE WHOLE LIST, WHEREVER IT IS DRAWN (Erik, report b7f23be0, 2026-09-30: "show the tasks here,
  * additional steps are unnecessary"). It had two faces: a three-row summary on the Overview with a
@@ -90,6 +98,7 @@ export function JobTaskList({
   doneOpen = false,
   materials = null,
   jobStatus = null,
+  flaggedIds = [],
 }: {
   jobId: string;
   orgId: string;
@@ -112,6 +121,8 @@ export function JobTaskList({
   /** The job's status: on a job that is over no task is open (lib/open-counts isOpenTask), so the
    *  header, the open rows and the page's Tasks badge are one tally (cn-v1174). */
   jobStatus?: string | null;
+  /** The ids of the job's tasks flagged for Needs You (priority > 0, cn-v1179), read by the page. */
+  flaggedIds?: readonly string[];
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -119,6 +130,10 @@ export function JobTaskList({
   const [pending, start] = useTransition();
   // Optimistic check state, reverted on a refusal; the refresh brings the server's answer.
   const [override, setOverride] = useState<Map<string, boolean>>(new Map());
+  // The flag, optimistic the same way: drawn at once, put back on a refusal, the refresh brings the truth.
+  const [flagOverride, setFlagOverride] = useState<Map<string, boolean>>(new Map());
+  const flaggedSet = new Set(flaggedIds);
+  const isFlagged = (t: JobTaskRow) => flagOverride.get(t.id) ?? flaggedSet.has(t.id);
   const [editing, setEditing] = useState<JobTaskRow | null>(null);
   const [viewing, setViewing] = useState<string | null>(null);
   const [foldOpen, setFoldOpen] = useState(doneOpen);
@@ -198,9 +213,28 @@ export function JobTaskList({
     });
   }
 
+  function flag(task: JobTaskRow) {
+    const next = !isFlagged(task);
+    setFlagOverride((m) => new Map(m).set(task.id, next));
+    start(async () => {
+      const res = await setJobTaskFlag(task.id, next, { jobId });
+      if (!res.ok) {
+        setFlagOverride((m) => new Map(m).set(task.id, !next));
+        toast(res.error ?? t("jb_couldntFlag"), "error");
+        return;
+      }
+      // NOTHING SILENT: the flag sends the task somewhere he is not looking, so the toast says where.
+      toast(next ? t("jb_flaggedToast") : t("jb_unflaggedToast"), "success");
+      router.refresh();
+    });
+  }
+
   const row = (task: JobTaskRow) => {
     const checked = isDone(task);
     const p = photos[task.id];
+    const flagged = isFlagged(task);
+    // The flag lives on an OPEN row only: a checked-off task is on no Needs You.
+    const openRow = task.status === "open" && !checked;
     return (
       <li key={task.id} className="flex items-center gap-1 pr-2">
         {/* 44px: the checkbox is the row's most-tapped target, one-handed on a ladder. */}
@@ -223,6 +257,25 @@ export function JobTaskList({
           {task.status === "done" && <span className="text-xs text-slate-500">{doneWords(task, tz, now)}</span>}
         </button>
         <Thumb photo={p?.task ?? null} label={fillText(t("jb_photoFor"), { title: task.title })} onOpen={setViewing} />
+        {openRow && viewerIsStaff && (
+          <button
+            type="button"
+            onClick={() => flag(task)}
+            disabled={pending}
+            aria-pressed={flagged}
+            aria-label={flagged ? t("jb_btn_removeFlag") : t("jb_btn_flagForNeedsYou")}
+            title={flagged ? t("jb_btn_removeFlag") : t("jb_btn_flagForNeedsYou")}
+            data-flag-toggle={task.id}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-slate-100 disabled:opacity-50"
+          >
+            <Flag className={flagged ? "h-5 w-5 fill-current text-brand" : "h-5 w-5 text-slate-300"} aria-hidden />
+          </button>
+        )}
+        {openRow && !viewerIsStaff && flagged && (
+          <span role="img" aria-label={t("jb_flaggedMark")} title={t("jb_flaggedMark")} data-flag-mark={task.id} className="flex h-11 w-11 shrink-0 items-center justify-center">
+            <Flag className="h-5 w-5 fill-current text-brand" aria-hidden />
+          </span>
+        )}
         {task.status === "done" && stamps && (
           p?.done ? (
             <Thumb photo={p.done} label={fillText(t("jb_photoOfDone"), { title: task.title })} onOpen={setViewing} />
@@ -370,7 +423,7 @@ function Thumb({ photo, label, onOpen }: { photo: TaskPhoto; label: string; onOp
 
 /**
  * THE ADD LINE: type the words, Add. Photo (after 0358) takes a picture first, files it on the job's
- * Photos tab, then asks "What needs doing?" (Make It a Task). No date, no priority, no person.
+ * Photos tab, then asks "What needs doing?" (Make It a Task). No date, no person, and no flag (the office sets that on the row after).
  */
 function AddTaskLine({ jobId, orgId, photoDoor, bordered }: { jobId: string; orgId: string; photoDoor: boolean; bordered: boolean }) {
   const router = useRouter();

@@ -22,8 +22,13 @@
 // unsent draft that has waited thirty days stops being counted and is drawn in one grey fold at the
 // bottom of the board, still with its buttons (older.ts). A new lead never ages out.
 //
-// Chores never badge; decisions badge. TASKS AND REMINDERS ARE NEVER HERE: a job's
-// tasks live on the job's Tasks chip and a person's Reminders on My Day's Tasks & Reminders (0358).
+// Chores never badge; decisions badge. A job's tasks live on the job's Tasks chip and a person's
+// Reminders on My Day's Tasks & Reminders (0358), with ONE exception (cn-v1179): a job task the office
+// FLAGGED (tasks.priority > 0) is a row under Operations, job_task_flagged. The owner, 2026-11-22:
+// "there are some tasks id like to flag as a reminder to do for certain jobs sometimes like [a job:
+// print panel labels] [...] so maybe these tasks should go in the needs you under operations instead
+// and reminders can just be reminders". Only the flagged ones: the bulk of a job's list is not here,
+// and a Reminder never is. A flag is a person's decision, so the set is bounded by a person.
 // The old task/work_order kinds and their Convert sheet are gone (Wave 1, W1-16);
 // the registry keeps task.* and inquiry.convert for Nort. North's own bug reports
 // are not a company's decision either: they live on Bug Watch with its own count.
@@ -36,7 +41,8 @@
 // counts its things), WAITING, everything waiting on someone else or on a day, each with why and the
 // day it comes back (the grey "Waiting (N)" fold, never a badge), and OLDER, the rows that have
 // waited thirty days (the grey "Older (N)" fold, never a badge). Nothing waits without a day
-// (waitingRow), and a hold never hides money or a legal clock.
+// (waitingRow), save a job on hold with none (waitingRowNoDay, cn-v1179), and a hold never hides money
+// or a legal clock.
 
 import type { SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
 import type { VisitOffer } from "@/lib/appointments/visit-offer";
@@ -60,7 +66,7 @@ export type ActionKind =
   | "time_stray" // a time entry left running past its day, or closed with no job — hours nobody can bill
   | "job_unbilled_work" // a job worked recently with ZERO costs/materials recorded (the 30'-of-Romex leak)
   | "materials_needed" // unpurchased take-off items on a job the crew is about to stand on (buy before the truck rolls)
-  | "job_on_hold" // a held job whose day has come (hold_until today or earlier, or no day at all): a Reminder, with its reason
+  | "job_on_hold" // a held job whose day has come (hold_until today or earlier): a Reminder, with its reason (no day: the fold, cn-v1179)
   | "stock_short" // pieces taken from stock past what the shelf showed ($0, billing nothing) — Settle until settled or undone
   // ── "Hey you, here's a bill, what's it for?" (Bills plan, Wave A) ──
   // ONE rolled-up item ("Supplier Bills · 11") carrying a card per supplier paper that needs a
@@ -76,7 +82,10 @@ export type ActionKind =
   // A PERMIT STILL WAITING ON AN INSPECTION (0378): one row per permit, never one per visit, and only
   // where the next visit is HIS — to phone for, or to write up. One still waiting on the authority in
   // front of it is in no pile at all (permit-inspection-items has the gate's whole story).
-  | "permit_inspection";
+  | "permit_inspection"
+  // A JOB TASK THE OFFICE FLAGGED (cn-v1179, tasks.priority > 0): "<job> · <task>", Check Off and Open
+  // the Job. Plain: a flag records no day, so it never wears a mark. Staff only.
+  | "job_task_flagged";
 
 /** THE FOUR TILES of Needs You (the redraw, 2026-11): Get Paid, Sales, Operations, Bookkeeping.
  *  Each kind sits in exactly one (needs-you-rule.ts KIND_GROUP), and the build stamps it once.
@@ -127,6 +136,7 @@ export const WHEN_IS_A_DEADLINE: Record<ActionKind, boolean> = {
   supplier_pay: true, // the discount's last day
   receipt_unbilled: false, // the day of the photo
   permit_inspection: true, // the booked day
+  job_task_flagged: false, // none: a flag records no day
 };
 
 /** The canonical verbs. Each (kind, verb) a row can send maps to a registry action (dispatch-map.ts). */
@@ -272,7 +282,8 @@ export type PileName =
   | "materials_to_buy"
   | "contracts_not_signed"
   | "lien_deadlines"
-  | "permit_inspections";
+  | "permit_inspections"
+  | "flagged_tasks";
 
 export interface PileInfo {
   name: PileName;
@@ -293,17 +304,24 @@ export interface PileInfo {
 
 /**
  * A ROW IN THE WAITING FOLD (Wave 1, NY-list): something waiting on someone else or on a day,
- * with WHY and THE DAY IT COMES BACK. `backOn` is required: nothing goes quiet without a day (Erik:
- * "too quiet gets things lost"). Built only through waitingRow, which refuses a row with no day, so a
- * row with no day stays on Needs You instead of disappearing into the fold.
+ * with WHY and THE DAY IT COMES BACK. Nothing goes quiet without a day (Erik: "too quiet gets things
+ * lost"): built through waitingRow, which refuses a row with no day, so such a row stays on Needs You
+ * instead of disappearing into the fold.
+ *
+ * ONE EXCEPTION, A JOB ON HOLD WITH NO DAY (cn-v1179), built only by waitingRowNoDay and called only
+ * by the hold feeder. The owner asked for it by picture (2026-11-22, Operations held a job "On hold, no
+ * day set · Waiting on permit" while the fold held another held job "Back Nov 23"): "below in the drop
+ * down for Waiting is another On hold job and seems like thats abetter spot for it and the immediate
+ * tasks should use the space alotted dont you think?". And it is not too quiet: the job is On Hold on
+ * the Jobs list, its status pill says so with its reason, and its fold row says "No Day Set".
  */
 export interface WaitingItem {
   id: string;
   kind: ActionKind;
   title: string;
   why: string;
-  /** The company's day it comes back, yyyy-mm-dd. */
-  backOn: string;
+  /** The company's day it comes back, yyyy-mm-dd. Null only on a hold with no day (waitingRowNoDay). */
+  backOn: string | null;
   href: string;
 }
 
@@ -322,6 +340,16 @@ export function waitingRow(w: Omit<WaitingItem, "backOn"> & { backOn: string | n
   const day = String(w.backOn ?? "").slice(0, 10);
   if (!YMD.test(day) || !Number.isFinite(Date.parse(`${day}T12:00:00Z`))) return null;
   return { id: w.id, kind: w.kind, title: w.title, why: w.why.trim() || "Waiting", backOn: day, href: w.href };
+}
+
+/**
+ * A HELD JOB WITH NO DAY, WAITING (cn-v1179; the law and the owner's words are on WaitingItem). Only a
+ * job on hold: any other kind is refused (null), so nothing else can use it to go quiet without a day.
+ * Its one caller is the hold feeder (query.ts, pinned by a source test).
+ */
+export function waitingRowNoDay(w: Omit<WaitingItem, "backOn">): WaitingItem | null {
+  if (w.kind !== "job_on_hold") return null;
+  return { id: w.id, kind: w.kind, title: w.title, why: w.why.trim() || "Waiting", backOn: null, href: w.href };
 }
 
 /**
@@ -365,7 +393,7 @@ export const KIND_META: Record<ActionKind, { label: string }> = {
   // Deliberately NOT "No Costs Yet" (job_unbilled_work = nothing captured yet);
   // this one means items ARE on the take-off and still need buying.
   materials_needed: { label: "To Buy" },
-  // Only a hold whose day has come is a Now row (a later one waits in the fold): it is a reminder.
+  // Only a hold whose day has come is a Now row (a later one, or one with no day, waits in the fold).
   job_on_hold: { label: "Reminder" },
   stock_short: { label: "To Settle" },
   supplier_paper: { label: "To File" },
@@ -373,6 +401,7 @@ export const KIND_META: Record<ActionKind, { label: string }> = {
   receipt_unbilled: { label: "Not on a Bill" },
   // Row overrides say which: To Book, Not Written Up, Failed, Cancelled (permit-inspection-items).
   permit_inspection: { label: "Permit Inspection" },
+  job_task_flagged: { label: "Flagged" },
 };
 
 /** A TECH'S APPOINTMENT ROW OPENS, NOTHING MORE (Wave 0). Done and Delete dispatch to
@@ -461,6 +490,9 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // one is a different authority and a different day — no generic verb here could name which. Nothing
   // to dismiss either: the row is derived from the permit's visits and goes when the last one passes.
   permit_inspection: ["open"],
+  // Check Off (do: task.complete, the registry's door over tasks/actions toggleTask) and Open the Job.
+  // No Snooze and no ending: taking the flag off on the job's Tasks tab is the way out.
+  job_task_flagged: ["do", "open"],
 };
 
 /**

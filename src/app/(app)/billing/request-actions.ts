@@ -16,8 +16,10 @@ import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { customerUnbilled, unbilledWorkForJob } from "@/lib/unbilled-work";
 import { prepaymentsLeft } from "@/lib/prepayments";
 import { reportError } from "@/lib/observe";
-import { PAY_DOOR_ORG_COLUMNS, createPaymentRequest, liveRequestForQuote, payDoorFacts, readPrepaymentStates, requestRefOf, type PayDoorFacts, type RequestRef, type RequestRefusal } from "@/lib/payment-request";
+import { PAY_DOOR_ORG_COLUMNS, createPaymentRequest, liveRequestForQuote, payDoorFacts, readPrepaymentStates, readPrepaymentStatesForOutgoing, requestRefOf, type PayDoorFacts, type RequestRef, type RequestRefusal } from "@/lib/payment-request";
 import type { PrepaymentPurpose } from "@/lib/prepayments";
+import { openBillViews, type JobBillRow, type OpenBillView } from "@/lib/job-bill-for-payment";
+import { finishBillingStep, readPriceLeftToBill } from "@/lib/finish-bills-first";
 
 export type PrepaymentView = RequestRef & {
   paid: number;
@@ -206,4 +208,93 @@ export async function requestPayment(input: {
   revalidateMoney(made.request.id);
   revalidateMoney();
   return { ok: true, request: made.request, existing: made.existing };
+}
+
+/**
+ * WHAT THE JOB'S GET PAID SAYS WHEN IT OPENS (cn-v1179, decision E: "it names the job's open bill and
+ * prefills its balance; it says when recorded work is not on a bill yet"). Staff only, one read when the
+ * sheet opens, every read of its own naming the company. It decides nothing settleUp does not: the open
+ * bills are lib/job-bill-for-payment's one rule (the rule settleUp lands a payment by), the work no bill
+ * claims is the billing step's own answer (lib/finish-bills-first, the one a paid bill asks), and a fixed
+ * price not all billed is the paid gate's own rule (readPriceLeftToBill). Codes and figures, no words:
+ * the sheet says them in the reader's language.
+ *
+ *   bills    one or more open bills (`open`): the sheet names one and prefills its balance, or lists two
+ *            or more, each a link, in place of a box the server would refuse. A payment request is an
+ *            open bill (settleUp lands on it when it is the only one) and is NAMED as a payment request.
+ *   work     Time & Material, no open bill, recorded work on no bill (the billing step's plan): its figure.
+ *   price    fixed price, no open bill, the accepted price not all billed: the two figures and what is left.
+ *   nothing  no open bill and nothing left to bill: a payment recorded here makes a new invoice.
+ *   unread   a read behind work/price failed: said, never "nothing".
+ *
+ * `paidAhead` is money the customer actually PAID ahead that no bill used yet, and only where it comes
+ * off the bill this payment lands on AND is not already off the figure the sheet shows: a bill settleUp
+ * writes now (work, nothing, unread). Not the price state (its "left" already counts the paid request
+ * as billed) and not an open bill (a sent one takes nothing off, the scout's row 18; a draft's balance
+ * is already net of its credit): 0 there (skeptic #82, S1). Money only asked is not money paid. Read
+ * as settleUp reads it (readPrepaymentStatesForOutgoing).
+ */
+export type GetPaidOwed =
+  | { kind: "bills" }
+  | { kind: "work"; amount: number }
+  | { kind: "price"; contract: number; billed: number; left: number }
+  | { kind: "nothing" }
+  | { kind: "unread" };
+
+export type GetPaidFacts = { ok: false; error: string } | { ok: true; open: OpenBillView[]; owed: GetPaidOwed; paidAhead: number };
+
+export async function readGetPaidFacts(jobId: string): Promise<GetPaidFacts> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: String(ctx.error) };
+  const { supabase, orgId, userId } = ctx;
+  const t = translator(await callerLang(supabase, userId));
+  if (!orgId) return { ok: false, error: t("su_req_noJob") };
+  try {
+    const [{ data: job, error: jobErr }, { data: bills, error: billsErr }, states] = await Promise.all([
+      supabase.from("jobs").select("id, billing_type").eq("id", jobId).eq("org_id", orgId).maybeSingle(),
+      supabase
+        .from("invoices")
+        .select("id, invoice_number, status, total, amount_paid, invoice_kind")
+        .eq("job_id", jobId)
+        .eq("org_id", orgId)
+        .neq("status", "void")
+        .order("created_at", { ascending: true }),
+      readPrepaymentStatesForOutgoing(supabase, jobId),
+    ]);
+    if (jobErr) throw jobErr;
+    if (billsErr) throw billsErr;
+    if (!job) return { ok: false, error: t("su_req_noJob") };
+    const billingType = (job as { billing_type?: string | null }).billing_type ?? null;
+    const open = openBillViews((bills ?? []) as JobBillRow[]);
+    const moneyLeft = cents(states.reduce((sum, s) => sum + Math.max(0, s.moneyLeft), 0));
+    let owed: GetPaidOwed;
+    if (open.length) owed = { kind: "bills" };
+    else if (billingType === "tm") {
+      const step = await finishBillingStep(supabase, jobId, { kind: "staff" });
+      owed =
+        step.kind === "error"
+          ? { kind: "unread" }
+          : step.kind === "plan" && step.door.kind !== "covered"
+            ? { kind: "work", amount: cents(step.work) }
+            : { kind: "nothing" };
+    } else {
+      const price = await readPriceLeftToBill(supabase, jobId, orgId, billingType);
+      owed = !price.ok
+        ? { kind: "unread" }
+        : price.price && price.price.left > 0.005
+          ? { kind: "price", contract: price.price.contract, billed: price.price.billed, left: price.price.left }
+          : { kind: "nothing" };
+    }
+    // SAID ONLY WHERE IT IS NOT ALREADY OFF THE FIGURE (skeptic #82, S1): with no open bill settleUp
+    // writes the typed figure PLUS this money and the request comes off, so the line is true for work,
+    // nothing and unread. The price state's "left" already counts the paid request as billed, and one
+    // open draft's balance is already net of its re-resolved credit: saying it there would take it off
+    // twice and the customer would leave paying short. 0 there, and 0 on any open bill.
+    const paidAhead = open.length === 0 && owed.kind !== "price" ? moneyLeft : 0;
+    return { ok: true, open, owed, paidAhead };
+  } catch (e) {
+    // A FAILED READ IS NEVER "NOTHING OWED": said, and the sheet prefills nothing.
+    reportError("readGetPaidFacts", e, { jobId });
+    return { ok: false, error: t("su_gp_readFailed") };
+  }
 }

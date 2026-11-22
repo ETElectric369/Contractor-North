@@ -119,6 +119,8 @@ const PLAN_KEYS = new Set([
   "ny_btn_pile_jobsNeedingADay", "ny_btn_pile_doneNotBilled", "ny_btn_pile_permitInspections",
   // cn-v1170: the leads' Couldn't Check line.
   "ny_btn_pile_leadsToCall",
+  // cn-v1179: the flagged job tasks' Couldn't Check line, and its label (the pile's name).
+  "ny_w_unreadFlaggedTasks", "ny_btn_pile_flaggedTasks",
 ]);
 
 const FEEDERS = [
@@ -414,19 +416,24 @@ describe("the build: each row's who, what and amount (table A2)", () => {
     expect(receipt.amount).toBe(42.1);
   });
 
+  // RE-PINNED ON PURPOSE (cn-v1179, decision D): a hold with NO day is no longer a Now row; it waits in
+  // the fold ("<job> · <reason> · No Day Set"). The legacy key ny_w_holdNoDay stays for a database
+  // without the hold-day columns.
   it("a job needing a day and a hold: the job in bold, the customer as the tail, the fact as a key", async () => {
     state.rows.needDay = [{ id: "j5", job_number: "J-070", name: "Larkspur Remodel", status: "to_be_scheduled", created_at: daysAgo(20), customers: { name: "Casey Loam" }, job_schedule_segments: [], time_entries: [] }];
     state.rows.holds = [
       { id: "j6", job_number: "J-071", name: "Snowbell Barn", updated_at: daysAgo(30), hold_reason: "Waiting on the owner", hold_until: dayAgo(1), customers: { name: "Theo Vance" }, holder: null },
       { id: "j7", job_number: "J-072", name: "Bayberry Porch", updated_at: daysAgo(30), hold_reason: "", hold_until: null, customers: null, holder: null },
     ];
-    const rows = await build();
+    const all = await getActionItems({ todayStr: TODAY, isStaff: true, userId: "owner-1", tz: TZ });
+    const rows = all.now;
     expect(byId(rows, "j5")).toMatchObject({ who: "Larkspur Remodel · J-070", what: { key: "ny_w_neverHadADay", tail: "Casey Loam" } });
     expect(byId(rows, "onhold-j6")).toMatchObject({ who: "Snowbell Barn · J-071", what: { key: "ny_w_holdBack", vars: { text: "Waiting on the owner" }, tail: "Theo Vance" } });
-    expect(byId(rows, "onhold-j7").what).toEqual({ key: "ny_w_holdNoDay", vars: { textKey: "ny_w_noReason" }, tail: null });
-    // THE CLOCK (cn-v1162): a hold back since yesterday is Due on that day; a hold with no day has none.
+    // THE CLOCK (cn-v1162): a hold back since yesterday is Due on that day.
     expect(byId(rows, "onhold-j6")).toMatchObject({ clock: dayAgo(1), level: "soon" });
-    expect([byId(rows, "onhold-j7").clock ?? null, byId(rows, "onhold-j7").level]).toEqual([null, "none"]);
+    // The hold with no day waits in the fold, with no day, and is no row of the board.
+    expect([...rows, ...rows.flatMap((x) => x.children ?? [])].some((r) => r.id === "onhold-j7")).toBe(false);
+    expect(all.waiting).toContainEqual({ id: "onhold-j7", kind: "job_on_hold", title: "Bayberry Porch · J-072", why: "No reason saved", backOn: null, href: "/jobs/j7" });
     // A job needing a day has no clock at all: every day it holds is a day the office's paper was born.
     expect([byId(rows, "j5").clock ?? null, byId(rows, "j5").level]).toEqual([null, "none"]);
   });

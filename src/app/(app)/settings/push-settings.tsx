@@ -84,6 +84,9 @@ const TRIGGERS: { key: string; help?: boolean; soon?: boolean; audience: Audienc
   // day a plan ends (lib/billing-notices from the daily cron; the Stripe webhook's declined-card
   // line). Addressed to the owner and admins only, so only they see the switch.
   { key: "billing", help: true, audience: "admins" },
+  // The morning materials notice (cn-v1179, lib/action-items/materials-morning): the daily run at the
+  // company's 8 AM sends it to orgStaffIds only, so only the office sees the switch.
+  { key: "materials_today", help: true, audience: "staff" },
   // North's own team only (cn-v1136): the blocker page (observe-blocker → platform-alert) and the
   // Monday digest (bug-watch-digest) ride the bug_watch kind. A company member never receives it,
   // so a company member never sees the switch.
@@ -103,6 +106,7 @@ const DEFAULTS: Record<string, boolean> = {
   long_shift: true,
   bug_watch: true,
   billing: true,
+  materials_today: true,
 };
 
 /** The roles the billing notices are addressed to: the people who can pick a plan or update the

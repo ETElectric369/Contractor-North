@@ -56,6 +56,8 @@ export const KIND_GROUP: Record<ActionKind, Group> = {
   supplier_pay: "keep_books",
   receipt_unbilled: "keep_books",
   permit_inspection: "run_jobs",
+  // A flagged job task is prep or a follow-up to get the job done (cn-v1179): running the job.
+  job_task_flagged: "run_jobs",
 };
 
 /**
@@ -188,6 +190,7 @@ export function levelOf(item: Pick<ActionItem, "kind" | "id" | "urgency" | "when
     case "receipt_unbilled":
     case "stock_short":
     case "organize":
+    case "job_task_flagged": // a flag records no day: plain, never amber (cn-v1179)
       return "none"; // no clock: each day these hold is the day the office's own paper was born
   }
 }

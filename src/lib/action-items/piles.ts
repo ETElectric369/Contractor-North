@@ -104,6 +104,9 @@ export const PILE_DEFS: Record<PileName, PileDef> = {
   // that lists none of them. Its rows say different things (one to phone for, one to write up), so its
   // button is the plain one that opens the pile.
   permit_inspections: { label: "Permit Inspections", verb: "See Them", listHref: null, listLabel: null },
+  // cn-v1179: the job tasks the office flagged. No list page holds them (each lives on its own job's
+  // Tasks tab), so the pile unfolds in place; its rows each carry Check Off, so its button opens it.
+  flagged_tasks: { label: "Flagged Tasks", verb: "See Them", listHref: null, listLabel: null },
 };
 
 /** The notes pile's words when it also holds papers that aren't notes (they file in Organize too). */
@@ -173,6 +176,8 @@ export function pileOf(item: Pick<ActionItem, "kind" | "id" | "paper" | "pile">)
       return "contracts_not_signed";
     case "lien_deadline":
       return "lien_deadlines";
+    case "job_task_flagged":
+      return "flagged_tasks";
     default:
       // supplier_paper, time_stray (already rollups), supplier_pay (each deadline its own line).
       return null;

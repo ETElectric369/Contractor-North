@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/cron-guard";
 import { generateDueTemplates } from "@/lib/recurring-engine";
 import { sendDayAheadDigests } from "@/lib/action-items/digest";
+import { sendMaterialsMorning } from "@/lib/action-items/materials-morning";
+import { translator } from "@/lib/i18n";
 import { generateNortReviewsForAllOrgs } from "@/lib/nort/review";
 import { sweepOrphanedUploads } from "@/lib/storage-sweep";
 import { backfillProcessorFees } from "@/lib/processor-fee-capture";
@@ -34,8 +36,8 @@ const NORT_REVIEW_BUDGET_MS = 200_000;
  * zone never had its own morning at all. Now vercel.json runs it every hour ("0 * * * *") and:
  *   - the COMPANY steps run for each company on the run that falls in ITS 8 AM (DAILY_LOCAL_HOUR,
  *     atLocalHour on the org's timezone, judged on the hour the run BEGAN): recurring templates,
- *     stale bank transfers, the billing and usage notices, the day-ahead digest, Nort's review, the
- *     shelf check. The due companies are worked out ONCE, up top, and handed to each step; a run
+ *     stale bank transfers, the billing and usage notices, the day-ahead digest, the morning materials
+ *     notice, Nort's review, the shelf check. The due companies are worked out ONCE, up top, and handed to each step; a run
  *     with none due runs none of them. Each is once a day per company on its own (see each step).
  *   - the GLOBAL steps (North's own housekeeping) run once a day, on the run that begins in
  *     GLOBAL_UTC_HOUR: the processor-fee backfill, the error sweep, the Bug Watch digest (its own
@@ -168,6 +170,19 @@ export async function GET(request: Request) {
     } catch (e: any) {
       result.day_ahead_error = e?.message ?? "failed";
       reportError("cron-day-ahead", e);
+    }
+    attempted++;
+    try {
+      // THE MORNING MATERIALS NOTICE (cn-v1179), right after the digest. The owner: "picking up
+      // materials which could be a reminder notification the morning of a job". The jobs the crew
+      // stands on TODAY (the company's today) with lines still to buy, by Needs You's own rule; one
+      // notice to the office, never a tech, in each person's language; nothing to buy is nothing sent.
+      // Once a day per company: the digest's pattern, the bell's materials_today lines since the
+      // company's midnight. A company whose read failed sends nothing and files cron-materials-today.
+      result.materials_today = await sendMaterialsMorning(supabase, { ...only, nowMs: startedAt, wordsFor: translator });
+    } catch (e: any) {
+      result.materials_today_error = e?.message ?? "failed";
+      reportError("cron-materials-today", e);
     }
   }
   // The "Close out your day" nudge moved to the EVENING cron (eod-reminder, 6pm local-ish) —

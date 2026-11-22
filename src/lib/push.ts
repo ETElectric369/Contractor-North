@@ -78,7 +78,11 @@ export type PushKind =
   // The company's own standing with North (cn-v1137): the trial's last days, a declined card and
   // its grace window, and the day a plan ends. Addressed to the company's owner and admins only —
   // the people who can pick a plan or update the card — never the office or the crew.
-  | "billing";
+  | "billing"
+  // THE MORNING MATERIALS NOTICE (cn-v1179): at the company's 8 AM, the office hears which jobs the
+  // crew stands on TODAY that still have lines to buy, by the same rule as Needs You's materials row.
+  // Its own kind, so muting the morning digest never mutes it. The office only, never a tech.
+  | "materials_today";
 
 // What each trigger defaults to when a user hasn't set an explicit toggle.
 const DEFAULTS: Record<PushKind, boolean> = {
@@ -107,6 +111,9 @@ const DEFAULTS: Record<PushKind, boolean> = {
   // The crew's access rides on it: a declined card nobody heard about is a work stoppage. On until
   // the owner or admin switches it off by name.
   billing: true,
+  // He asked for it by name (2026-11-22): "picking up materials which could be a reminder
+  // notification the morning of a job". On until a person switches it off.
+  materials_today: true,
 };
 
 /** An OPT-IN kind: off until a person switches it on (day_ahead: the morning digest and the 6 PM

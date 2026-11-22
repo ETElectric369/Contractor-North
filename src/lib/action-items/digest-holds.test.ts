@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
  * HOLDS ARE BACK (Wave 1, lane 5): the morning push's first decision line counts every job on hold
- * whose day has come or that has no day (company today, filtered to the company by hand: the cron's
+ * whose day has come (company today, filtered to the company by hand: the cron's
  * service client reads every company). It joins the decisions, so a morning with only holds back
  * still pushes. Before 0366 (no hold_until) the read fails and counts 0: no line, never a guess.
+ * RE-PINNED ON PURPOSE (cn-v1179, decision D): a hold with NO day is not back. It waits in My Day's
+ * fold, counted by no number, so the read is `hold_until <= today`, which a null day never meets.
  */
 const { notifyPeople, reportError } = vi.hoisted(() => ({ notifyPeople: vi.fn(async () => undefined), reportError: vi.fn() }));
 vi.mock("@/lib/observe", () => ({ reportError }));
@@ -71,11 +73,12 @@ describe("the morning push", () => {
     const db = fake({ organizations: { data: [ORG] }, jobs: { count: 2 }, invoices: { count: 0 }, inquiries: { count: 0 }, tasks: { data: [] } });
     expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 1, already: 0, failed: 0, lapsed_skipped: 0 });
     expect(notifyPeople).toHaveBeenCalledWith("org-1", ["owner-1"], "day_ahead", { title: "Needs You: 2", body: "2 Holds Are Back", url: "/planner" });
-    // Filtered to this company by hand; on hold; back today or earlier, or no day at all.
+    // Filtered to this company by hand; on hold; back today or earlier, never a hold with no day.
     const jobs = db.filters.jobs;
     expect(jobs).toContainEqual(["eq", "org_id", "org-1"]);
     expect(jobs).toContainEqual(["eq", "status", "on_hold"]);
-    expect(jobs.find((f) => f[0] === "or")?.[1]).toMatch(/^hold_until\.is\.null,hold_until\.lte\.\d{4}-\d{2}-\d{2}$/);
+    expect(jobs.find((f) => f[0] === "lte")?.slice(1)).toEqual(["hold_until", expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/)]);
+    expect(jobs.some((f) => f[0] === "or" || (f[0] === "is" && f[1] === "hold_until"))).toBe(false);
   });
 
   it("the holds line stands for all of them; the rest of the decisions follow it", async () => {

@@ -48,13 +48,15 @@ describe("the New Invoice sheet makes no deposit", () => {
 });
 
 describe("the job card and Finish decide by the DRAW pool only (cn-v1177, re-pinned on purpose after skeptic #80)", () => {
-  it("the Not Billed Yet card, its door and New Invoice get lumpToNet (the draw money) and never the requests; the header's Get Paid still says them", () => {
+  it("the Not Billed Yet card, its door and New Invoice get lumpToNet (the draw money) and never the requests; the header's Get Paid reads its own paid-ahead figure (cn-v1179)", () => {
     // A payment request never "covers" work: the bill is built and the sync takes the request off it.
     expect(PAGE).not.toContain("jobLump");
     expect(PAGE.match(/lumpToNet=\{lumpToNet\}/g)).toHaveLength(3);
     expect(PAGE).toMatch(/\n\s+lumpToNet,\n\s+\/\/ cn-v1177: the pay-door facts/);
-    expect(PAGE).toMatch(/const paidAhead = requestSeed && requestSeed\.ok \? requestSeed\.leftToNet : 0;/);
-    expect(PAGE).toMatch(/textReady=\{payDoor\.textReady\}\n\s+paidAhead=\{paidAhead\}/);
+    // cn-v1179, re-pinned on purpose: the page no longer hands the header's Get Paid a paid-ahead figure.
+    // The one it had was the requests' leftToNet (money only ASKED); the sheet reads the true one itself.
+    expect(PAGE).not.toMatch(/paidAhead/);
+    expect(PAGE).toMatch(/textReady=\{payDoor\.textReady\}\n\s+\/>/);
   });
 });
 

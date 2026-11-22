@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Check, ChevronRight, Package } from "lucide-react";
@@ -26,20 +26,12 @@ export function NowTasks({
   left,
   next,
   materials = null,
-  cap,
-  onCheckedChange,
 }: {
   jobId: string;
   left: number;
   next: { id: string; title: string }[];
   /** Lines left to buy on the job's list, and where the list is. null: nothing to buy. */
   materials?: { open: number; href: string } | null;
-  /** How many task rows to draw. Omitted = the Now card's own: three, or two under Buy Materials.
-   *  Tasks & Reminders' job rows (job-task-rows.tsx, cn-v1175) pass a larger one; All Tasks has the rest. */
-  cap?: number;
-  /** Told the ids checked off here (optimistically, before the refresh), so a badge beside the block
-   *  can go down with the tap. The Now card passes nothing. */
-  onCheckedChange?: (checked: ReadonlySet<string>) => void;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -48,9 +40,6 @@ export function NowTasks({
   const t = translator(lang);
   const [pending, start] = useTransition();
   const [checked, setChecked] = useState<Set<string>>(new Set());
-  useEffect(() => {
-    onCheckedChange?.(checked);
-  }, [checked, onCheckedChange]);
 
   function check(task: { id: string; title: string }) {
     const nowDone = !checked.has(task.id);
@@ -130,7 +119,7 @@ export function NowTasks({
             </Link>
           </li>
         )}
-        {next.slice(0, cap ?? (materials && materials.open > 0 ? 2 : 3)).map((task) => {
+        {next.slice(0, materials && materials.open > 0 ? 2 : 3).map((task) => {
           const done = checked.has(task.id);
           return (
             <li key={task.id}>

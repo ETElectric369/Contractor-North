@@ -77,6 +77,8 @@ import { prepaymentsLeft, type PrepaymentState } from "@/lib/prepayments";
 import { readPrepaymentStates, readPrepaymentStatesInCompany } from "@/lib/payment-request";
 import { reportError } from "@/lib/observe";
 import { formatCurrency } from "@/lib/utils";
+import { computeJobProgress } from "@/lib/job-progress-math";
+import { leftToBill } from "@/lib/payment-schedule-math";
 
 /**
  * WHAT FINISHING THIS JOB HAS TO BILL, decided once — for the press, for the modal before it, and for
@@ -335,4 +337,83 @@ export function paidDoorVerdict(step: FinishBillingStep, jobSaid: string): PaidD
     title: "Still to bill",
     why: "the job has work no bill claims yet, so it isn't finished",
   };
+}
+
+/**
+ * A FIXED-PRICE JOB'S PRICE, AND HOW MUCH OF IT IS ON A BILL (cn-v1179, decision E; the scout's row 7).
+ *
+ * The billing step above skips a fixed-price job ("the price is the price"), so a part payment on the
+ * job's one flat bill FINISHED the job and the rest of the contract sat on no bill, asked for by nobody.
+ * The owner, of the Get Paid box: "check the Get paid box and see if thats doing what its supposed to be
+ * doing which is im not sure". So the paid-in-full gate asks one more question of a fixed-price job: is
+ * its price billed? Finish Job by hand is a person saying "done" and is not asked (it is unchanged).
+ *
+ * THE FIGURES ARE THE JOB PAGE'S OWN, NEVER A SECOND SUM: the price is computeJobProgress's `estimate`
+ * (the accepted contract) and "billed" its `invoiced` (sent, non-void bills), measured by leftToBill, the
+ * Overview's Left to Bill. The work-to-date inputs are zero on purpose: neither figure read here depends
+ * on them. `invoiced` counts every sent bill of every kind, so a deposit request paid ahead and the final
+ * bill that took it off ("Less deposit") together come to the price, exactly as the page says.
+ *
+ * null = not this rule's business: a Time & Material job (its work is the billing step's), or a job with
+ * no ACCEPTED estimate (no contract figure: the job finishes as it always did).
+ */
+export type PriceLeft = { contract: number; billed: number; left: number };
+
+export function priceLeftToBill(input: {
+  billingType: string | null | undefined;
+  quotes: { total: number | null; status?: string | null; created_at?: string | null }[];
+  invoices: { total: number | null; status: string; amount_paid: number | null }[];
+}): PriceLeft | null {
+  if (input.billingType === "tm") return null;
+  if (!(input.quotes ?? []).some((q) => q.status === "accepted")) return null;
+  const progress = computeJobProgress({
+    billingTypeRaw: input.billingType,
+    quotes: input.quotes ?? [],
+    invoices: input.invoices ?? [],
+    billableLabor: 0,
+    pos: [],
+    bills: [],
+    markupPercent: 0,
+  });
+  const l = leftToBill(progress, null);
+  if (l.contract <= 0.005) return null;
+  return { contract: l.contract, billed: l.billed, left: l.left };
+}
+
+/**
+ * The two reads behind priceLeftToBill, the columns jobProgressFinancials reads them with, each naming
+ * the company by hand (three companies share one database; the paid gate can hold the service role).
+ * A failed read is `ok: false`, never "nothing left to bill".
+ */
+export async function readPriceLeftToBill(
+  supabase: { from: (t: string) => any },
+  jobId: string,
+  orgId: string | null,
+  billingType: string | null | undefined,
+): Promise<{ ok: true; price: PriceLeft | null } | { ok: false }> {
+  if (billingType === "tm") return { ok: true, price: null };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- a PostgREST builder
+  const pin = (q: any): any => (orgId ? q.eq("org_id", orgId) : q);
+  const [quotesRead, invoicesRead] = await Promise.all([
+    pin(supabase.from("quotes").select("total, status, created_at").eq("job_id", jobId)),
+    pin(supabase.from("invoices").select("total, status, amount_paid").eq("job_id", jobId)),
+  ]);
+  if (quotesRead?.error || invoicesRead?.error) {
+    reportError("priceLeftToBill.read", quotesRead?.error ?? invoicesRead?.error, { jobId });
+    return { ok: false };
+  }
+  try {
+    return { ok: true, price: priceLeftToBill({ billingType, quotes: quotesRead?.data ?? [], invoices: invoicesRead?.data ?? [] }) };
+  } catch (e) {
+    // contractTotalFromQuotes refuses a select list without created_at; never a silent "nothing left".
+    reportError("priceLeftToBill.rule", e, { jobId });
+    return { ok: false };
+  }
+}
+
+/** The sentence for the office when a paid bill leaves a fixed price not all billed (English: the bell's).
+ *  It names BOTH ways out, because both are real: the rest goes on a bill, or the office billed less on
+ *  purpose (a discount, a smaller job than was quoted) and says so with Finish Job. No dead end. */
+export function priceNotBilledSaid(jobSaid: string, p: PriceLeft): string {
+  return `${jobSaid} was paid, but its price isn't all billed yet: ${formatCurrency(p.contract)} agreed, ${formatCurrency(p.billed)} billed, ${formatCurrency(p.left)} still to bill. It stays open: bill the rest, or tap Finish Job if that's all of it.`;
 }

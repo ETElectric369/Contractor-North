@@ -256,6 +256,13 @@ export const words: WordCatalog = {
     sh_pushHelp_billing: "Your trial's last days, a declined card, and when a plan ends. Owners and admins only.",
     sh_push_bug_watch: "Bug Watch: Blockers and the Monday Digest",
     sh_pushHelp_bug_watch: "North's own team only: a page the moment something platform-wide breaks, and the Monday morning digest.",
+    // The morning materials notice (cn-v1179): the switch, and the notice's own body lines
+    // (lib/action-items/materials-morning, handed the translator by the daily run). The title is the label.
+    sh_push_materials_today: "Materials to Buy Today",
+    sh_pushHelp_materials_today: "The morning of a job that still has materials to buy.",
+    sh_pushMaterialsOne: "{job}: {n} to buy",
+    sh_pushMaterialsMore: "+{n} more jobs",
+    sh_pushMaterialsMoreOne: "+1 more job",
     sh_pushNotSupportedApp: "This version of the app can't do notifications yet — update North from TestFlight.",
     sh_pushNotSupportedBrowser: "This browser doesn't support push notifications.",
     sh_pushNotConfigured:
@@ -613,6 +620,11 @@ export const words: WordCatalog = {
     sh_push_bug_watch: "Bug Watch: Bloqueos y el Resumen del Lunes",
     sh_pushHelp_bug_watch:
       "Solo el equipo de North: un aviso en el momento en que algo falla en toda la plataforma, y el resumen del lunes por la mañana.",
+    sh_push_materials_today: "Materiales por Comprar Hoy",
+    sh_pushHelp_materials_today: "La mañana de un trabajo que todavía tiene materiales por comprar.",
+    sh_pushMaterialsOne: "{job}: {n} por comprar",
+    sh_pushMaterialsMore: "+{n} trabajos más",
+    sh_pushMaterialsMoreOne: "+1 trabajo más",
     sh_pushNotSupportedApp: "Esta versión de la app todavía no puede enviar avisos. Actualiza North desde TestFlight.",
     sh_pushNotSupportedBrowser: "Este navegador no admite avisos push.",
     sh_pushNotConfigured:

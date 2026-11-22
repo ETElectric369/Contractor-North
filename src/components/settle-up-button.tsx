@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { BadgeDollarSign, Check, Copy, Loader2, Mail, MessageSquare, QrCode, Share } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -15,6 +16,8 @@ import { DayField } from "@/components/day-field";
 import { ACTIONS_ROW_CLS } from "@/components/section-actions-menu";
 import { useToast } from "@/components/toast";
 import { collectArtifacts, invoiceCollectStatus, recordPayment, settleUp, venmoQrFor } from "@/app/(app)/billing/actions";
+import { readGetPaidFacts, type GetPaidFacts } from "@/app/(app)/billing/request-actions";
+import type { OpenBillView, PaymentLanded } from "@/lib/job-bill-for-payment";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { sendFirstDetail, sendFirstQuestion } from "@/lib/pay-door-words";
 import { paymentMethodChoices, paymentMethodKey } from "@/lib/payment-method";
@@ -247,11 +250,14 @@ async function ensureInvoice(
   sendIt = false,
   /** The server asked "Send INV-0xx as the bill first?" — the sheet asks the person, nothing moved. */
   onNeedsSend?: (invoiceNumber: string | null) => void,
+  /** What a recorded payment did (cn-v1179, G3): the bill that took it and what became of the job. */
+  onLanded?: (landed: PaymentLanded | undefined) => void,
 ): Promise<string | null> {
   if (props.source === "invoice") {
     if (collect === "record") {
       const r = await recordPayment({ invoice_id: props.invoiceId, amount, method, note, paid_at: paidAt });
       if (!r.ok) { toast(r.error ?? t("su_couldntRecord"), "error"); return null; }
+      onLanded?.("landed" in r ? r.landed : undefined);
     }
     return props.invoiceId;
   }
@@ -268,7 +274,137 @@ async function ensureInvoice(
     if ("invoiceId" in res && res.invoiceId) onOtherInvoice(res.invoiceId);
     return null;
   }
+  onLanded?.("landed" in res ? res.landed : undefined);
   return res.invoiceId ?? null;
+}
+
+/**
+ * WHAT A RECORDED PAYMENT DID, IN ONE OR TWO SHORT SENTENCES (cn-v1179, decision E: "the result names the
+ * bill and what happened to the job"). Never "Done" alone: which bill took the money (and that it was made
+ * just now, when it was; a payment request said as one), then what became of the job, in the paid gate's
+ * own verdict. A re-tap that was already recorded says so and nothing else.
+ */
+export function paymentLandedWords(landed: PaymentLanded | null | undefined, amount: string, method: string, t: Words): string[] {
+  if (!landed) return [];
+  if (landed.again) return [landed.number ? fillText(t("su_gp_again"), { inv: landed.number }) : t("su_gp_againNoBill")];
+  const inv = landed.number ?? t("su_theInvoice");
+  const bill = landed.made ? "su_gp_onNewBill" : landed.request ? "su_gp_onRequest" : "su_gp_onBill";
+  const out = [fillText(t(bill), { amount, method, inv })];
+  const job = landed.job ? JOB_WORDS[landed.job] : null;
+  if (job) out.push(t(job));
+  return out;
+}
+
+const JOB_WORDS: Record<NonNullable<PaymentLanded["job"]>, string> = {
+  finished: "su_gp_jobFinished",
+  work: "su_gp_jobOpenWork",
+  price: "su_gp_jobOpenPrice",
+  not_started: "su_gp_jobNotStarted",
+  untouched: "su_gp_jobUntouched",
+};
+
+/**
+ * WHERE "BILL THE WORK FIRST" GOES, AND HOW (cn-v1179). Pure.
+ *
+ * The door is the job's Invoices tab, where its New Invoice is. ON THE JOB'S OWN PAGE the tab changes IN
+ * PLACE, the way a tap on the tab strip changes it (components/tabs: history.replaceState, which Next hands
+ * to useSearchParams, and the strip follows the address): `inPlace` is that address, the other query
+ * params kept. FROM ANY OTHER PAGE it is a navigation: `go`.
+ *
+ * WHAT IT MUST NEVER BE is a push and a close in one tick, which is how this door was first written. The
+ * close steps history back to take the sheet's own entry off, the router reads that step as a Back, and a
+ * Back DISCARDS the navigation still on its way: the sheet closes and the person is left where they were,
+ * a door that goes nowhere (the measure sheet met this first, and says so where it navigates). Replacing
+ * the address lands ON the sheet's own entry, so the close finds no entry of its own left to step back
+ * over (the Modal's "is the marker still ours" check), the tab change is not undone, and the page's
+ * refresh on close is not thrown away either.
+ *
+ * THE TRADE, said plainly (skeptic #82): the sheet's entry stays on the stack as the Invoices tab's own,
+ * so one Back afterwards returns to the address he was on (the tab he came from, when the address named
+ * one) before a second Back leaves the page. It is the trade the Modal already makes for a link inside
+ * it. The other order (close, wait for the Back step, then change the tab) leaves no entry and needs a
+ * listener and a timer to be safe, and throws the close's refresh away; this one has no race in it.
+ */
+export function billFirstMove(pathname: string, search: string, jobId: string): { kind: "inPlace"; url: string } | { kind: "go"; href: string } {
+  const jobPath = `/jobs/${jobId}`;
+  if (pathname.replace(/\/+$/, "") !== jobPath) return { kind: "go", href: `${jobPath}?tab=invoices` };
+  const params = new URLSearchParams(search);
+  params.set("tab", "invoices");
+  return { kind: "inPlace", url: `${jobPath}?${params.toString()}` };
+}
+
+/**
+ * PAID AHEAD, ONLY WHERE TRUE (cn-v1179, G5): money actually paid that no bill used, said only when it
+ * comes off the bill this payment lands on AND is not already off the figure above (the server's read
+ * decides both: readGetPaidFacts says 0 in the price state and on an open bill, skeptic #82, S1). The
+ * sheet draws whatever the server says; exported so the words are read in both languages without a server.
+ */
+export function PaidAheadLine({ facts }: { facts: GetPaidFacts | null }) {
+  const t = translator(useLang());
+  if (!(facts?.ok && facts.paidAhead > 0.005)) return null;
+  return <p className="text-sm text-slate-700">{fillText(t("su_pa_aheadLine"), { amount: money(facts.paidAhead) })}</p>;
+}
+
+/**
+ * WHAT THE JOB'S GET PAID SAYS WHEN IT OPENS (cn-v1179, decision E), from the server's one read
+ * (billing/request-actions readGetPaidFacts). One open bill: named, with what is left (a draft as a
+ * draft, a payment request as one); two or more: each listed with its own door, in place of a box the
+ * server would refuse; no open bill: the work or the price not on a bill yet, with ONE door (Bill the
+ * Work First, the job's Invoices tab, where New Invoice is), or that nothing is owed. Exported so the
+ * words are read in both languages without a server.
+ */
+export function JobOwedLines({ facts, onBillFirst }: { facts: GetPaidFacts | null; onBillFirst?: () => void }) {
+  const t = translator(useLang());
+  if (!facts) return <p className="text-xs text-slate-500">{t("su_gp_reading")}</p>;
+  if (!facts.ok) return <p className="text-xs text-rose-600">{facts.error}</p>;
+  const named = (b: OpenBillView) => {
+    const n = b.number ?? t("su_gp_anInvoice");
+    return b.request ? fillText(t("su_gp_requestBill"), { inv: n }) : b.draft ? fillText(t("su_gp_draftBill"), { inv: n }) : n;
+  };
+  const left = (b: OpenBillView) => fillText(t("su_gp_billLeft"), { bill: named(b), amount: money(b.balance) });
+  if (facts.open.length === 1) {
+    const b = facts.open[0];
+    return (
+      <div className="rounded-lg bg-slate-50 px-3 py-2">
+        <div className="text-sm font-semibold text-slate-900">{left(b)}</div>
+        <p className="mt-0.5 text-xs text-slate-500">{b.request ? t("su_gp_oneRequest") : t("su_gp_oneBill")}</p>
+      </div>
+    );
+  }
+  if (facts.open.length > 1) {
+    return (
+      <div className="space-y-2">
+        <p className="text-sm text-slate-700">{fillText(t("su_gp_manyBills"), { n: String(facts.open.length) })}</p>
+        <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+          {facts.open.map((b) => (
+            <li key={b.id} className="flex items-center justify-between gap-2 px-3">
+              <span className="text-sm text-slate-800">{left(b)}</span>
+              <Link href={`/billing/${b.id}`} aria-label={`${t("su_btn_gp_open")} ${named(b)}`} className="inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
+                {t("su_btn_gp_open")}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  const owed = facts.owed;
+  if (owed.kind === "work" || owed.kind === "price") {
+    return (
+      <div className="space-y-2">
+        <p className="text-sm text-slate-700">
+          {owed.kind === "work"
+            ? fillText(t("su_gp_workNotBilled"), { amount: money(owed.amount) })
+            : fillText(t("su_gp_priceNotBilled"), { contract: money(owed.contract), billed: money(owed.billed), left: money(owed.left) })}
+        </p>
+        <Button type="button" variant="outline" className="w-full" onClick={onBillFirst}>
+          {t("su_btn_gp_billWorkFirst")}
+        </Button>
+      </div>
+    );
+  }
+  if (owed.kind === "unread") return <p className="text-xs text-slate-500">{t("su_gp_unread")}</p>;
+  return <p className="text-sm text-slate-700">{t("su_gp_nothingOwed")}</p>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -441,6 +577,31 @@ function ReceiptRow({
       )}
       {showQr && outcome === "paid" && qr && <img src={qr} alt={t("su_scanForReceipt")} className="mx-auto h-40 w-40 rounded-lg" />}
       {note && <p className="text-[11px] text-slate-400">{note}</p>}
+    </div>
+  );
+}
+
+/**
+ * CASH GETS A RECEIPT DOOR TOO (cn-v1179, decision E). After Record It the sheet offers the receipt the card
+ * path offers, through the same one review sheet (components/send-sheet, kind "receipt"): the business's
+ * own text and email, nothing sent until the person presses Text It or Email It. Not the doors that carry
+ * this phone's own sentence (Text from This Phone, Share, the paid QR): that sentence is the card's ("paid by
+ * card"), and a cash payment must not be told to the customer as one. Never on a draft (see the caller).
+ */
+function CashReceiptRow({ invoiceId, amount, textReady = true }: { invoiceId: string; amount: number; textReady?: boolean }) {
+  const t = translator(useLang());
+  const note = [textReady && t("su_noteTextReceipt"), t("su_noteEmailReceipt")].filter(Boolean).join(" ");
+  return (
+    <div className="w-full space-y-2 text-center">
+      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{t("su_receipt")}</div>
+      <div className="flex flex-wrap justify-center gap-2">
+        {textReady && (
+          <SendButton kind="receipt" id={invoiceId} amount={amount} via="text" textReady={textReady} label={t("su_btn_textReceipt")} variant="outline" className="h-8" />
+        )}
+        <SendButton kind="receipt" id={invoiceId} amount={amount} textReady={textReady} label={t("su_btn_emailReceipt")} variant="outline" className="h-8" />
+      </div>
+      {!textReady && <p className="text-xs text-slate-500">{t("su_textsNotReady")}</p>}
+      <p className="text-[11px] text-slate-400">{note}</p>
     </div>
   );
 }
@@ -1316,6 +1477,8 @@ function useOtherWay(
     methods?: string[];
     /** false = no Venmo handle: the optional QR button is hidden; recording a Venmo payment always works. */
     venmoConfigured?: boolean;
+    /** smsReadiness(org).ready: the cash receipt's Text door reads it, as the card receipt's does. */
+    textReady?: boolean;
   },
   onDone: () => void,
 ) {
@@ -1345,6 +1508,12 @@ function useOtherWay(
    */
   const [ask, setAsk] = useState<{ invoiceNumber: string | null; then: "record" | "venmo" } | null>(null);
   const sendOk = useRef(false);
+  /**
+   * RECORDED, AND SAID (cn-v1179, decision E). Record It used to toast "Paid — $X cash. Done." and close,
+   * whatever had happened to the bill and the job. The sheet now stays on what it did: the bill that took
+   * the money, what became of the job, and the receipt door the card path already had.
+   */
+  const [recorded, setRecorded] = useState<{ invoiceId: string; amount: number; words: string[]; landed?: PaymentLanded } | null>(null);
 
   const amt = () => Number(String(amount).replace(/[$,\s]/g, ""));
   /** A chip's words: the company's own spelling, or — for a Spanish reader — the catalog's word for one of the four methods the
@@ -1364,8 +1533,26 @@ function useOtherWay(
     setPaidAt("");
     setVenmo(null);
     setAsk(null);
+    setRecorded(null);
     sendOk.current = false;
     setAmount(props.source === "invoice" ? String(props.balance || "") : "");
+  }
+
+  /** The job's one open bill's balance, put in the box when the sheet's read comes back (cn-v1179, G1).
+   *  Never over a figure the person already typed: the box stays theirs. */
+  function prefill(balance: number) {
+    if (!(balance > 0.005)) return;
+    setAmount((was) => (String(was).trim() ? was : balance.toFixed(2)));
+  }
+
+  /** A way of paying as a sentence says it: the house's four in lower case, a brand as its own name. */
+  const methodSaid = (m: string) => (["cash", "check", "transfer", "other"].includes(paymentMethodKey(m)) ? methodWords(m).toLowerCase() : methodWords(m));
+
+  /** The end of a recorded payment: said in the toast and on the sheet, with the receipt door. */
+  function landedOn(invoiceId: string, paidAmount: number, m: string, landed: PaymentLanded | undefined) {
+    const words = paymentLandedWords(landed, money(paidAmount), methodSaid(m), t);
+    toast(words.length ? words.join(" ") : fillText(t("su_gp_recordedTitle"), { amount: money(paidAmount) }), "success");
+    setRecorded({ invoiceId, amount: paidAmount, words, landed });
   }
   /** The recorded payment is the end of the sheet: it closes (and resets this form). */
   const close = onDone;
@@ -1380,12 +1567,13 @@ function useOtherWay(
     if (qrPending) return; // Enter in the amount box while the QR is still coming
     if (!Number.isFinite(amt()) || amt() <= 0) { toast(t("su_enterWhatTheyPaid"), "error"); return; }
     start(async () => {
-      const id = await ensureInvoice(props, method, "record", amt(), note, paidAt || null, toast, t, (o) => router.push(`/billing/${o}`), sendOk.current, (n) =>
-        setAsk({ invoiceNumber: n, then: "record" }),
+      let landed: PaymentLanded | undefined;
+      const id = await ensureInvoice(props, method, "record", amt(), note, paidAt || null, toast, t, (o) => router.push(`/billing/${o}`), sendOk.current,
+        (n) => setAsk({ invoiceNumber: n, then: "record" }),
+        (l) => { landed = l; },
       );
       if (!id) return;
-      toast(fillText(t("su_paidMethodDone"), { amount: money(amt()), method: methodWords(method).toLowerCase() }), "success");
-      close();
+      landedOn(id, amt(), method, landed);
     });
   }
 
@@ -1435,8 +1623,9 @@ function useOtherWay(
       // The chip label as picked; recordPayment stores its key.
       const r = await recordPayment({ invoice_id: venmo.invoiceId, amount: venmo.amount, method, note, paid_at: paidAt || null });
       if (!r.ok) { toast(r.error ?? t("su_couldntRecord"), "error"); return; }
-      toast(fillText(t("su_paidVenmoDone"), { amount: money(venmo.amount) }), "success");
-      close();
+      const at = venmo;
+      setVenmo(null);
+      landedOn(at.invoiceId, at.amount, method, "landed" in r ? r.landed : undefined);
     });
   }
 
@@ -1448,7 +1637,30 @@ function useOtherWay(
   // ── THE VIEWS ────────────────────────────────────────────────────────────────────────────
   let takeover: React.ReactNode = null;
   let footer: React.ReactNode = null;
-  if (ask) {
+  if (recorded) {
+    const l = recorded.landed;
+    takeover = (
+      <div className="flex flex-col items-center gap-2 py-4 text-center">
+        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+          <Check className="h-6 w-6" />
+        </span>
+        <div className="text-lg font-semibold text-slate-900">{fillText(t("su_gp_recordedTitle"), { amount: money(recorded.amount) })}</div>
+        {recorded.words.map((w) => (
+          <p key={w} className="text-sm text-slate-600">{w}</p>
+        ))}
+        {/* A DRAFT HOLDS NO RECEIPT: sending one would send the draft. A re-tap that was already
+            recorded, or an answer that said nothing of the bill, offers none either. */}
+        {l && !l.again && (l.draft ? (
+          <p className="text-xs text-slate-500">{fillText(t("su_gp_stillDraft"), { inv: l.number ?? t("su_thisInvoiceCap") })}</p>
+        ) : (
+          <div className="mt-2 w-full">
+            <CashReceiptRow invoiceId={recorded.invoiceId} amount={recorded.amount} textReady={props.textReady} />
+          </div>
+        ))}
+        <Button className="mt-2" onClick={close}>{t("su_btn_done")}</Button>
+      </div>
+    );
+  } else if (ask) {
     // Asked, never assumed. Not Now goes back to the sheet with nothing written.
     takeover = (
       <div className="space-y-3">
@@ -1548,7 +1760,7 @@ function useOtherWay(
     );
   }
 
-  return { onOpen, reset, dirty, takeover, footer, panel };
+  return { onOpen, reset, prefill, dirty, takeover, footer, panel };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -1578,9 +1790,6 @@ export function GetPaidButton(
      *  form is already on top when this one takes its history entry off (overlay-history hands the
      *  entry to the form; a close-then-open in one commit would pop the form's own entry). */
     handOff?: { label: string; onPress: () => void };
-    /** Source "job": money the job's payment requests still have to come off (the seed's leftToNet).
-     *  Said in one line; the sheet prefills no figure from the work, so there is nothing to lower. */
-    paidAhead?: number;
   },
 ) {
   const router = useRouter();
@@ -1597,18 +1806,57 @@ export function GetPaidButton(
     open: openProp,
     onClose: onCloseProp,
     handOff,
-    paidAhead = 0,
     ...rest
   } = props;
   const controlled = openProp !== undefined;
   const open = controlled ? !!openProp : ownOpen;
   const mode = rest as Mode;
   const card = useCardDoor({ ...mode, cardEnabled, textReady }, open, close);
-  const other = useOtherWay({ ...mode, methods, venmoConfigured }, close);
+  const other = useOtherWay({ ...mode, methods, venmoConfigured, textReady }, close);
+
+  /**
+   * WHAT THE JOB OWES, READ WHEN THE SHEET OPENS (cn-v1179, decision E). Source "job" only: the server's
+   * one read (readGetPaidFacts, staff only) names the open bill and prefills its balance, lists two or
+   * more, or says the work or price not on a bill yet. One read per open: an answer that comes back after
+   * the sheet closed, or after a newer open, is dropped (the card door's own generation rule).
+   */
+  const jobId = mode.source === "job" ? mode.id : null;
+  const [facts, setFacts] = useState<GetPaidFacts | null>(null);
+  const factsGen = useRef(0);
+  function readFacts() {
+    if (!jobId) return;
+    const g = ++factsGen.current;
+    setFacts(null);
+    readGetPaidFacts(jobId).then(
+      (f) => {
+        if (factsGen.current !== g) return;
+        setFacts(f);
+        if (f.ok && f.open.length === 1) other.prefill(f.open[0].balance);
+      },
+      () => {
+        if (factsGen.current === g) setFacts({ ok: false, error: t("su_gp_readFailed") });
+      },
+    );
+  }
+  /** Bill the Work First: the job's Invoices tab, where its New Invoice is (billFirstMove says how). */
+  function billFirst() {
+    if (!jobId) return;
+    const move = billFirstMove(window.location.pathname, window.location.search, jobId);
+    if (move.kind === "go") {
+      // Another page: a real navigation, made with the sheet still UP. The page under it goes, and the
+      // Modal then leaves the history alone (its third case). No close here.
+      router.push(move.href);
+      return;
+    }
+    // The job's own page: the tab changes in place, on the sheet's own history entry, THEN the sheet closes.
+    window.history.replaceState(null, "", move.url);
+    close();
+  }
 
   function openSheet() {
     other.onOpen();
     card.onOpen();
+    readFacts();
     setOwnOpen(true);
   }
   // Opened by another sheet: the same two onOpens, on the opening (state, never a key).
@@ -1617,6 +1865,7 @@ export function GetPaidButton(
     if (controlled && open && !wasOpen.current) {
       other.onOpen();
       card.onOpen();
+      readFacts();
     }
     wasOpen.current = open;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1625,6 +1874,8 @@ export function GetPaidButton(
   function close() {
     card.reset();
     other.reset();
+    factsGen.current += 1;
+    setFacts(null);
     if (controlled) onCloseProp?.();
     else setOwnOpen(false);
     router.refresh();
@@ -1639,6 +1890,7 @@ export function GetPaidButton(
   }, [handingOff]);
 
   const title = mode.source === "invoice" ? fillText(t("su_getPaidAmount"), { amount: money(mode.balance) }) : t("su_btn_getPaid");
+  const manyBills = !!facts && facts.ok && facts.open.length > 1;
   const words = label ?? (trigger === "link" ? t("su_btn_gettingPaidNow") : t("su_btn_getPaid"));
   const button =
     trigger === "none" ? null : trigger === "menuItem" ? (
@@ -1669,14 +1921,18 @@ export function GetPaidButton(
       >
         {card.takeover ?? other.takeover ?? (
           <div className="space-y-5">
-            {card.panel}
-            {other.panel(!!card.panel, transferPending)}
-            {!cardEnabled && (
+            {jobId && <JobOwedLines facts={facts} onBillFirst={billFirst} />}
+            {/* TWO OR MORE OPEN BILLS: each is a door above, in place of a box the server would refuse. */}
+            {manyBills ? null : (
+              <>
+                {card.panel}
+                {other.panel(!!card.panel, transferPending)}
+              </>
+            )}
+            {!cardEnabled && !manyBills && (
               <p className="text-xs text-slate-500">{t("su_cardsNotOnForCompany")}</p>
             )}
-            {mode.source === "job" && paidAhead > 0.005 && (
-              <p className="text-sm text-slate-700">{fillText(t("su_pa_aheadLine"), { amount: money(paidAhead) })}</p>
-            )}
+            {jobId && <PaidAheadLine facts={facts} />}
             {handOff && (
               <button
                 type="button"
@@ -1709,12 +1965,12 @@ export function SettleUpButton(props: Mode & {
   compact?: boolean;
   /** smsReadiness(org).ready from the page (lib/sms-readiness). */
   textReady?: boolean;
-  /** Source "job": the money its payment requests still have to come off (cn-v1177). */
-  paidAhead?: number;
 }) {
-  const { compact, paidAhead, ...rest } = props;
+  // No paid-ahead prop (cn-v1179, G5): the page's figure counted money only ASKED. The job's sheet reads
+  // the figure that is true for the bill the payment lands on when it opens (readGetPaidFacts).
+  const { compact, ...rest } = props;
   // THE JOB HUB'S SHEET CARRIES ONE QUIET LINK (cn-v1177): Request a Deposit or Materials Payment.
-  if (props.source === "job") return <JobGetPaid {...(rest as Omit<typeof rest, "source" | "id">)} jobId={props.id} compact={compact} paidAhead={paidAhead} />;
+  if (props.source === "job") return <JobGetPaid {...(rest as Omit<typeof rest, "source" | "id">)} jobId={props.id} compact={compact} />;
   return <GetPaidButton {...(rest as Mode & Omit<typeof rest, "source">)} trigger={compact ? "outline" : "primary"} />;
 }
 
@@ -1732,11 +1988,9 @@ function JobGetPaid({
   methods,
   venmoConfigured,
   textReady,
-  paidAhead,
 }: {
   jobId: string;
   compact?: boolean;
-  paidAhead?: number;
   cardEnabled?: boolean;
   methods?: string[];
   venmoConfigured?: boolean;
@@ -1754,7 +2008,6 @@ function JobGetPaid({
         methods={methods}
         venmoConfigured={venmoConfigured}
         textReady={textReady}
-        paidAhead={paidAhead}
         trigger={compact ? "outline" : "primary"}
         handOff={{
           label: t("su_btn_requestDepositOrMaterials"),

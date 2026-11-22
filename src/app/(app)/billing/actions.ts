@@ -22,7 +22,8 @@ import { currentLangFor } from "@/lib/current-lang";
 import { money } from "@/lib/email";
 import { markInvoiceResent, markInvoiceSent, restampDueOnFirstSend } from "@/lib/invoice-sent-stamp";
 import { needsSendRefusal, sendDraftForPayment } from "@/lib/pay-door-send";
-import { jobBillForPayment, type JobBillRow } from "@/lib/job-bill-for-payment";
+import { jobBillForPayment, type JobBillRow, type PaymentLanded } from "@/lib/job-bill-for-payment";
+import { jobAfterPay } from "@/lib/complete-job-when-paid";
 import { hasUnsentRevision, invoiceLineEditRefusal, stampInvoiceRevised } from "@/lib/invoice-revision";
 import { billItemisation, editedRemainderDrift, editedRemainderSentence } from "@/lib/bill-itemisation";
 import { isReturnBill, returnCreditRows, returnLinesAgainstPurchases, returnsSummaryParts, returnsThatFit, type ReturnOutcome } from "@/lib/supplier-returns";
@@ -4188,7 +4189,7 @@ export async function recordPayment(input: {
   method: string;
   note: string;
   paid_at?: string | null;
-}): Promise<Result> {
+}): Promise<Result & { landed?: PaymentLanded }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -4198,9 +4199,11 @@ export async function recordPayment(input: {
 
   // M2: confirm the invoice is visible to this org (a cross-org id returns null
   // under the org-scoped read policy) before recording a payment against it.
+  // status, invoice_kind and job_id ride along (cn-v1179, G3/G4): what the sheet says about the bill
+  // that took the money (a draft holds no receipt yet; a payment request is said as one).
   const { data: inv } = await supabase
     .from("invoices")
-    .select("id, org_id, invoice_number, total, amount_paid, customers(name)")
+    .select("id, org_id, invoice_number, total, amount_paid, customers(name), status, invoice_kind, job_id")
     .eq("id", input.invoice_id)
     .maybeSingle();
   if (!inv) return { ok: false, error: "Invoice not found." };
@@ -4237,14 +4240,27 @@ export async function recordPayment(input: {
   // ring the bell for the OTHER office staff (the recorder already knows), and refresh every screen
   // that shows money. It used to be written out here, again in the Stripe writer, and two-thirds
   // missing from the bank download's deposit.
-  await afterPaymentLanded(supabase, {
+  const after = await afterPaymentLanded(supabase, {
     invoiceId: input.invoice_id,
     orgId: inv.org_id,
     // A person typed this: `supabase` is their own RLS client, which is what prices the job's hours.
     access: { kind: "staff" },
     bell: { amount: input.amount, recordedBy: ctx.userId },
   });
-  return { ok: true };
+  // WHAT IT DID, SAID BACK (cn-v1179, G3): the bill that took it and what became of the job, in the
+  // gate's own verdict (lib/complete-job-when-paid jobAfterPay). A draft stays a draft (paidStatus never
+  // advances one), so a draft before is a draft after.
+  const row = inv as { invoice_number?: string | null; status?: string | null; invoice_kind?: string | null; job_id?: string | null };
+  return {
+    ok: true,
+    landed: {
+      number: row.invoice_number ?? null,
+      made: false,
+      request: isPrepaymentKind(row.invoice_kind),
+      draft: row.status === "draft",
+      job: row.job_id ? jobAfterPay(after?.job) : null,
+    },
+  };
 }
 
 /** Edit a recorded payment (amount / method / note) and recompute the invoice. */
@@ -4707,7 +4723,7 @@ export async function settleUp(input: {
   collect?: "record" | "later";
   /** The person said yes to "Send INV-0xx as the bill first?" (a card on the job's open draft). */
   sendIt?: boolean;
-}): Promise<Result & { invoiceId?: string; needsSend?: true; invoiceNumber?: string | null }> {
+}): Promise<Result & { invoiceId?: string; needsSend?: true; invoiceNumber?: string | null; landed?: PaymentLanded }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -4761,12 +4777,17 @@ export async function settleUp(input: {
      The honest rule: an existing invoice short-circuits only when its balance is already zero.
      Otherwise the collection lands ON that invoice — the second tap becomes the payment it is —
      and the visit gets the completed stamp the first, interrupted call never wrote. */
+  /** THE SAME TAP, ALREADY DONE (cn-v1179, G3): said as that, never as a new payment. */
+  const again = (number: string | null = null): PaymentLanded => ({ number, made: false, request: false, draft: false, job: null, again: true });
   const settleExisting = async (
     invoiceId: string,
     total: number,
     amountPaid: number,
-  ): Promise<Result & { invoiceId?: string }> => {
+    /** The bill's number, when the read that found it has it: a re-tap names the bill it already paid. */
+    number: string | null = null,
+  ): Promise<Result & { invoiceId?: string; landed?: PaymentLanded }> => {
     const balance = invoiceBalance(total, amountPaid);
+    let landed: PaymentLanded | undefined = input.collect !== "later" ? again(number) : undefined;
     if (balance > 0.005 && input.collect !== "later") {
       const paid = await recordPayment({
         invoice_id: invoiceId,
@@ -4777,6 +4798,7 @@ export async function settleUp(input: {
         note: input.note?.trim() || "",
       });
       if (!paid.ok) return { ok: false, invoiceId, error: paid.error ?? "The payment didn't record — try it from the invoice." };
+      landed = paid.landed;
     }
     if (apptId) {
       await supabase
@@ -4790,7 +4812,7 @@ export async function settleUp(input: {
     }
     revalidateMoney(invoiceId);
     revalidateMoney();
-    return { ok: true, invoiceId };
+    return { ok: true, invoiceId, ...(landed ? { landed } : {}) };
   };
 
   /**
@@ -4825,10 +4847,10 @@ export async function settleUp(input: {
     if (error) return { error: "Couldn't check this job's payments just now, so nothing was recorded. Try again in a moment." };
     return data ? { invoiceId: String((data as { invoice_id: string }).invoice_id) } : null;
   };
-  const alreadyDone = (invoiceId: string): Result & { invoiceId?: string } => {
+  const alreadyDone = (invoiceId: string): Result & { invoiceId?: string; landed?: PaymentLanded } => {
     revalidateMoney(invoiceId);
     revalidateMoney();
-    return { ok: true, invoiceId };
+    return { ok: true, invoiceId, landed: again() };
   };
 
   if (apptId) {
@@ -4879,7 +4901,7 @@ export async function settleUp(input: {
     }
     const { data: jobBills, error: billsErr } = await supabase
       .from("invoices")
-      .select("id, invoice_number, status, total, amount_paid")
+      .select("id, invoice_number, status, total, amount_paid, invoice_kind")
       .eq("job_id", jobId)
       .neq("status", "void")
       .order("created_at", { ascending: true });
@@ -4935,9 +4957,9 @@ export async function settleUp(input: {
             error: `${label} has ${formatCurrency(freshBalance)} left, less than the ${formatCurrency(amount)} they paid. Record ${formatCurrency(freshBalance)} on ${label}, then put the rest on a new invoice.`,
           };
         }
-        return settleExisting(bill.id, freshTotal, freshPaid);
+        return settleExisting(bill.id, freshTotal, freshPaid, bill.invoice_number ?? null);
       }
-      return settleExisting(bill.id, Number(bill.total ?? 0), Number(bill.amount_paid ?? 0));
+      return settleExisting(bill.id, Number(bill.total ?? 0), Number(bill.amount_paid ?? 0), bill.invoice_number ?? null);
     }
   }
   // Pay Now's card door with no figure lands only on a bill that exists; there is none to land on.
@@ -5099,6 +5121,7 @@ export async function settleUp(input: {
 
   // The one payment path — balance cap, org check, recalc-to-paid, cash-in push all inherited.
   // "later" leaves the balance open on purpose: Venmo/Stripe settles it in the customer's hands.
+  let landedHere: PaymentLanded | undefined;
   if (input.collect !== "later") {
     const paid = await recordPayment({
       invoice_id: inv.id,
@@ -5109,6 +5132,8 @@ export async function settleUp(input: {
     if (!paid.ok) {
       return { ok: false, invoiceId: inv.id, error: `The invoice was created but the payment didn't record — ${paid.error ?? "try it from the invoice."}` };
     }
+    // MADE JUST NOW, SAID (cn-v1179, G3): the bill this tap wrote took the money.
+    landedHere = paid.landed ? { ...paid.landed, number: paid.landed.number ?? inv.invoice_number ?? null, made: true } : undefined;
   }
 
   // The deed happened; the calendar should say so. Guarded to live statuses so a completed visit
@@ -5127,7 +5152,7 @@ export async function settleUp(input: {
   }
   revalidateMoney(inv.id);
   revalidateMoney();
-  return { ok: true, invoiceId: inv.id };
+  return { ok: true, invoiceId: inv.id, ...(landedHere ? { landed: landedHere } : {}) };
 }
 
 /**

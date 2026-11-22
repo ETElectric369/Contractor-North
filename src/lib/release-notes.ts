@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1179", date: "2026-11-22", line: "Flag a job's task to put it on Needs You. My Day no longer lists every job's tasks. An on-hold job with no day waits in Waiting. A morning Materials to Buy Today notice. Get Paid says what it does." },
   { version: "cn-v1178", date: "2026-11-22", line: "One sale, one deposit: a revised estimate never asks for it twice. A Quote makes a fixed-price job, an Estimate time and material. A sent estimate is changed through Back to Draft." },
   { version: "cn-v1177", date: "2026-11-22", line: "Deposits · An estimate states its deposit and the customer's link takes it by card. A job has Request a Payment for a deposit or materials; it comes off the next invoice." },
   { version: "cn-v1176", date: "2026-11-21", line: "Won · Start the Job at the bottom of an inspection approves the estimate in person and starts the job. The customer's Accept link matches customers more carefully. Menu rows show their counts." },

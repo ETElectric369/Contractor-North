@@ -146,6 +146,7 @@ export const NY_EN: Readonly<Record<string, string>> = {
   ny_w_unreadSupplierPay: "Couldn't check what's due to your suppliers just now, so a discount deadline may be missing here. Open Bills to see it.",
   ny_w_unreadHours: "Couldn't read the shifts that are on no job just now. Open Timecards to see them.",
   ny_w_unreadLeads: "Couldn't read your leads just now. Open Leads to see them.",
+  ny_w_unreadFlaggedTasks: "Couldn't read the flagged job tasks just now. Open a job's Tasks tab to see them.",
   ny_w_hoursNotAllListed: "The newest {n} shifts on no job are all billed, empty or today's, so older ones weren't checked.",
   ny_btn_seeAllOnEstimates: "See All on Estimates",
   ny_btn_seeAllOnInvoices: "See All on Invoices",
@@ -178,6 +179,7 @@ export const NY_EN: Readonly<Record<string, string>> = {
   ny_btn_pile_contractsNotSigned: "Contracts Not Signed",
   ny_btn_pile_lienDeadlines: "Lien Deadlines",
   ny_btn_pile_permitInspections: "Permit Inspections",
+  ny_btn_pile_flaggedTasks: "Flagged Tasks",
   ny_btn_payName: "Pay {name}",
   ny_btn_paySupplier: "Pay Supplier",
   ny_btn_fixTheClock: "Fix the Clock",
@@ -224,6 +226,9 @@ export const NY_EN: Readonly<Record<string, string>> = {
   ny_btn_setAside: "Set Aside",
   ny_btn_notACost: "Not a Cost",
   ny_btn_signedOnPaper: "Signed on Paper",
+  ny_btn_checkOff: "Check Off",
+  // A flagged job task's second door (cn-v1179): the agenda's own Open the Job.
+  ag_btn_openTheJob: "Open the Job",
   // Another catalog's key a row's door reuses (never re-added under ny_): the visit's own door.
   ld_btn_openTheInspection: "Open the Inspection",
   // A lead's Schedule (cn-v1170): the Leads list's own door word.

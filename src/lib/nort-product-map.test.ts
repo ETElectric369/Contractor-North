@@ -120,6 +120,23 @@ describe("Nort's product map after the shell wave", () => {
     expect(myDay).not.toContain("the day's reminders and tasks");
   });
 
+  // cn-v1179: the per-job task rows left My Day, a job task got a flag that puts it on Needs You, a job
+  // on hold with no day waits in the fold, and the office gets a morning notice of materials to buy.
+  // The map is what Nort answers "where is it?" from: each of the four is said where it is true.
+  it("says the flag, the fold's hold with no day and the morning materials notice (cn-v1179)", () => {
+    const lines = NORT_PRODUCT_MAP.split("\n");
+    const myDay = lines.find((l) => l.startsWith("- My Day (/planner)"))!;
+    expect(myDay).toContain("My Day lists no other job's tasks.");
+    expect(myDay).toContain("The office can flag a task on that Tasks tab (Flag for Needs You), and a flagged task is a row on Needs You under Operations until it is checked off or its flag is removed.");
+    const needsYou = lines.find((l) => l.startsWith("- My Day → Needs You"))!;
+    expect(needsYou).toContain("A job on hold with no day waits there too, saying No Day Set, and counts in no number.");
+    expect(needsYou).toContain("A job task the office flagged is a row under Operations with Check Off and Open the Job (two or more: Flagged Tasks · N).");
+    const you = lines.find((l) => l.startsWith("- Settings → You"))!;
+    expect(you).toContain("Materials to Buy Today is the office's 8 AM notice of today's jobs that still have materials to buy");
+    const route = readFileSync(join(process.cwd(), "src/app/api/chat/route.ts"), "utf8");
+    expect(route).toContain("(a job on hold with no day says No Day Set)");
+  });
+
   it("Nort's own instructions say Needs You too, where they name the list", () => {
     const route = readFileSync(join(process.cwd(), "src/app/api/chat/route.ts"), "utf8");
     expect(route).toContain("it saves instantly to Needs You, on their My Day, for later filing.");

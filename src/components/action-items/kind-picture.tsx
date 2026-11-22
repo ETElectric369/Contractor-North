@@ -6,6 +6,7 @@ import {
   ClipboardCheck,
   Clock,
   FilePenLine,
+  Flag,
   FolderInput,
   HandCoins,
   Hourglass,
@@ -61,6 +62,8 @@ export const PICTURE_ICON: Record<PictureId, LucideIcon> = {
   sort: FolderInput,
   papers: Inbox,
   discount: Percent,
+  // A flagged job task (cn-v1179): the flag the job's Tasks tab draws.
+  flag: Flag,
 };
 
 /** Each tile's icon: Get Paid, Sales, Operations, Bookkeeping. */

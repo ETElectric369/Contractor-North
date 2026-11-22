@@ -1,6 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+// The web transport's key, so the switch list renders (without it the screen says push is not set up).
+vi.hoisted(() => {
+  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY = "test-key";
+});
 
 vi.mock("./push-actions", () => ({
   savePushSubscription: vi.fn(),
@@ -13,7 +20,8 @@ vi.mock("./push-actions", () => ({
 vi.mock("@/lib/native-shell", () => ({ isNativeShell: () => false }));
 vi.mock("@/lib/native-push", () => ({ registerForNativePush: vi.fn(), nativePushPermission: vi.fn() }));
 
-import { pushTriggersFor } from "./push-settings";
+import { PushSettings, pushTriggersFor } from "./push-settings";
+import { LangProvider } from "@/components/lang-provider";
 import { ALL_ON, type FeatureMap } from "@/lib/features";
 import { esTitleCase, titleCaseIn } from "../../../../tests/title-case-words";
 
@@ -210,5 +218,59 @@ describe("the settings page passes platformAdmin, and the switches never ask whe
     expect(effect).toContain('if (initialRole && typeof initialPlatformAdmin === "boolean") return;');
     expect(settings).toContain('if (typeof initialPlatformAdmin !== "boolean") setPlatformAdmin(r.platformAdmin === true);');
     expect(settings).not.toContain("initialPlatformAdmin !== undefined");
+  });
+});
+
+/**
+ * MATERIALS TO BUY TODAY (cn-v1179): the morning materials notice. Its sender (the daily run,
+ * lib/action-items/materials-morning) addresses orgStaffIds only, so the office sees the switch and a
+ * tech never does (KEEP THIS HONEST). On by default: the owner asked for it by name.
+ */
+describe("pushTriggersFor: the Materials to Buy Today row", () => {
+  it("is there for the owner, an admin and the office; not for a tech or an unknown role", () => {
+    for (const role of ["owner", "admin", "office"]) expect(pushTriggersFor(role, ALL_ON).map((t) => t.key), role).toContain("materials_today");
+    expect(pushTriggersFor("tech", ALL_ON).map((t) => t.key)).not.toContain("materials_today");
+    expect(pushTriggersFor(null, ALL_ON).map((t) => t.key)).not.toContain("materials_today");
+  });
+
+  it("says what it is in both languages, the label Title Case in each", () => {
+    const en = pushTriggersFor("office", ALL_ON, false, "en").find((t) => t.key === "materials_today")!;
+    const es = pushTriggersFor("office", ALL_ON, false, "es").find((t) => t.key === "materials_today")!;
+    expect(en.label).toBe("Materials to Buy Today");
+    expect(en.help).toBe("The morning of a job that still has materials to buy.");
+    expect(es.label).toBe("Materiales por Comprar Hoy");
+    expect(es.help).toBe("La mañana de un trabajo que todavía tiene materiales por comprar.");
+    expect(en.audience).toBe("staff");
+    expect(titleCaseIn(en.label, "en"), en.label).toBe(true);
+    expect(esTitleCase(es.label), es.label).toBe(true);
+    for (const row of [en, es]) expect(`${row.label} ${row.help}`).not.toMatch(/\$/);
+  });
+
+  it("defaults ON, on the screen and on the server alike", () => {
+    const src = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
+    for (const file of ["src/app/(app)/settings/push-settings.tsx", "src/lib/push.ts"]) {
+      expect(src(file), file).toMatch(/^\s*materials_today: true,$/m);
+    }
+    expect(src("src/lib/push.ts")).toMatch(/\| "materials_today";/);
+  });
+});
+
+describe("the Materials to Buy Today switch, drawn", () => {
+  const draw = (lang: "en" | "es", role: string) =>
+    renderToStaticMarkup(
+      createElement(LangProvider, { lang, children: createElement(PushSettings, { initialPrefs: {}, role, platformAdmin: false }) }),
+    );
+
+  it("the office's screen draws it, checked by default, in English and in Spanish; a tech's never does", () => {
+    const en = draw("en", "office");
+    expect(en).toContain("Materials to Buy Today");
+    expect(en).toContain("The morning of a job that still has materials to buy.");
+    const es = draw("es", "office");
+    expect(es).toContain("Materiales por Comprar Hoy");
+    expect(es).toContain("La mañana de un trabajo que todavía tiene materiales por comprar.");
+    const row = en.slice(en.indexOf("Materials to Buy Today"));
+    expect(row.slice(0, row.indexOf("</label>"))).toMatch(/checked=""/);
+    expect(draw("en", "tech")).not.toContain("Materials to Buy Today");
+    expect(draw("es", "tech")).not.toContain("Materiales por Comprar Hoy");
   });
 });

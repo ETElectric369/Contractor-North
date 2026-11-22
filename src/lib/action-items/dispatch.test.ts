@@ -35,6 +35,7 @@ const built = (kind: ActionKind, o: Partial<ActionItem> = {}): ActionItem => {
     job_unbilled_work: "nocosts-job-1",
     materials_needed: "materials-job-1",
     receipt_unbilled: "receipt-doc-1",
+    job_task_flagged: "flagtask-task-1",
   };
   return row(kind, { id: ids[kind] ?? `${kind}-rec-1`, ...o });
 };
@@ -80,6 +81,8 @@ describe("every (kind, verb) the row table can send maps to a registry action", 
       "job_unbilled_work:snooze",
       "materials_needed:snooze",
       "receipt_unbilled:notACost",
+      // cn-v1179: Check Off on a flagged job task.
+      "job_task_flagged:do",
     ])
       expect(pairs, want).toContain(want);
     // cn-v1170: a lead row sends ONE verb, Not Sold (dismiss). No Called, no Snooze: its Schedule
@@ -94,7 +97,7 @@ describe("every (kind, verb) the row table can send maps to a registry action", 
       expect(m, `${kind} ${verb}`).not.toBeNull();
       expect(REGISTRY[m!.name], `${kind} ${verb} → ${m!.name}`).toBeDefined();
       expect(REGISTRY[m!.name].effect).toBe("write");
-      expect(String(m!.input.id), `${kind} ${verb}`).not.toMatch(/^(unbilled|jdone|qdraft|onhold|nocosts|materials|receipt)-/);
+      expect(String(m!.input.id), `${kind} ${verb}`).not.toMatch(/^(unbilled|jdone|qdraft|onhold|nocosts|materials|receipt|flagtask)-/);
       // The registry's own schema takes what the map hands it.
       expect(REGISTRY[m!.name].input.safeParse(m!.input).success, `${kind} ${verb} → ${m!.name} ${JSON.stringify(m!.input)}`).toBe(true);
     }
@@ -134,6 +137,15 @@ describe("the mappings that matter", () => {
     expect(map("invoice_draft", "snooze", "inv-1")).toEqual({ name: "invoice.setAside", input: { id: "inv-1", date: "2026-10-03", reason: "Waiting on the permit" } });
     expect(resolveRowVerb("invoice_draft", "snooze", "inv-1", { date: "2026-10-03" })).toEqual({ name: "invoice.setAside", input: { id: "inv-1", date: "2026-10-03" } });
     for (const n of ["job.snoozeHold", "job.takeOffHold", "invoice.setAside", "job.snoozeNeedsYou"]) expect(REGISTRY[n], n).toBeDefined();
+  });
+
+  it("Check Off on a flagged job task is the task's own check-off: task.complete, toggleTask's registry door (cn-v1179)", () => {
+    expect(map("job_task_flagged", "do", "flagtask-task-1")).toEqual({ name: "task.complete", input: { id: "task-1", done: true } });
+    // A row id without its prefix maps to nothing; no other verb is the row's.
+    expect(map("job_task_flagged", "do", "task-1")).toBeNull();
+    for (const v of ["snooze", "dismiss", "schedule", "assign"] as Affordance[]) expect(map("job_task_flagged", v, "flagtask-task-1"), v).toBeNull();
+    const entity = readFileSync(join(process.cwd(), "src/lib/actions/entities/task.ts"), "utf8");
+    expect(entity).toContain("handler: (i) => toggleTask(i.id, i.done, { cascade: i.cascade }),");
   });
 
   it("an estimate has no follow-up day (cn-v1172); the endless rows keep their day in needs_you_waits", () => {

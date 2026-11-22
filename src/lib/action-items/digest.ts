@@ -43,7 +43,9 @@ import { reportError } from "@/lib/observe";
  * card's own name on My Day.
  *
  * HOLDS ARE BACK (Wave 1, lane 5): the first decision line counts every job on hold whose day has
- * come or that has no day ("3 Holds Are Back"), the same holds My Day's "Holds Back" pile shows.
+ * come ("3 Holds Are Back"), the same holds My Day's "Holds Back" pile shows. A hold with NO day is not
+ * back (cn-v1179, decision D): it waits in My Day's Waiting fold, counted by no number, so the morning
+ * does not count it either (the owner, by picture: "seems like thats abetter spot for it").
  *
  * ONE COMPANY'S FAILURE IS ITS OWN (cn-v1130, skeptic #34). The tasks read used to be a bare `.data`
  * (a failed read was "no six, no push"), and a throw anywhere ended the loop for every company after
@@ -74,17 +76,17 @@ export async function sendDayAheadDigests(
       const { todayStr: today, dayStart } = todayBoundsInTz(tz);
 
       // Decision head-counts (+2 title rows each), and first THE HOLDS THAT ARE BACK (Wave 1, lane 5):
-      // every job on hold whose day is today or earlier, or that has no day at all (a hold from before
-      // 0366: it is due now, "No Day Set"), not only the ones that came back today. The service client
-      // reads every company, so it is filtered to this one by hand. Before 0366 (no hold_until) it
-      // counts 0: the old push never had the line, and it never guesses one.
+      // every job on hold whose day is today or earlier, not only the ones that came back today. A hold
+      // with no day waits in the fold and is not counted (cn-v1179): `lte` never matches a null day.
+      // The service client reads every company, so it is filtered to this one by hand. Before 0366 (no
+      // hold_until) it counts 0: the old push never had the line, and it never guesses one.
       const [holdsR, invR, leadR] = await Promise.all([
         supabase
           .from("jobs")
           .select("id", { count: "exact", head: true })
           .eq("org_id", org.id)
           .eq("status", "on_hold")
-          .or(`hold_until.is.null,hold_until.lte.${today}`),
+          .lte("hold_until", today),
         supabase
           .from("invoices")
           .select("invoice_number", { count: "exact" })

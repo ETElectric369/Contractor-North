@@ -16,7 +16,7 @@ import { SendSheet } from "@/components/send-sheet";
 import { useToast } from "@/components/toast";
 import { useLang } from "@/components/lang-provider";
 import { dispatchAction } from "@/lib/action-items/dispatch";
-import type { DispatchPayload } from "@/lib/action-items/dispatch-map";
+import { DISPATCH_WHY_KEY, type DispatchPayload, type DispatchWhy } from "@/lib/action-items/dispatch-map";
 import { KIND_GROUP, type ActionItem, type Affordance, type Group, type PileName } from "@/lib/action-items/types";
 import { rowButtons, type RowDoor } from "@/lib/action-items/row-buttons";
 import { pileUnfoldsHere } from "@/lib/action-items/piles";
@@ -237,11 +237,13 @@ export function ActionList({
       ok: false,
       error: t("su_didntReachServer"),
       note: undefined as string | undefined,
+      why: undefined as DispatchWhy | undefined,
     }));
     setBusyId(null);
     setInFlight((s) => without(s, item.id));
     if (!res.ok) {
-      const message = res.error ?? t("ny_couldntDoThat");
+      // A refusal the row cannot answer is said in the reader's language (skeptic #82, S5).
+      const message = res.why ? t(DISPATCH_WHY_KEY[res.why]) : (res.error ?? t("ny_couldntDoThat"));
       setDoneIds((s) => without(s, item.id));
       setRemovedIds((s) => without(s, item.id));
       // NOTHING SILENT: a row hidden before the answer took no sheet along, so the list says it.

@@ -1,7 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { pushCalendarItem } from "@/lib/calendar-sync";
 import { STARTED_JOB_STATUSES, finishedJobFields, jobStatusLabel } from "@/lib/job-status";
-import { BILLING_STEP_WRONG_COMPANY, finishBillingStep, paidDoorVerdict, type BillingAccess, type PaidDoorVerdict } from "@/lib/finish-bills-first";
+import { BILLING_STEP_WRONG_COMPANY, finishBillingStep, paidDoorVerdict, priceNotBilledSaid, readPriceLeftToBill, type BillingAccess, type PaidDoorVerdict } from "@/lib/finish-bills-first";
 import { jobSaidLabel } from "@/lib/job-pick-label";
 import { reportError } from "@/lib/observe";
 import { closeJobTasks, type CloseJobTasks } from "@/lib/job-tasks";
@@ -46,6 +46,11 @@ import { PREPAID_CREDIT, isPrepaymentKind } from "@/lib/prepayments";
  *      requireStaff and this runs in the Stripe webhook on a service client — and it must not, since
  *      a draft it built would itself be the "other open bill" rule 3 refuses. So it does not finish
  *      the job, and `say` carries the sentence a person reads (lib/after-payment-landed rings it).
+ *   5. A FIXED PRICE IS BILLED (cn-v1179). The step above skips a fixed-price job, so a part payment on
+ *      its one flat bill used to end it with the rest of the contract on no bill. When the job has an
+ *      accepted estimate, the job page's own figures (computeJobProgress: the contract and what went out
+ *      on sent bills) must say it is all billed, or the job stays open and the office is told "Still to
+ *      bill". No accepted estimate, or Time & Material: exactly as before. Finish Job is not asked.
  *
  * THIS IS THE SECOND DOOR THAT ENDS A JOB, so it writes what the first one writes: every field in
  * lib/job-status's finishedJobFields, which is the whole of a finish — the word, and the hold reason
@@ -82,9 +87,28 @@ import { PREPAID_CREDIT, isPrepaymentKind } from "@/lib/prepayments";
  */
 type JobSaid = { say: string; sayTitle: string } | { say?: undefined; sayTitle?: undefined };
 
+/**
+ * WHY A PAID BILL LEFT ITS JOB OPEN, as a code a door can say in a person's language (cn-v1179, G3: the
+ * Get Paid sheet says what became of the job). Absent when nothing about the job's own state held it
+ * (another open bill, a part payment, a job already over, a read that failed).
+ *   work         recorded hours, receipts or takes are on no bill yet (the billing step's plan)
+ *   price        a fixed price is not all billed yet (readPriceLeftToBill)
+ *   not_started  the job hasn't started, so a bill paid ahead of the visit doesn't end it
+ */
+export type JobLeftOpen = "work" | "price" | "not_started";
+
 export type CompleteWhenPaid =
   | ({ completed: true; jobId: string } & JobSaid)
-  | ({ completed: false; why: string; jobId?: string } & JobSaid);
+  | ({ completed: false; why: string; jobId?: string; open?: JobLeftOpen } & JobSaid);
+
+/** What became of the job, for a door that says it: finished, held open (and why), or as it was. */
+export type JobAfterPay = "finished" | JobLeftOpen | "untouched";
+
+export function jobAfterPay(job: CompleteWhenPaid | null | undefined): JobAfterPay {
+  if (!job) return "untouched";
+  if (job.completed) return "finished";
+  return job.open ?? "untouched";
+}
 
 /** The verdict's sentence and title, as this gate hands them on. */
 const heard = (v: PaidDoorVerdict): JobSaid => (v.say ? { say: v.say, sayTitle: v.title } : {});
@@ -184,7 +208,7 @@ export async function completeJobWhenPaid(
     // org_id rides along (the projection law): it is what the billing step prices this job's hours in.
     const { data: job, error: jobErr } = await supabase
       .from("jobs")
-      .select("id, org_id, status, job_number, name, customers(name)")
+      .select("id, org_id, status, billing_type, job_number, name, customers(name)")
       .eq("id", jobId)
       .maybeSingle();
     if (jobErr) {
@@ -195,7 +219,7 @@ export async function completeJobWhenPaid(
     if (!job) return { completed: false, why: "job not found" };
     if (jobStatus === "complete" || jobStatus === "cancelled") return { completed: false, why: `the job is already ${jobStatus}` };
     if (!(STARTED_JOB_STATUSES as string[]).includes(jobStatus)) {
-      return { completed: false, why: `the job hasn't started (it is ${jobStatusLabel(jobStatus) || "not started"}) — a bill paid ahead of the visit doesn't end it` };
+      return { completed: false, why: `the job hasn't started (it is ${jobStatusLabel(jobStatus) || "not started"}) — a bill paid ahead of the visit doesn't end it`, open: "not_started" };
     }
 
     const { data: others, error: othersErr } = await supabase.from("invoices").select("id, status").eq("job_id", jobId).neq("id", invoiceId);
@@ -208,7 +232,7 @@ export async function completeJobWhenPaid(
 
     // 4. THE BILLING STEP — the same function Finish Job runs (lib/finish-bills-first). A finishing
     //    status may not be written without it, at either door.
-    const named = job as { org_id?: string | null; job_number?: string | null; name?: string | null; customers?: { name?: string | null } | null };
+    const named = job as { org_id?: string | null; billing_type?: string | null; job_number?: string | null; name?: string | null; customers?: { name?: string | null } | null };
     const jobSaid = jobSaidLabel({ job_number: named.job_number, name: named.name, customer: named.customers?.name ?? null });
     // THE COMPANY THE WORK IS PRICED IN IS THE JOB'S OWN, and on the service path it has to be the one
     // the payment door proved. A job whose row says otherwise is priced by nobody and finished by nobody.
@@ -220,8 +244,34 @@ export async function completeJobWhenPaid(
         orgId: access.orgId,
       });
     }
-    const verdict = paidDoorVerdict(wrongCompany ? BILLING_STEP_WRONG_COMPANY : await finishBillingStep(supabase, jobId, access), jobSaid);
-    if (!verdict.finish) return { completed: false, why: verdict.why, jobId, ...heard(verdict) };
+    const step = wrongCompany ? BILLING_STEP_WRONG_COMPANY : await finishBillingStep(supabase, jobId, access);
+    const verdict = paidDoorVerdict(step, jobSaid);
+    if (!verdict.finish) return { completed: false, why: verdict.why, jobId, ...(step.kind === "plan" ? { open: "work" as const } : {}), ...heard(verdict) };
+
+    // 5. A FIXED PRICE IS BILLED BEFORE A PAYMENT ENDS THE JOB (cn-v1179, decision E; lib/finish-bills-
+    //    first priceLeftToBill). A part payment on the job's one flat bill used to finish it with the rest
+    //    of the contract on no bill. The office is told the way "Still to bill" is told for T&M work. The
+    //    figures name the company by hand (the job's own; on the service path that is the one proved above).
+    const price = await readPriceLeftToBill(supabase, jobId, named.org_id ?? (access.kind === "service" ? access.orgId : null), named.billing_type ?? null);
+    if (!price.ok) {
+      return {
+        completed: false,
+        why: "the job's price couldn't be checked against its bills, so it wasn't finished",
+        jobId,
+        say: `${jobSaid} was paid off, but the app couldn't check its price against its bills, so it wasn't finished.`,
+        sayTitle: "Couldn't check this job's bills",
+      };
+    }
+    if (price.price && price.price.left > 0.005) {
+      return {
+        completed: false,
+        why: "the job's price isn't all billed yet, so it isn't finished",
+        jobId,
+        open: "price",
+        say: priceNotBilledSaid(jobSaid, price.price),
+        sayTitle: "Still to bill",
+      };
+    }
 
     const { data: done, error: updErr } = await supabase
       .from("jobs")

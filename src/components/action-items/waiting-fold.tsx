@@ -16,7 +16,9 @@ const EN = translator("en");
  * WAITING (N) — Erik: Needs You shows only what he can act on NOW, and everything waiting sits in one
  * fold where each row says why and the day it comes back. "Too quiet gets things lost": nothing is in
  * here without its day (the build folds only rows waitingRow accepted), and on that day it is back on
- * Needs You.
+ * Needs You. The one row with no day is a job on hold with none (cn-v1179, waitingRowNoDay): it says
+ * "No Day Set", sits after the rows that have a day, and opens the job, whose status pill holds its
+ * Snooze (give it a day) and the way off hold.
  *
  * Under the Needs You list, collapsed. Its count is grey: a count of things waiting is inventory,
  * never a badge (a badge counts only what is open for him now). Drawn only when something waits.
@@ -56,7 +58,9 @@ export function WaitingFold({ items }: { items: WaitingItem[] }) {
   );
 }
 
-/** "Tupelo Panel · J-034 · Waiting on the permit · Back Oct 3": the day said in the reader's language. */
+/** "Tupelo Panel · J-934 · Waiting on the permit · Back Oct 3": the day said in the reader's language.
+ *  A hold with no day: "Larkspur Deck · J-041 · Waiting on the permit · No Day Set". */
 export function waitingLine(w: Pick<WaitingItem, "title" | "why" | "backOn">, lang: Lang = "en", words: Words = EN): string {
-  return [w.title, w.why, fillSlots(words("ag_btn_backOn"), { day: shortDay(w.backOn, lang) })].filter(Boolean).join(" · ");
+  const day = w.backOn ? fillSlots(words("ag_btn_backOn"), { day: shortDay(w.backOn, lang) }) : words("ny_btn_noDaySet");
+  return [w.title, w.why, day].filter(Boolean).join(" · ");
 }

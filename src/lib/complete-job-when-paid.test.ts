@@ -99,7 +99,8 @@ describe("completeJobWhenPaid — the gate", () => {
     for (const status of ["to_be_scheduled", "scheduled"]) {
       const db = fakeDb({ invoices: [paidStandard()], jobs: [{ id: JOB, status }] });
       const r = await completeJobWhenPaid(db, "inv-1", { kind: "staff" });
-      expect(r).toEqual({ completed: false, why: `the job hasn't started (it is ${status.replace(/_/g, " ")}) — a bill paid ahead of the visit doesn't end it` });
+      // cn-v1179: the code a door says it by (the Get Paid sheet: "it hasn't started yet").
+      expect(r).toEqual({ completed: false, why: `the job hasn't started (it is ${status.replace(/_/g, " ")}) — a bill paid ahead of the visit doesn't end it`, open: "not_started" });
       expect(db.tables.jobs[0].status).toBe(status);
       expect(db.log.some((l) => l.table === "jobs" && l.verb === "update")).toBe(false);
     }

@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fakeDb } from "@/test/fake-supabase";
 import { estimateLines, hoursWords, isHisTask, notAddedWords, planLineSync, retitleLineTask, syncJobTasks, syncWords, type LineTask, type SyncResult } from "./sync-job-tasks";
 import { translator } from "@/lib/i18n";
@@ -90,6 +92,20 @@ describe("planLineSync — the plan", () => {
     expect(isHisTask({ notes: "x", photo_path: null })).toBe(true);
     expect(isHisTask({ notes: null, photo_path: "p" })).toBe(true);
     expect(isHisTask({ notes: null, photo_path: null, has_steps: true })).toBe(true);
+  });
+
+  it("isHisTask: a FLAG makes it his (cn-v1179); priority 0, null or absent does not", () => {
+    expect(isHisTask({ notes: null, photo_path: null, priority: 1 })).toBe(true);
+    expect(isHisTask({ notes: null, photo_path: null, priority: 2 })).toBe(true);
+    expect(isHisTask({ notes: null, photo_path: null, priority: 0 })).toBe(false);
+    expect(isHisTask({ notes: null, photo_path: null, priority: null })).toBe(false);
+  });
+
+  it("a FLAGGED open orphan is kept and tombstoned, never removed: the flag is his (cn-v1179)", () => {
+    const plan = planLineSync([], [have({ id: "bare" }), have({ id: "flagged", priority: 1 })]);
+    expect(plan.remove).toEqual(["bare"]);
+    expect(plan.kept.map((t) => t.id)).toEqual(["flagged"]);
+    expect(plan.tombstone).toEqual([{ id: "flagged", source_key: "gone:line:flagged" }]);
   });
 });
 
@@ -237,7 +253,7 @@ const db = (
     opts,
   );
 // A row as the database holds it: every column present, the minutes null until something writes them (0395).
-const task = (over: Record<string, unknown>) => ({ job_id: "j1", status: "open", notes: null, photo_path: null, parent_id: null, planned_minutes: null, ...over });
+const task = (over: Record<string, unknown>) => ({ job_id: "j1", status: "open", notes: null, photo_path: null, parent_id: null, planned_minutes: null, priority: 0, ...over });
 
 describe("syncJobTasks — the writes", () => {
   it("inserts the wanted tasks nobody has, through the birth's own insert (source_key, title, sort_order, category null)", async () => {
@@ -273,6 +289,28 @@ describe("syncJobTasks — the writes", () => {
     expect(byId.t4.source_key).toBe("task:v1"); // a visit's task that matches no line stays the visit's
     expect(byId.t5.source_key).toBe(null);
     expect(inserted.tasks.map((t) => t.source_key)).toEqual(["line:b"]);
+  });
+
+  it("a FLAGGED line task whose line went away is kept with its flag, and said (cn-v1179: it is on Needs You)", async () => {
+    const { sb, tables } = db({
+      lines: [],
+      tasks: [task({ id: "plain", source_key: "line:gone", title: "Old scope" }), task({ id: "flag", source_key: "line:gone2", title: "Order the breaker", priority: 1 })],
+    });
+    const res = await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1" });
+    expect(res).toEqual(result({ removed: 1, kept: 1, keptNames: ["Order the breaker"] }));
+    const byId = Object.fromEntries(tables.tasks.map((t) => [t.id, t]));
+    expect(byId.plain).toBeUndefined();
+    expect(byId.flag.source_key).toBe("gone:line:gone2");
+    expect(byId.flag.priority).toBe(1);
+    expect(byId.flag.status).toBe("open");
+  });
+
+  it("the sync READS the flag and never deletes a task flagged since its read (source pins)", () => {
+    const src = readFileSync(join(process.cwd(), "src/lib/estimate/sync-job-tasks.ts"), "utf8");
+    // The read that feeds isHisTask must ask for the column, or every task reads as unflagged.
+    expect(src).toMatch(/from\("tasks"\)\.select\("id, source_key, title, status, notes, photo_path, parent_id, planned_minutes, priority"\)/);
+    // The delete is conditional on what was read: status, photo and flag.
+    expect(src).toMatch(/\.delete\(\)\.in\("id", plan\.remove\)[^;]*\.eq\("status", "open"\)[^;]*\.is\("photo_path", null\)[^;]*\.eq\("priority", 0\)/);
   });
 
   it("a line task with steps under it is kept (0055 would cascade the delete to the steps)", async () => {
@@ -352,10 +390,10 @@ describe("syncJobTasks — the writes", () => {
     expect(syncWords(result({ rekeyed: 3 }))).toBe("The job's list follows the estimate: 3 matched.");
     expect(syncWords(result({ rekeyed: 1 }), "The job it left (J-047) follows too")).toBe("The job it left (J-047) follows too: 1 matched.");
     expect(syncWords(result({ inserted: 2, removed: 1, kept: 1, keptNames: ["Trench"], sizeSet: true, sizeNow: 180 }))).toBe(
-      "The job's list follows the estimate: 2 tasks added · 1 removed · 1 kept (Trench) — done, or with notes, a photo or steps · the job's length is now 3 h.",
+      "The job's list follows the estimate: 2 tasks added · 1 removed · 1 kept (Trench) — done, flagged, or with notes, a photo or steps · the job's length is now 3 h.",
     );
     expect(syncWords(result({ inserted: 1, kept: 4, keptNames: ["A", "B", "C", "D"], sizeStays: { box: 480, estimate: 90 } }))).toBe(
-      "The job's list follows the estimate: 1 task added · 4 kept (A, B, C, …) — done, or with notes, a photo or steps · the job's length stays at 8 h (the estimate now says 1.5 h).",
+      "The job's list follows the estimate: 1 task added · 4 kept (A, B, C, …) — done, flagged, or with notes, a photo or steps · the job's length stays at 8 h (the estimate now says 1.5 h).",
     );
     expect(hoursWords(null)).toBe("none");
     expect(hoursWords(100)).toBe("1.7 h");

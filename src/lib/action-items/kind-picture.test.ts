@@ -24,8 +24,9 @@ describe("KIND_PICTURE", () => {
     for (const k of KINDS) expect(KIND_PICTURE[k], k).toMatch(/^[a-z_]+$/);
   });
 
-  it("is the owner's table: eighteen pictures over twenty-two kinds", () => {
-    expect(new Set(Object.values(KIND_PICTURE)).size).toBe(18);
+  // RE-PINNED ON PURPOSE (cn-v1179): the flagged job task's own picture, the flag.
+  it("is the owner's table: nineteen pictures over twenty-three kinds", () => {
+    expect(new Set(Object.values(KIND_PICTURE)).size).toBe(19);
     expect(KIND_PICTURE).toEqual({
       job_to_schedule: "pick_day",
       inquiry: "call",
@@ -49,6 +50,7 @@ describe("KIND_PICTURE", () => {
       supplier_pay: "discount",
       receipt_unbilled: "cost",
       permit_inspection: "permit",
+      job_task_flagged: "flag",
     });
   });
 

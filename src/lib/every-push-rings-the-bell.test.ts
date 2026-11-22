@@ -46,6 +46,8 @@ const THROUGH_NOTIFY: string[] = [
   "src/lib/bank-transfer-alerts.ts",
   "src/lib/action-items/digest.ts",
   "src/lib/action-items/eod-sweep.ts",
+  // cn-v1179: the morning "Materials to Buy Today" notice, in each person's own language.
+  "src/lib/action-items/materials-morning.ts",
   // cn-v1138: "you're on this job" is a function of the language; notifyPeople groups the crew by it
   // and writes each group its own line (type "assigned", as before) before its own push.
   "src/lib/crew-notify.ts",

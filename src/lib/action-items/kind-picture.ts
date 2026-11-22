@@ -33,7 +33,8 @@ export type PictureId =
   | "stock"
   | "sort"
   | "papers"
-  | "discount";
+  | "discount"
+  | "flag";
 
 /** Each kind's picture. Its keys are in AFFORDANCES' order, like KIND_GROUP's (the test compares them). */
 export const KIND_PICTURE: Record<ActionKind, PictureId> = {
@@ -61,4 +62,6 @@ export const KIND_PICTURE: Record<ActionKind, PictureId> = {
   supplier_pay: "discount",
   receipt_unbilled: "cost",
   permit_inspection: "permit",
+  // A flagged job task (cn-v1179): the flag the office set on it, the same mark the job's Tasks tab draws.
+  job_task_flagged: "flag",
 };

@@ -8,18 +8,24 @@ import { describe, it, expect, vi } from "vitest";
  * "No Day Set". The pips are gone. Since cn-v1162 a hold is Due (SOON) only on its own CLOCK: the
  * come-back day somebody picked, from the day it came through seven days after. A hold with no day has
  * no clock and is plain; its last touch orders it (oldest first) and marks nothing.
+ *
+ * RE-PINNED ON PURPOSE (cn-v1179, decision D): a hold with NO day is no longer a Now row. It waits in
+ * the Waiting fold, saying its reason and No Day Set, after every row that has a day, and counts in no
+ * number. Only a database without the hold-day columns (before 0366) keeps the old rule.
  */
 
 // A fixed day: the test reads no clock.
 const TODAY = "2026-11-11";
 const daysAgo = (n: number) => new Date(Date.parse(`${TODAY}T20:00:00Z`) - n * 86_400_000).toISOString();
 
-const state = vi.hoisted(() => ({ held: [] as any[] }));
+const state = vi.hoisted(() => ({ held: [] as any[], legacy: false }));
 
-/** Every read answers empty, except the held-jobs read, told apart by its select. */
+/** Every read answers empty, except the held-jobs read, told apart by its select. `legacy`: the
+ *  database has no hold-day columns (before 0366), so the read naming them fails as Postgres would. */
 function fakeClient() {
   const answer = (table: string, cols: string) => {
-    if (table === "jobs" && cols.includes("hold_reason") && cols.includes("hold_until")) return state.held;
+    if (table === "jobs" && cols.includes("hold_reason") && cols.includes("hold_until")) return state.legacy ? { missing: true } : state.held;
+    if (table === "jobs" && cols.includes("hold_reason") && state.legacy) return state.held;
     if (table === "profiles") return { org_id: "org-1", role: "owner" };
     return [];
   };
@@ -31,6 +37,7 @@ function fakeClient() {
         get(_t, prop) {
           if (prop === "then") {
             const data = answer(table, cols);
+            if (data && (data as any).missing) return (ok: any, err: any) => Promise.resolve({ data: null, error: { code: "42703", message: "column jobs.hold_until does not exist" }, count: null }).then(ok, err);
             const rows = Array.isArray(data) ? data : [];
             return (ok: any, err: any) => Promise.resolve({ data: Array.isArray(data) ? rows : data, error: null, count: rows.length }).then(ok, err);
           }
@@ -58,7 +65,10 @@ function fakeClient() {
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fakeClient() }));
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
 
-import { getActionItems } from "./query";
+import { getActionItems, getActionItemsCount } from "./query";
+import { summarize } from "./needs-you-rule";
+import { waitingLine } from "@/components/action-items/waiting-fold";
+import { translator } from "@/lib/i18n";
 
 const hold = (id: string, num: string, name: string, touched: string, until: string | null) => ({
   id,
@@ -72,27 +82,51 @@ const hold = (id: string, num: string, name: string, touched: string, until: str
   customers: { name: "A Customer" },
 });
 
-describe("a hold with no day ages from when it was last touched", () => {
-  it("a hold with no day is plain, and so is its pile; its since is its last touch, the oldest first; the words still say No Day Set", async () => {
-    state.held = [hold("j34", "J-034", "Alder Service", daysAgo(10), null), hold("j48", "J-048", "Tupelo Panel", daysAgo(2), null), hold("j13", "J-013", "Birch Remodel", daysAgo(40), null)];
-    const r = await getActionItems({ todayStr: TODAY, isStaff: true, userId: "owner-1", tz: "America/Los_Angeles" });
-    const pile = r.now.find((i) => i.id === "pile:holds_back");
-    expect(pile, "the three holds roll into the Holds Back pile").toBeTruthy();
-    expect(pile!.level).toBe("none");
-    const kids = pile!.children!;
-    expect(kids.map((k) => k.subtitle)).toEqual(["No Day Set", "No Day Set", "No Day Set"]);
-    expect(kids.map((k) => k.level)).toEqual(["none", "none", "none"]);
-    expect(kids.map((k) => k.clock)).toEqual([null, null, null]);
-    // Age is the order now: the oldest touch first, whatever order the read gave them in.
-    expect(kids.map((k) => k.id)).toEqual(["onhold-j13", "onhold-j34", "onhold-j48"]);
-    const byId = Object.fromEntries(kids.map((k) => [k.id, k]));
-    expect(byId["onhold-j13"].since).toBe(daysAgo(40).slice(0, 10));
-    expect(byId["onhold-j34"].since).toBe(daysAgo(10).slice(0, 10));
-    expect(byId["onhold-j48"].since).toBe(daysAgo(2).slice(0, 10));
-    // The pile carries its oldest child's own day, so it sits where that child would have.
-    expect(pile!.since).toBe(daysAgo(40).slice(0, 10));
+describe("a hold with no day waits in the fold (cn-v1179)", () => {
+  it("no day: waiting, after the rows with a day, counted by no number; a later day waits; a day come is back on Now with its clock", async () => {
+    state.legacy = false;
+    state.held = [
+      hold("j34", "J-934", "Larkspur Deck", daysAgo(85), null),
+      hold("j48", "J-048", "Snowbell Barn", daysAgo(2), "2026-11-12"),
+      hold("j13", "J-013", "Bayberry Porch", daysAgo(40), TODAY),
+    ];
+    const ctx = { todayStr: TODAY, isStaff: true, userId: "owner-1", tz: "America/Los_Angeles" };
+    const r = await getActionItems(ctx);
+    // Back today: a Now row (a lone one, no pile), Due on its own day.
+    const ids = [...r.now, ...r.now.flatMap((x) => x.children ?? [])].map((x) => x.id);
+    expect(ids).toContain("onhold-j13");
+    expect(ids).not.toContain("onhold-j34");
+    expect(ids).not.toContain("onhold-j48");
+    const back = r.now.find((x) => x.id === "onhold-j13")!;
+    expect([back.clock, back.level]).toEqual([TODAY, "soon"]);
+    // The fold: tomorrow's first, the one with no day last, saying its reason and No Day Set.
+    const held = r.waiting.filter((w) => w.kind === "job_on_hold");
+    expect(held.map((w) => [w.id, w.backOn])).toEqual([
+      ["onhold-j48", "2026-11-12"],
+      ["onhold-j34", null],
+    ]);
+    expect(waitingLine(held[1])).toBe("Larkspur Deck · J-934 · Waiting on the customer · No Day Set");
+    expect(waitingLine(held[1], "es", translator("es"))).toBe("Larkspur Deck · J-934 · Waiting on the customer · Sin Día");
+    expect(waitingLine(held[0])).toBe("Snowbell Barn · J-048 · Waiting on the customer · Back Nov 12");
+    // The numbers: only the hold that is back counts (the header, the tiles, the dock's badge).
+    expect(summarize(r.now, { isStaff: true }).total).toBe(1);
+    expect(await getActionItemsCount(ctx)).toBe(1);
   });
 
+  it("before 0366 (no hold-day columns) the old rule stands: a hold is a Now row with no Snooze", async () => {
+    state.legacy = true;
+    state.held = [hold("j34", "J-934", "Larkspur Deck", daysAgo(10), null)];
+    const r = await getActionItems({ todayStr: TODAY, isStaff: true, userId: "owner-1", tz: "America/Los_Angeles" });
+    state.legacy = false;
+    const row = r.now.find((x) => x.id === "onhold-j34");
+    expect(row, "the legacy hold stays on Now").toBeTruthy();
+    expect(row!.affordances).toEqual(["do", "open"]);
+    expect(row!.what?.key).toBe("ny_w_holdNoDay");
+    expect(r.waiting.some((w) => w.id === "onhold-j34")).toBe(false);
+  });
+});
+
+describe("a hold's clock", () => {
   it("a hold whose day has come: its clock is that day, Due for seven days after, then plain", async () => {
     state.held = [
       hold("j13", "J-013", "Birch Remodel", daysAgo(1), daysAgo(9).slice(0, 10)),
@@ -111,5 +145,38 @@ describe("a hold with no day ages from when it was last touched", () => {
     expect(byId["onhold-j21"].level).toBe("soon");
     expect(byId["onhold-j48"].level).toBe("soon");
     expect(pile.level).toBe("soon");
+  });
+});
+
+describe("the fold's law (cn-v1179)", () => {
+  it("waitingRow still refuses a row with no day; waitingRowNoDay takes only a job on hold", async () => {
+    const { waitingRow, waitingRowNoDay } = await import("./types");
+    const base = { id: "onhold-j1", kind: "job_on_hold" as const, title: "Larkspur Deck · J-041", why: "Waiting on the permit", href: "/jobs/j1" };
+    expect(waitingRow({ ...base, backOn: null })).toBeNull();
+    expect(waitingRow({ ...base, backOn: "" })).toBeNull();
+    expect(waitingRow({ ...base, backOn: "not a day" })).toBeNull();
+    expect(waitingRowNoDay(base)).toEqual({ ...base, backOn: null });
+    for (const kind of ["materials_needed", "invoice_draft", "permit_inspection", "job_task_flagged"] as const) expect(waitingRowNoDay({ ...base, kind }), kind).toBeNull();
+  });
+
+  it("waitingRowNoDay has ONE caller: the hold feeder, inside its own block", async () => {
+    const { readdirSync, readFileSync, statSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const callers: string[] = [];
+    const walk = (dir: string) => {
+      for (const f of readdirSync(dir)) {
+        const p = join(dir, f);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f) && readFileSync(p, "utf8").includes("waitingRowNoDay(")) callers.push(p.slice(process.cwd().length + 1));
+      }
+    };
+    walk(join(process.cwd(), "src"));
+    expect(callers.sort()).toEqual(["src/lib/action-items/query.ts", "src/lib/action-items/types.ts"]);
+    const q = readFileSync(join(process.cwd(), "src/lib/action-items/query.ts"), "utf8");
+    expect(q.match(/waitingRowNoDay\(/g)).toHaveLength(1);
+    const at = q.indexOf("waitingRowNoDay({");
+    expect(at).toBeGreaterThan(q.indexOf("// 5) HOLDS"));
+    expect(at).toBeLessThan(q.indexOf("// 5b) FLAGGED JOB TASKS"));
+    expect(q.slice(at - 200, at)).toContain('if (withDay && state === "no_day") {');
   });
 });

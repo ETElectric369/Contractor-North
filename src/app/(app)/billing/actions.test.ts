@@ -1097,7 +1097,7 @@ describe("settleUp — a retried Record Payment on the job's open bill records o
       if (q.table === "jobs") return { data: { id: J052, name: "Panel swap", job_number: "J-052", customer_id: "cust-1", inquiry_id: null } };
       if (q.table === "invoices" && q.verb === "select") {
         if (q.cols === "id, created_at, total, amount_paid") return { data: null }; // INV-074 is weeks old
-        if (q.cols === "id, invoice_number, status, total, amount_paid") {
+        if (q.cols === "id, invoice_number, status, total, amount_paid, invoice_kind") {
           return { data: [{ id: INV074, invoice_number: "INV-074", status: paid() >= 624.49 ? "paid" : "sent", total: 624.49, amount_paid: paid() }] };
         }
         if (q.cols.startsWith("id, org_id, invoice_number, total, amount_paid")) {
@@ -1495,7 +1495,7 @@ describe("no sentence the office reads names a removed import button", () => {
 describe("recordPayment — the payment push is paired with its bell line (W1-10)", () => {
   const PAID_INV = "5b3c0000-0000-4000-8000-000000000074";
   const route = (q: Q): Reply => {
-    if (q.table === "invoices" && q.verb === "select" && q.cols === "id, org_id, invoice_number, total, amount_paid, customers(name)") {
+    if (q.table === "invoices" && q.verb === "select" && q.cols === "id, org_id, invoice_number, total, amount_paid, customers(name), status, invoice_kind, job_id") {
       return { data: { id: PAID_INV, org_id: "org-1", invoice_number: "INV-074", total: 624.49, amount_paid: 0, customers: { name: "Jason Wexley" } } };
     }
     if (q.table === "organizations") return { data: { settings: { timezone: "America/Los_Angeles" } } };
@@ -1522,7 +1522,8 @@ describe("recordPayment — the payment push is paired with its bell line (W1-10
     spies.notified = [];
     state.client = fakeSupabase(route, calls);
     const res = await recordPayment({ invoice_id: PAID_INV, amount: 624.49, method: "Check", note: "#1042" });
-    expect(res).toEqual({ ok: true });
+    // cn-v1179 (G3): what it did is said back: the bill, not made here, on no job (so nothing to say of one).
+    expect(res).toEqual({ ok: true, landed: { number: "INV-074", made: false, request: false, draft: false, job: null } });
     // A person typed it, so it reads "Payment recorded" and that person is not told about it.
     expect(spies.notified).toEqual([
       ["org-1", ["office-2", "office-3"], "invoice_paid", { title: "Payment recorded", body: "$624.49 on INV-074 — Jason Wexley", url: `/billing/${PAID_INV}` }],

@@ -8,12 +8,12 @@
 // ERIK NAMED IT (2026-09-30): "instead of todayy's 6 lets not limit it and call it something more
 // clear like Tasks & Reminders". So there is no cap on this card and no "6" in its words. The rows
 // are the person's own REMINDERS (tasks with no job), and only they are ranked, marked and counted here.
-// A JOB'S TASKS come under them since cn-v1175, one row per job (job-task-rows.tsx), and never in a
-// number at the top: Erik, 2026-11-21, "a job's full list of tasks shouldnt be all counted in the top
-// badge but subdivided with a drop down in the list and stated as that job's tasks with its own mini
-// badge so we can keep the flowe easier on the eye". Each job's row has its own small badge (that job's
-// open tasks only) and a drop-down, shut by default; DoneMarks, the head counts and the rank below never
-// read a job's task (0358's "never stockpiled here" was about the six, and the six stays Reminders).
+// NO JOB'S TASK LIST rides on this card (cn-v1179). cn-v1175 put each job's open tasks under the
+// Reminders, one row per job; the owner took them off again (2026-11-22: "i dont think i need or want
+// all of the scheduled jobs' tasks lists on my day its way too much [...] reminders can just be
+// reminders"). A job's list is on the job's Tasks tab, the one the office flags is a Needs You row,
+// and the job on the clock keeps its tasks on the Now card. DoneMarks, the head counts and the rank
+// below never read a job's task.
 // The Reminders: the server picks them with THE shared rank
 // (lib/six-rank: carried pins, today's pins, overdue, due today, flagged undated, then the plain
 // ones — the same function behind the morning digest, so the phone and the card can never disagree)
@@ -41,7 +41,6 @@ import { formatDate } from "@/lib/utils";
 import { carriedDay, carriedPin, isPinned, ranksToday } from "@/lib/six-rank";
 import { createTask, toggleTask, updateTask, type ToggleTaskResult } from "../tasks/actions";
 import { taskHref } from "@/lib/task-href";
-import { JobTaskRows, type JobTasksInput } from "./job-task-rows";
 
 /** A ranked row (lib/six-rank picks it). A Reminder: no job. focus_date crosses as-is and the card
  *  asks lib/six-rank what it means — the pin's definition has ONE home, and it used to have three. */
@@ -256,7 +255,6 @@ export function YourList({
   doneToday,
   restCount,
   jobs = [],
-  jobTasks,
 }: {
   /** The day's Reminders, already in rank order. No cap — Erik: "lets not limit it". */
   rows: SixSlot[];
@@ -270,9 +268,6 @@ export function YourList({
   restCount: number;
   /** The Add line's job chip. Empty: the line adds Reminders only. */
   jobs?: AddJob[];
-  /** A job's open tasks, one row per job under the Reminders (cn-v1175). Omitted: no section. Never
-   *  part of DoneMarks, `rows` or any count in the head. */
-  jobTasks?: JobTasksInput;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -576,8 +571,6 @@ export function YourList({
           {fillText(t("md_moreForYou"), { n: String(restCount) })}
         </Link>
       )}
-      {/* A JOB'S TASKS, under the Reminders, one row per job with its own badge (job-task-rows.tsx). */}
-      {jobTasks && <JobTaskRows input={jobTasks} />}
     </Card>
   );
 }

@@ -16,7 +16,9 @@ import { isPrepaymentKind } from "@/lib/prepayments";
  * WHERE A JOB ON HOLD SITS (Wave 1, lane 5; 0366's hold_until), decided on each held row:
  *   "later"   its day is after today: it waits in the Waiting fold, "Back Oct 3";
  *   "back"    its day is today or earlier: a Reminder on Needs You ("Back Today", "Back since Sep 30");
- *   "no_day"  it has no day (held before 0366): a Reminder too, "No Day Set", whose Snooze picks one.
+ *   "no_day"  it has no day: it waits in the Waiting fold too, "No Day Set" (cn-v1179, the owner by
+ *             picture: "seems like thats abetter spot for it"); its job's Snooze picks one. Only a
+ *             database without the hold-day columns keeps it a Reminder on Needs You.
  * No updated_at proxy any more: a hold was "a week untouched" only because it had no day of its own.
  */
 export function heldJobState(holdUntil: string | null | undefined, todayStr: string): "later" | "back" | "no_day" {

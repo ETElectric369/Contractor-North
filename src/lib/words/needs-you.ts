@@ -19,8 +19,8 @@ import type { WordCatalog } from "./types";
  * Bills Cuentas. A clickable is ny_btn_…, Title Case in both languages (tests/words-parity); a WHAT
  * phrase (ny_w_…) is sentence case and is never a button.
  *
- * Reused, never re-added: su_didntReachServer, ag_btn_backOn, ld_btn_openTheInspection, ld_btn_schedule,
- * ag_cal_btn_moreFor, md_needsYou, md_nothingNeedsYou.
+ * Reused, never re-added: su_didntReachServer, ag_btn_backOn, ag_btn_openTheJob, ld_btn_openTheInspection,
+ * ld_btn_schedule, ag_cal_btn_moreFor, md_needsYou, md_nothingNeedsYou.
  */
 export const words: WordCatalog = {
   prefix: "ny_",
@@ -155,6 +155,8 @@ export const words: WordCatalog = {
     ny_w_unreadSupplierPay: "Couldn't check what's due to your suppliers just now, so a discount deadline may be missing here. Open Bills to see it.",
     ny_w_unreadHours: "Couldn't read the shifts that are on no job just now. Open Timecards to see them.",
     ny_w_unreadLeads: "Couldn't read your leads just now. Open Leads to see them.",
+    // cn-v1179: the flagged job tasks' Couldn't Check line.
+    ny_w_unreadFlaggedTasks: "Couldn't read the flagged job tasks just now. Open a job's Tasks tab to see them.",
     ny_w_hoursNotAllListed: "The newest {n} shifts on no job are all billed, empty or today's, so older ones weren't checked.",
     // The age at the right edge, and the dated words (lib/action-items/dated-when).
     ny_ageOverdue: "{n}d overdue",
@@ -167,6 +169,8 @@ export const words: WordCatalog = {
     ny_datedStarted: "Started {day}",
     // The box's own form and lines.
     ny_waiting: "Waiting",
+    // cn-v1179: a job on hold with no day, in the fold ("<job> · <reason> · No Day Set").
+    ny_btn_noDaySet: "No Day Set",
     // cn-v1175: the grey fold of rows that waited thirty days (a button: Title Case), and its one line.
     ny_older: "Older",
     ny_olderWhy: "Waiting 30 days or more. Not counted in the numbers above.",
@@ -214,6 +218,7 @@ export const words: WordCatalog = {
     ny_btn_pile_contractsNotSigned: "Contracts Not Signed",
     ny_btn_pile_lienDeadlines: "Lien Deadlines",
     ny_btn_pile_permitInspections: "Permit Inspections",
+    ny_btn_pile_flaggedTasks: "Flagged Tasks",
     // Each row's one named button and what its ⋯ holds (lib/action-items/row-buttons).
     ny_btn_payName: "Pay {name}",
     ny_btn_paySupplier: "Pay Supplier",
@@ -264,6 +269,11 @@ export const words: WordCatalog = {
     // cn-v1172: No Answer Yet is the Closing list's; its button is Closing's Send Again.
     ny_btn_sendAgain: "Send Again",
     ny_btn_seeAllInClosing: "See All in Closing",
+    // cn-v1179: a flagged job task's button (its second is ag_btn_openTheJob).
+    ny_btn_checkOff: "Check Off",
+    // cn-v1179 (skeptic #82, S5): Check Off on a flagged task that still has open steps. A row cannot
+    // answer the task door's question, so it names the one way through (the row's own Open the Job).
+    ny_taskHasOpenSteps: "This task still has open steps. Open the Job to check them off.",
   },
   es: {
     ny_markNow: "Atender hoy",
@@ -384,6 +394,7 @@ export const words: WordCatalog = {
     ny_w_unreadSupplierPay: "No se pudo revisar lo que debes a tus proveedores, así que puede faltar aquí la fecha de un descuento. Abre Cuentas para verla.",
     ny_w_unreadHours: "No se pudieron leer los turnos sin trabajo. Abre Tarjetas de Tiempo para verlos.",
     ny_w_unreadLeads: "No se pudieron leer tus prospectos. Abre Prospectos para verlos.",
+    ny_w_unreadFlaggedTasks: "No se pudieron leer las tareas marcadas de los trabajos. Abre la pestaña Tareas de un trabajo para verlas.",
     ny_w_hoursNotAllListed: "Los {n} turnos sin trabajo más recientes ya están facturados, vacíos o son de hoy, así que no se revisaron los anteriores.",
     ny_ageOverdue: "{n}d de retraso",
     ny_ageAgo: "hace {n}d",
@@ -394,6 +405,7 @@ export const words: WordCatalog = {
     ny_datedSent: "Se envió el {day}",
     ny_datedStarted: "Empezó el {day}",
     ny_waiting: "En Espera",
+    ny_btn_noDaySet: "Sin Día",
     ny_older: "Más Antiguos",
     ny_olderWhy: "Esperando 30 días o más. No se cuentan en los números de arriba.",
     ny_couldntDoThat: "No se pudo. Inténtalo de nuevo.",
@@ -438,6 +450,7 @@ export const words: WordCatalog = {
     ny_btn_pile_contractsNotSigned: "Contratos sin Firmar",
     ny_btn_pile_lienDeadlines: "Plazos de Gravamen",
     ny_btn_pile_permitInspections: "Inspecciones de Permisos",
+    ny_btn_pile_flaggedTasks: "Tareas Marcadas",
     ny_btn_payName: "Pagar a {name}",
     ny_btn_paySupplier: "Pagar al Proveedor",
     ny_btn_fixTheClock: "Corregir el Reloj",
@@ -486,5 +499,7 @@ export const words: WordCatalog = {
     ny_btn_signedOnPaper: "Firmado en Papel",
     ny_btn_sendAgain: "Enviar de Nuevo",
     ny_btn_seeAllInClosing: "Ver Todos en Cierre",
+    ny_btn_checkOff: "Marcar como Hecha",
+    ny_taskHasOpenSteps: "Esta tarea aún tiene pasos abiertos. Abre el Trabajo para marcarlos.",
   },
 };

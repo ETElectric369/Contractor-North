@@ -88,6 +88,8 @@ export interface LineTask {
   gone?: boolean;
   /** The task's own minutes (0395), as stored; null or absent = none. */
   planned_minutes?: number | null;
+  /** The office's flag (tasks.priority, 0 = none; cn-v1179): above 0 the task is on Needs You. */
+  priority?: number | null;
 }
 
 /** Any other task on the job: a visit's ("task:<id>") or one made by hand (no key). Never removed here. */
@@ -99,9 +101,17 @@ export interface OtherTask {
   planned_minutes?: number | null;
 }
 
-/** Something a person added to the task: it is his now, and leaves only by his hand. */
-export const isHisTask = (t: Pick<LineTask, "notes" | "photo_path" | "has_steps">): boolean =>
-  !!(t.notes && t.notes.trim()) || !!t.photo_path || !!t.has_steps;
+/**
+ * Something a person added to the task: it is his now, and leaves only by his hand.
+ *
+ * A FLAG IS HIS TOO (cn-v1179). The office can flag a job task so it stands on Needs You ("there are
+ * some tasks id like to flag as a reminder to do for certain jobs", the owner, 2026-11-22). This rule
+ * was written before a job task could carry a flag, and read a flagged task with no notes, photo or
+ * steps as bare: when its estimate line went away the sync deleted it, and the thing he had asked to
+ * be reminded of left Needs You without a word. A flagged task is kept like one with notes.
+ */
+export const isHisTask = (t: Pick<LineTask, "notes" | "photo_path" | "has_steps" | "priority">): boolean =>
+  !!(t.notes && t.notes.trim()) || !!t.photo_path || !!t.has_steps || (Number(t.priority) || 0) > 0;
 
 /** A DISMISSAL ("<key>#<title>", cn-v1084) is read and written by born-with-tasks now, so the birth
  *  honors the list the sync does (cn-v1134); the delete door keeps importing the writer from here. */
@@ -383,7 +393,7 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho, lang: Lang 
   if (est.error) return { ...NONE, error: est.error };
   const wanted = tasksFromLines(est.lines).tasks;
 
-  let tq = sb.from("tasks").select("id, source_key, title, status, notes, photo_path, parent_id, planned_minutes").eq("job_id", who.jobId);
+  let tq = sb.from("tasks").select("id, source_key, title, status, notes, photo_path, parent_id, planned_minutes, priority").eq("job_id", who.jobId);
   if (who.orgId) tq = tq.eq("org_id", who.orgId);
   const { data: rows, error: tErr } = await tq.order("sort_order").order("created_at");
   if (tErr) return { ...NONE, error: dbError(tErr) };
@@ -465,8 +475,9 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho, lang: Lang 
   let kept = plan.kept.length;
   const keptNames = plan.kept.map((t) => t.title);
   if (plan.remove.length) {
-    // Conditional on what was read: a task checked off or photographed in the meantime is not removed — it is kept.
-    let dq = sb.from("tasks").delete().in("id", plan.remove).eq("job_id", who.jobId).eq("status", "open").is("photo_path", null);
+    // Conditional on what was read: a task checked off, photographed or flagged in the meantime is not
+    // removed — it is kept. (priority is not null, default 0: 0 is "no flag".)
+    let dq = sb.from("tasks").delete().in("id", plan.remove).eq("job_id", who.jobId).eq("status", "open").is("photo_path", null).eq("priority", 0);
     if (who.orgId) dq = dq.eq("org_id", who.orgId);
     const { data, error } = await dq.select("id");
     if (error) return { ...NONE, rekeyed, error: dbError(error) };
@@ -626,7 +637,7 @@ export function syncWords(r: SyncResult, lead?: string, lang: Lang = "en", words
   if (r.inserted) bits.push(n(r.inserted, "qs_lib_tasksAdded", `${plural(r.inserted, "task", "tasks")} added`));
   if (r.rekeyed) bits.push(n(r.rekeyed, "qs_lib_tasksMatched", `${r.rekeyed} matched`));
   if (r.removed) bits.push(n(r.removed, "qs_lib_tasksRemoved", `${r.removed} removed`));
-  if (r.kept) bits.push(n(r.kept, "qs_lib_tasksKept", `${r.kept} kept${few(r.keptNames)} — done, or with notes, a photo or steps`, { names: few(r.keptNames) }));
+  if (r.kept) bits.push(n(r.kept, "qs_lib_tasksKept", `${r.kept} kept${few(r.keptNames)} — done, flagged, or with notes, a photo or steps`, { names: few(r.keptNames) }));
   if (r.leftOff?.length) bits.push(n(r.leftOff.length, "qs_lib_tasksLeftOff", `${r.leftOff.length} left off${few(r.leftOff)} — deleted from the job before`, { names: few(r.leftOff) }));
   if (r.twice?.length) bits.push(n(r.twice.length, "qs_lib_tasksTwice", `${r.twice.length} on the list twice${few(r.twice)} — remove one`, { names: few(r.twice) }));
   if (r.leftAlone?.length) bits.push(n(r.leftAlone.length, "qs_lib_tasksLeftAlone", `${r.leftAlone.length} left alone${few(r.leftAlone)} — an estimate not yet accepted still has them`, { names: few(r.leftAlone) }));

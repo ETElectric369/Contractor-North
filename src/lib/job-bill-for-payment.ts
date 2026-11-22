@@ -21,8 +21,60 @@
  * exactly that reason, so the person is asked instead, and a partial still just lands.
  */
 import { invoiceBalance } from "./invoice-math";
+import { isPrepaymentKind } from "./prepayments";
+import type { JobAfterPay } from "./complete-job-when-paid";
 
-export type JobBillRow = { id: string; invoice_number: string | null; status: string | null; total: number | string | null; amount_paid: number | string | null };
+export type JobBillRow = {
+  id: string;
+  invoice_number: string | null;
+  status: string | null;
+  total: number | string | null;
+  amount_paid: number | string | null;
+  /** Read where the bill is NAMED (the Get Paid sheet): a payment request is said as one. */
+  invoice_kind?: string | null;
+};
+
+/**
+ * THE JOB'S OPEN BILLS, by the one rule this door and the Get Paid sheet both read: a non-void bill with
+ * money still owed, oldest first as handed in. A PAYMENT REQUEST counts (a deposit asked ahead and not yet
+ * paid IS a bill the customer holds, and settleUp lands a payment on it when it is the only one); the
+ * sheet names it as a payment request, never as the job's bill for the work (cn-v1179).
+ */
+export function openJobBills<R extends JobBillRow>(rows: readonly R[]): { row: R; balance: number }[] {
+  return rows
+    .filter((r) => String(r.status ?? "") !== "void")
+    .map((row) => ({ row, balance: invoiceBalance(Number(row.total ?? 0), Number(row.amount_paid ?? 0)) }))
+    .filter((x) => x.balance > 0.005);
+}
+
+/** One open bill as the Get Paid sheet names it: its number, what is left, a draft said as a draft,
+ *  a payment request said as one. */
+export type OpenBillView = { id: string; number: string | null; balance: number; draft: boolean; request: boolean };
+
+export function openBillViews(rows: readonly JobBillRow[]): OpenBillView[] {
+  return openJobBills(rows).map(({ row, balance }) => ({
+    id: row.id,
+    number: row.invoice_number ?? null,
+    balance,
+    draft: String(row.status ?? "") === "draft",
+    request: isPrepaymentKind(row.invoice_kind),
+  }));
+}
+
+/**
+ * WHAT A RECORDED PAYMENT DID, for the sheet to say (cn-v1179, G3): the bill that took the money (made
+ * just now or not; a payment request said as one; a draft said as one: it holds no receipt yet), and what
+ * became of the job. `again`: the same tap a moment ago already recorded it; nothing was added.
+ */
+export type PaymentLanded = {
+  number: string | null;
+  made: boolean;
+  request: boolean;
+  draft: boolean;
+  /** null: the bill is on no job. */
+  job: JobAfterPay | null;
+  again?: boolean;
+};
 
 export type JobBillChoice =
   | { kind: "none" }
@@ -38,13 +90,10 @@ export function jobBillForPayment(
     amount?: number | null;
   },
 ): JobBillChoice {
-  const open = rows
-    .filter((r) => String(r.status ?? "") !== "void")
-    .map((r) => ({ r, balance: invoiceBalance(Number(r.total ?? 0), Number(r.amount_paid ?? 0)) }))
-    .filter((x) => x.balance > 0.005);
+  const open = openJobBills(rows);
   if (!open.length) return { kind: "none" };
-  if (open.length > 1) return { kind: "ambiguous", bills: open.map((x) => ({ number: x.r.invoice_number ?? "an invoice", balance: x.balance })) };
-  const [{ r, balance }] = open;
+  if (open.length > 1) return { kind: "ambiguous", bills: open.map((x) => ({ number: x.row.invoice_number ?? "an invoice", balance: x.balance })) };
+  const [{ row: r, balance }] = open;
   const amount = Number(opts.amount);
   const paysItAll = Number.isFinite(amount) && amount > 0 && amount >= balance - 0.005;
   if (String(r.status ?? "") === "draft" && (opts.card || paysItAll)) return { kind: "needsSend", bill: r, balance };

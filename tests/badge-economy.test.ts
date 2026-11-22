@@ -20,11 +20,24 @@ const src = (rel: string) => readFileSync(new URL(`../src/${rel}`, import.meta.u
 describe("badge economy: the inbox is decisions-only (the task feeder stays dead)", () => {
   const querySrc = src("lib/action-items/query.ts");
 
-  it("never emits kind 'task' or 'work_order' — the feeder and its projection are deleted", () => {
-    // Structural: the union must not query tasks at all, nor project the kinds.
-    expect(querySrc).not.toContain('.from("tasks")');
+  // RE-PINNED ON PURPOSE (cn-v1179, decision B; the owner: "there are some tasks id like to flag as a
+  // reminder to do for certain jobs sometimes [...] so maybe these tasks should go in the needs you under
+  // operations instead"). The old task feeder stays dead: the union reads tasks ONCE, and that read is
+  // the flagged JOB tasks only (priority > 0, a job set, open by the one rule), capped and counted.
+  it("never emits kind 'task' or 'work_order'; its one tasks read is the flagged job tasks, never a Reminder, capped", () => {
     expect(querySrc).not.toContain('kind: "task"');
     expect(querySrc).not.toContain('kind: "work_order"');
+    expect(querySrc.match(/\.from\("tasks"\)/g)).toHaveLength(1);
+    const read = querySrc.slice(querySrc.indexOf('.from("tasks")') - 200, querySrc.indexOf('.from("tasks")') + 600);
+    expect(read).toContain("whereJobTaskOpen(");
+    expect(read).toContain("${OPEN_TASK_JOB.replace(");
+    expect(read).toContain('.not("job_id", "is", null)');
+    expect(read).toContain('.gt("priority", 0)');
+    expect(read).toContain(".limit(FLAGGED_TASKS_READ)");
+    expect(read).toContain('{ count: "exact" }');
+    expect(querySrc).toContain("counts.flagged_tasks = codeCount(flaggedR);");
+    // Staff only: a tech's build reads no task at all.
+    expect(querySrc).toMatch(/const flaggedP: Promise<Read> = isStaff\s*\?/);
   });
 
   it("no feeder counts an undated set as due-now (the due-now-forever cut is gone)", () => {
@@ -207,9 +220,12 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(digestSrc).not.toContain("Needs action:");
   });
 
-  it("the morning push counts every hold that is back (its day today or earlier, or no day), filtered to the company, and it joins the decisions", () => {
+  // RE-PINNED ON PURPOSE (cn-v1179, decision D): a hold with no day waits in the fold and counts in no
+  // number, so the morning does not count it either.
+  it("the morning push counts every hold that is back (its day today or earlier, never no day), filtered to the company, and it joins the decisions", () => {
     const digestSrc = src("lib/action-items/digest.ts");
-    expect(digestSrc).toMatch(/\.from\("jobs"\)\s*\.select\("id", \{ count: "exact", head: true \}\)\s*\.eq\("org_id", org\.id\)\s*\.eq\("status", "on_hold"\)\s*\.or\(`hold_until\.is\.null,hold_until\.lte\.\$\{today\}`\)/);
+    expect(digestSrc).toMatch(/\.from\("jobs"\)\s*\.select\("id", \{ count: "exact", head: true \}\)\s*\.eq\("org_id", org\.id\)\s*\.eq\("status", "on_hold"\)\s*\.lte\("hold_until", today\)/);
+    expect(digestSrc).not.toContain("hold_until.is.null");
     expect(digestSrc).toContain("const decisions = holdsBack + (invR.count ?? 0) + (leadR.count ?? 0);");
     // First line, and it stands for every hold it counts.
     expect(digestSrc.indexOf("decisionTitles.push(holdsBackLine(holdsBack))")).toBeLessThan(digestSrc.indexOf("Invoice ${i.invoice_number} overdue"));

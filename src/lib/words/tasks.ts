@@ -105,6 +105,10 @@ export const words: WordCatalog = {
     tk_photoAfterMigration: "The photo is on the job's Photos tab. Photos on tasks start after the next database update.",
     tk_taskNotDoneAnymore: "That task isn't checked off any more, so the photo stays on the Photos tab.",
     tk_jobOverNoTask: "This job is over, so it takes no new tasks: set its status back to In Progress first.",
+    // ── the flag on a job's task (setJobTaskFlag, cn-v1179): flagged = on Needs You, under Operations ──
+    tk_flagStaffOnly: "Only the office can flag a job's task for Needs You. You can still check it off.",
+    tk_flagJobTaskOnly: "This flag is for a job's task. A Reminder keeps its own flag on Tasks & Reminders.",
+    tk_flagDoneTask: "This task is checked off, so it can't go on Needs You. Reopen it first.",
   },
   es: {
     // ── the page ──
@@ -197,5 +201,8 @@ export const words: WordCatalog = {
     tk_photoAfterMigration: "La foto está en la pestaña Fotos del trabajo. Las fotos en tareas empiezan después de la próxima actualización de la base de datos.",
     tk_taskNotDoneAnymore: "Esa tarea ya no está marcada como hecha, así que la foto se queda en la pestaña Fotos.",
     tk_jobOverNoTask: "Este trabajo ya terminó, así que no acepta tareas nuevas: primero regresa su estado a En Curso.",
+    tk_flagStaffOnly: "Solo la oficina puede poner bandera a una tarea del trabajo para Te Necesita. Aún puedes marcarla como hecha.",
+    tk_flagJobTaskOnly: "Esta bandera es para una tarea de un trabajo. Un Recordatorio tiene su propia bandera en Tareas y Recordatorios.",
+    tk_flagDoneTask: "Esta tarea ya está hecha, así que no puede ir a Te Necesita. Reábrela primero.",
   },
 };

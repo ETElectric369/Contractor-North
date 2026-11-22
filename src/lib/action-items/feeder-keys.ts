@@ -32,6 +32,7 @@ export const FEEDER_SAY_KEYS = [
   "ny_btn_pile_doneNotBilled",
   "ny_btn_pile_permitInspections",
   "ny_btn_pile_leadsToCall",
+  "ny_btn_pile_flaggedTasks",
   // Which paper an estimate row names (`docKey`).
   "ny_docEstimate",
   "ny_docQuote",
@@ -112,6 +113,7 @@ export const FEEDER_SAY_KEYS = [
   "ny_w_unreadSupplierPay",
   "ny_w_unreadHours",
   "ny_w_unreadLeads",
+  "ny_w_unreadFlaggedTasks",
   "ny_w_hoursNotAllListed",
 ] as const;
 

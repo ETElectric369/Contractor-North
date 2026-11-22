@@ -10,16 +10,32 @@ import type { ActionKind, Affordance } from "./types";
  * stripped HERE, to the record the verb writes, so a verb never writes zero rows and reports success
  * (the silent-write law): unbilled-<visit> / jdone-<job> (visit_unbilled), qdraft-<estimate>
  * (quote_draft), onhold-<job> (job_on_hold), nocosts-<job> (job_unbilled_work), materials-<job>
- * (materials_needed), receipt-<document> (receipt_unbilled). A won estimate's day goes on its JOB,
- * which the row names as `target`.
+ * (materials_needed), receipt-<document> (receipt_unbilled), flagtask-<task> (job_task_flagged). A won
+ * estimate's day goes on its JOB, which the row names as `target`.
  *
- * No task arms and no convert branch (Wave 1, W1-16): tasks and Reminders never reach Needs You
- * (0358). The registry keeps task.* and inquiry.convert for Nort; nothing here reaches them. Nor
- * inquiry.delete: a lead's ending is inquiry.markLost (Not Sold, kept on file), never a deletion.
+ * ONE task arm, no convert branch: a Reminder never reaches Needs You (0358), and of a job's tasks only
+ * the ones the office flagged do (cn-v1179), whose Check Off is task.complete, the registry's door over
+ * tasks/actions toggleTask (the same check-off the job's Tasks tab makes). inquiry.convert stays Nort's.
+ * Nor inquiry.delete: a lead's ending is inquiry.markLost (Not Sold, kept on file), never a deletion.
  */
 export type DispatchPayload = { date?: string; assignee?: string; reason?: string };
 
 export type Mapped = { name: string; input: Record<string, unknown> };
+
+/**
+ * A REFUSAL A ROW CANNOT ANSWER, NAMED (cn-v1179, skeptic #82, S5). A flagged task's Check Off runs
+ * task.complete with no cascade; on a task that still has open steps toggleTask refuses with a QUESTION
+ * (complete them too?) that a Needs You row has no way to ask. The row never sends cascade (that would
+ * close steps nobody looked at): it says one sentence naming its one way through, its own Open the Job.
+ * The sentence is the catalog's (ny_taskHasOpenSteps), said by the list in the reader's language; the
+ * English here is what a caller that reads no `why` shows.
+ */
+export type DispatchWhy = "openSteps";
+export const DISPATCH_WHY_KEY: Record<DispatchWhy, string> = { openSteps: "ny_taskHasOpenSteps" };
+export const OPEN_STEPS_EN = "This task still has open steps. Open the Job to check them off.";
+export function refusalWhy(kind: ActionKind, verb: Affordance, res: { ok: boolean; needsCascade?: unknown }): DispatchWhy | null {
+  return !res.ok && kind === "job_task_flagged" && verb === "do" && res.needsCascade === true ? "openSteps" : null;
+}
 
 /** The record id inside a row id, when it carries `prefix`; null when it doesn't. */
 export function recordId(rowId: string, prefix: string): string | null {
@@ -49,6 +65,11 @@ export function resolveRowVerb(
     if (kind === "quote_awaiting") return { name: "quote.setStatus", input: { id, status: "accepted" } };
     // Signed on Paper: recorded by the office, signed by the contract's customer, today.
     if (kind === "contract_unsigned") return { name: "contract.recordPaperSignature", input: { id } };
+    // Check Off a flagged job task (cn-v1179): the task itself, done.
+    if (kind === "job_task_flagged") {
+      const task = recordId(id, "flagtask-");
+      return task ? { name: "task.complete", input: { id: task, done: true } } : null;
+    }
     return null;
   }
 

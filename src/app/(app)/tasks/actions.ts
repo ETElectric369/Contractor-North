@@ -71,6 +71,13 @@ async function zeroRowsReason(supabase: Client, say: Say, id: string, verb: "cha
   return say("tk_taskNotFound");
 }
 
+/** Is the signed-in caller the office (owner/admin/office: lib/actions/perms isStaffRole)? A failed
+ *  read is not staff: a refusal in words beats a flag a tech was never meant to set. */
+async function callerIsStaff(supabase: Client, uid: string): Promise<boolean> {
+  const { data: me } = await supabase.from("profiles").select("role").eq("id", uid).maybeSingle();
+  return isStaffRole((me as { role?: string } | null)?.role ?? "");
+}
+
 export type CreateTaskResult = Result & {
   /** The row now representing this task — the EXISTING one on a duplicate hit. */
   id?: string;
@@ -126,6 +133,12 @@ export async function createTask(input: {
     const { data: j } = await supabase.from("jobs").select("id, status").eq("id", input.job_id).maybeSingle();
     if (!j) return { ok: false, error: await say("tk_jobUnavailable") };
     if (isEndedJob((j as { status?: string | null }).status)) return { ok: false, error: await say("tk_jobOverNoTask") };
+  }
+  // A JOB TASK'S FLAG IS THE OFFICE'S (cn-v1179): priority > 0 on a job task puts it on Needs You, so a
+  // tech's add carries none. (No door sends one today: the job's Add line sends no priority and the
+  // assistant sends 0 on a job; this holds the rule for a crafted call.)
+  if (input.job_id && (input.priority ?? 0) > 0 && !(await callerIsStaff(supabase, user.id))) {
+    return { ok: false, error: await say("tk_flagStaffOnly") };
   }
   // A STEP LIVES WHERE ITS TASK LIVES: a step of a job's task is on that job (so the crew sees it),
   // a step of a Reminder is private with it. Unless the caller named the job itself.
@@ -414,7 +427,19 @@ export async function updateTask(
   }
   if (patch.due_date !== undefined) clean.due_date = patch.due_date || null;
   if (patch.focus_date !== undefined) clean.focus_date = patch.focus_date || null;
-  if (patch.priority !== undefined) clean.priority = patch.priority;
+  if (patch.priority !== undefined) {
+    // A JOB TASK'S FLAG IS THE OFFICE'S (cn-v1179): on a job's task, priority > 0 is the flag that puts
+    // it on Needs You (setJobTaskFlag is its door). A Reminder's priority stays its own person's.
+    const { data: cur } = await supabase.from("tasks").select("job_id").eq("id", id).maybeSingle();
+    const onJob = patch.job_id !== undefined ? !!clean.job_id : !!(cur as { job_id?: string | null } | null)?.job_id;
+    if (onJob) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user || !(await callerIsStaff(supabase, user.id))) return { ok: false, error: await say("tk_flagStaffOnly") };
+    }
+    clean.priority = patch.priority;
+  }
   if (patch.assigned_to) {
     // A job's task has no assignee (0358): refused in words, never stored beside the job.
     const { data: cur } = await supabase.from("tasks").select("job_id").eq("id", id).maybeSingle();
@@ -445,6 +470,53 @@ export async function updateTask(
   const newJobId = clean.job_id as string | null | undefined;
   if (newJobId && newJobId !== opts?.jobId) revalidatePath(`/jobs/${newJobId}`);
   return { ok: true };
+}
+
+export type SetJobTaskFlagResult = Result & {
+  /** The flag as stored after the write (true = on Needs You while the task is open). */
+  flagged?: boolean;
+};
+
+/**
+ * THE FLAG ON A JOB'S TASK (cn-v1179). The owner, 2026-11-22: "there are some tasks id like to flag as
+ * a reminder to do for certain jobs sometimes like [a job: print panel labels] and that will help me a
+ * lot with prep items and final details [...] so maybe these tasks should go in the needs you under
+ * operations instead and reminders can just be reminders".
+ *
+ * The flag is the column a Reminder's flag already is: `priority` (0018), flagged = priority > 0, so no
+ * new column and one meaning. Stored as 1 (flagged) or 0. Every OPEN flagged job task is a Needs You row
+ * under Operations (lib/action-items); checking it off takes it off, and un-flagging here is the other
+ * way out. Only the office sets it (a tech sees the mark and checks the task off); only on a job's task
+ * (a Reminder keeps its own flag on Tasks & Reminders); a task already checked off takes no new flag
+ * (it could never be a row), though its flag can always be taken off. The silent-write law: the write
+ * reads its row back, and a zero-row answer is said in words.
+ */
+export async function setJobTaskFlag(id: string, flagged: boolean, opts?: { jobId?: string | null }): Promise<SetJobTaskFlagResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { say } = wordsOf(supabase);
+  if (!user) return { ok: false, error: await say("tk_notSignedIn") };
+  if (!(await callerIsStaff(supabase, user.id))) return { ok: false, error: await say("tk_flagStaffOnly") };
+  const { data: row, error: readErr } = await supabase.from("tasks").select("id, job_id, status").eq("id", id).maybeSingle();
+  if (readErr) return { ok: false, error: dbError(readErr) };
+  if (!row) return { ok: false, error: await say("tk_taskNotFound") };
+  const jobId = (row as { job_id?: string | null }).job_id ?? null;
+  if (!jobId) return { ok: false, error: await say("tk_flagJobTaskOnly") };
+  if (flagged && (row as { status?: string | null }).status !== "open") return { ok: false, error: await say("tk_flagDoneTask") };
+  const { data: wrote, error } = await supabase
+    .from("tasks")
+    .update({ priority: flagged ? 1 : 0 })
+    .eq("id", id)
+    .eq("job_id", jobId)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!wrote?.length) return { ok: false, error: await zeroRowsReason(supabase, say, id, "change") };
+  // The job's page draws the flag; My Day holds Needs You, where the row lands (or leaves).
+  revalidateTaskViews(null, jobId);
+  if (opts?.jobId && opts.jobId !== jobId) revalidatePath(`/jobs/${opts.jobId}`);
+  return { ok: true, flagged };
 }
 
 export async function deleteTask(

@@ -22,15 +22,15 @@ describe("the icons", () => {
       .split(",")
       .map((s) => s.trim())
       .filter((s) => s && !s.startsWith("type "));
-    expect(names.length).toBe(22);
+    expect(names.length).toBe(23); // cn-v1179: Flag, the flagged job task's picture
     for (const n of names) expect(DTS, n).toContain(`declare const ${n}:`);
     expect(imports).not.toMatch(/\bFileSignature\b/);
     expect(SRC).not.toMatch(/\bFileSignature[,\s]*[}>]|<FileSignature\b/);
   });
 
-  it("every picture id has an icon, eighteen different ones; every tile has its own, none of them a row's", () => {
+  it("every picture id has an icon, nineteen different ones; every tile has its own, none of them a row's", () => {
     for (const id of new Set(Object.values(KIND_PICTURE))) expect(PICTURE_ICON[id], id).toBeTruthy();
-    expect(new Set(Object.values(PICTURE_ICON)).size).toBe(18);
+    expect(new Set(Object.values(PICTURE_ICON)).size).toBe(19);
     expect(new Set(Object.values(GROUP_ICON)).size).toBe(4);
     for (const g of GROUP_ORDER) expect(Object.values(PICTURE_ICON)).not.toContain(GROUP_ICON[g]);
   });
