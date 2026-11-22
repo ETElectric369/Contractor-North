@@ -11,8 +11,8 @@ import type { InspectionListState } from "@/lib/inspections";
 export type MenuDoor = "open" | "pickDay" | "move" | "happened" | "lost" | "del";
 
 /** The row's one boxed button: Start Inspection, Create Estimate, or Open Inspection; and for a visit
- *  marked Won with no job picked (cn-v1175, R8), Won · Pick the Job. */
-export type PrimaryKind = "start" | "estimate" | "open" | "pickJob";
+ *  marked Won with no job picked (cn-v1175, R8), Won · Start the Job (cn-v1176: the Won sheet). */
+export type PrimaryKind = "start" | "estimate" | "open" | "wonStart";
 
 /** One inspection on the list. */
 export type ListRow = {
@@ -56,7 +56,7 @@ export type FoldRow = { id: string; who: string; what: string; day: string | nul
  */
 export function primaryOf(state: InspectionListState, o: { decidable: boolean; estimatesOn: boolean; wonNoJob?: boolean }): PrimaryKind {
   // A WIN WITH NO JOB IS NOT AN ENDING (cn-v1175, R8): it stays on the list and asks for its job.
-  if (o.wonNoJob) return "pickJob";
+  if (o.wonNoJob) return "wonStart";
   if (state === "write_up") return o.estimatesOn ? "estimate" : "open";
   return o.decidable ? "start" : "open";
 }

@@ -5,6 +5,7 @@ import { inspectionFileHref, inspectionRowWords, rowTagWords, type FiledUnder, t
 import { dayWords, relativeWhen } from "@/lib/action-items/dated-when";
 import { happenedSaidKey, primaryOf, rowDoors, stateWordKey, type ListRow } from "./list-rows";
 import type { VisitOffer } from "@/lib/appointments/visit-offer";
+import { wonStartShown } from "@/lib/appointments/won-sheet";
 
 /**
  * ONE INSPECTION ROW, WORDED ON THE SERVER (cn-v1172: lifted out of the Inspections page). Erik,
@@ -90,7 +91,9 @@ export function inspectionRowBuilder(ctx: RowContext) {
     const words = wordsOf(a, state);
     const decidable = isDecidableVisitType(a.type);
     const wonNoJob = a.outcome === "won" && !a.job_id;
-    const kind = primaryOf(state, { decidable, estimatesOn, wonNoJob });
+    // cn-v1176 fix F2: the Won sheet's button only where the sheet takes the visit (won-sheet
+    // wonStartShown, ONE rule); any other Won visit with no job keeps the button that opens the visit.
+    const kind = primaryOf(state, { decidable, estimatesOn, wonNoJob: wonStartShown({ type: a.type, outcome: a.outcome, hasJob: !!a.job_id }) });
     const visitHref = `/appointments/${a.id}`;
     // THE BOXED BUTTON. Create Estimate: the capture prefills the estimator scope; the inquiry keeps
     // the lead threading (quotes/new also recovers it from the capture appointment when absent).
@@ -98,9 +101,9 @@ export function inspectionRowBuilder(ctx: RowContext) {
     const primary =
       kind === "estimate"
         ? { label: t("ip_btn_createEstimate"), href: `/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}` }
-        : kind === "pickJob"
-          ? // The visit page offers the job picker at once on a win with no job (visit-ending).
-            { label: t("vp_btn_wonPickTheJob"), href: visitHref }
+        : kind === "wonStart"
+          ? // A win with no job opens the Won sheet on the visit (cn-v1176: the job comes FROM the sale).
+            { label: t("vi_btn_wonStartTheJob"), href: `${visitHref}?won=1` }
           : { label: t(kind === "start" ? "ip_btn_startInspection" : "ip_btn_openInspection"), href: visitHref };
     const wordKey = stateWordKey(state, estimatesOn);
     return {
@@ -115,13 +118,14 @@ export function inspectionRowBuilder(ctx: RowContext) {
       visitHref,
       // A win with no job has one move behind its button: Not Sold, if the work went away after all.
       // A row with an offer keeps Open Inspection behind the ⋯ (the offer took the boxed button's place).
-      doors: withOpen(wonNoJob ? (decidable ? ["lost"] : []) : rowDoors(state, { primary: kind, decidable, hasStart: !!a.starts_at }), !!offer && !wonNoJob),
+      doors: withOpen(wonNoJob ? (decidable ? ["lost"] : []) : rowDoors(state, { primary: kind, decidable, hasStart: !!a.starts_at }), !!offer),
       startsAt: a.starts_at ?? null,
       endsAt: a.ends_at ?? null,
       happenedSaid: t(happenedSaidKey(estimatesOn)),
-      // THE OFFER (cn-v1175, R5): only where the row is not already asking for a job of its own.
-      offer: offer && offer.kind === "job" && !wonNoJob ? { id: offer.id, label: offer.label } : null,
-      offerOthers: offer && offer.kind === "job" && !wonNoJob ? offer.others.filter((o) => o.kind === "job").map(({ id, label }) => ({ id, label })) : [],
+      // THE OFFER (cn-v1175, R5), on a won row too (cn-v1176: restored): a job made for this customer
+      // after the visit is the likeliest answer to a win with no job, asked in place.
+      offer: offer && offer.kind === "job" ? { id: offer.id, label: offer.label } : null,
+      offerOthers: offer && offer.kind === "job" ? offer.others.filter((o) => o.kind === "job").map(({ id, label }) => ({ id, label })) : [],
     };
   };
 

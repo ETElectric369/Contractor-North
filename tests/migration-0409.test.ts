@@ -254,7 +254,9 @@ describe("migration 0409: born from an estimate", () => {
 
   describe("public.accept_public_quote: 0396's body, and only these additions", () => {
     it("0396 is the last migration that made it, and the ground check holds the live body to it", () => {
-      const makers = names.filter((n) => /function\s+(public\.)?accept_public_quote\s*\(/i.test(readFileSync(join(migrations, n), "utf8")));
+      // Historical (cn-v1176): 0413 re-made the function after this file, from this file's body; the
+      // makers up to and including 0409 are what this file was written against.
+      const makers = names.filter((n) => n < "0410_" && /function\s+(public\.)?accept_public_quote\s*\(/i.test(readFileSync(join(migrations, n), "utf8")));
       expect(makers.slice(-2)).toEqual(["0396_the_customers_address_on_the_public_accept.sql", "0409_born_from_an_estimate.sql"]);
       const between = names.filter((x) => x >= "0397_" && x < "0409_");
       expect(between.length).toBe(12); // 0397 … 0408

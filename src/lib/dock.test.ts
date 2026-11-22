@@ -14,6 +14,8 @@ import {
   navDrawnAt,
   visibleDock,
   type NavAt,
+  rowBadge,
+  tileBadge,
 } from "@/lib/dock";
 import { ALL_ON, FEATURE_KEYS, normalizeFeatures, type FeatureKey, type FeatureMap } from "@/lib/features";
 import { JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
@@ -865,5 +867,57 @@ describe("awaitsHome and navDrawnAt — the last settled location holds until th
       expect(existsSync(file), file).toBe(true);
       expect(readFileSync(file, "utf8"), file).toMatch(/<div className="mx-auto max-w-2xl">\s*<NavHome id=\{home\.nav\} \/>/);
     }
+  });
+});
+
+/**
+ * ONE NUMBER, ONE FUNCTION (cn-v1176, the owner's report: "Admin has a badge showing the number 1 but the
+ * subnav has no badges to follow up so I have no idea what that badge is for"). Admin's tile badge is
+ * Reconcile's count; the Reconcile row under Admin now says the SAME count from the SAME source (the
+ * layout's badge map, read through lib/dock rowBadge, which the tile's tileBadge sums). Re-pinned on
+ * purpose: the tile's old inline sum in dock.tsx is gone. Badges count only what is open; zero draws
+ * nothing.
+ */
+describe("a tile's badge always leads to a row", () => {
+  const admin = () => visibleDock({ isStaff: true }).find((s) => s.key === "invoices")!;
+  const recon = () => admin().children.find((c) => c.id === "m-recon")!;
+
+  it("the Reconcile row says the number Admin's tile says, from the same map", () => {
+    const badges = { "/reconcile": 1 };
+    expect(rowBadge(badges, recon())).toBe(1);
+    expect(tileBadge(badges, admin())).toBe(1);
+    // Every count on a tile is a row's: the tile is exactly the sum of its rows.
+    const many = { "/reconcile": 2, "/leads": 3, "/closing": 4, "/planner": 5 };
+    for (const s of dockTiles(visibleDock({ isStaff: true }))) {
+      expect(tileBadge(many, s), s.key).toBe(s.children.reduce((n, c) => n + rowBadge(many, c), 0));
+    }
+  });
+
+  it("zero, a negative, a missing or a non-number count draws nothing; a heading never counts", () => {
+    for (const v of [0, -2, Number.NaN, undefined, "3" as unknown as number]) {
+      expect(rowBadge({ "/reconcile": v as number }, recon())).toBe(0);
+      expect(tileBadge({ "/reconcile": v as number }, admin())).toBe(0);
+    }
+    expect(rowBadge({ "/reconcile": 1 }, { href: "/reconcile", header: true })).toBe(0);
+    expect(rowBadge(undefined, recon())).toBe(0);
+  });
+
+  it("the tile, the lg column, the sheet and the strip all read the one function; a row's count is slate, never amber", () => {
+    const dock = readFileSync(join(process.cwd(), "src/components/app-shell/dock.tsx"), "utf8");
+    expect(dock).toContain("const badge = tileBadge(badges, s);");
+    expect(dock).not.toContain("s.children.reduce((sum, c)");
+    expect(dock).toContain("<RowCount count={rowBadge(badges, c)} active={cur} />");
+    const rowCount = dock.slice(dock.indexOf("export function RowCount"), dock.indexOf("/** Never hand the renderer"));
+    expect(rowCount).toContain("if (!(count > 0)) return null;");
+    expect(rowCount).not.toMatch(/amber/);
+    const sheet = readFileSync(join(process.cwd(), "src/components/section-sheet.tsx"), "utf8");
+    expect(sheet).toContain("<RowCount count={rowBadge(badges, c)} active={cur} />");
+    const strip = readFileSync(join(process.cwd(), "src/components/section-subnav.tsx"), "utf8");
+    expect(strip).toContain("const badges = useBadges(badgesProp);");
+    expect(strip).toContain("badges={badges}");
+    expect(strip).toContain("<RowCount count={rowBadge(badges, c)} active={active} />");
+    const layout = readFileSync(join(process.cwd(), "src/app/(app)/layout.tsx"), "utf8");
+    expect(layout).toContain("<SectionSubnav isStaff={isStaff} features={doors} lapsed={lapsed} badges={badges} />");
+    expect(layout).toContain('"/reconcile": await reconcileP');
   });
 });

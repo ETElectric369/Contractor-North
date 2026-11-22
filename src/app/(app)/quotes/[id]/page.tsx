@@ -18,6 +18,8 @@ import { featureOn } from "@/lib/features";
 import { circuitCard } from "@/lib/estimate/circuit-card";
 import { translator } from "@/lib/i18n";
 import { currentLang } from "@/lib/current-lang";
+import { formatDate } from "@/lib/utils";
+import { acceptedLine } from "./accepted-line";
 
 export const dynamic = "force-dynamic";
 // The estimator runs inside this page's server actions (generateQuoteDraft and kin, quotes/actions):
@@ -185,6 +187,24 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   // The revision chain (0391): what this estimate revises, and — when it is superseded — the accepted
   // revision that replaced it (newest, if ever two).
   const revisesId = q.revises_quote_id ?? null;
+  // WHO SAID YES (cn-v1176, M6): while accepted, how and by whom (0413's two columns, in the row's `*`),
+  // the recorder's name read on its own (a gone profile is no name), the day in the company's zone.
+  const acceptedRow = q as { status?: string | null; accepted_how?: string | null; accepted_by?: string | null; accepted_at?: string | null };
+  let acceptedSaid: string | null = null;
+  if (acceptedRow.status === "accepted") {
+    const { data: who } = acceptedRow.accepted_by
+      ? await supabase.from("profiles").select("id, full_name").eq("id", acceptedRow.accepted_by).maybeSingle()
+      : { data: null };
+    acceptedSaid = acceptedLine(
+      {
+        status: acceptedRow.status,
+        how: acceptedRow.accepted_how ?? null,
+        byName: (who as { full_name?: string | null } | null)?.full_name ?? null,
+        day: acceptedRow.accepted_at ? formatDate(acceptedRow.accepted_at, orgS.timezone || undefined, await currentLang()) : null,
+      },
+      t,
+    );
+  }
   const [{ data: revisesRow }, { data: supersededRow }] = await Promise.all([
     revisesId ? supabase.from("quotes").select("id, quote_number, status, accepted_at").eq("id", revisesId).maybeSingle() : Promise.resolve({ data: null }),
     q.status === "superseded" ? revisionOf(supabase, { quoteId: q.id, orgId: null }).then((r) => ({ data: r })) : Promise.resolve({ data: null }),
@@ -247,6 +267,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           showCircuits: card.has,
           canAddCircuits: card.canAdd,
           panelJob: await panelJobFor(supabase, q, t("qt_theJob")),
+          acceptedSaid,
           // THE JOB SITE LINE (cn-v1158): the four records the paper picks its site from, each as its
           // five address columns and nothing else (lib/quote-site reads them in the print page's own
           // order), the job that owns the site once there is one, and the customer's other addresses.

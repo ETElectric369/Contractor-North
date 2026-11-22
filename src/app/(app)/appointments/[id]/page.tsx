@@ -8,6 +8,7 @@ import { smsReadiness } from "@/lib/sms";
 import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { UnscheduleButton } from "../unschedule-button";
 import { Inspector, type CapturePhoto, type InspectionTemplate } from "./inspector";
+import { WonSheetHost } from "./won-sheet";
 import { MapPin } from "lucide-react";
 import { BackLink } from "@/components/back-link";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
@@ -33,7 +34,8 @@ import { ACTIONS_ROW_CLS, SectionActionsMenu } from "@/components/section-action
 import type { NavTree } from "@/lib/nav-tree";
 import { wontHappenVerdict } from "@/lib/appointments/wont-happen";
 import { visitHome } from "@/lib/appointments/visit-home";
-import { inspectionHeaderStep, startAsked, startAskedHref, startCardShown, startRowShown, visitHeading } from "@/lib/appointments/inspection-page";
+import { bookSellPrice, inspectionHeaderStep, startAsked, startAskedHref, startCardShown, startRowShown, visitHeading, wonAsked, wonDoorShown } from "@/lib/appointments/inspection-page";
+import { ITEM_OPTIONS_EMBED, type OptionedPriceItem } from "@/lib/pricing/item-options";
 import { NavHome } from "@/components/nav-home";
 import { captureQuoteId, hasCaptureData } from "@/lib/inspections";
 import { isLiveQuote } from "@/lib/invoice-import-rule";
@@ -62,6 +64,9 @@ import {
 
 export const dynamic = "force-dynamic";
 
+/** One row of the price book as this page reads it (cn-v1176: with the item's markup and vendors). */
+type BookReadRow = Omit<OptionedPriceItem, "description"> & { code: string; description: string | null; unit: string | null };
+
 /** The table read's pre-0165 shape (the column isn't there yet): the one failure the page still
  *  reads as "no sheet", as tolerateMissingColumns always did. */
 function tolerableBefore0165(e: unknown): boolean {
@@ -87,6 +92,9 @@ export default async function AppointmentCapturePage({
   const { id } = await params;
   const sp = (await searchParams) ?? {};
   const openTask = typeof sp.task === "string" && /^[\w-]{1,80}$/.test(sp.task) ? sp.task : null;
+  // `?won=1` opens the Won sheet on the Inspector (cn-v1176): the lists' and the ending card's
+  // "Won · Start the Job" land here. The Inspector draws it for the office only.
+  const openWon = wonAsked(sp);
   const supabase = await createClient();
   // Who's looking — stamped onto anything the inspection sheet queues offline, so a shared phone
   // can never file one person's work under another's name.
@@ -144,9 +152,18 @@ export default async function AppointmentCapturePage({
     // Read tolerantly and unconditionally: it's a small table, and branching the query on whether
     // the playbook happens to contain a scopes need would break the moment somebody adds one.
     // Paged (audit v1085): PostgREST caps a read at 1,000 rows, and a big book lost its tail in silence.
-    tolerateMissingColumns<{ code: string; description: string | null; unit: string | null; buy_price: number | null }[]>(() =>
-      readAllPages<{ code: string; description: string | null; unit: string | null; buy_price: number | null }>((from, to) =>
-        supabase.from("price_list_items").select("code, description, unit, buy_price").eq("archived", false).order("code").order("id").range(from, to),
+    // cn-v1176 (the pick's price): with the item's markup and its vendors (ITEM_OPTIONS_EMBED), the
+    // fields the task path prices the same book part from, so a pick is seeded at that SAME sell price.
+    tolerateMissingColumns<BookReadRow[]>(() =>
+      readAllPages<BookReadRow>((from, to) =>
+        supabase
+          .from("price_list_items")
+          .select(`code, description, unit, buy_price, markup_pct, ${ITEM_OPTIONS_EMBED}`)
+          .eq("archived", false)
+          .eq("price_list_item_options.archived", false)
+          .order("code")
+          .order("id")
+          .range(from, to),
       ).then((r) => ({ data: r.error ? null : r.rows, error: r.error })),
     ),
     // THE TASK KITS (0386, W4), for a task's kit picker: by name, with their lines. Every money
@@ -400,6 +417,30 @@ export default async function AppointmentCapturePage({
   // below hold this same href, so the page says one name and one place for it, top and bottom.
   // Pricing is the office's: nobody else is handed the door to the estimator.
   const estimateHref = viewerIsStaff && estimatesOn ? `/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}` : null;
+  // WON · START THE JOB (cn-v1176, lib/appointments/inspection-page wonDoorShown): the office's door
+  // at the bottom of the Inspector; the sheet it opens asks the server what to show.
+  const wonDoor = wonDoorShown({
+    isStaff: viewerIsStaff,
+    type: a.type ?? null,
+    status: a.status ?? null,
+    outcome: (a as { outcome?: string | null }).outcome ?? null,
+    hasJob: !!a.job_id,
+  });
+  // THE PICK'S PRICE (cn-v1176): a scope pick starts at the sell price the task path gives the same
+  // book part, for the customer the estimate prices for (the visit's, else its lead's), through the
+  // one priceBookLine (lib/appointments/inspection-page bookSellPrice). The office only: nobody else
+  // is handed the book. A price already stored on the visit is the answer's, and is not touched here.
+  const pricingCustomerId = viewerIsStaff ? (a.customer_id ?? a.inquiries?.customer_id ?? null) : null;
+  const pricingLevelPct = pricingCustomerId
+    ? (((await supabase.from("customers").select("pricing_levels(markup_pct)").eq("id", pricingCustomerId).maybeSingle()).data as {
+        pricing_levels?: { markup_pct?: number | string | null } | { markup_pct?: number | string | null }[] | null;
+      } | null)?.pricing_levels ?? null)
+    : null;
+  const levelRow = Array.isArray(pricingLevelPct) ? (pricingLevelPct[0] ?? null) : pricingLevelPct;
+  const bookPricing = {
+    levelPct: levelRow?.markup_pct == null || levelRow.markup_pct === "" ? null : Number(levelRow.markup_pct),
+    orgDefaultPct: orgSettings.default_markup_pct,
+  };
 
   /* THE NAME START THE JOB WILL GIVE, resolved the way createJobFromAppointment resolves it (the
      visit's card, else the lead's card, else the lead; the lead's own spelling still only-who), so
@@ -647,6 +688,7 @@ export default async function AppointmentCapturePage({
           job={linkedJob ? { id: linkedJob.id, job_number: linkedJob.job_number, name: linkedJob.name } : null}
           tz={tz}
           seed={a.location ?? who ?? ""}
+          visitType={a.type ?? null}
         />
         {notesShown && <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{notesShown}</p>}
         {/* The customer's own answers, as answers. See the block above for why this is read-only
@@ -724,7 +766,7 @@ export default async function AppointmentCapturePage({
               code: p.code,
               description: p.description ?? "",
               unit: p.unit ?? "EA",
-              price: Number(p.buy_price ?? 0),
+              price: bookSellPrice({ ...p, description: String(p.description ?? "").trim() }, bookPricing),
             }))}
             // The kits reach the Inspector whatever the switch says: a task that already picked one still
             // names and previews it (the estimate and the job still expand it). The company's Kits switch
@@ -762,6 +804,9 @@ export default async function AppointmentCapturePage({
             // The estimate already written up from this visit: its door reads Open the Estimate while
             // it stands; a declined or expired one hands Start the Estimate back (cn-v1069).
             estimate={estimate}
+            // Won · Start the Job (cn-v1176): the door (decided above, office only) and `?won=1`.
+            wonDoor={wonDoor}
+            wonAsked={openWon}
             nortOn={featureOn(orgSettings.features, "nort")}
             buildOwn={featureOn(orgSettings.features, "safety_log")}
             // The linked lead's preliminary plan report — parsed server-side so the card is in the
@@ -780,6 +825,10 @@ export default async function AppointmentCapturePage({
           )}
         </>
       )}
+      {/* WON WHERE THE INSPECTOR IS NOT DRAWN (cn-v1176 fix F2): Leads off with nothing captured, or an
+          inspection read that failed. The lists' and the ending card's `?won=1` still open the one
+          sheet, through a small host with the same address rule (no save to wait for here). */}
+      {wonDoor && !(showInspector && !inspectionUnread) && <WonSheetHost appointmentId={a.id} wonAsked={openWon} />}
     </div>
   );
 }

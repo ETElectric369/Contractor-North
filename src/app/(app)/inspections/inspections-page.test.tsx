@@ -227,7 +227,7 @@ describe("one list: who needs an inspection", () => {
       ["Theo Vance", "/crm/cust-3", "9d ago", "4 Bayberry Rd", "Needs a Day", ["Start Inspection", "/appointments/nd-1"]],
       ["2 Catbird Way", null, "2d ago", null, "Needs a Day", ["Start Inspection", "/appointments/nd-2"]],
       // The two inspected rows (Create Estimate) are drawn on the Estimates page: quotes-two-parts.test.
-      ["Porch light", null, "6d ago", "No field notes", "Won, No Job Picked", ["Won · Pick the Job", "/appointments/nb-1"]],
+      ["Porch light", null, "6d ago", "No field notes", "Won, No Job Picked", ["Won · Start the Job", "/appointments/nb-1?won=1"]],
       ["Casey Loam", null, "4d ago", "Deck lighting · 7 Thistlewood Dr", "Day Passed", ["Start Inspection", "/appointments/ms-1"]],
     ]);
     // A name with no file is plain words, never a dead link.
@@ -243,7 +243,7 @@ describe("one list: who needs an inspection", () => {
       [null, "Empezar Inspección"],
       ["Falta el Día", "Empezar Inspección"],
       ["Falta el Día", "Empezar Inspección"],
-      ["Ganada, Sin Trabajo Elegido", "Ganada · Elegir el Trabajo"],
+      ["Ganada, Sin Trabajo Elegido", "Ganada · Empezar el Trabajo"],
       ["Ya Pasó el Día", "Empezar Inspección"],
     ]);
     expect(rows[1].what).toBe("Por elegir");
@@ -270,7 +270,7 @@ describe("one list: who needs an inspection", () => {
     // cn-v1171 (skeptic #74): nothing says an estimate is needed where the company makes none.
     expect(wu.map((r) => [r.primary, r.menu, r.word])).toEqual([
       [["Open Inspection", "/appointments/wu-1"], "lost", "Inspected"],
-      [["Won · Pick the Job", "/appointments/nb-1"], "lost", "Won, No Job Picked"],
+      [["Won · Start the Job", "/appointments/nb-1?won=1"], "lost", "Won, No Job Picked"],
       [["Open Inspection", "/appointments/wu-2"], "lost", "Inspected"],
     ]);
     const html = await render();

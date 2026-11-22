@@ -43,6 +43,7 @@ import { addCaptureItemsToJobList, canonicalMaterialListId } from "../materials/
 import { reportError } from "@/lib/observe";
 import { visitWork } from "@/lib/appointments/visit-work";
 import { jobShort } from "@/lib/appointments/visit-start";
+import { narrowJobRows, visitJobArms } from "@/lib/appointments/narrow-jobs";
 import { callerLang } from "@/lib/lang-of";
 import { fillSlots } from "@/lib/lang-words";
 import type { Lang } from "@/lib/locale";
@@ -603,6 +604,51 @@ export async function searchLinkTargets(q: string): Promise<LinkTarget[]> {
         : sub("ag_srv_subJob", { number: String(r.job_number) }),
     })),
   ];
+}
+
+/**
+ * THE NARROWED PICK (cn-v1176, E3): "Already Have the Job? Pick It" on the visit's ending card offers
+ * only the jobs this visit could have become. The visit is RE-READ here (never a customer id from the
+ * phone): jobs whose customer is the visit's customer or its lead's customer, or whose lead is the
+ * visit's lead; never a cancelled one; unfinished first. Office only (the attach door is staff), and no
+ * money column is read. A visit tied to nobody has nothing to narrow to, so it is offered nothing (the
+ * Connect picker, searchLinkTargets, still searches every job).
+ */
+export async function searchJobsForVisit(appointmentId: string, q: string): Promise<LinkTarget[]> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return [];
+  const ws = wordsOf(ctx.supabase, ctx.userId);
+  const supabase = ctx.supabase;
+  const { data: visit } = await supabase.from("appointments").select("id, customer_id, inquiry_id").eq("id", appointmentId).maybeSingle();
+  if (!visit) return [];
+  const v = visit as { customer_id?: string | null; inquiry_id?: string | null };
+  let leadCustomer: string | null = null;
+  if (v.inquiry_id) {
+    const { data: lead } = await supabase.from("inquiries").select("customer_id").eq("id", v.inquiry_id).maybeSingle();
+    leadCustomer = (lead as { customer_id?: string | null } | null)?.customer_id ?? null;
+  }
+  const arms = visitJobArms({ customerId: v.customer_id ?? null, leadCustomerId: leadCustomer, inquiryId: v.inquiry_id ?? null });
+  if (!arms) return [];
+  const { data: jobs } = await supabase
+    .from("jobs")
+    .select("id, job_number, name, address, city, state, zip, status")
+    .or(arms)
+    .neq("status", "cancelled")
+    .order("created_at", { ascending: false })
+    .limit(50);
+  type JobRow = { id: string; job_number: string | null; name: string | null; address: string | null; city: string | null; state: string | null; zip: string | null; status: string | null };
+  const rows = narrowJobRows((jobs ?? []) as JobRow[], q).slice(0, 12);
+  const lang = await ws.lang();
+  const t = translator(lang);
+  return rows.map((r) => ({
+    kind: "job" as const,
+    id: r.id,
+    name: r.name ?? String(r.job_number ?? ""),
+    address: formatFullAddress(r.address ?? null, r.city ?? null, r.state ?? null, r.zip ?? null) || null,
+    sub: r.status
+      ? fillSlots(t("ag_srv_subJobStatus"), { number: String(r.job_number), status: jobStatusLabel(r.status, lang, t) })
+      : fillSlots(t("ag_srv_subJob"), { number: String(r.job_number) }),
+  }));
 }
 
 /**
@@ -1724,10 +1770,22 @@ export async function rescheduleAppointment(
 
 /** Turn an appointment (often a site-visit/estimate inspection) into a job —
  *  idempotent: if it already spawned one, returns that job. Inherits the
- *  customer, the visit's words (never its tag) → name (lib/job-name), location → address, and start time. */
+ *  customer, the visit's words (never its tag) → name (lib/job-name), location → address, and start time.
+ *
+ *  `opts.asSale` (cn-v1176, the Won sheet's plain start; OFF by default, so the Start a Job card and the
+ *  dots menu's row behave as they always did): the job is left the way an ACCEPTED ESTIMATE leaves it
+ *  (quotes/actions createJobFromQuote + lib/appointments/behind-quote closeVisitsBehindQuote). It WAITS
+ *  FOR A DAY (to_be_scheduled, no start, no end, no segments: the inspection's slot was the inspection's,
+ *  never the work's), sized only by his task hours (the visit's own length is the inspection's); the
+ *  visit is ATTACHED, never absorbed (it keeps its own calendar life and stays on file as the customer's
+ *  inspection), stamped Won, and a booked one is marked Done through the header's own door
+ *  (setAppointmentStatus). `opts.billingType`, when given, is the job's billing kind (asSale only). */
 export async function createJobFromAppointment(
   appointmentId: string,
+  opts?: { asSale?: boolean; billingType?: "tm" | "fixed" },
 ): Promise<Result & { note?: string; /** The visit already had a job (maybe one made a moment ago on another device); `id` is that job. */ already?: boolean }> {
+  const asSale = opts?.asSale === true;
+  const saleKind = asSale && (opts?.billingType === "tm" || opts?.billingType === "fixed") ? opts.billingType : null;
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const ws = wordsOf(ctx.supabase, ctx.userId);
@@ -1739,11 +1797,15 @@ export async function createJobFromAppointment(
     // ends_at and inquiry_id were all missing, which is why none of them survived the conversion.
     // `notes` too (209451e1): the lead's message rode the visit and never reached the job.
     // The rows typed on site (`capture`, cn-v1069) and the sheet's tasks are read by visitWork below.
-    .select("id, title, customer_id, location, unit, city, state, zip, job_id, starts_at, ends_at, planned_minutes, inquiry_id, notes")
+    // type + outcome (cn-v1176, E1): a sales visit that becomes a job is WON, stamped on the claim below.
+    // status: the sale's start marks a booked inspection Done (asSale).
+    .select("id, title, type, outcome, status, customer_id, location, unit, city, state, zip, job_id, starts_at, ends_at, planned_minutes, inquiry_id, notes")
     .eq("id", appointmentId)
     .maybeSingle();
   if (!appt) return { ok: false, error: await ws.say("ag_srv_apptNotFound") };
   if (appt.job_id) return { ok: true, id: appt.job_id, already: true };
+  // THE SLOT THE JOB TAKES: the visit's own, except on a sale, where the job waits for a day.
+  const slotStart: string | null = asSale ? null : (appt.starts_at ?? null);
 
   /* WHAT THE VISIT ALREADY KNEW TRAVELS WITH IT.
      Erik: "im not sure why it says 5 hours but i already marked it as a job … we need more
@@ -1821,14 +1883,17 @@ export async function createJobFromAppointment(
   const work = await visitWork(supabase, appointmentId, "job");
   const visitBirth = work.birth;
 
-  // The visit's own size, else the sum of his task hours; neither → 0, unsized, as before.
-  const sized = Number((appt as { planned_minutes?: number | null }).planned_minutes ?? 0) || (visitBirth.plannedMinutes ?? 0);
-  const apptEnd = (appt as { ends_at?: string | null }).ends_at ?? null;
-  const scheduledEnd = sized > 0 && appt.starts_at
-    ? new Date(new Date(appt.starts_at).getTime() + Math.min(sized, WORK_DAY_MINUTES) * 60_000).toISOString()
+  // The visit's own size, else the sum of his task hours; neither → 0, unsized, as before. On a sale
+  // the visit's size is the INSPECTION's, so only his task hours size the job (none → unsized).
+  const sized = asSale
+    ? (visitBirth.plannedMinutes ?? 0)
+    : Number((appt as { planned_minutes?: number | null }).planned_minutes ?? 0) || (visitBirth.plannedMinutes ?? 0);
+  const apptEnd = asSale ? null : ((appt as { ends_at?: string | null }).ends_at ?? null);
+  const scheduledEnd = sized > 0 && slotStart
+    ? new Date(new Date(slotStart).getTime() + Math.min(sized, WORK_DAY_MINUTES) * 60_000).toISOString()
     : // A visit with no size and no end becomes a job of the default length (two hours, "2 hours —
       // change it"), never a job with no end, which drew as the rest of the work day.
-      apptEnd ?? (appt.starts_at ? new Date(new Date(appt.starts_at).getTime() + DEFAULT_JOB_MINUTES * 60_000).toISOString() : null);
+      apptEnd ?? (slotStart ? new Date(new Date(slotStart).getTime() + DEFAULT_JOB_MINUTES * 60_000).toISOString() : null);
 
   const { data: job, error } = await supabase
     .from("jobs")
@@ -1839,14 +1904,16 @@ export async function createJobFromAppointment(
       // its default 'fixed' — which not only mislabels the job but switches OFF whether its hours and
       // receipts are offered at invoicing, the Unbilled card, the portal, and step 4 of
       // completeJobWhenPaid. readUsualBillingKind is the company's own answer; a failed read is "tm".
-      billing_type: await readUsualBillingKind(supabase),
+      // The Won sheet's pick (asSale), else the company's own answer.
+      billing_type: saleKind ?? (await readUsualBillingKind(supabase)),
       inquiry_id: inquiryId,
       // The visit's notes (the lead's message, what the inspector was told) are the job's scope.
       description: (appt as { notes?: string | null }).notes ?? null,
-      // A visit waiting for a day (no start, 0368) makes a job that is waiting for one too.
-      status: appt.starts_at ? "scheduled" : "to_be_scheduled",
+      // A visit waiting for a day (no start, 0368) makes a job that is waiting for one too; a sale's
+      // job always waits for one (the accepted estimate's to_be_scheduled).
+      status: slotStart ? "scheduled" : "to_be_scheduled",
       planned_minutes: sized > 0 ? sized : null, // blank stays blank — never a made-up number
-      scheduled_start: appt.starts_at,
+      scheduled_start: slotStart,
       scheduled_end: scheduledEnd,
       address: appt.location,
       unit: apptUnit, // the visit's unit is the job's (0187), and its name's " #56"
@@ -1876,10 +1943,26 @@ export async function createJobFromAppointment(
   // re-reads to learn why: somebody else's job won (ours is deleted, it has no children yet, and
   // the winner is returned so the caller clocks into THAT one), or the visit is gone.
   // SILENT-WRITE LAW (audit v921): a zero-row update is a 204, not a success. Hence .select("id").
+  //
+  // A SALES VISIT THAT BECOMES A JOB IS WON (cn-v1176, E1): the same guard the attach door keeps
+  // (linkAppointmentTo) — a visit with a win to record (lib/statuses DECIDABLE_VISIT_TYPES), only where
+  // nothing is stamped yet — on the claim itself, so every door through here says it (the Start a Job
+  // card, the dots menu's row, the Won sheet's plain start).
+  //
+  // ON A SALE (asSale) the visit is ATTACHED, not absorbed (0237): the job waits for a day and the
+  // inspection keeps its own calendar life, as an accepted estimate leaves it (closeVisitsBehindQuote).
+  const visitType = (appt as { type?: string | null }).type ?? null;
+  const wonNow = isDecidableVisitType(visitType) && !(appt as { outcome?: string | null }).outcome;
+  const claimAt = new Date().toISOString();
   const { data: absorbed } = await supabase
     .from("appointments")
     // …and the visit keeps the same answer the job just got (audit v921) — one contact, both records.
-    .update({ job_id: job.id, absorbed: true, ...(!appt.customer_id && customerId ? { customer_id: customerId } : {}) })
+    .update({
+      job_id: job.id,
+      ...(asSale ? {} : { absorbed: true }),
+      ...(!appt.customer_id && customerId ? { customer_id: customerId } : {}),
+      ...(wonNow ? { outcome: "won", outcome_at: claimAt } : {}),
+    })
     .eq("id", appointmentId)
     .is("job_id", null)
     .select("id");
@@ -1907,8 +1990,8 @@ export async function createJobFromAppointment(
      Tuesday and Wednesday, which the appointment had rightly marked busy, sprang free the moment
      it was deduped behind the job. Same day-expansion rule the rail's placement uses. */
   const sizedDays = daysNeeded(sized);
-  if (sizedDays > 1 && appt.starts_at) {
-    const firstDay = todayStrInTz(tz, new Date(appt.starts_at));
+  if (sizedDays > 1 && slotStart) {
+    const firstDay = todayStrInTz(tz, new Date(slotStart));
     const run = workingDaysFrom(firstDay, sizedDays);
     if (run.length) {
       await supabase.from("job_schedule_segments").insert(
@@ -1960,18 +2043,32 @@ export async function createJobFromAppointment(
       materialsNote = await ws.say("ag_srv_madeTypedUnlisted");
     }
   }
-  // The visit is now represented by the job on the calendar (they draw as one — see gridDataFor),
-  // so nothing is lost by leaving the appointment in place: it keeps its capture, its answers and
-  // its provenance, and stops competing with the job for the same afternoon.
-  await pushCalendarItem("job", job.id); // the new job is scheduled — push it (fire-safe)
-  // …and reconcile the absorbed booking's OWN Google event away (pushApptRow sees absorbed and
-  // deletes) — otherwise his phone calendar keeps both, the exact double this column exists to end.
-  await pushCalendarItem("appointment", appointmentId);
+  /* THE SALE'S INSPECTION IS DONE (asSale): a booked one is marked Done through the header's own door
+     (setAppointmentStatus: it withdraws a live pick-a-time link and re-pushes the visit), so the visit
+     reads Done, Won, tied to its job. One that is already done (or cancelled) is left as it is. */
+  let doneNote: string | undefined;
+  if (asSale && absorbed?.length) {
+    const st = (appt as { status?: string | null }).status ?? null;
+    if (st === "scheduled" || st === "proposed") {
+      const done = await setAppointmentStatus(appointmentId, "completed");
+      if (!done.ok) doneNote = done.error;
+      else if (done.note) doneNote = done.note;
+    }
+  }
+  if (!asSale) {
+    // The visit is now represented by the job on the calendar (they draw as one — see gridDataFor),
+    // so nothing is lost by leaving the appointment in place: it keeps its capture, its answers and
+    // its provenance, and stops competing with the job for the same afternoon.
+    await pushCalendarItem("job", job.id); // the new job is scheduled — push it (fire-safe)
+    // …and reconcile the absorbed booking's OWN Google event away (pushApptRow sees absorbed and
+    // deletes) — otherwise his phone calendar keeps both, the exact double this column exists to end.
+    await pushCalendarItem("appointment", appointmentId);
+  }
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
   revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
-  const note = [absorbNote, ...work.notes, tasksNote, materialsNote].filter(Boolean).join(" ");
+  const note = [absorbNote, ...work.notes, tasksNote, materialsNote].concat(doneNote ?? []).filter(Boolean).join(" ");
   return { ok: true, id: job.id, ...(note ? { note } : {}) };
 }
 

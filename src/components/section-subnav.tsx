@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { activeNav, visibleDock } from "@/lib/dock";
+import { activeNav, rowBadge, visibleDock } from "@/lib/dock";
+import { RowCount, useBadges } from "@/components/app-shell/dock";
 import { useNavAt } from "@/components/app-shell/use-nav-at";
 import { dockLabel } from "@/lib/dock-words";
 import { useLang } from "@/components/lang-provider";
@@ -24,9 +25,22 @@ import { SectionSheet } from "./section-sheet";
  *  pages, so either shape would just double it. On phones (no left rail) it's the only
  *  sibling nav, so it stays — and it persists on detail/sub-routes too (/quotes/[id],
  *  /forms/[id], /purchasing/[id]…), not just on a section's exact landing pages. */
-export function SectionSubnav({ isStaff, features, lapsed = false }: { isStaff?: boolean; features?: FeatureMap; lapsed?: boolean }) {
+export function SectionSubnav({
+  isStaff,
+  features,
+  lapsed = false,
+  badges: badgesProp,
+}: {
+  isStaff?: boolean;
+  features?: FeatureMap;
+  lapsed?: boolean;
+  /** The SAME counts the dock's tiles sum (cn-v1176, one number, one function): each row says its own,
+   *  so a tile's badge always leads to a row. A promise is resolved like the dock's (never suspends). */
+  badges?: Record<string, number> | Promise<Record<string, number>>;
+}) {
   // The rows' words in the person's language (lib/dock-words; the dock's data stays English).
   const lang = useLang();
+  const badges = useBadges(badgesProp);
 
   // THE ONE DOCK FILTER (lib/dock visibleDock): the same tiles and rows the dock draws, role and
   // switches both (and the lapsed mode), so the strip can never offer a page the dock has put away.
@@ -60,6 +74,7 @@ export function SectionSubnav({ isStaff, features, lapsed = false }: { isStaff?:
         group={group}
         items={group.children}
         activeHref={activeHref}
+        badges={badges}
       />
     );
   }
@@ -94,6 +109,11 @@ export function SectionSubnav({ isStaff, features, lapsed = false }: { isStaff?:
           >
             <Icon className="relative z-10 h-[18px] w-[18px] shrink-0" />
             <span className="relative z-10">{dockLabel(c, lang)}</span>
+            {rowBadge(badges, c) > 0 && (
+              <span className="absolute right-1 top-1 z-10">
+                <RowCount count={rowBadge(badges, c)} active={active} />
+              </span>
+            )}
           </Link>
         );
       })}

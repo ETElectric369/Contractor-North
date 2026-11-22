@@ -543,7 +543,7 @@ export default async function AppLayout({
                 going, and upright nothing about any of it changes. */}
             <PullToRefresh />
             <Suspense fallback={null}>
-              <SectionSubnav isStaff={isStaff} features={doors} lapsed={lapsed} />
+              <SectionSubnav isStaff={isStaff} features={doors} lapsed={lapsed} badges={badges} />
             </Suspense>
             {/* A page whose feature is switched off still opens from a link, with the Off line on top. */}
             <RouteOffLine features={features} isOwner={isOwner} />

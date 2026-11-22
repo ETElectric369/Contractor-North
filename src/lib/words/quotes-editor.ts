@@ -181,6 +181,13 @@ export const words: WordCatalog = {
     qe_tax: "Tax",
     qe_total: "Total",
     qe_saving: "Saving…",
+    // cn-v1176 (M6): who said yes, under the status control while the estimate is accepted (plain text).
+    qe_acceptedInPersonBy: "Approved in person by {who} · {day}",
+    qe_acceptedInPerson: "Approved in person · {day}",
+    qe_acceptedOfficeBy: "Marked accepted by {who} · {day}",
+    qe_acceptedOffice: "Marked accepted · {day}",
+    qe_acceptedOnLink: "Accepted by the customer on their link · {day}",
+    qe_acceptedOn: "Accepted · {day}",
     qe_savesItself: "Saves itself the moment you put something on it.",
 
     // ── The writes (use-quote-writes): the waiting lines, the refusals' fallbacks ──
@@ -336,6 +343,12 @@ export const words: WordCatalog = {
     qe_tax: "Impuesto",
     qe_total: "Total",
     qe_saving: "Guardando…",
+    qe_acceptedInPersonBy: "Aprobado en persona por {who} · {day}",
+    qe_acceptedInPerson: "Aprobado en persona · {day}",
+    qe_acceptedOfficeBy: "Marcado como aceptado por {who} · {day}",
+    qe_acceptedOffice: "Marcado como aceptado · {day}",
+    qe_acceptedOnLink: "Aceptado por el cliente en su enlace · {day}",
+    qe_acceptedOn: "Aceptado · {day}",
     qe_savesItself: "Se guarda solo en cuanto le pones algo.",
 
     qe_couldNotReach: "No se pudo conectar con el servidor — toca Reintentar",

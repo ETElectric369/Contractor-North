@@ -68,18 +68,24 @@ export function LinkPicker({
   kinds = null,
   openLabel,
   label,
+  search,
 }: {
   appointmentId: string;
   /** What it's already connected to, for the resting state. */
   linked: { kind: LinkTarget["kind"]; name: string } | null;
   /** The address typed on this visit — used to offer matches without anyone typing twice. */
   seed: string;
-  /** Only these kinds are offered (the ending card's "Won · Pick the Job" is jobs only). null: all three. */
+  /** Only these kinds are offered (the ending card's "Already Have the Job? Pick It" is jobs only). null: all three. */
   kinds?: LinkTarget["kind"][] | null;
   /** The words on the closed picker's one button; left out, the catalog's "Connect this to a lead, customer or job". */
   openLabel?: string;
   /** The small label over the box; left out, the catalog's "For"; null draws none (inside a card that already says what it is). */
   label?: string | null;
+  /** A NARROWED SEARCH (cn-v1176, E3: the ending card's "Already Have the Job? Pick It", the visit's own
+   *  jobs only, searchJobsForVisit). Given, it replaces searchLinkTargets: it runs as soon as the box
+   *  opens, on what was TYPED (any length; empty lists them all), never on the address seed. Left out,
+   *  the Connect picker is exactly as it was. */
+  search?: (q: string) => Promise<LinkTarget[]>;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -103,18 +109,23 @@ export function LinkPicker({
   // Debounced, and last-response-wins: typing fast otherwise lets a slow early query overwrite
   // the results for what is actually in the box.
   useEffect(() => {
-    const term = q.trim() || seed.trim();
+    const term = search ? q.trim() : q.trim() || seed.trim();
     if (timer.current) clearTimeout(timer.current);
-    if (term.length < 2) {
+    if (search ? !open : term.length < 2) {
       setRows([]);
       return;
     }
     setSearching(true);
     timer.current = setTimeout(() => {
       const mine = ++reqId.current;
-      searchLinkTargets(term)
+      (search ?? searchLinkTargets)(term)
         .then((r) => {
           if (mine === reqId.current) setRows(kinds ? r.filter((x) => kinds.includes(x.kind)) : r);
+        })
+        .catch((e) => {
+          // The narrowed pick says a read that never landed; the Connect picker is as it was.
+          if (!search) throw e;
+          if (mine === reqId.current) setError(t("vp_noConnectionLink"));
         })
         .finally(() => {
           if (mine === reqId.current) setSearching(false);
@@ -123,7 +134,7 @@ export function LinkPicker({
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- kinds is a stable literal per mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- kinds and search are stable per mount
   }, [q, seed, open]);
 
   const TONE: Record<LinkTarget["kind"], string> = {
@@ -175,7 +186,7 @@ export function LinkPicker({
             <Input
               autoFocus
               value={q}
-              placeholder={seed.trim() ? fillText(t("vp_searchingSeed"), { seed: seed.trim() }) : t("vp_nameOrAddress")}
+              placeholder={seed.trim() && !search ? fillText(t("vp_searchingSeed"), { seed: seed.trim() }) : t("vp_nameOrAddress")}
               onChange={(e) => setQ(e.target.value)}
               className="pl-9"
             />
@@ -186,10 +197,10 @@ export function LinkPicker({
                 <Loader2 className="h-3 w-3 animate-spin" /> {t("vp_looking")}
               </p>
             )}
-            {!searching && rows.length === 0 && (q.trim() || seed.trim()).length >= 2 && (
+            {!searching && rows.length === 0 && (search ? !error : (q.trim() || seed.trim()).length >= 2) && (
               // Not an error. Working unattached is a legitimate outcome, not a failure state.
               <p className="px-1 py-2 text-xs text-slate-400">
-                {kinds?.length === 1 && kinds[0] === "job" ? t("vp_noJobMatchesYet") : offerLead ? t("vp_nobodyByThatName") : t("vp_nothingMatchesYet")}
+                {search ? t("vp_noJobForThisVisit") : kinds?.length === 1 && kinds[0] === "job" ? t("vp_noJobMatchesYet") : offerLead ? t("vp_nobodyByThatName") : t("vp_nothingMatchesYet")}
               </p>
             )}
             {offerLead && (

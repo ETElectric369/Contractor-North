@@ -58,6 +58,11 @@ export type RowButtons = {
 };
 
 const open = (label: string, href: string): RowDoor => ({ label, act: { type: "open", href } });
+
+/** The visit's page with its Won sheet open (cn-v1176, `?won=1`), whatever the address already asks. */
+export function wonSheetHref(href: string): string {
+  return /[?&]won=1(&|$)/.test(href) ? href : `${href}${href.includes("?") ? "&" : "?"}won=1`;
+}
 const has = (item: Pick<ActionItem, "affordances">, v: Affordance) => item.affordances.includes(v);
 
 /** The words every ending's confirm is built from. `what` names the row. */
@@ -251,8 +256,9 @@ export function rowButtons(item: ActionItem, ctx: RowButtonsCtx): RowButtons {
       return {
         // WRITE IT UP, BOXED (cn-v1175, R7): the row's one button opens the inspection, where the report
         // is read or written and the estimate or the job is chosen (never made by a tap on a row). A visit
-        // marked Won with no job picked asks for its job instead (R8: a win with no job is not an ending).
-        primary: item.wonNoJob ? open(L("vp_btn_wonPickTheJob"), item.href) : open(L("ny_btn_writeItUp"), item.href),
+        // marked Won with no job asks for its job instead (R8: a win with no job is not an ending): Won ·
+        // Start the Job opens the Won sheet on the visit (cn-v1176), where the job is made or picked.
+        primary: item.wonNoJob ? open(L("vi_btn_wonStartTheJob"), wonSheetHref(item.href)) : open(L("ny_btn_writeItUp"), item.href),
         also: null,
         // ONE WORD FOR AN ENDING (cn-v1175, R8): behind ⋯, Move to Another Day (while the visit has a day
         // and was not marked done) and Not Sold. NO DISMISS ON A SALES VISIT: Not Sold is the one ending

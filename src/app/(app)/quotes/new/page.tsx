@@ -1,9 +1,8 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { smsReadiness } from "@/lib/sms";
-import { sameScope, scopeWord } from "@/lib/playbook/scope";
-import type { Answers } from "@/lib/playbook/types";
-import { measuredOnSiteBlock, parseInspectorCapture, seedLinesFromCapture } from "@/lib/inspection/capture";
+import { sameScope } from "@/lib/playbook/scope";
+import { measuredOnSiteBlock, parseInspectorCapture } from "@/lib/inspection/capture";
 import { captureQuoteId } from "@/lib/inspections";
 import { liveEstimateBehindVisit } from "@/lib/estimate/behind-visit";
 import { kitsReadWords, partsKitsOnly, readTaskKits } from "@/lib/estimate/task-kits";
@@ -15,21 +14,16 @@ import { currentLang } from "@/lib/current-lang";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { measurementsFromAnswers, tolerateMissingColumns } from "@/lib/inspection/schema";
-import { readViaView } from "@/lib/inspection/inspection-access";
 import { factsForEstimatorByProvenance } from "@/lib/playbook/answers";
-import { applicableNeeds, clearInapplicable } from "@/lib/playbook/resolve";
 import { briefProvenanceKeys, parsePlanBrief } from "@/lib/plan-brief";
 import { intakeAnswerLines, intakeProvenanceKeys } from "@/lib/inquiries/carry-intake-answers";
 import { extOf, intakePaths, uploadDisplayName } from "@/lib/playbook/uploads";
-import { coerceScopes, ownScopes, scopeLines, type ScopePick } from "@/lib/playbook/scopes";
-import { coerceTasks, type TaskValue } from "@/lib/playbook/tasks";
 import type { DraftLineItem } from "@/lib/estimate/line-map";
-import { taskLines, type TaskBookRow } from "@/lib/estimate/task-lines";
-import { laborRateFor } from "@/lib/pricing/labor-rate";
+import { readPriceBook, readPricingLevel, readVisitEstimateSeed, visitEstimateLines, type ScopeGroup, type TaskGroup } from "@/lib/estimate/visit-lines";
 import { normalizeDocStyle } from "@/lib/doc-style";
 import { sheetFromPlaybook } from "@/lib/playbook/from-sheet";
 import { playbookForForm } from "@/lib/playbook/parse";
-import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
+import { ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
 import { NewInspectionButton } from "../../appointments/new-inspection-button";
 import { EstimateEditor } from "../estimate-editor";
 
@@ -40,12 +34,19 @@ export const dynamic = "force-dynamic";
 // the largest the repo uses (Vercel Pro's ceiling for these functions).
 export const maxDuration = 300;
 
+/** The shape of a visit's id on the address (a uuid); anything else is no visit. */
+const CAPTURE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export default async function NewQuotePage({
   searchParams,
 }: {
   searchParams: Promise<{ customer?: string; job?: string; inquiry?: string; capture?: string }>;
 }) {
-  const { customer, job, inquiry, capture } = await searchParams;
+  const { customer, job, inquiry, capture: captureParam } = await searchParams;
+  // A MALFORMED ?capture= IS NO VISIT (cn-v1176 fix F10): an id that is not a uuid opens the blank
+  // editor, as it always did, instead of a database error the read below would throw on. A REAL read
+  // failure on a well-formed id still throws (readVisitEstimateSeed).
+  const capture = captureParam && CAPTURE_ID.test(captureParam.trim()) ? captureParam.trim() : undefined;
   const supabase = await createClient();
   const t = translator(await currentLang());
   // For the editor's storage-first uploads (#116) — RLS returns only the caller's own org.
@@ -72,7 +73,7 @@ export default async function NewQuotePage({
 
   // ?capture=<appointment id> — an inspection's field capture prefills the
   // estimator scope (like importing labor into an invoice). RLS scopes the read;
-  // a bad/cross-org id just yields no prefill. Also recovers the lead backlink
+  // a cross-org id just yields no prefill, and a malformed one never reaches it (CAPTURE_ID above). Also recovers the lead backlink
   // from the appointment when the URL didn't carry ?inquiry=. Photos are
   // DELIBERATELY not carried into the prefill — only notes/measurements/materials;
   // they stay on the appointment's capture page (signed URLs, private bucket).
@@ -80,10 +81,10 @@ export default async function NewQuotePage({
   // Square/linear feet from the inspection, handed to the kit picker so its sizing boxes open
   // with the numbers the inspector already took.
   let measured: { sqft: number | null; linearFt: number | null; byKey?: Record<string, number | null> } | undefined;
-  const pickedScopes: { label: string; picks: ScopePick[] }[] = [];
+  const pickedScopes: ScopeGroup[] = [];
   // A `tasks` answer (cn-v1073): HIS tasks, each with his hours and his parts. Priced below, once
   // the book and the customer's rate card have loaded — one line per task (lib/estimate/task-lines).
-  const pickedTasks: { label: string; tasks: TaskValue[] }[] = [];
+  const pickedTasks: TaskGroup[] = [];
   // The rows typed on site (capture.items) and the numbers measured there (capture.measures), read
   // tolerantly (parseInspectorCapture). Saved since the typed inspector shipped, read by nothing until
   // cn-v1069: the items follow the scope picks onto the estimate, the measures join the scope text.
@@ -96,17 +97,21 @@ export default async function NewQuotePage({
   // contact list standing in their yard.
   let captureCustomerId: string | undefined;
   let captureJobId: string | undefined;
+  // THE VISIT'S PRICING CUSTOMER (cn-v1176, M1): the visit's customer, else its lead's.
+  let pricingCustomer: string | null = null;
   if (capture) {
-    const { data: appt } = await supabase
-      .from("appointments")
-      .select("id, title, location, inquiry_id, capture, customer_id, job_id")
-      .eq("id", capture)
-      .maybeSingle();
+    // THE VISIT-SIDE READS live with the line builder (lib/estimate/visit-lines readVisitEstimateSeed),
+    // shared with the Inspector's Won sheet: the visit, its answers THROUGH appointment_answers (0366,
+    // LEAK-0227: the view hands the office the answers as stored, prices included), its sheet and its
+    // lead, each a read of its own. A failed answers read THROWS: an estimate never seeds from an
+    // inspection it couldn't read. Pre-0165 (no such column) is still no measured block.
+    const seedRead = await readVisitEstimateSeed(supabase, capture);
+    const appt = seedRead?.visit ?? null;
     const cap = (appt as any)?.capture as
       | { notes?: string; measurements?: string; materials?: string }
       | null
       | undefined;
-    if (appt) {
+    if (appt && seedRead) {
       // THE VISIT'S ESTIMATE IS OPENED, NEVER TWINNED (S1): a second open of this door, a stale Start
       // The Estimate link or a second tab must edit the row the visit already became — its first
       // save would otherwise birth a twin and overwrite the visit's backlink (capture.quote_id, last
@@ -118,46 +123,17 @@ export default async function NewQuotePage({
       // THE TYPED ANSWERS GO FIRST, and are labelled as MEASURED (0165). The inspector already
       // stood in front of these numbers; making the estimator re-extract "85 ft" from a sentence
       // is a re-derivation that can silently come back with a different number. Facts above prose.
-      // THROUGH appointment_answers (0366, LEAK-0227): the answers column is revoked from the
-      // signed-in role, and this is the office's page, so the view hands back the answers as stored,
-      // prices included. The view carries the sheet's id and the lead's id; the sheet and the lead's
-      // intake are then two reads of their own (an embed through a view is PostgREST's guess, never
-      // pinned, so it isn't relied on). Before 0366 the table is read the same way (readViaView). A
-      // failed read is an error, exactly as before: an estimate never seeds from an inspection it
-      // couldn't read. Pre-0165 (no such column on the table) is still no measured block.
-      const ans = await readViaView<{ inspection_answers: unknown; inspection_template_id: string | null; inquiry_id: string | null }>(
-        supabase,
-        "answers",
-        (from) => from.select("inspection_answers, inspection_template_id, inquiry_id").eq("id", capture).maybeSingle(),
-      );
-      if (ans.error && !(ans.via === "table" && String((ans.error as { code?: string }).code ?? "") === "42703")) throw ans.error;
-      const [sheetRel, leadRel] = ans.data
-        ? await Promise.all([
-            ans.data.inspection_template_id
-              ? tolerateMissingColumns<{ schema: unknown; playbook: unknown }>(() =>
-                  supabase.from("forms").select("schema, playbook").eq("id", ans.data!.inspection_template_id!).maybeSingle(),
-                )
-              : Promise.resolve(null),
-            ans.data.inquiry_id
-              ? tolerateMissingColumns<{ intake: unknown }>(() =>
-                  supabase.from("inquiries").select("intake").eq("id", ans.data!.inquiry_id!).maybeSingle(),
-                )
-              : Promise.resolve(null),
-          ])
-        : [null, null];
-      const insp = ans.data ? { inspection_answers: ans.data.inspection_answers, forms: sheetRel, inquiry: leadRel } : null;
-      const rel = (insp as any)?.forms;
+      const leadRel = seedRead.lead;
       // Read through the PLAYBOOK, the same resolver the inspector wrote through (cn-v628). Read
       // through the raw sheet instead and a checkbox-turned-select answer of "No" prints as "yes",
       // because the sheet's checkbox branch only asks whether the value is truthy — and "No" is.
-      const pb = playbookForForm(Array.isArray(rel) ? rel[0] : rel);
-      const answers = ((insp as any)?.inspection_answers ?? {}) as never;
+      const pb = seedRead.pb;
+      const answers = seedRead.answers as never;
       // WHO SAID EACH FACT. An answer the plan brief seeded and nobody edited is a MACHINE's
       // reading of the customer's documents — it must not cross into the estimator wearing "his
       // words — take them as given". Equality against the brief is the provenance test: the
       // moment he edits a value it stops matching and becomes his.
-      const inqRel = (insp as any)?.inquiry;
-      const leadBrief = parsePlanBrief((Array.isArray(inqRel) ? inqRel[0] : inqRel)?.intake);
+      const leadBrief = parsePlanBrief(leadRel?.intake);
       const machineKeys =
         leadBrief?.status === "ready" && leadBrief.answers
           ? briefProvenanceKeys(pb, leadBrief.answers, answers)
@@ -167,7 +143,7 @@ export default async function NewQuotePage({
       // stranger typed it and the intake and inspection playbooks can drift until the same
       // key means different things on each side. Still-untouched carried values join the
       // verify bucket; the moment he edits one on site it stops matching and becomes his.
-      const leadIntake = (Array.isArray(inqRel) ? inqRel[0] : inqRel)?.intake as
+      const leadIntake = leadRel?.intake as
         | { intake_answers?: unknown }
         | null
         | undefined;
@@ -218,25 +194,13 @@ export default async function NewQuotePage({
           : "",
       ].filter(Boolean);
       if (parts.length > 1) initialScope = parts.join("\n\n");
-      // A `scopes` answer is already priced line items. Collect the picks here (where the playbook
-      // is in scope) and map them to lines below, once the price book has loaded — the descriptions
-      // and units come from the book, not from the answer.
-      // ONLY THE QUESTIONS THAT STILL APPLY, cleared to a fixed point first (the same read as the
-      // facts above). A crew lead's save (0356) keeps the office's priced picks under a scopes
-      // question his answers have since turned off; the Inspector hides that question, so its
-      // picks must not become lines on an estimate nobody can see them on the inspection of.
-      const liveAnswers = clearInapplicable(pb, answers);
-      captureScopeWord = scopeWord(pb, liveAnswers as Answers);
-      for (const n of applicableNeeds(pb, liveAnswers)) {
-        if (n.slot?.type === "tasks") {
-          const tasks = coerceTasks((liveAnswers as Record<string, unknown>)[n.key]);
-          if (tasks?.length) pickedTasks.push({ label: n.label, tasks });
-          continue;
-        }
-        if (n.slot?.type !== "scopes") continue;
-        const picks = coerceScopes((liveAnswers as Record<string, unknown>)[n.key]);
-        if (picks?.length) pickedScopes.push({ label: n.label, picks });
-      }
+      // A `scopes` answer is already priced line items, a `tasks` answer his tasks: collected by the
+      // builder's own read (lib/estimate/visit-lines visitPicks, ONLY THE QUESTIONS THAT STILL APPLY,
+      // cleared to a fixed point first) and mapped to lines below, once the price book has loaded.
+      captureScopeWord = seedRead.scopeWord;
+      pickedScopes.push(...seedRead.scopes);
+      pickedTasks.push(...seedRead.tasks);
+      pricingCustomer = seedRead.pricingCustomerId;
       captureInquiryId = (appt as any).inquiry_id ?? undefined;
       captureApptId = (appt as any).id;
       captureCustomerId = (appt as any).customer_id ?? undefined;
@@ -327,7 +291,7 @@ export default async function NewQuotePage({
       if (parts.length > 1) initialScope = parts.join("\n\n");
     }
   }
-  const [{ data: customers }, { data: leadRows }, { data: priceItems, error: priceItemsErr }, { data: taxRates }, kitsRead, { data: org }, { data: peopleRows, error: peopleErr }] =
+  const [{ data: customers }, { data: leadRows }, { data: priceItems, error: priceItemsErr }, { data: taxRates }, kitsRead, { data: org }, { data: peopleRows, error: peopleErr }, seedLevel] =
     await Promise.all([
       supabase.from("customers").select("id, name, company_name, pricing_levels(markup_pct, labor_rate)").order("name"),
       // AN ESTIMATE IS OFTEN FOR A LEAD, NOT A CUSTOMER (Erik: "I should be able to select from
@@ -354,13 +318,8 @@ export default async function NewQuotePage({
       // `.eq("price_list_item_options.archived", false)` filters the EMBEDDED rows only (it is not
       // an !inner join), so an item whose every maker is archived still appears, priced at its own
       // allowance — which is exactly right. A maker the org stopped carrying is never offered.
-      supabase
-        .from("price_list_items")
-        .select(`id, code, description, category, unit, buy_price, markup_pct, updated_at, ${ITEM_OPTIONS_EMBED}`)
-        .eq("archived", false)
-        .eq("price_list_item_options.archived", false)
-        .order("description")
-        .limit(2000),
+      // readPriceBook (lib/estimate/visit-lines): this select, shared with the Won sheet's builder.
+      readPriceBook(supabase),
       supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
       // THE SHARED SELECT SHAPE (kit-line.ts): kit lines with their 0166 sizing and, since 0240,
       // their price-list link + the item embed, so a linked line prices LIVE for this customer in
@@ -377,6 +336,10 @@ export default async function NewQuotePage({
       // that names a person quotes the hour at the figure their clocked hour will bill at. Active
       // only: a row never offers somebody who has left. Never their pay rate.
       supabase.from("profile_pay").select("id, full_name, bill_rate").eq("active", true).order("full_name"),
+      // THE SEED'S PRICING LEVEL, read by its own id through the reader the Won sheet uses (cn-v1176
+      // fix U3): the customer list above has no limit and is capped by the API's row cap, so a customer
+      // past it would price the seed at the default level here and at their own level on the sheet.
+      readPricingLevel(supabase, pricingCustomer),
     ]);
   if (peopleErr) reportError("quotes/new:people", peopleErr, { inquiry: inquiry ?? null, capture: capture ?? null });
   const people = ((peopleRows ?? []) as { id: string; full_name: string | null; bill_rate: number | string | null }[]).map((p) => ({
@@ -386,41 +349,28 @@ export default async function NewQuotePage({
   }));
   const kits = kitsRead.rows as Array<Record<string, unknown>> | null;
   if (kitsRead.state === "failed") reportError("quotes/new:kits", kitsRead.error, { inquiry: inquiry ?? null, capture: capture ?? null });
-  // THE INSPECTION'S PICKS, AS REAL LINES. Descriptions and units come from the org's own book
-  // (the answer stores codes, never prose), and a code that has since left the price list is
-  // dropped rather than rendered as a bare code with a price beside it.
   const settings = getOrgSettings((org as any)?.settings);
-  const book = new Map((priceItems ?? []).map((p: any) => [p.code as string, { description: p.description, unit: p.unit }]));
-  const bookCodes = new Set(book.keys());
-  // HIS TASKS, AS LINES: one per task, priced from his hours at THE labor rate (the inspection's
-  // customer's level rate, else the org default: laborRateFor) and his parts at the book's cost
-  // through THE markup rule for that customer. A task without hours is a $0 line that asks.
-  const taskBook = new Map<string, TaskBookRow>(
-    (priceItems ?? []).filter((p: any) => p.code).map((p: any) => [String(p.code), p as TaskBookRow]),
-  );
-  const seedCustomer = captureCustomerId ? ((customers ?? []) as any[]).find((c) => c.id === captureCustomerId) : undefined;
-  const seedPricing = { levelPct: seedCustomer?.pricing_levels?.markup_pct ?? null, orgDefaultPct: settings.default_markup_pct };
-  // The rule's answer for the visit's customer (no person on a seeded task: the Inspector's hours
-  // are the task's, whoever works them), through the one laborRateFor every door prices with.
-  const seedRate = laborRateFor({ levelRate: seedCustomer?.pricing_levels?.labor_rate, orgDefault: settings.default_labor_rate }).rate;
+  // THE INSPECTION'S PICKS, HIS TASKS AND THE ROWS TYPED ON SITE, AS REAL LINES, through THE ONE
+  // builder (lib/estimate/visit-lines visitEstimateLines), the same one the Inspector's Won sheet
+  // shows and approves: the scope picks (descriptions and units from the company's own book, a code
+  // that left the book dropped), then one line per task (his hours at THE labor rate, his parts at the
+  // book's cost through THE markup rule), then the typed rows, unpriced. Priced for the visit's
+  // customer, else its lead's (cn-v1176): that customer's level rate and markup, else the defaults.
   // The company's Doc Studio choice for how a task line reads on the paper: what the builder's
   // switch calls "Company Default". Through the one normalizer, like every renderer.
   const companyEstimateFormat = normalizeDocStyle(settings.doc_style).estimate_format;
-  // HIS TASK KITS (0386, W4): a task that picked one expands here — his minutes per unit × the
-  // units, the kit's parts × the units — through THE one expandTaskKit (task-lines.ts), the same
-  // function the Inspector previewed it with.
+  // HIS TASK KITS (0386, W4): a task that picked one expands inside the builder through THE one
+  // expandTaskKit (task-lines.ts), the same function the Inspector previewed it with.
   const taskKits = kitsRead.kits;
-  const taskKitMap = new Map(taskKits.map((k) => [k.id, k]));
-  const taskSeed = pickedTasks.flatMap((g) =>
-    taskLines(g.tasks, { book: taskBook, rate: seedRate, pricing: seedPricing, kits: taskKitMap, group: g.label }),
-  );
-  // …THEN THE ROWS TYPED ON SITE, unpriced (cn-v1069, lib/inspection/capture seedLinesFromCapture):
-  // "200 ft 12-2 romex" typed standing at the panel is a line Erik prices, never a sentence he
-  // re-reads to make one.
-  const seededLines: DraftLineItem[] = seedLinesFromCapture(
-    [...pickedScopes.flatMap((g) => scopeLines(ownScopes(g.picks, bookCodes), book, g.label)), ...taskSeed],
-    typedCapture?.items,
-  );
+  const seededLines: DraftLineItem[] = visitEstimateLines({
+    scopes: pickedScopes,
+    tasks: pickedTasks,
+    typedItems: typedCapture?.items,
+    priceItems: (priceItems ?? []) as any[],
+    kits: taskKits,
+    level: seedLevel,
+    settings: { default_markup_pct: settings.default_markup_pct, default_labor_rate: settings.default_labor_rate },
+  });
 
   // The lead this page was opened for ALWAYS appears, even if it has since been won or lost or
   // has aged past the cap — a picker that can't show what the document is actually attached to

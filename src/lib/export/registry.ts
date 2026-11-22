@@ -109,7 +109,8 @@ export const EXPORT_TABLES: readonly ExportTable[] = [
     columns: [
       "id", "quote_number", "doc_type", "estimate_format", "customer_id", "job_id", "inquiry_id", "revises_quote_id", "status", "title",
       "description", "notes", "address", "unit", "city", "state", "zip", "circuits", "tax_rate", "subtotal", "tax", "total", "valid_until",
-      "follow_up_at", "accepted_at", "declined_at", "created_by", "created_at", "updated_at",
+      // accepted_how / accepted_by (0413): how the estimate was accepted and which office person recorded it.
+      "follow_up_at", "accepted_at", "accepted_how", "accepted_by", "declined_at", "created_by", "created_at", "updated_at",
     ],
   },
   { table: "quote_line_items", order: "id", columns: ["id", "quote_id", "description", "detail", "category", "quantity", "unit", "unit_price", "line_total", "sort_order"] },

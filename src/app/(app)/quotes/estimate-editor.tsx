@@ -261,6 +261,9 @@ export interface SavedEstimate {
    *  circuits yet, not locked (lib/estimate/circuit-card). */
   canAddCircuits: boolean;
   panelJob: { id: string; label: string } | null;
+  /** WHO SAID YES (cn-v1176, M6; ./[id]/accepted-line): the page's finished sentence while the estimate
+   *  is accepted, else null. Plain text under the status control, office only (this editor is). */
+  acceptedSaid?: string | null;
 }
 
 export type EstimateEditorProps = { catalog: EditorCatalog } & ({ mode: "unsaved"; seed: UnsavedSeed } | { mode: "saved"; saved: SavedEstimate });
@@ -1084,6 +1087,9 @@ export function EstimateEditor(props: EstimateEditorProps) {
             <StatusControl id={savedId} status={status} />
             {(catalog.estimatesOn || lock) && <DuplicateQuoteButton id={savedId} />}
             {tree && <SectionActionsMenu tree={tree} />}
+            {/* WHO SAID YES (cn-v1176): only while accepted; the page wrote the sentence. Plain text, on
+                its own line at the end of the row (basis-full), so the buttons keep their places. */}
+            {status === "accepted" && savedPage?.acceptedSaid && <p className="basis-full text-xs text-slate-500">{savedPage.acceptedSaid}</p>}
           </div>
         </div>
       )}

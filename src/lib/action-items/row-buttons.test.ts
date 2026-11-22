@@ -45,7 +45,7 @@ describe("the table", () => {
       [row("appointment"), "Close Out"],
       // cn-v1175 (R7): Write It Up, boxed; it still opens the inspection (never an estimate).
       [row("inspection_writeup"), "Write It Up"],
-      [row("inspection_writeup", { wonNoJob: true }), "Won · Pick the Job"],
+      [row("inspection_writeup", { wonNoJob: true }), "Won · Start the Job"],
       [row("job_to_schedule"), "Pick a Day"],
       [row("materials_needed", { openToBuy: 6 }), "Buy Materials · 6 Open"],
       [row("materials_needed", { openToBuy: 1 }), "Buy Materials · 1 Open"],

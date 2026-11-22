@@ -30,6 +30,7 @@ vi.mock("../actions", () => ({
   linkAppointmentTo: vi.fn(),
   linkAppointmentToNewLead: vi.fn(),
   searchLinkTargets: vi.fn(async () => []),
+  searchJobsForVisit: vi.fn(async () => []),
 }));
 // The sheet drawn open, so what it says can be read (the real Modal renders nothing while closed).
 vi.mock("@/components/ui/modal", () => ({
@@ -203,15 +204,26 @@ describe("the start card speaks Spanish to a Spanish reader", () => {
 });
 
 describe("how the visit ended, in Spanish", () => {
-  const base = { appointmentId: "appt-1", isStaff: true, decidable: true, status: "completed", estimate: null, outcome: null, outcomeAt: null, job: null, tz: TZ };
+  // cn-v1176 fix F2: the card is handed the visit's type (the Won link reads won-sheet wonStartShown).
+  const base = { appointmentId: "appt-1", isStaff: true, decidable: true, status: "completed", estimate: null, outcome: null, outcomeAt: null, job: null, tz: TZ, visitType: "inspection" as string | null };
   const ending = (o: Partial<Parameters<typeof VisitEnding>[0]>) => es(createElement(VisitEnding, { ...base, ...o }));
 
-  it("the two honest endings: No Vendida (cn-v1170, was Perdida), and Ganada · Elegir el Trabajo on the attach door", () => {
+  it("the two honest endings: No Vendida (cn-v1170, was Perdida), and the quiet pick ¿Ya Tienes el Trabajo? Elígelo (cn-v1176)", () => {
     const html = ending({});
     expect(text(html)).toMatch(/^¿Cómo terminó esta\?/);
     expect(html).toContain(">No Vendida<");
-    expect(html).toContain("Ganada · Elegir el Trabajo");
-    expect(html).not.toMatch(/Lost|Not Sold|Perdida|Won · Pick the Job|How did this one end/);
+    expect(html).toContain("¿Ya Tienes el Trabajo? Elígelo");
+    expect(html).not.toMatch(/Lost|Not Sold|Perdida|Won · Pick the Job|Already Have|How did this one end/);
+  });
+
+  it("Ganada sin trabajo (cn-v1176): the card says so, ONE link to the Won sheet and the quiet pick, all in Spanish", () => {
+    const html = ending({ outcome: "won", outcomeAt: "2026-11-20T20:00:00.000Z" });
+    expect(html).toContain(">Ganada<");
+    expect(html).toContain("Aún sin trabajo.");
+    expect(html).toContain('href="/appointments/appt-1?won=1"');
+    expect(html).toContain("Ganada · Empezar el Trabajo");
+    expect(html).toContain("¿Ya Tienes el Trabajo? Elígelo");
+    expect(html).not.toMatch(/No job yet|Won · Start|Already Have|Pick It/);
   });
 
   it("the estimate it became, a dead one said so; the outcome with a Spanish day and Cambiar", () => {
@@ -243,15 +255,17 @@ describe("the link picker, in Spanish", () => {
     const closed = es(createElement(LinkPicker, { appointmentId: "appt-1", linked: null, seed: "" }));
     expect(text(closed)).toContain("Para Conectar esto a un prospecto, cliente o trabajo");
     // A caller's own words win, and label={null} draws no label (the ending card's door).
-    const handed = es(createElement(LinkPicker, { appointmentId: "appt-1", linked: null, seed: "", kinds: ["job"], openLabel: t("vp_btn_wonPickTheJob"), label: null }));
-    expect(text(handed)).toBe("Ganada · Elegir el Trabajo");
+    const handed = es(createElement(LinkPicker, { appointmentId: "appt-1", linked: null, seed: "", kinds: ["job"], openLabel: t("vp_btn_alreadyHaveTheJobPickIt"), label: null }));
+    expect(text(handed)).toBe("¿Ya Tienes el Trabajo? Elígelo");
     expect(resting + closed).not.toMatch(/Connect this to|>For<|>Change<|>lead</);
   });
 
   it("the open state's words are the catalog's (a click cannot be driven here): the search box, the empty lines, the lead door", () => {
     const s = src("src/app/(app)/appointments/[id]/link-picker.tsx");
-    expect(s).toContain('placeholder={seed.trim() ? fillText(t("vp_searchingSeed"), { seed: seed.trim() }) : t("vp_nameOrAddress")}');
-    expect(s).toContain('{kinds?.length === 1 && kinds[0] === "job" ? t("vp_noJobMatchesYet") : offerLead ? t("vp_nobodyByThatName") : t("vp_nothingMatchesYet")}');
+    // cn-v1176 (re-pinned on purpose): a narrowed search (the ending card's pick) never searches the seed.
+    expect(s).toContain('placeholder={seed.trim() && !search ? fillText(t("vp_searchingSeed"), { seed: seed.trim() }) : t("vp_nameOrAddress")}');
+    expect(s).toContain('{search ? t("vp_noJobForThisVisit") : kinds?.length === 1 && kinds[0] === "job" ? t("vp_noJobMatchesYet") : offerLead ? t("vp_nobodyByThatName") : t("vp_nothingMatchesYet")}');
+    expect(t("vp_noJobForThisVisit")).toBe("Aún no hay trabajo para este cliente.");
     expect(s).toContain('{fillText(t("vp_addressGoesOnLead"), { typed })}');
     expect(s).toContain("{t(KIND_KEY[r.kind])}");
     expect(fillText(t("vp_searchingSeed"), { seed: "12 Bayberry" })).toBe("Buscando “12 Bayberry” — o escribe un nombre");
@@ -520,7 +534,10 @@ describe("the visit page catalog (vp_)", () => {
       // cn-v1170: the ending reads Not Sold (was Lost), and two new sentences say the lead went with it.
       vp_lost: "Not Sold",
       vp_btn_lost: "Not Sold",
-      vp_btn_wonPickTheJob: "Won · Pick the Job",
+      // cn-v1176: Won · Pick the Job left the card (Won is the Inspector's door); the quiet pick and its words.
+      vp_btn_alreadyHaveTheJobPickIt: "Already Have the Job? Pick It",
+      vp_noJobForThisVisit: "No job for this customer yet.",
+      vp_noJobYet: "No job yet.",
       vp_btn_clearTheAnswer: "Clear the Answer",
       vp_btn_keepIt: "Keep It",
       vp_writtenUpAs: "Written up as",
@@ -560,7 +577,9 @@ describe("the visit page catalog (vp_)", () => {
     for (const k of Object.keys(replaced)) expect(vp.en, k).toHaveProperty(k);
     // + the five What Is This For? words (cn-v1157), pinned in visit-title-field.test
     // + the three words of the page with no visit to show (cn-v1157: vp_visitGone, vp_visitGoneTech, vp_btn_backToInspections), pinned in not-found.test
-    expect(Object.keys(vp.en)).toHaveLength(Object.keys(replaced).length + 122 + 5 + 3);
+    // D's half is 125 since cn-v1176 (the Won sheet's plain start, three refusals); 126 with fix F1's
+    // vp_saleEstimateStands (pinned in visit-pieces-spanish.test).
+    expect(Object.keys(vp.en)).toHaveLength(Object.keys(replaced).length + 126 + 5 + 3);
     for (const [k, literal] of Object.entries(replaced)) expect(dict("en")[k], k).toBe(literal);
     // The sentences the old card assembled, re-assembled through the slots, are the old sentences.
     const en = dict("en");

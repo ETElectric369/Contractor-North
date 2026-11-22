@@ -19,6 +19,9 @@
  *   3. THE HEADING above the sheet (visitHeading).
  */
 
+import { priceBookLine, type BookPricing, type OptionedPriceItem } from "@/lib/pricing/item-options";
+import { isNotSoldOutcome, isWonVisitType } from "@/lib/appointments/won-sheet";
+
 /** The query string as the page receives it (Next's awaited searchParams). */
 export type PageQuery = Record<string, string | string[] | undefined>;
 
@@ -129,4 +132,51 @@ export function inspectionHeaderStep(f: {
 export function visitHeading(f: { isInspection: boolean; isStaff: boolean; estimatesOn: boolean }): "inspection" | "inspection_or_estimate" {
   if (f.isInspection) return "inspection";
   return f.isStaff && f.estimatesOn ? "inspection_or_estimate" : "inspection";
+}
+
+/* ── 4. WON · START THE JOB (cn-v1176) ─────────────────────────────────────────────────────────────
+   The owner, 2026-11-21: "an instant create and approve estimate button at the bottom which would run
+   the proper cycle of things ... and pop into the new job". One office-only door at the bottom of the
+   Inspector opens one sheet; the server's read (appointments/won-actions readWonSheet) decides what the
+   sheet shows. These decide only whether the door is drawn and whether the address asks for the sheet. */
+
+/** Whether the address asks for the Won sheet: `won=1`, and nothing else counts. */
+export function wonAsked(sp: PageQuery): boolean {
+  return sp.won === "1";
+}
+
+/** The address as it is, less `won` (closing the sheet): every other param kept in its order, and the
+ *  hash. So a refresh does not reopen it and a later tap on a `?won=1` link opens it again. */
+export function addressWithoutWon(pathname: string, search: string, hash = ""): string {
+  const q = new URLSearchParams(search);
+  q.delete("won");
+  const s = q.toString();
+  return `${pathname}${s ? `?${s}` : ""}${hash}`;
+}
+
+/**
+ * Is the Inspector's "Won · Start the Job" door drawn? The office, on an inspection (a sales visit of
+ * the inspection type: never the city's final inspection), not cancelled, not marked Not Sold, with
+ * no job. A visit marked Won with no job picked shows it, and so does a visit with an estimate behind
+ * it (the sheet then approves that estimate). A tech and a crew lead never get it.
+ */
+export function wonDoorShown(f: { isStaff: boolean; type: string | null; status: string | null; outcome: string | null; hasJob: boolean }): boolean {
+  if (!f.isStaff || f.hasJob) return false;
+  if (!isWonVisitType(f.type)) return false; // the server's read asks the same (lib/appointments/won-sheet)
+  if (f.status === "cancelled") return false;
+  return !isNotSoldOutcome(f.outcome); // the server's refusal reads the same rule (won-sheet decideWonState)
+}
+
+/**
+ * 5. THE PICK'S PRICE (cn-v1176, the owner's pick 1: "a price-list item picked during an inspection
+ * carries the SAME markup as a task's part"). The Inspector seeds a scope pick with this: the price
+ * the task path gives the same book part (lib/estimate/task-lines materialDetail), through THE one
+ * function it calls, priceBookLine (the default vendor, else the item's own price, through the
+ * customer's level, the item's markup and the company's default), rounded the way it rounds. No second
+ * markup formula. A book part with no price is 0 (the pick then asks on the estimate). A price already
+ * stored on a visit is never re-read through here: the seed is only where a NEW pick starts.
+ */
+export function bookSellPrice(item: OptionedPriceItem, pricing: BookPricing): number {
+  const n = priceBookLine(item, pricing).unitPrice;
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : 0;
 }

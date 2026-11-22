@@ -427,6 +427,24 @@ export function visibleDock({ isStaff, features, lapsed = false }: { isStaff: bo
   });
 }
 
+/**
+ * ONE NUMBER, ONE FUNCTION (cn-v1176, the owner: "Admin has a badge showing the number 1 but the subnav
+ * has no badges to follow up so I have no idea what that badge is for"). The layout hands the shell one
+ * map of open counts keyed by a row's href (`/reconcile`, `/closing`…). A ROW's badge is its own entry;
+ * a TILE's badge is the sum of its drawn rows' badges, read through the same function, so a tile's
+ * number always leads to a row that says it. Badges count only what is open: zero (or anything that is
+ * not a positive number) is 0, and 0 draws nothing.
+ */
+export type DockBadges = Record<string, number>;
+export function rowBadge(badges: DockBadges | null | undefined, row: Pick<DockNode, "href" | "header">): number {
+  if (!row.href || row.header) return 0;
+  const n = badges?.[row.href];
+  return typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+export function tileBadge(badges: DockBadges | null | undefined, section: Pick<DockSection, "children">): number {
+  return section.children.reduce((sum, c) => sum + rowBadge(badges, c), 0);
+}
+
 /** The tiles the rail and the phone bar draw: every visible section but the ones that live behind
  *  the initials (inMenu). The avatar menu draws those as rows (menuSections). */
 export const dockTiles = (sections: DockSection[]): DockSection[] => sections.filter((s) => !s.inMenu);

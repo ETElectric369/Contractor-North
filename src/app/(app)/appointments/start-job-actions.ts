@@ -40,6 +40,8 @@ import { callerLang } from "@/lib/lang-of";
 import { fillSlots, say, type Words } from "@/lib/lang-words";
 import type { Lang } from "@/lib/locale";
 import { createJobFromAppointment, linkAppointmentTo } from "./actions";
+import { isNotSoldOutcome, isWonVisitType } from "@/lib/appointments/won-sheet";
+import { readWonSheet } from "./won-actions";
 import { clockIn, switchJob } from "../timeclock/actions";
 
 /** The caller's language, read once per call, and its words. Not exported: a "use server" file exports only async functions. */
@@ -366,6 +368,79 @@ export async function linkVisitInstead(appointmentId: string, jobId: string): Pr
     message: await ws.say("vp_linkedThisVisitTo", { job: jobNumber, note: res.note ?? (await ws.say("vp_nothingNewWasMade")), onIt }),
     ...(warnings.length ? { warning: warnings.join(" ") } : {}),
   };
+}
+
+/**
+ * THE WON SHEET'S PLAIN START (cn-v1176, E2): "Start the Job" when nothing priced was recorded, Estimates
+ * is switched off, or the office chose "Start the Job with No Estimate". The job is made through the
+ * one visit door (createJobFromAppointment) with `asSale`, so it is left the way an ACCEPTED ESTIMATE
+ * leaves it: waiting for a day (to_be_scheduled, never put on the inspection's slot), and the inspection
+ * stays an inspection, Done, Won, attached to that job (not absorbed), on file as the customer's
+ * inspection. The customer card, the lead's stamp, the task list and the typed rows happen as they do
+ * on the Start a Job card. `opts.billingType` is the job's billing kind; absent, the company's usual one.
+ *
+ * Office only. Twice-safe: a visit that already has a job answers with that job, and the door's claim
+ * keeps two taps to one job. Refused, with nothing made: a cancelled visit, a visit that is not a sale
+ * (a work visit, the city's final inspection), one marked Not Sold, and ANY visit with an estimate that
+ * stands behind it or is its lead's standing one, draft, sent or accepted (the job comes from that
+ * estimate, never a second, estimate-less one that the estimate's acceptance would double). That is the
+ * Won sheet's own decision, CALLED here, never copied (cn-v1176 fix F1): readWonSheet answers, and only
+ * `plain`, or `estimate` from the visit's own lines, lets a job start with no estimate. No money is read
+ * here (the decision's read is the office's own).
+ */
+export async function startJobFromSale(
+  appointmentId: string,
+  opts?: { billingType?: "tm" | "fixed" },
+): Promise<{ ok: true; job: { id: string; number: string | null }; warnings: string[] } | { ok: false; error: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: await wordsOf(await createClient()).say("vp_onlyOfficeStartsJob") };
+  const supabase = ctx.supabase as unknown as SupabaseClient;
+  const ws = wordsOf(ctx.supabase, ctx.userId);
+
+  const { data: row } = await supabase
+    .from("appointments")
+    .select("id, type, status, outcome, job_id, capture_quote:capture->>quote_id")
+    .eq("id", appointmentId)
+    .maybeSingle();
+  const visit = row as { id: string; type: string | null; status: string | null; outcome: string | null; job_id: string | null; capture_quote: string | null } | null;
+  if (!visit) return { ok: false, error: await ws.say("vp_visitNotFound") };
+
+  const jobOf = async (id: string) => {
+    const { data } = await supabase.from("jobs").select("id, job_number").eq("id", id).maybeSingle();
+    const j = data as { id: string; job_number: string | null } | null;
+    return { id, number: j?.job_number ?? null };
+  };
+  if (visit.job_id) return { ok: true, job: await jobOf(visit.job_id), warnings: [] };
+  if (visit.status === "cancelled") return { ok: false, error: await ws.say("vp_visitCancelledNothingStarted") };
+  if (!isWonVisitType(visit.type)) return { ok: false, error: await ws.say("vp_saleNotASalesVisit") };
+  if (isNotSoldOutcome(visit.outcome)) return { ok: false, error: await ws.say("vp_saleMarkedNotSold") };
+  // THE WON SHEET'S OWN DECISION (cn-v1176 fix F1): an estimate that stands for this visit or its lead is
+  // the one approved; a job with no estimate beside it would be doubled when that estimate is accepted.
+  const sheet = await readWonSheet(visit.id);
+  if (!sheet.ok) return { ok: false, error: sheet.error };
+  const nothing = await ws.say("vp_nothingWasStarted");
+  const estimateWord = async (q: { number: string | null }) => q.number ?? (await ws.say("vp_btn_theEstimate"));
+  if (sheet.state === "estimate" && sheet.source === "existing") {
+    return { ok: false, error: await ws.say("vp_saleEstimateStands", { estimate: sheet.quote ? await estimateWord(sheet.quote) : await ws.say("vp_btn_theEstimate") }) };
+  }
+  if (sheet.state === "finish") return { ok: false, error: await ws.say("vp_saleEstimateAccepted", { estimate: await estimateWord(sheet.quote) }) };
+  if (sheet.state === "refer") {
+    const tie = sheet.job.number ? await ws.say("vi_btn_wonTieTo", { j: sheet.job.number }) : await ws.say("vi_btn_wonTieToTheJob");
+    return { ok: false, error: `${await ws.say("qs_wonRefer", { quote: sheet.quote.number ?? "", job: sheet.job.number ?? "", tie })} ${nothing}` };
+  }
+  if (sheet.state === "has_job") return { ok: false, error: `${await ws.say("qs_wonHasJob")} ${nothing}` };
+
+  const billingType = opts?.billingType === "tm" || opts?.billingType === "fixed" ? opts.billingType : undefined;
+  const made = await createJobFromAppointment(visit.id, { asSale: true, ...(billingType ? { billingType } : {}) });
+  if (!made.ok || !made.id) return { ok: false, error: made.error ?? (await ws.say("vp_jobCouldNotBeStarted")) };
+
+  revalidatePath(`/appointments/${visit.id}`);
+  revalidatePath(`/jobs/${made.id}`);
+  revalidatePath("/jobs");
+  // A WARNING IS NEVER DROPPED (cn-v1176): every note the job maker returns on this path (the visit gone
+  // mid-start, tasks or typed rows not listed, the inspection not marked done…), already in the reader's
+  // language, goes back to the sheet, which says it under "Job started".
+  return { ok: true, job: await jobOf(made.id), warnings: made.note ? [made.note] : [] };
 }
 
 /**

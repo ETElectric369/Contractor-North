@@ -60,7 +60,8 @@ describe("accepting an estimate that already has its job", () => {
     const write = status.indexOf(".update(patch)");
     expect(read).toBeGreaterThan(-1);
     expect(write).toBeGreaterThan(read);
-    expect(status).toContain("createJobFromQuote(id, linked ? { sizeBefore: linked.sizeBefore, tasksBefore: linked.tasksBefore, partsBefore: linked.partsBefore } : undefined)");
+    // cn-v1176: the Won sheet's billing kind rides as a third argument, read on the new-job branch only.
+    expect(status).toContain("createJobFromQuote(id, linked ? { sizeBefore: linked.sizeBefore, tasksBefore: linked.tasksBefore, partsBefore: linked.partsBefore } : undefined, opts?.billingType)");
   });
   it("the news is said under the status, apart from a warning", () => {
     expect(status).toContain("if (jobRes?.said) said = jobRes.said;");

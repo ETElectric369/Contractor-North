@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
  */
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
-vi.mock("../actions", () => ({ setAppointmentOutcome: vi.fn(), linkAppointmentTo: vi.fn(), searchLinkTargets: vi.fn(async () => []) }));
+vi.mock("../actions", () => ({ setAppointmentOutcome: vi.fn(), linkAppointmentTo: vi.fn(), searchLinkTargets: vi.fn(async () => []), searchJobsForVisit: vi.fn(async () => []) }));
 
 import { VisitEnding, endingOffered, outcomeWord } from "./visit-ending";
 import { DECIDABLE_VISIT_TYPES, isDecidableVisitType } from "@/lib/statuses";
@@ -26,6 +26,7 @@ const base = {
   outcomeAt: null,
   job: null,
   tz: TZ,
+  visitType: "inspection" as string | null,
 };
 const html = (o: Partial<Parameters<typeof VisitEnding>[0]>) => renderToStaticMarkup(createElement(VisitEnding, { ...base, ...o }));
 const doors = (s: string) => (s.match(/<button[^>]*>/g) ?? []).length;
@@ -50,7 +51,10 @@ describe("the ending doors are offered only where they apply", () => {
     expect(s).not.toContain(">Lost<");
     expect(s).not.toContain("Nothing Came of It"); // Erik: "just keep Lost everywhere"
     expect(s).not.toContain(">Won<"); // a win is never typed alone: it is the job the visit became
-    expect(s).toContain("Won · Pick the Job"); // the attach door, jobs only, right on the card
+    // cn-v1176: Won is the Inspector's bottom door; the card keeps the QUIET pick of a job that exists.
+    expect(s).toContain("Already Have the Job? Pick It");
+    expect(s).not.toContain("Won · Pick the Job");
+    expect(s).not.toContain("Won · Start the Job");
     expect(doors(s)).toBe(2);
     for (const m of s.match(/<button[^>]*>/g) ?? []) expect(m).toContain("min-h-[44px]");
   });
@@ -94,6 +98,63 @@ describe("what the visit became", () => {
     expect(doors(s)).toBe(1);
     // A tech reads the answer and gets no Change.
     expect(doors(html({ isStaff: false, outcome: "lost", outcomeAt: "2026-07-31T20:00:00.000Z" }))).toBe(0);
+  });
+});
+
+/**
+ * WON IS THE INSPECTOR'S DOOR (cn-v1176, E4). The card no longer picks a job to be won: an undecided
+ * visit is offered Not Sold and the QUIET pick of a job that already exists (narrowed to this visit's
+ * own customer and lead); a visit marked Won with no job says so and carries ONE link to the Won sheet.
+ */
+describe("the ending card after cn-v1176", () => {
+  it("Won with no job: the card says so, ONE link to the Won sheet (?won=1), the quiet pick beside it, Change for the rest", () => {
+    const s = html({ outcome: "won", outcomeAt: "2026-11-20T20:00:00.000Z" });
+    expect(s).toContain(">Won<");
+    expect(s).toContain("No job yet.");
+    expect(s).toContain('href="/appointments/appt-1?won=1"');
+    expect((s.match(/Won · Start the Job/g) ?? []).length).toBe(1);
+    expect(s).toContain("Already Have the Job? Pick It");
+    expect(s).toContain(">Change<");
+    // Not Sold sits behind Change, never beside the win.
+    expect(s).not.toContain(">Not Sold<");
+    // Nothing new is amber (amber is a real clock).
+    expect(s).not.toMatch(/amber/);
+  });
+
+  it("an undecided visit: Not Sold and the quiet pick, and nothing that wins it from the card", () => {
+    const s = html({});
+    expect(s).toContain(">Not Sold<");
+    expect(s).toContain("Already Have the Job? Pick It");
+    expect(s).not.toContain("?won=1");
+    expect(s).not.toMatch(/amber/);
+  });
+
+  it("a visit Won with its job, a tech, a work visit: no Won sheet link", () => {
+    expect(html({ outcome: "won", job: { id: "j1", job_number: "J-900", name: "12 Larkspur Ln" } })).not.toContain("?won=1");
+    expect(html({ isStaff: false, outcome: "won" })).not.toContain("?won=1");
+    expect(html({ decidable: false, outcome: "won" })).not.toContain("?won=1");
+  });
+
+  it("cn-v1176 fix F2: a call or a meeting marked Won with no job keeps the quiet pick and no Won sheet link (no dead end)", () => {
+    for (const visitType of ["call", "meeting", "appointment"]) {
+      const s = html({ outcome: "won", visitType });
+      expect(s, visitType).toContain("No job yet.");
+      expect(s, visitType).toContain("Already Have the Job? Pick It");
+      expect(s, visitType).not.toContain("?won=1");
+      expect(s, visitType).not.toContain("Won · Start the Job");
+    }
+    // The estimate visit is a sale the sheet takes: its link is drawn.
+    expect(html({ outcome: "won", visitType: "quote" })).toContain('href="/appointments/appt-1?won=1"');
+  });
+
+  it("the pick is the narrowed one, through the attach door; the card holds no Won · Pick the Job", () => {
+    const src = readFileSync("src/app/(app)/appointments/[id]/visit-ending.tsx", "utf8");
+    expect(src).toContain("search={(q) => searchJobsForVisit(appointmentId, q)}");
+    expect(src).toContain('openLabel={t("vp_btn_alreadyHaveTheJobPickIt")}');
+    expect(src).not.toContain("vp_btn_wonPickTheJob");
+    const picker = readFileSync("src/app/(app)/appointments/[id]/link-picker.tsx", "utf8");
+    expect(picker).toContain("(search ?? searchLinkTargets)(term)");
+    expect(picker).toContain("settleLink(linkAppointmentTo(appointmentId, r.kind, r.id)");
   });
 });
 

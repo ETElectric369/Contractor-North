@@ -136,8 +136,12 @@ describe("the seed", () => {
     expect(page).toContain("const taskKits = kitsRead.kits;");
     expect(page).toContain("kitDoors && kitsReadWords(kitsRead.state) && ("); // the banner beside the price list's
     expect(page).toContain('reportError("quotes/new:kits"');
-    expect(page).toContain("const taskKitMap = new Map(taskKits.map((k) => [k.id, k]));");
-    expect(page).toMatch(/taskLines\(g\.tasks, \{ book: taskBook, rate: seedRate, pricing: seedPricing, kits: taskKitMap, group: g\.label \}\)/);
+    // cn-v1176: the line builder moved to lib/estimate/visit-lines (one builder for the page and the Won
+    // sheet); the page hands it the kits it read, and the builder hands them to taskLines.
+    expect(page).toMatch(/visitEstimateLines\(\{[\s\S]*?kits: taskKits,/);
+    const builder = src("src/lib/estimate/visit-lines.ts");
+    expect(builder).toContain("const taskKitMap = new Map(seed.kits.map((k) => [k.id, k]));");
+    expect(builder).toMatch(/taskLines\(g\.tasks, \{ book: taskBook, rate, pricing, kits: taskKitMap, group: g\.label \}\)/);
   });
 });
 

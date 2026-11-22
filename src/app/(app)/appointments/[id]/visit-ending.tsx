@@ -10,7 +10,8 @@ import { translator } from "@/lib/i18n";
 import { formatDate } from "@/lib/utils";
 import { estimateStatusLabel } from "@/lib/statuses";
 import { notSoldAnswer, undoneKey } from "@/lib/appointments/not-sold";
-import { setAppointmentOutcome } from "../actions";
+import { wonStartShown } from "@/lib/appointments/won-sheet";
+import { searchJobsForVisit, setAppointmentOutcome } from "../actions";
 import { LinkPicker } from "./link-picker";
 
 /**
@@ -24,12 +25,18 @@ import { LinkPicker } from "./link-picker";
  *
  *   Written up as EST-0042 · sent          the estimate, as a link; a dead one says so
  *   Won · Jun 14 · J-039 The Bayberry place  the outcome, with its day and the job when there is one
- *   [Lost] [Won · Pick the Job]            the office's doors on a completed visit with a win or
+ *   [Not Sold]  Already Have the Job? Pick It
+ *                                          the office's doors on a completed visit with a win or
  *                                          loss to record (a meeting too), still undecided, no job,
- *                                          no live estimate. The win is never typed alone: it is the
- *                                          JOB the visit became (the attach door, linkAppointmentTo,
- *                                          stamps won) — Lim's Jun 15 visit became E-007 → J-030
- *                                          with no backlink, and the only word on offer was Lost.
+ *                                          no live estimate. WON IS THE INSPECTOR'S BOTTOM DOOR now
+ *                                          (cn-v1176, "Won · Start the Job": the job comes FROM the
+ *                                          sale, the owner's "opposite direction of flow"); the card
+ *                                          keeps only the quiet pick for a job that already exists,
+ *                                          narrowed to this visit's own customer and lead
+ *                                          (searchJobsForVisit), through the attach door
+ *                                          (linkAppointmentTo, which stamps won).
+ *   Won · No job yet. [Won · Start the Job]  a visit marked Won with no job: the link opens the
+ *                                          Won sheet (?won=1), with the same quiet pick beside it.
  *
  * The outcome is the visit's own answer (setAppointmentOutcome), the same column the estimate's
  * Accepted / Declined and the Inspections tab's bucket read. Change re-opens the three words; Clear
@@ -68,7 +75,7 @@ export function endingOffered(v: {
   return v.isStaff && v.decidable && v.status === "completed" && !v.outcome && !v.hasJob && !v.estimateLive;
 }
 
-/** A visit marked Won with no job picked (cn-v1175, R8): the office is handed the job picker at once. */
+/** A visit marked Won with no job picked (cn-v1175, R8): the card says so and opens the Won sheet (cn-v1176). */
 export function jobAsked(v: { isStaff: boolean; decidable: boolean; outcome: string | null; hasJob: boolean }): boolean {
   return v.isStaff && v.decidable && v.outcome === "won" && !v.hasJob;
 }
@@ -86,6 +93,7 @@ export function VisitEnding({
   job,
   tz,
   seed = "",
+  visitType,
 }: {
   appointmentId: string;
   isStaff: boolean;
@@ -99,6 +107,9 @@ export function VisitEnding({
   tz: string;
   /** What the job picker searches first: the visit's address (jobs are named by street). */
   seed?: string;
+  /** The visit's stored type: the Won sheet's link is drawn only for a type the sheet takes (cn-v1176
+   *  fix F2, won-sheet wonStartShown); any other Won visit with no job keeps the quiet pick only. */
+  visitType: string | null;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -146,17 +157,28 @@ export function VisitEnding({
     });
   }
 
+  // THE QUIET PICK (cn-v1176): a job that already exists for this visit's customer or lead, through the
+  // attach door; the narrowed search re-reads the visit on the server.
+  const pick = !job && (
+    <div className="min-w-[14rem] flex-1 [&>div]:mt-0">
+      <LinkPicker
+        appointmentId={appointmentId}
+        linked={null}
+        seed={seed}
+        kinds={["job"]}
+        openLabel={t("vp_btn_alreadyHaveTheJobPickIt")}
+        label={null}
+        search={(q) => searchJobsForVisit(appointmentId, q)}
+      />
+    </div>
+  );
+
   const choices = (
     <div className="mt-2 flex flex-wrap items-start gap-2">
       <Button type="button" variant="secondary" disabled={pending} className={DOOR} onClick={() => decide("lost")}>
         {t("vp_btn_lost")}
       </Button>
-      {/* The win is the job it became: the attach door (jobs only, every status but cancelled). */}
-      {!job && (
-        <div className="min-w-[14rem] flex-1 [&>div]:mt-0">
-          <LinkPicker appointmentId={appointmentId} linked={null} seed={seed} kinds={["job"]} openLabel={t("vp_btn_wonPickTheJob")} label={null} />
-        </div>
-      )}
+      {pick}
       {changing && (
         <>
           {outcome && (
@@ -206,9 +228,29 @@ export function VisitEnding({
           {choices}
         </>
       )}
-      {/* A WIN WITH NO JOB PICKED IS NOT AN ENDING (cn-v1175, R8): the Inspections list and Needs You send
-          the office here to pick the job, so the picker is out at once, never behind Change. */}
-      {jobAsked({ isStaff, decidable, outcome, hasJob: !!job }) && !offered && !changing && choices}
+      {/* A WIN WITH NO JOB IS NOT AN ENDING (cn-v1175, R8; cn-v1176): the card says so, and its ONE link
+          opens the Won sheet (the Inspector's bottom door, ?won=1); the quiet pick sits beside it. Not
+          Sold stays behind Change. */}
+      {jobAsked({ isStaff, decidable, outcome, hasJob: !!job }) && !offered && !changing && (
+        <>
+          <p className="mt-1 text-slate-600" data-won-no-job="">
+            {t("vp_noJobYet")}
+          </p>
+          <div className="mt-2 flex flex-wrap items-start gap-2">
+            {wonStartShown({ type: visitType, outcome, hasJob: !!job }) && (
+              <Link
+                href={`/appointments/${appointmentId}?won=1`}
+                scroll={false}
+                className={`${DOOR} rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 hover:border-brand hover:text-brand`}
+                data-won-start=""
+              >
+                {t("vi_btn_wonStartTheJob")}
+              </Link>
+            )}
+            {pick}
+          </div>
+        </>
+      )}
       {changing && choices}
     </div>
   );

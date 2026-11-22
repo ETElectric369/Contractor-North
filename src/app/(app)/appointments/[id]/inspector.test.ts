@@ -138,6 +138,54 @@ describe("the office: unchanged", () => {
   });
 });
 
+/**
+ * WON · START THE JOB (cn-v1176), re-pinned on purpose: the office's bar is Save, the estimate's door,
+ * and, where the page says so (wonDoor), the quiet outlined Won door after them. A crew lead and a tech
+ * never get the door or the sheet, whatever is handed in. The bar keeps ONE boxed button.
+ */
+describe("the bar per role, with Won · Start the Job", () => {
+  const bar = (html: string) => html.slice(html.indexOf("sticky bottom-0"));
+  const BOXED = "bg-[rgb(var(--glass-ink))]";
+  it("the office with the door: Save, Start the Estimate, then Won · Start the Job, outlined", () => {
+    const html = render("office", { wonDoor: true });
+    const doors = buttons(bar(html));
+    expect(doors.map((b) => b.text)).toEqual(["Save", "Start the Estimate", "Won · Start the Job"]);
+    const won = doors[2];
+    expect(won.open).toContain("border-slate-300");
+    expect(won.open).not.toContain(BOXED);
+    expect(won.open).toMatch(TARGET);
+    expect(doors.filter((b) => b.open.includes(BOXED))).toHaveLength(1); // the estimate's door, only
+    // The sheet is closed until asked: nothing of it is drawn, no total in the bar.
+    expect(textOf(html)).not.toContain("Approve and Start the Job");
+    expect(textOf(bar(html))).not.toMatch(/\$/);
+  });
+  it("the office with an estimate standing keeps Open the Estimate, and the door beside it", () => {
+    const doors = buttons(bar(render("office", { wonDoor: true, estimate: { id: "q-1", number: "E-900", live: true } }))).map((b) => b.text);
+    expect(doors).toEqual(["Save", "Open the Estimate", "Won · Start the Job"]);
+  });
+  it("the office where the page says no door: Save and Start the Estimate, as before", () => {
+    expect(buttons(bar(render("office"))).map((b) => b.text)).toEqual(["Save", "Start the Estimate"]);
+  });
+  it("a crew lead and a tech: no door, even when one is handed in", () => {
+    for (const access of ["crewLead", "view"] as const) {
+      const html = render(access, { wonDoor: true, wonAsked: true });
+      expect(html, access).not.toContain("Won · Start the Job");
+      expect(html, access).not.toContain("Approve");
+    }
+  });
+  it("in Spanish, the door says Ganada · Empezar el Trabajo", async () => {
+    const { LangProvider } = await import("@/components/lang-provider");
+    const html = renderToStaticMarkup(
+      createElement(LangProvider as never, { lang: "es" } as never, createElement(Inspector, {
+        appointmentId: "appt-1", orgId: "org-1", userId: "u-1", templates: [SHEET], priceBook: BOOK, initialTemplateId: "sheet-1",
+        initialAnswers: ANSWERS as never, initialCapture: {}, initialPhotos: [], initialLocation: "", linked: null,
+        estimateHref: "/quotes/new?capture=appt-1", access: "office", wonDoor: true,
+      })),
+    );
+    expect(textOf(html)).toContain("Ganada · Empezar el Trabajo");
+  });
+});
+
 describe("a crew lead on this visit: fills it in, never a price", () => {
   const html = render("crewLead");
   const t = textOf(html);

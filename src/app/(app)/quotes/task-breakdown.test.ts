@@ -242,7 +242,9 @@ describe("the rate reaches the editor through the one rule", () => {
       // The team off the same view the job's labor billing reads its rates from — never their pay rate.
       expect(page, p).toContain('supabase.from("profile_pay").select("id, full_name, bill_rate").eq("active", true).order("full_name")');
     }
-    expect(read("src/app/(app)/quotes/new/page.tsx")).toContain("laborRateFor({ levelRate: seedCustomer?.pricing_levels?.labor_rate, orgDefault: settings.default_labor_rate }).rate");
+    // cn-v1176: the seed's rate is the line builder's (lib/estimate/visit-lines), for the pricing customer's level.
+    expect(read("src/lib/estimate/visit-lines.ts")).toContain("laborRateFor({ levelRate: seed.level?.labor_rate as number | null | undefined, orgDefault: seed.settings.default_labor_rate }).rate");
+    expect(read("src/app/(app)/quotes/new/page.tsx")).toContain("settings: { default_markup_pct: settings.default_markup_pct, default_labor_rate: settings.default_labor_rate },");
     // The saved page reads the level's labor rate with the row (projection law) and hands it as the level.
     expect(read("src/app/(app)/quotes/[id]/page.tsx")).toContain("customers(*, pricing_levels(markup_pct, labor_rate))");
     expect(read("src/app/(app)/quotes/[id]/page.tsx")).toContain("level: { markup: q.customers?.pricing_levels?.markup_pct ?? null, rate: q.customers?.pricing_levels?.labor_rate ?? null },");

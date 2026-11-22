@@ -10,6 +10,7 @@ import { bucketInspections, inspectionLabel } from "@/lib/inspections";
 import { SALES_VISIT_TYPES, VISIT_CLOSED_JOB_STATUSES, leadClosedAtFrom, visitSettled } from "@/lib/appointments/visit-settled";
 import { leadRidesItsWriteUp, lessRidden } from "./lead-rides-its-writeup";
 import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES, visitTitle } from "@/lib/statuses";
+import { wonStartShown } from "@/lib/appointments/won-sheet";
 import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
 import { invoiceAmount } from "@/lib/invoice-amount";
 import { lienStatus } from "@/lib/lien-math";
@@ -1062,7 +1063,9 @@ async function buildActionItems(ctx: {
         // Move to Another Day keeps the visit's time of day: the day picked, at this time (dispatch-map).
         targetId: localTimeOfDay(a.starts_at, tz),
         // A visit marked Won with no job picked is not an ending (R8): its one button asks for the job.
-        wonNoJob: a.outcome === "won" && !a.job_id,
+        // cn-v1176 fix F2: only where the Won sheet takes the visit (won-sheet wonStartShown, ONE rule);
+        // any other Won visit with no job keeps Write It Up, which opens the visit and its quiet pick.
+        wonNoJob: wonStartShown({ type: a.type, outcome: a.outcome, hasJob: !!a.job_id }),
         ...(old ? { older: true } : {}),
       });
       writeUpApptIds.add(a.id);

@@ -222,6 +222,12 @@ describe("Start the Job's server (start-job-actions): the mechanism on the sourc
       ["vp_nothingWasStarted", "Nothing was started.", "No se empezó nada."],
       ["vp_thisCustomerLower", "this customer", "este cliente"],
       ["vp_jobCouldNotBeStarted", "The job could not be started. Nothing was changed.", "No se pudo empezar el trabajo. No se cambió nada."],
+      // cn-v1176: the Won sheet's plain start (startJobFromSale).
+      ["vp_saleNotASalesVisit", "Only an inspection or an estimate visit is won. Nothing was started.", "Solo se gana una inspección o una visita para presupuesto. No se empezó nada."],
+      ["vp_saleMarkedNotSold", "This inspection is marked Not Sold. Tap Change on it and Clear the Answer first. Nothing was started.", "Esta inspección está marcada como No Vendida. Toca Cambiar en ella y luego Borrar la Respuesta. No se empezó nada."],
+      ["vp_saleEstimateAccepted", "{estimate} is already accepted, so the job comes from it: tap Finish the Job from {estimate}. Nothing was started.", "{estimate} ya está aceptado, así que el trabajo sale de él: toca Crear el Trabajo desde {estimate}. No se empezó nada."],
+      // cn-v1176 fix F1: an estimate that stands refuses the plain start, naming the sheet's own button.
+      ["vp_saleEstimateStands", "{estimate} stands for this visit, so the job comes from it: tap Approve and Start the Job. Nothing was started.", "{estimate} ya existe para esta visita, así que el trabajo sale de él: toca Aprobar y Empezar el Trabajo. No se empezó nada."],
       ["vp_jobMadeNotReadBack", "The job was made but could not be read back. Reload the page before trying again.", "El trabajo se creó pero no se pudo leer de vuelta. Recarga la página antes de intentar de nuevo."],
       ["vp_switchDidntGoThrough", "the switch did not go through.", "el cambio no pasó."],
       ["vp_tryAgainFromJobPage", "try again from the job page.", "inténtalo de nuevo desde la página del trabajo."],
@@ -559,6 +565,10 @@ describe("the visit page catalog (vp_), builder D's half", () => {
     vp_onClockLinkInstead: "You're on the clock on {job}, the job {customer} already has from today. Link this visit to {job} instead. Nothing was started.",
     vp_thisCustomerLower: "this customer",
     vp_jobCouldNotBeStarted: "The job could not be started. Nothing was changed.",
+    vp_saleNotASalesVisit: "Only an inspection or an estimate visit is won. Nothing was started.",
+    vp_saleMarkedNotSold: "This inspection is marked Not Sold. Tap Change on it and Clear the Answer first. Nothing was started.",
+    vp_saleEstimateAccepted: "{estimate} is already accepted, so the job comes from it: tap Finish the Job from {estimate}. Nothing was started.",
+    vp_saleEstimateStands: "{estimate} stands for this visit, so the job comes from it: tap Approve and Start the Job. Nothing was started.",
     vp_jobMadeNotReadBack: "The job was made but could not be read back. Reload the page before trying again.",
     vp_clockStillOn: "Your clock is still on {from}: {why}",
     vp_switchDidntGoThrough: "the switch did not go through.",
@@ -621,7 +631,7 @@ describe("the visit page catalog (vp_), builder D's half", () => {
   };
 
   it("every English value this half added is the literal it replaced, byte for byte, and each has its own Spanish", () => {
-    expect(Object.keys(replaced)).toHaveLength(122);
+    expect(Object.keys(replaced)).toHaveLength(126); // 126 with cn-v1176 fix F1's vp_saleEstimateStands
     for (const [k, v] of Object.entries(replaced)) {
       expect(vp.en[k], k).toBe(v);
       expect(vp.es[k], k).toBeTruthy();
@@ -631,6 +641,9 @@ describe("the visit page catalog (vp_), builder D's half", () => {
     // + the five What Is This For? words (vp_whatIsThisFor…, vp_titleSav…, vp_titleNotSaved)
     // + the three words of the page with no visit to show (vp_visitGone, vp_visitGoneTech, vp_btn_backToInspections)
     // + cn-v1170's two (vp_markedLostLeadToo, vp_undoneLeadToo: a visit's Not Sold that took its lead)
-    expect(Object.keys(vp.en)).toHaveLength(270);
+    // + cn-v1176: the card's three (vp_btn_alreadyHaveTheJobPickIt, vp_noJobForThisVisit, vp_noJobYet) and
+    //   these three refusals; vp_btn_wonPickTheJob left (nothing reads it).
+    // + cn-v1176 fix F1: vp_saleEstimateStands.
+    expect(Object.keys(vp.en)).toHaveLength(276);
   });
 });

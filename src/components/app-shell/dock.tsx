@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { activeNav, dockTiles, visibleDock } from "@/lib/dock";
+import { activeNav, dockTiles, rowBadge, tileBadge, visibleDock } from "@/lib/dock";
 import { useNavAt } from "@/components/app-shell/use-nav-at";
 import { dockLabel, dockTileLabel } from "@/lib/dock-words";
 import { translator } from "@/lib/i18n";
@@ -39,7 +39,7 @@ type DockProps = {
  * chains. The shape check is inside the effect so the value and the "is it pending?" decision
  * can never come from two different renders.
  */
-function useBadges(badges?: Badges | Promise<Badges>): Badges {
+export function useBadges(badges?: Badges | Promise<Badges>): Badges {
   const [resolved, setResolved] = useState<Badges>({});
   useEffect(() => {
     let live = true;
@@ -64,6 +64,26 @@ function useBadges(badges?: Badges | Promise<Badges>): Badges {
 /** True for a spec Promise AND for React's RSC thenable — anything Promise.resolve can adopt. */
 export function isThenable(v: unknown): boolean {
   return !!v && (typeof v === "object" || typeof v === "function") && typeof (v as { then?: unknown }).then === "function";
+}
+
+/**
+ * A ROW'S OPEN COUNT (cn-v1176): the number a tile's badge is made of, drawn on the row it came from
+ * (lib/dock rowBadge, the one function the tile's sum reads too), so a tile's number always leads to a
+ * row. Plain slate, never the tile's amber: amber is a real clock in this app, and a row count is what
+ * is still open behind it (components/tabs CountBadge's look). Zero draws nothing.
+ */
+export function RowCount({ count, active = false }: { count: number; active?: boolean }) {
+  if (!(count > 0)) return null;
+  return (
+    <span
+      data-row-count=""
+      className={`relative z-10 ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${
+        active ? "bg-white/70 text-[rgb(var(--glass-ink))]" : "bg-slate-100 text-slate-600"
+      }`}
+    >
+      {count > 9 ? "9+" : count}
+    </span>
+  );
 }
 
 /** Never hand the renderer anything but a plain count map. */
@@ -144,7 +164,8 @@ function DockInner({ branding, role, badges: badgesProp, features, lapsed = fals
             {tiles.map((s) => {
               const Icon = s.icon;
               const on = s.key === active?.key;
-              const badge = s.children.reduce((sum, c) => sum + (c.href ? badges?.[c.href] ?? 0 : 0), 0);
+              // ONE NUMBER, ONE FUNCTION (lib/dock tileBadge): the sum of the rows' own badges, each drawn on its row.
+              const badge = tileBadge(badges, s);
               const tile = dockTileLabel(s, lang);
               return (
                 <Link
@@ -213,6 +234,7 @@ function DockInner({ branding, role, badges: badgesProp, features, lapsed = fals
                 >
                   <CIcon className="relative z-10 h-4 w-4 shrink-0" />
                   <span className="relative z-10 truncate">{dockLabel(c, lang)}</span>
+                  <RowCount count={rowBadge(badges, c)} active={cur} />
                 </Link>
               );
             })}

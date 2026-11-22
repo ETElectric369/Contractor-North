@@ -28,9 +28,9 @@ describe("migration 0412: a bug report carries its picture in the row, and can w
   const code = noComments(sql);
   const flat = squash(code);
 
-  it("is the newest migration, named for what it does, and takes its locks with a timeout", () => {
+  it("is the one 0412, named for what it does, and takes its locks with a timeout", () => {
     expect(names.filter((n) => n.startsWith("0412_"))).toEqual(["0412_a_bug_report_carries_its_picture.sql"]);
-    expect(names[names.length - 1]).toBe("0412_a_bug_report_carries_its_picture.sql");
+    // The newest-migration line moved to migration-0413.test.ts the day 0413 was written.
     expect(code).toContain("set local lock_timeout = '3s';");
     expect(code).toContain("set local statement_timeout = '15s';");
     expect(code).not.toMatch(/^\s*(begin|commit)\s*;/im);

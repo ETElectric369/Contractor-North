@@ -200,7 +200,9 @@ describe("class 4 — a lost or cut price-book read is said, never priced around
     expect(inserted.material_list_items).toBeUndefined();
   });
   it("the Inspector's book read is paged", () => {
-    expect(src("src/app/(app)/appointments/[id]/page.tsx")).toContain('readAllPages<{ code: string; description: string | null; unit: string | null; buy_price: number | null }>((from, to) =>');
+    // Re-pinned on purpose (cn-v1176, the pick's price): the row carries the item's markup and vendors
+    // now (BookReadRow); the read is still paged.
+    expect(src("src/app/(app)/appointments/[id]/page.tsx")).toContain("readAllPages<BookReadRow>((from, to) =>");
   });
 });
 

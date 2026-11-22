@@ -414,8 +414,10 @@ describe("Won · Pick the Job carries the visit's work onto the job it links (cn
     const picker = src("src/app/(app)/appointments/[id]/link-picker.tsx");
     expect(picker).toContain('if (done.res.note) toast(done.res.note, "success");');
     expect(picker).toContain('if (done.res.warning) toast(done.res.warning, "info", undefined, { sticky: true });');
-    expect(src("src/app/(app)/appointments/[id]/visit-ending.tsx")).toContain('openLabel={t("vp_btn_wonPickTheJob")}');
-    expect(translator("en")("vp_btn_wonPickTheJob")).toBe("Won · Pick the Job");
+    // cn-v1176 (re-pinned on purpose): the card's pick is "Already Have the Job? Pick It", narrowed to the
+    // visit's own jobs; the attach door and its sentence are the same.
+    expect(src("src/app/(app)/appointments/[id]/visit-ending.tsx")).toContain('openLabel={t("vp_btn_alreadyHaveTheJobPickIt")}');
+    expect(translator("en")("vp_btn_alreadyHaveTheJobPickIt")).toBe("Already Have the Job? Pick It");
   });
 
   it("the one list writer keys a typed row on its capture id, so a second press lists nothing twice", () => {

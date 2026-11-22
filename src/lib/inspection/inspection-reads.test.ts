@@ -99,7 +99,9 @@ describe("nobody reads appointments.inspection_answers from the table", () => {
   });
 
   it("the three readers go through appointment_answers (the panel tab stopped reading the inspection's panel answer in cn-v1141)", () => {
-    for (const f of ["app/(app)/appointments/[id]/page.tsx", "app/(app)/appointments/actions.ts", "app/(app)/quotes/new/page.tsx"]) {
+    // cn-v1176: the estimate page's visit read moved to the line builder's reader (lib/estimate/visit-lines),
+    // which the page and the Won sheet both call.
+    for (const f of ["app/(app)/appointments/[id]/page.tsx", "app/(app)/appointments/actions.ts", "lib/estimate/visit-lines.ts"]) {
       expect(read(f), f).toMatch(/readViaView(?:<[\s\S]*?>)?\(\s*[\w.]+,\s*"answers",/);
     }
   });

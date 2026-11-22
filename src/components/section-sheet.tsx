@@ -8,7 +8,8 @@ import { useCoversTheScreen } from "@/components/ui/modal-lock";
 import { useLang } from "@/components/lang-provider";
 import { dockLabel, dockTileLabel } from "@/lib/dock-words";
 import { fillText, translator } from "@/lib/i18n";
-import type { DockNode, DockSection } from "@/lib/dock";
+import { rowBadge, type DockBadges, type DockNode, type DockSection } from "@/lib/dock";
+import { RowCount } from "@/components/app-shell/dock";
 
 /**
  * The LONG-menu counterpart to SectionSubnav's pill strip (below lg — see dock.tsx: the
@@ -37,11 +38,14 @@ export function SectionSheet({
   group,
   items,
   activeHref,
+  badges,
 }: {
   group: DockSection;
   /** The section's children, already staffOnly-filtered (headers included). */
   items: DockNode[];
   activeHref?: string;
+  /** The shell's open counts by href (cn-v1176): each row says its own, the number its tile sums. */
+  badges?: DockBadges;
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
@@ -196,6 +200,7 @@ export function SectionSheet({
               >
                 <CIcon className="relative z-10 h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" />
                 <span className="relative z-10 truncate">{dockLabel(c, lang)}</span>
+                <RowCount count={rowBadge(badges, c)} active={cur} />
               </Link>
             );
           })}

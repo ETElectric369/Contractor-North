@@ -356,7 +356,8 @@ describe("the Inspector catalog (vi_)", () => {
 
   it("names the one screen that reads it, and nothing else", () => {
     expect(vi_).toBeTruthy();
-    expect(vi_.files).toEqual(["src/app/(app)/appointments/[id]/inspector.tsx"]);
+    // cn-v1176: and the Won sheet the Inspector opens (won-sheet.tsx).
+    expect(vi_.files).toEqual(["src/app/(app)/appointments/[id]/inspector.tsx", "src/app/(app)/appointments/[id]/won-sheet.tsx"]);
   });
 
   it("every vi_btn_ key is Title Case in both languages", () => {
@@ -616,6 +617,42 @@ describe("the Inspector catalog (vi_)", () => {
       vi_dropFilesHere: "Drop Files Here",
       vi_fileTypeDoesntGoHere: "That file type doesn't go here",
       vi_btn_tapToDismiss: "Tap to Dismiss",
+      // cn-v1176: the Won sheet's words were born in the catalog (no literal replaced): pinned as written.
+      vi_btn_wonStartTheJob: "Won · Start the Job",
+      vi_btn_approveAndStartTheJob: "Approve and Start the Job",
+      vi_btn_startTheJobWithNoEstimate: "Start the Job with No Estimate",
+      vi_btn_wonFinishFrom: "Finish the Job from {n}",
+      vi_btn_wonOpenEstimate: "Open {n}",
+      vi_btn_wonFinishFromTheEstimate: "Finish the Job from the Estimate",
+      vi_btn_wonPutBack: "Put It Back",
+      // cn-v1176 fixes F3, F7, F9: born in the catalog; F1/F8/F9 rewordings re-pinned below on purpose.
+      vi_btn_wonTieTo: "Tie This Inspection to {j}",
+      vi_btn_wonTieToTheJob: "Tie This Inspection to the Job",
+      vi_wonCouldntTie: "Couldn't reach the server, so nothing was tied. Try again.",
+      vi_wonExistingEmpty: "{n} has no lines yet. Tap {open} and add them first.",
+      vi_wonNoQtyYet: "No quantity yet",
+      vi_wonReading: "Reading the inspection…",
+      vi_wonCouldntRead: "Couldn't read the inspection. Check your signal and try again.",
+      vi_wonCouldntApprove: "Couldn't reach the server, so nothing was approved. Try again.",
+      vi_wonCouldntStart: "Couldn't reach the server, so no job was started. Try again.",
+      vi_wonTheEstimate: "the estimate",
+      vi_wonTheJob: "the job",
+      vi_wonExisting: "{n} will be approved as it stands.",
+      vi_wonExistingHole: "{n} has a line with no price. Open it and price that line first.",
+      vi_wonNoPriceYet: "No price yet",
+      vi_wonQty: "Qty",
+      vi_wonPrice: "Price",
+      vi_wonHolesLeft: "Give each line without a price its number, or remove it.",
+      vi_wonNoLinesLeft: "Every line was removed: tap Put It Back on one, or Start the Job with No Estimate.",
+      vi_wonNothingPriced: "Nothing priced was recorded on this inspection.",
+      vi_wonEstimatesOff: "Estimates is switched off for your company.",
+      vi_wonNoEstimateChosen: "The job starts with no estimate.",
+      vi_wonFinish: "{n} is accepted and has no job yet.",
+      vi_wonHasJob: "This inspection already has its job: {j}.",
+      vi_wonRefer: "{n} is accepted and already has its job, {j}: tap {tie}.",
+      vi_wonNoCustomer: "The job will have no customer until one is added.",
+      vi_wonApproved: "Approved · {n} · {total}",
+      vi_wonJobStarted: "Job started",
     };
     // The table is the catalog, whole: a key added to one and not the other is a hole.
     expect(Object.keys(replaced).sort()).toEqual(Object.keys(vi_.en).sort());

@@ -244,8 +244,10 @@ describe("the page reads the one file for all three, and hands ONE href to both 
     expect(page).toContain('{viewerIsStaff && headerStep === "open_estimate" && estimate && (\n            <Link href={`/quotes/${estimate.id}`}>');
     expect(page).toContain('<Button type="button">{t("vi_btn_openTheEstimate")}</Button>');
     const inspector = src("src/app/(app)/appointments/[id]/inspector.tsx");
-    expect(inspector).toContain('<Link href={estimateHref}>\n                <Button type="button">{t("vi_btn_startTheEstimate")}</Button>');
-    expect(inspector).toContain('<Link href={`/quotes/${estimate.id}`}>\n              <Button type="button">{t("vi_btn_openTheEstimate")}</Button>');
+    // Re-pinned on purpose (cn-v1176): the Inspector's Start the Estimate waits for a real save
+    // (goEstimate awaits flushNow) before it goes to the same href.
+    expect(inspector).toMatch(/<Link\n\s+href=\{estimateHref\}\n\s+onClick=\{\(e\) => \{[\s\S]*?void goEstimate\(estimateHref\);[\s\S]*?<Button type="button">\{t\("vi_btn_startTheEstimate"\)\}<\/Button>/);
+    expect(inspector).toContain('<Link href={`/quotes/${estimate.id}`}>\n                  <Button type="button">{t("vi_btn_openTheEstimate")}</Button>');
     expect(translator("en")("vi_btn_startTheEstimate")).toBe("Start the Estimate");
     expect(translator("en")("vi_btn_openTheEstimate")).toBe("Open the Estimate");
   });
@@ -285,5 +287,97 @@ describe("the page reads the one file for all three, and hands ONE href to both 
   it("the comments the change made untrue are gone", () => {
     expect(page).not.toContain("START THE WORK, FIRST");
     expect(page).not.toContain("A completed inspection has none");
+  });
+});
+
+// ── cn-v1176: Won · Start the Job's door and address, and the pick's price ───────────────────────
+import { addressWithoutWon, bookSellPrice, wonAsked, wonDoorShown } from "@/lib/appointments/inspection-page";
+import { buildTaskDetail, type TaskBookRow } from "@/lib/estimate/task-lines";
+
+describe("4. Won · Start the Job: the door, office only, and the address", () => {
+  const base = { isStaff: true, type: "inspection", status: "completed", outcome: null as string | null, hasJob: false };
+  it("drawn for the office on an inspection with no job: booked or done, undecided or marked Won", () => {
+    for (const status of ["scheduled", "proposed", "completed"]) expect(wonDoorShown({ ...base, status }), status).toBe(true);
+    expect(wonDoorShown({ ...base, outcome: "won" })).toBe(true);
+  });
+  it("never for a tech or a crew lead, a job, a cancelled visit, Not Sold, or any other type", () => {
+    expect(wonDoorShown({ ...base, isStaff: false })).toBe(false);
+    expect(wonDoorShown({ ...base, hasJob: true })).toBe(false);
+    expect(wonDoorShown({ ...base, status: "cancelled" })).toBe(false);
+    expect(wonDoorShown({ ...base, outcome: "lost" })).toBe(false);
+    expect(wonDoorShown({ ...base, outcome: "no_bid" })).toBe(false);
+    // cn-v1176 fix F2: re-pinned. The estimate visit ("quote") is a sale the sheet takes too (won-sheet isWonVisitType).
+    expect(wonDoorShown({ ...base, type: "quote" })).toBe(true);
+    for (const type of APPOINTMENT_TYPES.filter((t) => t !== "inspection" && t !== "quote")) expect(wonDoorShown({ ...base, type }), type).toBe(false);
+    expect(wonDoorShown({ ...base, type: null })).toBe(false);
+  });
+  it("won=1 and nothing else asks for the sheet; closing takes only `won` off the address", () => {
+    expect(wonAsked({ won: "1" })).toBe(true);
+    for (const v of [undefined, "0", "true", ["1"]]) expect(wonAsked({ won: v as never })).toBe(false);
+    expect(addressWithoutWon("/appointments/a-1", "?won=1")).toBe("/appointments/a-1");
+    expect(addressWithoutWon("/appointments/a-1", "?task=t1&won=1&start=1", "#tasks")).toBe("/appointments/a-1?task=t1&start=1#tasks");
+    expect(addressWithoutWon("/appointments/a-1", "")).toBe("/appointments/a-1");
+  });
+  it("the page decides the door once and hands the Inspector the door and the address", () => {
+    const page = src("src/app/(app)/appointments/[id]/page.tsx");
+    expect(page).toContain("const openWon = wonAsked(sp);");
+    expect(page).toMatch(/const wonDoor = wonDoorShown\(\{\n\s+isStaff: viewerIsStaff,/);
+    expect(page).toContain("wonDoor={wonDoor}");
+    expect(page).toContain("wonAsked={openWon}");
+  });
+});
+
+describe("5. the pick's price: the same sell price a task's part gets, through the one priceBookLine", () => {
+  const item = (over: Partial<TaskBookRow> = {}): TaskBookRow => ({
+    code: "R1",
+    description: "Transfer switch",
+    unit: "EA",
+    buy_price: 100,
+    markup_pct: null,
+    price_list_item_options: [],
+    ...over,
+  });
+  const taskSell = (row: TaskBookRow, pricing: { levelPct: number | null; orgDefaultPct: number | null }) =>
+    buildTaskDetail(
+      { id: "t1", name: "Switch", hours: 1, units: null, kit_id: null, materials: [{ code: row.code, words: null, qty: 2 }] },
+      { book: new Map([[row.code, row]]), rate: 100, pricing },
+    ).materials[0].sell;
+
+  const cases: [string, TaskBookRow, { levelPct: number | null; orgDefaultPct: number | null }][] = [
+    ["a customer with a level", item(), { levelPct: 30, orgDefaultPct: 15 }],
+    ["a customer with no level (the company's default)", item(), { levelPct: null, orgDefaultPct: 15 }],
+    ["the item's own markup", item({ markup_pct: 22 }), { levelPct: null, orgDefaultPct: 15 }],
+    ["a default vendor", item({ price_list_item_options: [{ id: "o1", vendor: "Northline Supply", buy_price: 80, is_default: true, sort_order: 0 }] }), { levelPct: 30, orgDefaultPct: 15 }],
+    ["an odd cent", item({ buy_price: 33.337 }), { levelPct: 12.5, orgDefaultPct: 0 }],
+  ];
+  for (const [name, row, pricing] of cases) {
+    it(`${name}: the pick starts where the task's part is priced`, () => {
+      const sell = bookSellPrice(row, pricing);
+      expect(sell).toBe(taskSell(row, pricing));
+      expect(sell).toBeGreaterThan(Number(row.buy_price) * 0.99); // never below cost on these rows
+    });
+  }
+  it("a level marks up, and no level falls to the company's default: not the cost", () => {
+    expect(bookSellPrice(item(), { levelPct: 30, orgDefaultPct: 15 })).not.toBe(bookSellPrice(item(), { levelPct: null, orgDefaultPct: 15 }));
+    expect(bookSellPrice(item(), { levelPct: null, orgDefaultPct: 15 })).not.toBe(100);
+  });
+  it("a book part with no price starts at 0 (the estimate asks), where the task's part asks too", () => {
+    expect(bookSellPrice(item({ buy_price: null }), { levelPct: 30, orgDefaultPct: 15 })).toBe(0);
+    expect(taskSell(item({ buy_price: null }), { levelPct: 30, orgDefaultPct: 15 })).toBeNull();
+  });
+  it("the page seeds the pick through it, for the visit's customer else its lead's, the office only; a stored price is not re-read", () => {
+    const page = src("src/app/(app)/appointments/[id]/page.tsx");
+    expect(page).toContain("price: bookSellPrice({ ...p, description: String(p.description ?? \"\").trim() }, bookPricing),");
+    expect(page).toContain("const pricingCustomerId = viewerIsStaff ? (a.customer_id ?? a.inquiries?.customer_id ?? null) : null;");
+    expect(page).toContain("orgDefaultPct: orgSettings.default_markup_pct,");
+    expect(page).toContain(".select(`code, description, unit, buy_price, markup_pct, ${ITEM_OPTIONS_EMBED}`)");
+    expect(page).toContain('.eq("price_list_item_options.archived", false)');
+    expect(page).toContain("priceBook={(viewerIsStaff ? (priceBook ?? []) : []).map((p) => ({");
+    // No second markup formula on this path.
+    expect(page).not.toMatch(/buy_price[^\n]*\*\s*\(1\s*\+/);
+    // The Inspector seeds a NEW pick from the book row; a stored pick keeps its own price.
+    const inspector = src("src/app/(app)/appointments/[id]/inspector.tsx");
+    expect(inspector).toContain("setPicks([...picked, { code: row.code, qty: 1, price: row.price }]);");
+    expect(inspector).toContain("value={p.price}");
   });
 });

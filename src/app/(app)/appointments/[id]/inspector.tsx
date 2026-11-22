@@ -47,6 +47,8 @@ import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
 import { measureLabelWordsIn, measuredRowLabelIn } from "@/lib/inspection/measured-label";
 import { keepModelInPlus, registerMeasureHost, type MeasureHost } from "@/lib/quick-measure";
+import { WonSheet } from "./won-sheet";
+import { addressWithoutWon } from "@/lib/appointments/inspection-page";
 
 /**
  * A MEASURED ROW'S STORED LABEL IS ENGLISH (skeptic #50): the rule and its four keys live in
@@ -279,6 +281,8 @@ export function Inspector({
   viewNote = null,
   nortOn = true,
   buildOwn = true,
+  wonDoor = false,
+  wonAsked = false,
 }: {
   appointmentId: string;
   templates: InspectionTemplate[];
@@ -334,6 +338,11 @@ export function Inspector({
   /** "Or Build My Own" opens /forms, whose New Form is Safety Log's door (0352): with Safety Log
    *  off the link would land on no way to build one, so it isn't drawn. */
   buildOwn?: boolean;
+  /** WON · START THE JOB (cn-v1176): the page's answer to whether the bar draws the door (the office,
+   *  an inspection, not cancelled, not Not Sold, no job: lib/appointments/inspection-page wonDoorShown). */
+  wonDoor?: boolean;
+  /** `?won=1` is on the address: the sheet opens on first load, and again when the address gains it. */
+  wonAsked?: boolean;
 }) {
   const office = access === "office";
   const crew = access === "crewLead";
@@ -724,7 +733,24 @@ export function Inspector({
     // arrive as `explicit` and make every autosave claim to be a deliberate press.
     timer.current = setTimeout(() => flush(), 900);
   }
-  function flush(explicit = false) {
+  /** The write that is out now, if one is (flushNow waits for it before it sends what is left). */
+  const inflightRef = useRef<Promise<boolean> | null>(null);
+  /**
+   * A SAVE THAT WAITS (cn-v1176). flush() is the autosave's and Save's: it starts the write and the
+   * screen says how it went. flushNow() is for a door that READS what was saved (the Won sheet, Start
+   * the Estimate): it sends anything still in the debounce, waits for any write already out, and
+   * answers whether everything landed. False = the work is kept, the bar says why, and the door does
+   * not open over unsaved answers.
+   */
+  async function flushNow(): Promise<boolean> {
+    if (timer.current) clearTimeout(timer.current);
+    const prior = inflightRef.current;
+    if (prior) await prior;
+    // A failed write re-arms the debounce; what it kept goes now, with whatever was typed since.
+    if (timer.current) clearTimeout(timer.current);
+    return flush();
+  }
+  function flush(explicit = false): Promise<boolean> {
     const patch = capturePatchRef.current;
     const wantAnswers = answersDirty.current;
     capturePatchRef.current = {};
@@ -736,7 +762,7 @@ export function Inspector({
       // Pressing Save when everything is already written must still ANSWER. Silence reads as a
       // dead button, and the whole point of the press is to be told the work is safe.
       if (explicit) setSavedAt(Date.now());
-      return;
+      return Promise.resolve(true);
     }
     // ── A FAILED SAVE MUST KEEP THE WORK AND TRY AGAIN ──────────────────────────────────────
     //
@@ -755,13 +781,20 @@ export function Inspector({
     // A REFUSAL IS NOT A DEAD ZONE. When the database says no to who is asking (a crew lead taken
     // off the visit, the office's update not in yet), trying again every 900ms changes nothing: the
     // work is kept and the reason stays on screen, and the next thing he types or presses tries again.
+    let settle: (ok: boolean) => void = () => {};
+    const done = new Promise<boolean>((resolve) => (settle = resolve));
     const restore = (msg: string, again = true) => {
       capturePatchRef.current = mergeCapturePatches(patch, capturePatchRef.current);
       if (wantAnswers) answersDirty.current = true;
       setSavedAt(null); // a stale green tick must never stand over unwritten work
       setError(msg);
       if (again) schedule(); // retry without needing him to type another character
+      settle(false);
     };
+    inflightRef.current = done;
+    void done.then(() => {
+      if (inflightRef.current === done) inflightRef.current = null;
+    });
     start(async () => {
       setError(null);
       try {
@@ -781,11 +814,61 @@ export function Inspector({
           setSheetSaved(true);
         }
         setSavedAt(Date.now());
+        settle(true);
       } catch {
         // No signal. Nothing is lost and nothing is written; it will go as soon as there are bars.
         restore(t("vi_noSignalAnswersHeld"));
       }
     });
+    return done;
+  }
+
+  // ── WON · START THE JOB (cn-v1176) ─────────────────────────────────────────────────────────
+  // ONE sheet, always rendered below for the office and never keyed (a key change around an open
+  // Modal makes it close itself): it opens from the bar's door and from `?won=1`. The door waits for
+  // a real save first, so the server reads what is on this screen, never what was before it.
+  const [wonOpen, setWonOpen] = useState(false);
+  const [wonWaiting, setWonWaiting] = useState(false);
+  async function openWon() {
+    if (wonWaiting) return;
+    setWonWaiting(true);
+    try {
+      if (await flushNow()) setWonOpen(true);
+    } finally {
+      setWonWaiting(false);
+    }
+  }
+  // The address: on first load, and when it gains `won=1` while the page is open (the Inspector is
+  // not remounted by a navigation to the same visit, so the prop is followed, as `?task=` is).
+  // `won` comes off the address FIRST, and the sheet opens once the address no longer carries it: the
+  // Modal puts its own entry on the history when it opens and steps it back when it closes, and an
+  // address changed under an open Modal would undo that step or reopen the sheet on Back (the house's
+  // ?new=1 doors take their param off the same way). So a refresh does not reopen it, and a later tap
+  // on a `?won=1` link opens it again.
+  const wonFromAddressRef = useRef(false);
+  useEffect(() => {
+    if (!office) return;
+    if (wonAsked) {
+      wonFromAddressRef.current = true;
+      if (typeof window === "undefined") return;
+      const { pathname, search, hash } = window.location;
+      router.replace(addressWithoutWon(pathname, search, hash), { scroll: false });
+      return;
+    }
+    if (wonFromAddressRef.current) {
+      wonFromAddressRef.current = false;
+      void openWon();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wonAsked]);
+  /** Closing is the sheet's own: the address already let go of `won` when it opened. */
+  function closeWon() {
+    setWonOpen(false);
+  }
+  /** START THE ESTIMATE WAITS TOO (cn-v1176): the estimator reads the visit the moment it opens, so
+   *  the last answer typed is written first. A failed save is said in the bar and the page stays. */
+  async function goEstimate(href: string) {
+    if (await flushNow()) router.push(href);
   }
   // ── A TAB CLOSING MID-DEBOUNCE MUST NOT EAT THE LAST THING TYPED ─────────────────────────
   //
@@ -2772,8 +2855,11 @@ export function Inspector({
       </fieldset>
 
       {/* ── THE BAR ───────────────────────────────────────────────────────────────────────── */}
-      {!readOnly && <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
-        <div className="text-xs text-slate-500">
+      {/* THE BAR'S ROWS (cn-v1176): at most two at 375 px. The counts and Save share the first; the
+          estimate's door and Won · Start the Job the second (the one boxed button stays the estimate's,
+          the Won door is the quiet outline). On a wide screen it is all one row. */}
+      {!readOnly && <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
+        <div className="min-w-0 flex-1 basis-40 text-xs text-slate-500">
           {/* Counts, never confidence. */}
           {[
             open.length > 0 ? fillText(t("vi_stillOpen"), { n: String(open.length) }) : t("vi_allQuestionsAnswered"),
@@ -2791,7 +2877,6 @@ export function Inspector({
             ) : null}
           </span>
         </div>
-        <div className="flex items-center gap-2">
           {/* THE SAVE BUTTON IS BACK, and autosave stays underneath it.
               Erik: "when i start and complete an inspection and im not ready to start the estimate
               i want to be able to save it and the save button is gone."
@@ -2810,22 +2895,47 @@ export function Inspector({
           >
             {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> {t("vi_btn_saving")}</> : <><Check className="h-4 w-4" /> {t("vi_btn_save")}</>}
           </Button>
-          {/* Pricing is the office's: a crew lead fills the inspection in and the office starts the
-              estimate from it. */}
-          {office && estimate?.live ? (
-            // The write-up exists and stands: open it, never a second one beside it (cn-v1069).
-            <Link href={`/quotes/${estimate.id}`}>
-              <Button type="button">{t("vi_btn_openTheEstimate")}</Button>
-            </Link>
-          ) : (
-            office && estimateHref && (
-              <Link href={estimateHref}>
-                <Button type="button">{t("vi_btn_startTheEstimate")}</Button>
-              </Link>
-            )
+          {office && (
+            <div className="ml-auto flex items-center gap-2">
+              {/* Pricing is the office's: a crew lead fills the inspection in and the office starts the
+                  estimate from it. */}
+              {office && estimate?.live ? (
+                // The write-up exists and stands: open it, never a second one beside it (cn-v1069).
+                <Link href={`/quotes/${estimate.id}`}>
+                  <Button type="button">{t("vi_btn_openTheEstimate")}</Button>
+                </Link>
+              ) : (
+                office && estimateHref && (
+                  // The estimator reads the visit as it opens: the last answer is written first (goEstimate
+                  // waits for flushNow); a plain click still navigates if the script never ran.
+                  <Link
+                    href={estimateHref}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                      e.preventDefault();
+                      void goEstimate(estimateHref);
+                    }}
+                  >
+                    <Button type="button">{t("vi_btn_startTheEstimate")}</Button>
+                  </Link>
+                )
+              )}
+              {/* WON · START THE JOB (cn-v1176): the office's, after the buttons that were here. It waits
+                  for a real save, then the sheet below asks the server what to show. No total here: the
+                  total is the sheet's. */}
+              {office && wonDoor && (
+                <Button type="button" variant="outline" disabled={wonWaiting} onClick={() => void openWon()}>
+                  {wonWaiting && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {t("vi_btn_wonStartTheJob")}
+                </Button>
+              )}
+            </div>
           )}
-        </div>
       </div>}
+
+      {/* THE WON SHEET (cn-v1176): ONE Modal, always rendered for the office, never keyed or remounted.
+          A tech and a crew lead get no door, no sheet and no price. */}
+      {office && <WonSheet appointmentId={appointmentId} open={wonOpen} onClose={closeWon} />}
 
       {viewing?.url && <MediaLightbox url={viewing.url} name={fileLabel(viewing.path)} onClose={() => setViewing(null)} />}
       {viewing3d?.url && <ModelViewer url={viewing3d.url} name={fileLabel(viewing3d.path)} onClose={() => setViewing3d(null)} />}

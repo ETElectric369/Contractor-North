@@ -605,7 +605,7 @@ export async function quoteEditLock(quoteId: string): Promise<{ reason: string }
  *  circuits and the row's own address. A const so each select is a string literal the client's select
  *  parser can read into a row type, where a template built at run time is not. */
 const EDITOR_QUOTE_COLUMNS =
-  "id, quote_number, customer_id, job_id, inquiry_id, status, doc_type, title, description, notes, tax_rate, subtotal, tax, total, valid_until, follow_up_at, estimate_format, revises_quote_id, public_token, circuits, address, unit, city, state, zip, accepted_at, declined_at, created_by, created_at, updated_at" as const;
+  "id, quote_number, customer_id, job_id, inquiry_id, status, doc_type, title, description, notes, tax_rate, subtotal, tax, total, valid_until, follow_up_at, estimate_format, revises_quote_id, public_token, circuits, address, unit, city, state, zip, accepted_at, declined_at, accepted_how, accepted_by, created_by, created_at, updated_at" as const;
 const EDITOR_ITEM_COLUMNS = "id, quote_id, description, quantity, unit, unit_price, line_total, sort_order, category, detail" as const;
 
 /**
@@ -2162,6 +2162,9 @@ export async function createJobFromQuote(
    *  BEFORE the status write counted this estimate's lines, whole, per task line and per part
    *  (lib/estimate/sync-job-tasks estimateLines). */
   opts?: { sizeBefore?: number | null; tasksBefore?: ReadonlyMap<string, number | null>; partsBefore?: ReadonlyMap<string, number> },
+  /** cn-v1176 (M5): the NEW job's billing kind, from the Won sheet through updateQuoteStatus. Read only
+   *  on the branch that makes a new job; absent (every other door), the company's usual kind. */
+  billingType?: "tm" | "fixed",
 ): Promise<{
   ok: boolean;
   error?: string;
@@ -2362,7 +2365,8 @@ export async function createJobFromQuote(
       // guard that exists BECAUSE hours once went unbilled. A job wrongly born 'fixed' therefore
       // completes silently on a customer's payment with its unbilled work invisible on every surface
       // at once. readUsualBillingKind is the company's own answer and a failed read falls to "tm".
-      billing_type: await readUsualBillingKind(supabase),
+      // The Won sheet names the kind it asked for (cn-v1176); every other door, the company's usual one.
+      billing_type: billingType === "tm" || billingType === "fixed" ? billingType : await readUsualBillingKind(supabase),
       ...(inheritedAddress
         ? {
             address: inheritedAddress.address,
@@ -2472,7 +2476,14 @@ async function pushQuoteAccepted(id: string): Promise<void> {
   }
 }
 
-export async function updateQuoteStatus(id: string, status: string) {
+export async function updateQuoteStatus(
+  id: string,
+  status: string,
+  /** cn-v1176 (M5), both optional so every existing caller and the assistant's handlers are untouched:
+   *  `billingType` is the NEW job's billing kind (absent: the company's usual kind, readUsualBillingKind);
+   *  `inPerson` records a FRESH acceptance as approved in person (the Won sheet), else as the office's. */
+  opts?: { billingType?: "tm" | "fixed"; inPerson?: boolean },
+) {
   if (!(QUOTE_STATUSES as readonly string[]).includes(status))
     return { ok: false as const, error: `Status must be one of: ${QUOTE_STATUSES.filter((s) => s !== "superseded").join(", ")}.` };
   const ctx = await requireStaff();
@@ -2498,8 +2509,13 @@ export async function updateQuoteStatus(id: string, status: string) {
   // accepted_at bump — the customer's own Accept and the finishing window read it) and the office is
   // not rung twice for one acceptance; the job still catches up below (idempotent).
   const alreadyAccepted = status === "accepted" && (was as { status?: string } | null)?.status === "accepted";
+  // WHO SAID YES, AND HOW (cn-v1176, 0413): on a FRESH acceptance only, the way it was given ("in_person"
+  // from the Won sheet, else "office") and the signed-in person who recorded it (never an input). A
+  // re-select of an accepted estimate and a walk-back write neither, so what was recorded stands.
   const patch: Record<string, unknown> =
-    status === "accepted" && !alreadyAccepted ? { status, accepted_at: new Date().toISOString() } : { status };
+    status === "accepted" && !alreadyAccepted
+      ? { status, accepted_at: new Date().toISOString(), accepted_how: opts?.inPerson ? "in_person" : "office", accepted_by: ctx.userId }
+      : { status };
   if ((was as { status?: string } | null)?.status === "superseded") {
     let rev: { id: string; quote_number: string | null } | null;
     try {
@@ -2567,7 +2583,8 @@ export async function updateQuoteStatus(id: string, status: string) {
     let jobId: string | undefined;
     try {
       // links quotes.job_id + spins up WO/materials; on a linked estimate, the job catches up
-      const jobRes = await createJobFromQuote(id, linked ? { sizeBefore: linked.sizeBefore, tasksBefore: linked.tasksBefore, partsBefore: linked.partsBefore } : undefined);
+      // The Won sheet's billing kind rides to the NEW job only (cn-v1176); absent, the company's usual one.
+      const jobRes = await createJobFromQuote(id, linked ? { sizeBefore: linked.sizeBefore, tasksBefore: linked.tasksBefore, partsBefore: linked.partsBefore } : undefined, opts?.billingType);
       if (jobRes?.ok && jobRes.id) jobId = String(jobRes.id);
       if (jobRes && jobRes.ok === false) jobWarn = jobRes.error ?? (await ws.say("qs_jobNotCreated"));
       // The job was made and something it should carry (its tasks) could not be listed: said, not sunk.

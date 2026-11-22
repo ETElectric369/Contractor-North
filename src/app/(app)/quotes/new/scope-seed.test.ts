@@ -34,7 +34,10 @@ describe("the scopes the estimate seeds from an inspection", () => {
   });
 
   it("the page reads the picks through the cleared answers and the applicable needs, never pb.needs", () => {
-    const src = readFileSync(join(process.cwd(), "src/app/(app)/quotes/new/page.tsx"), "utf8");
+    // cn-v1176: the read moved to the line builder (lib/estimate/visit-lines visitPicks); the page takes its picks.
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/quotes/new/page.tsx"), "utf8");
+    expect(page).toContain("pickedScopes.push(...seedRead.scopes);");
+    const src = readFileSync(join(process.cwd(), "src/lib/estimate/visit-lines.ts"), "utf8");
     expect(src).toContain("const liveAnswers = clearInapplicable(pb, answers);");
     expect(src).toContain("for (const n of applicableNeeds(pb, liveAnswers)) {");
     expect(src).toContain("coerceScopes((liveAnswers as Record<string, unknown>)[n.key])");

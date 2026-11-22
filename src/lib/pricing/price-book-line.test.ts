@@ -218,8 +218,11 @@ describe("every picker takes the one pricing input, and every picker page reads 
   });
 
   it("every page that feeds a line picker selects the vendor embed with the archived filter", () => {
+    // cn-v1176: the new-estimate page reads the book through readPriceBook (lib/estimate/visit-lines),
+    // the one read the Won sheet's builder makes too.
+    expect(read("src/app/(app)/quotes/new/page.tsx")).toContain("readPriceBook(supabase),");
     for (const p of [
-      "src/app/(app)/quotes/new/page.tsx",
+      "src/lib/estimate/visit-lines.ts",
       "src/app/(app)/quotes/[id]/page.tsx",
       "src/app/(app)/billing/[id]/page.tsx",
       "src/lib/pricing/price-book-search.ts",

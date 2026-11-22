@@ -228,9 +228,10 @@ export const NY_EN: Readonly<Record<string, string>> = {
   ld_btn_openTheInspection: "Open the Inspection",
   // A lead's Schedule (cn-v1170): the Leads list's own door word.
   ld_btn_schedule: "Schedule",
-  // A write-up row's ⋯ (cn-v1175): the Inspections row's own Move, and the visit page's ask for a won job.
+  // A write-up row's ⋯ (cn-v1175): the Inspections row's own Move, and the visit page's ask for a won job
+  // (cn-v1176: the Won sheet's door).
   ip_btn_moveToAnotherDay: "Move to Another Day…",
-  vp_btn_wonPickTheJob: "Won · Pick the Job",
+  vi_btn_wonStartTheJob: "Won · Start the Job",
 };
 
 const spanish = (c: Pick<SayCtx, "lang" | "words">): c is { lang: "es"; words: Words } => c.lang === "es" && !!c.words;

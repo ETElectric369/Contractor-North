@@ -350,6 +350,12 @@ export interface EditorQuote extends Quote {
   zip: string | null;
   accepted_at: string | null;
   declined_at: string | null;
+  /** HOW THE YES WAS GIVEN (0413, cn-v1176): "customer_link" (their own Accept), "in_person" (the Won
+   *  sheet), "office" (the status select); null = recorded before 0413, or not accepted. */
+  accepted_how: "customer_link" | "in_person" | "office" | null;
+  /** WHO RECORDED IT (0413): the office person's profile id; null on the customer's link, before 0413,
+   *  or once that profile is gone (on delete set null). */
+  accepted_by: string | null;
 }
 
 export interface WorkOrder {
