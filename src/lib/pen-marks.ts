@@ -209,7 +209,12 @@ export function penColumns(
   creditExpected: boolean,
 ): { pen_mark: PenMark | null; returned: boolean; billable: boolean } {
   const pen = penMarkOf(line.pen);
-  const back = line.returned === true;
+  // AN UNANSWERED MARK TRACKS NOTHING. "unclear" is the open question: no return is on record until a
+  // person answers it (the answer doors turn the mark into struck, or take it off). A line that somehow
+  // said both would have been written as a return and read back, after an Undo, as a question again;
+  // the database suite's sweep over every combination found that the first time it ran, on the release
+  // block's test-database step, before production was touched.
+  const back = line.returned === true && pen !== "unclear";
   return {
     pen_mark: pen,
     returned: creditExpected && back,

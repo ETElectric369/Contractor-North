@@ -178,6 +178,32 @@ describe("a paper's line and its bill's line (0417)", () => {
     }
   });
 
+  it("EVERY combination a line could carry writes a row the database takes, and reads back as the same answer (the database suite's sweep, whole)", () => {
+    const marks = [undefined, "struck", "quantity", "unclear"] as const;
+    for (const pen of marks)
+      for (const returned of [undefined, true, false])
+        for (const billable of [true, false])
+          for (const creditExpected of [true, false]) {
+            const cols = penColumns({ pen, returned, billable }, creditExpected);
+            const at = JSON.stringify({ pen, returned, billable, creditExpected });
+            // 0417's own checks: never returned AND billed; a mark is one of three words or none.
+            expect([at, cols.returned && cols.billable]).toEqual([at, false]);
+            expect([at, cols.pen_mark === null || ["struck", "quantity", "unclear"].includes(cols.pen_mark)]).toEqual([at, true]);
+            const back = penFromColumns(cols);
+            // An unclear mark is still the open question, and tracks no return; a returned line is still returned.
+            if (cols.pen_mark === "unclear") {
+              expect([at, back]).toEqual([at, { pen: "unclear" }]);
+              expect([at, cols.returned, cols.billable]).toEqual([at, false, false]);
+            }
+            if (cols.returned) expect([at, back.returned]).toEqual([at, true]);
+          }
+  });
+
+  it("an unanswered mark never tracks a return, whatever else the line says", () => {
+    expect(penColumns({ pen: "unclear", returned: true, billable: true }, true)).toEqual({ pen_mark: "unclear", returned: false, billable: false });
+    expect(penColumns({ pen: "unclear", returned: true, billable: false }, false)).toEqual({ pen_mark: "unclear", returned: false, billable: false });
+  });
+
   it("an Undo brings back what the paper said and what a person answered", () => {
     // On account, struck: back as returned.
     expect(penFromColumns({ pen_mark: "struck", returned: true, billable: false })).toEqual({ pen: "struck", returned: true });
