@@ -16,6 +16,7 @@
  *   unbilledWorkForJob / fixedBillingsNotYetNetted  the fetchers the actions and pages call
  */
 
+import { DRAW_CREDIT, isPrepaymentKind } from "./prepayments";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { billableBillCost } from "@/lib/bill-itemisation";
 import { isReturnBill, returnCreditCost, returnLinesAgainstPurchases } from "@/lib/supplier-returns";
@@ -792,10 +793,14 @@ export function fixedBillingsToNet(invoices: PriorInvoiceRow[]): number {
   let credited = 0;
   for (const inv of invoices ?? []) {
     if (inv.status === "void" || inv.status === "draft") continue;
+    // TWO POOLS, NEVER MIXED (cn-v1177): a payment request is not draw money; it is netted by its own
+    // "prepaid_credit" lines (lib/prepayments), never by a draw's "Less previous billings".
+    if (isPrepaymentKind(inv.invoice_kind)) continue;
     fixed += lumpDrawAmount({ status: inv.status, invoice_kind: inv.invoice_kind, items: inv.invoice_items });
     for (const it of inv.invoice_items ?? []) {
       const amt = Number(it.line_total);
-      if (Number.isFinite(amt) && it.import_source === "draw_credit") credited += Math.abs(amt);
+      // THE DRAW POOL'S OWN credit line only: a "prepaid_credit" line takes a request off, not a draw.
+      if (Number.isFinite(amt) && it.import_source === DRAW_CREDIT) credited += Math.abs(amt);
     }
   }
   return Math.max(0, cents(fixed - credited));

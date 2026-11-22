@@ -7,7 +7,8 @@ import { CostBreakdown } from "@/components/cost-breakdown";
 import { ProgressReportCard } from "@/components/progress-report-card";
 import { customerLines, invoiceBalance, invoiceDiscountSplit, mergeSuppliesAndTax, paymentLedger, type InvoiceLine } from "@/lib/invoice-math";
 import { paymentMethodLabel } from "@/lib/payment-method";
-import { sectionLines } from "@/lib/portal/line-kind";
+import { PAYMENT_REQUEST_LABEL, sectionLines } from "@/lib/portal/line-kind";
+import { isPrepaymentKind } from "@/lib/prepayments";
 
 /**
  * THE single invoice document body. Every read-only surface — the print/PDF page,
@@ -134,7 +135,9 @@ export function InvoiceDocument({
         co={coSized}
         template={template}
         meta={{
-          docType: "Invoice",
+          // A payment request (cn-v1177) is headed for what it is: money asked for ahead of the
+          // work, which the next invoice takes off. English: this is the customer's copy.
+          docType: isPrepaymentKind(invoiceKind) ? PAYMENT_REQUEST_LABEL : "Invoice",
           number,
           rows: [
             { label: "Date", value: formatDate(createdAt) },

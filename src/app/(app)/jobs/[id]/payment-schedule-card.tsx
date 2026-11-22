@@ -11,6 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/toast";
 import { formatCurrency } from "@/lib/utils";
 import { scheduleStatus, defaultSchedule, milestoneAmount, type Milestone } from "@/lib/payment-schedule-math";
+import type { DepositRule } from "@/lib/deposit-rule";
 import { setPaymentSchedule, requestNextPayment } from "../../billing/actions";
 
 type Row = { label: string; percent: number };
@@ -76,14 +77,16 @@ export function PaymentScheduleCard({
   jobId,
   billingType = "fixed",
   contractTotal = 0,
-  depositPercent = 0,
+  depositRule = { percent: 0, cap: 0 },
   milestones = [],
   drawsBilled = false,
 }: {
   jobId: string;
   billingType?: "fixed" | "tm";
   contractTotal?: number;
-  depositPercent?: number;
+  /** The company's deposit rule (lib/deposit-rule): the default schedule's deposit row is depositFor of
+   *  the contract, never a percent of its own (cn-v1177). Absent: no deposit row. */
+  depositRule?: DepositRule;
   milestones?: Milestone[];
   /** True when a non-void deposit/progress/final invoice already exists on this job — the exact
    *  read setPaymentSchedule does before it will attach or replace a schedule. */
@@ -201,7 +204,7 @@ export function PaymentScheduleCard({
           initial={
             hasSchedule
               ? status.rows.map((r) => ({ label: r.label, percent: Number(r.percent) || 0 }))
-              : defaultSchedule(depositPercent).map((m) => ({ label: m.label, percent: Number(m.percent) || 0 }))
+              : defaultSchedule(contractTotal, depositRule).map((m) => ({ label: m.label, percent: Number(m.percent) || 0 }))
           }
           onClose={() => setEditing(false)}
           onSaved={() => {

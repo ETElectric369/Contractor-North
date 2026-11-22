@@ -154,6 +154,15 @@ export const words: WordCatalog = {
     vi_wonRefer: "{n} is accepted and already has its job, {j}: tap {tie}.",
     vi_wonNoCustomer: "The job will have no customer until one is added.",
     vi_wonApproved: "Approved · {n} · {total}",
+    // cn-v1177: the done step's deposit (after an approval).
+    vi_btn_wonTakeDeposit: "Take the Deposit Now · {amount}",
+    vi_btn_wonGetPaidOn: "Get Paid on {n}",
+    vi_btn_wonGetPaidOnTheDeposit: "Get Paid on the Deposit",
+    vi_wonDepositReading: "Reading the deposit…",
+    vi_wonDepositUnread: "The deposit couldn't be read just now. Take it from the job's Invoices tab.",
+    vi_wonDepositDidntGo: "The deposit request didn't go through. Take it from the job's Invoices tab.",
+    vi_wonDepositPaid: "{n}: the deposit is paid.",
+    vi_wonTheDeposit: "The deposit request",
     vi_wonJobStarted: "Job started",
 
     // ── The placeholders ──
@@ -411,6 +420,14 @@ export const words: WordCatalog = {
     vi_wonRefer: "{n} está aceptado y ya tiene su trabajo, {j}: toca {tie}.",
     vi_wonNoCustomer: "El trabajo no tendrá cliente hasta que se agregue uno.",
     vi_wonApproved: "Aprobado · {n} · {total}",
+    vi_btn_wonTakeDeposit: "Cobrar el Anticipo Ahora · {amount}",
+    vi_btn_wonGetPaidOn: "Cobrar {n}",
+    vi_btn_wonGetPaidOnTheDeposit: "Cobrar el Anticipo",
+    vi_wonDepositReading: "Leyendo el anticipo…",
+    vi_wonDepositUnread: "No se pudo leer el anticipo ahora. Cóbralo desde la pestaña Facturas del trabajo.",
+    vi_wonDepositDidntGo: "La solicitud del anticipo no se creó. Cóbralo desde la pestaña Facturas del trabajo.",
+    vi_wonDepositPaid: "{n}: el anticipo está pagado.",
+    vi_wonTheDeposit: "La solicitud del anticipo",
     vi_wonJobStarted: "Trabajo empezado",
 
     vi_inYourOwnWords: "En tus palabras",

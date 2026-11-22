@@ -105,7 +105,7 @@ const world = (row: typeof original, over?: (c: Call) => unknown) => (c: Call): 
   const mine = over?.(c);
   if (mine !== undefined) return mine;
   if (c.table === "quotes" && c.verb === "select" && c.select?.includes("circuits")) return { data: row, error: null };
-  if (c.table === "quotes" && c.verb === "select" && c.select === "tax_rate") return { data: { tax_rate: 0 }, error: null };
+  if (c.table === "quotes" && c.verb === "select" && c.select?.startsWith("tax_rate")) return { data: { tax_rate: 0 }, error: null };
   if (c.table === "quote_line_items" && c.verb === "select") return { data: [], error: null };
   if (c.table === "quote_line_items" && c.verb === "insert") return { data: null, error: null };
   if (c.table === "quotes" && c.verb === "insert") return { data: { id: "q-new", quote_number: "E-010" }, error: null };

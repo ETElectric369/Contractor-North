@@ -8,6 +8,9 @@ import { BadgeDollarSign, Check, Copy, Loader2, Mail, MessageSquare, QrCode, Sha
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { SendButton } from "@/components/send-sheet";
+// The Request a Payment form (cn-v1177). It imports GetPaidButton back for its Take It Now; both are
+// used only at render time, so the two modules may name each other.
+import { RequestPaymentSheet } from "@/components/request-payment";
 import { DayField } from "@/components/day-field";
 import { ACTIONS_ROW_CLS } from "@/components/section-actions-menu";
 import { useToast } from "@/components/toast";
@@ -1562,15 +1565,43 @@ export function GetPaidButton(
     /** A bank transfer on its way for this bill (lib/bank-transfer's sentence), said in the sheet. */
     transferPending?: string | null;
     /** How the door looks: the header's primary, an outline (the job hub), a ⋯ row, or the small
-     *  "Getting Paid Now?" link under a draft's Send. */
-    trigger?: "primary" | "outline" | "menuItem" | "link";
+     *  "Getting Paid Now?" link under a draft's Send. "none": no door of its own; another sheet opens
+     *  this one through `open` (the Request a Payment form's Take It Now, cn-v1177). */
+    trigger?: "primary" | "outline" | "menuItem" | "link" | "none";
     label?: string;
+    /** OPENED BY ANOTHER SHEET (cn-v1177): when given, the caller owns open and close. The sheet is
+     *  the same sheet, opened the same way (both halves' onOpen on the opening), never a copy. */
+    open?: boolean;
+    onClose?: () => void;
+    /** THE ONE QUIET LINK OUT (cn-v1177): the job hub's sheet offers "Request a Deposit or Materials
+     *  Payment". Pressed, the caller opens its form FIRST and this sheet closes right after, so the
+     *  form is already on top when this one takes its history entry off (overlay-history hands the
+     *  entry to the form; a close-then-open in one commit would pop the form's own entry). */
+    handOff?: { label: string; onPress: () => void };
+    /** Source "job": money the job's payment requests still have to come off (the seed's leftToNet).
+     *  Said in one line; the sheet prefills no figure from the work, so there is nothing to lower. */
+    paidAhead?: number;
   },
 ) {
   const router = useRouter();
   const t = translator(useLang());
-  const [open, setOpen] = useState(false);
-  const { cardEnabled = false, methods, venmoConfigured, textReady, transferPending, trigger = "primary", label, ...rest } = props;
+  const [ownOpen, setOwnOpen] = useState(false);
+  const {
+    cardEnabled = false,
+    methods,
+    venmoConfigured,
+    textReady,
+    transferPending,
+    trigger = "primary",
+    label,
+    open: openProp,
+    onClose: onCloseProp,
+    handOff,
+    paidAhead = 0,
+    ...rest
+  } = props;
+  const controlled = openProp !== undefined;
+  const open = controlled ? !!openProp : ownOpen;
   const mode = rest as Mode;
   const card = useCardDoor({ ...mode, cardEnabled, textReady }, open, close);
   const other = useOtherWay({ ...mode, methods, venmoConfigured }, close);
@@ -1578,20 +1609,39 @@ export function GetPaidButton(
   function openSheet() {
     other.onOpen();
     card.onOpen();
-    setOpen(true);
+    setOwnOpen(true);
   }
+  // Opened by another sheet: the same two onOpens, on the opening (state, never a key).
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (controlled && open && !wasOpen.current) {
+      other.onOpen();
+      card.onOpen();
+    }
+    wasOpen.current = open;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, controlled]);
   /** Every way out of the sheet: both halves let go of what this open held, then the page reads again. */
   function close() {
     card.reset();
     other.reset();
-    setOpen(false);
+    if (controlled) onCloseProp?.();
+    else setOwnOpen(false);
     router.refresh();
   }
+  // The hand-off: the form opened in the press's commit; this sheet closes in the next one.
+  const [handingOff, setHandingOff] = useState(false);
+  useEffect(() => {
+    if (!handingOff) return;
+    setHandingOff(false);
+    close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handingOff]);
 
   const title = mode.source === "invoice" ? fillText(t("su_getPaidAmount"), { amount: money(mode.balance) }) : t("su_btn_getPaid");
   const words = label ?? (trigger === "link" ? t("su_btn_gettingPaidNow") : t("su_btn_getPaid"));
   const button =
-    trigger === "menuItem" ? (
+    trigger === "none" ? null : trigger === "menuItem" ? (
       <button type="button" onClick={openSheet} className={ACTIONS_ROW_CLS}>
         <BadgeDollarSign className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {words}
       </button>
@@ -1624,6 +1674,22 @@ export function GetPaidButton(
             {!cardEnabled && (
               <p className="text-xs text-slate-500">{t("su_cardsNotOnForCompany")}</p>
             )}
+            {mode.source === "job" && paidAhead > 0.005 && (
+              <p className="text-sm text-slate-700">{fillText(t("su_pa_aheadLine"), { amount: money(paidAhead) })}</p>
+            )}
+            {handOff && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (handingOff) return;
+                  handOff.onPress();
+                  setHandingOff(true);
+                }}
+                className="inline-flex min-h-11 items-center text-sm font-medium text-slate-600 underline"
+              >
+                {handOff.label}
+              </button>
+            )}
           </div>
         )}
       </Modal>
@@ -1643,7 +1709,69 @@ export function SettleUpButton(props: Mode & {
   compact?: boolean;
   /** smsReadiness(org).ready from the page (lib/sms-readiness). */
   textReady?: boolean;
+  /** Source "job": the money its payment requests still have to come off (cn-v1177). */
+  paidAhead?: number;
 }) {
-  const { compact, ...rest } = props;
+  const { compact, paidAhead, ...rest } = props;
+  // THE JOB HUB'S SHEET CARRIES ONE QUIET LINK (cn-v1177): Request a Deposit or Materials Payment.
+  if (props.source === "job") return <JobGetPaid {...(rest as Omit<typeof rest, "source" | "id">)} jobId={props.id} compact={compact} paidAhead={paidAhead} />;
   return <GetPaidButton {...(rest as Mode & Omit<typeof rest, "source">)} trigger={compact ? "outline" : "primary"} />;
+}
+
+/**
+ * THE JOB HUB'S GET PAID, WITH ITS ONE LINK OUT (cn-v1177). The sheet itself is GetPaidButton,
+ * source "job", unchanged: settleUp, the flat bill for the work. Its one addition is the quiet link
+ * that hands off to the Request a Payment form (components/request-payment): the form opens first,
+ * then this sheet closes. The form is mounted on its first opening and never keyed or unmounted
+ * after (each opening resets its fields with state).
+ */
+function JobGetPaid({
+  jobId,
+  compact,
+  cardEnabled,
+  methods,
+  venmoConfigured,
+  textReady,
+  paidAhead,
+}: {
+  jobId: string;
+  compact?: boolean;
+  paidAhead?: number;
+  cardEnabled?: boolean;
+  methods?: string[];
+  venmoConfigured?: boolean;
+  textReady?: boolean;
+}) {
+  const t = translator(useLang());
+  const [formMounted, setFormMounted] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  return (
+    <>
+      <GetPaidButton
+        source="job"
+        id={jobId}
+        cardEnabled={cardEnabled}
+        methods={methods}
+        venmoConfigured={venmoConfigured}
+        textReady={textReady}
+        paidAhead={paidAhead}
+        trigger={compact ? "outline" : "primary"}
+        handOff={{
+          label: t("su_btn_requestDepositOrMaterials"),
+          onPress: () => {
+            setFormMounted(true);
+            setFormOpen(true);
+          },
+        }}
+      />
+      {formMounted && (
+        <RequestPaymentSheet
+          jobId={jobId}
+          open={formOpen}
+          onClose={() => setFormOpen(false)}
+          payDoor={{ cardEnabled, methods, venmoConfigured, textReady }}
+        />
+      )}
+    </>
+  );
 }

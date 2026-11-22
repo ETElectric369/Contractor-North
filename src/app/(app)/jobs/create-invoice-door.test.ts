@@ -341,7 +341,7 @@ describe("the job's New Invoice routes like the server, case by case (W1-24)", (
     expect(res.error).toMatch(/payment schedule/);
   });
 
-  it("no estimate and no draw (a service call): one tap, createInvoiceForJob exactly as before; Take a Deposit Instead opens the sheet on Deposit", async () => {
+  it("no estimate and no draw (a service call): one tap, createInvoiceForJob exactly as before; the ?invoice=deposit preset opens the sheet on Deposit (Take a Deposit Instead opens the Request a Payment form since cn-v1177)", async () => {
     const f = facts({ billingType: "fixed", quotes: [{ status: "declined", total: 900 }] });
     expect(f).toMatchObject({ hasEstimate: false, drawBilled: false, billsActuals: true });
     expect(newInvoiceRoute({ ...f, openDraft: null })).toEqual({ kind: "direct" });

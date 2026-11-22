@@ -472,6 +472,8 @@ export default async function NewQuotePage({
           salesTax: featureOn(settings.features, "sales_tax"),
           textReady: smsReadiness(org as { settings?: unknown } | null).ready,
           estimatesOn: featureOn(settings.features, "estimates"),
+          // The Deposit field's rule (cn-v1177): already clamped by getOrgSettings.
+          depositRule: { percent: settings.deposit_percent, cap: settings.deposit_cap_amount },
         }}
       />
     </div>

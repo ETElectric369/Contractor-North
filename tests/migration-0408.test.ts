@@ -160,7 +160,8 @@ describe("migration 0408: one Materials line under each task", () => {
   });
 
   it("0395 is the last migration that made public_quote, and the ground check holds the live body to it", () => {
-    const makers = names.filter((n) => /function\s+(public\.)?public_quote\s*\(/i.test(readFileSync(join(migrations, n), "utf8")));
+    // makers up to and including 0408 are what this file was written against (0414 re-made it after).
+    const makers = names.filter((n) => n < "0409_" && /function\s+(public\.)?public_quote\s*\(/i.test(readFileSync(join(migrations, n), "utf8")));
     expect(makers.slice(-2)).toEqual(["0395_a_task_has_labor_rows.sql", "0408_one_materials_line_under_each_task.sql"]);
     const between = names.filter((x) => x >= "0396_" && x < "0408_");
     expect(between.length).toBe(12); // 0396 … 0407

@@ -15,7 +15,11 @@
  *   quote         -> From the Estimate (lines copied from an estimate, which can be either)
  *   milestone     -> Contract Payments (a scheduled draw on a fixed-price contract)
  *   draw_credit   -> Credits           (the deposit and earlier bills coming back off)
+ *   prepaid_credit -> Credits          (a payment request coming back off a later bill, cn-v1177)
  *   a deposit bill's own lines -> Deposit
+ *   a payment request's own lines -> Payment Requests (money asked for ahead of the work, never
+ *                    work: cn-v1177. Read before anything a line says, because a request's one line
+ *                    is locked and is never the work whatever its words are)
  * A LINE TYPED BY HAND reads by the same rule the /i Cost Breakdown reads (handLineKind in
  * invoice-math), so the portal and the customer's bill can never file one line in two places
  * (audit of this split, 2026-09-24: INV-059's "Labor - Erik" was Labor on /i and Other here, and
@@ -26,8 +30,9 @@
  * never guessed at. So is anything the rule does not know yet (a new importer).
  */
 import { handLineKind, isHoursUnit, storedLineKind } from "@/lib/invoice-math";
+import { PREPAID_CREDIT, PREPAYMENT_LINE, isPrepaymentKind } from "@/lib/prepayments";
 
-export type LineGroup = "labor" | "materials" | "change_orders" | "estimate" | "contract" | "deposit" | "credit" | "discount" | "tax" | "other";
+export type LineGroup = "labor" | "materials" | "change_orders" | "estimate" | "contract" | "deposit" | "prepayment" | "credit" | "discount" | "tax" | "other";
 
 /** The order the groups are listed in, everywhere: labor first, materials second, the rest after. */
 export const LINE_GROUP_ORDER: readonly LineGroup[] = [
@@ -37,6 +42,7 @@ export const LINE_GROUP_ORDER: readonly LineGroup[] = [
   "estimate",
   "contract",
   "deposit",
+  "prepayment",
   "credit",
   "discount",
   "tax",
@@ -51,11 +57,19 @@ export const LINE_GROUP_LABEL: Readonly<Record<LineGroup, string>> = {
   estimate: "From the Estimate",
   contract: "Contract Payments",
   deposit: "Deposit",
+  prepayment: "Payment Requests",
   credit: "Credits",
   discount: "Discount",
   tax: "Sales Tax",
   other: "Other",
 };
+
+/**
+ * WHAT A PAYMENT REQUEST IS CALLED (cn-v1177), wherever an invoice's kind is named: the document's
+ * heading, the billing list's chip, the portal's bill card, the assistant's read, the accountant's
+ * workbook. One word in one place, English (customer-bound); a kind with no word is a hole.
+ */
+export const PAYMENT_REQUEST_LABEL = "Payment Request";
 
 /** Is this unit hours? (One rule, in invoice-math; re-exported for the portal's callers.) */
 export { isHoursUnit };
@@ -65,6 +79,9 @@ export function lineGroup(
   line: { import_source?: string | null; unit?: string | null; description?: string | null; line_kind?: string | null; line_total?: unknown },
   invoiceKind?: string | null,
 ): LineGroup {
+  // A PAYMENT REQUEST'S OWN LINE IS MONEY ASKED AHEAD, NEVER WORK (cn-v1177): it comes back off the
+  // next bill as a prepaid_credit line, so counting it as work would count the work twice.
+  if (isPrepaymentKind(invoiceKind) || line.import_source === PREPAYMENT_LINE) return "prepayment";
   // WHAT THE LINE WAS SAID TO BE COMES FIRST (0342): a line added from the price book, or one the
   // office filed with the Kind chip. The same first read groupInvoiceLines makes on /i and print.
   // A 'discount' that takes nothing off is not one (0389) — Other, as groupInvoiceLines reads it.
@@ -83,6 +100,7 @@ export function lineGroup(
     case "milestone":
       return "contract";
     case "draw_credit":
+    case PREPAID_CREDIT:
       return "credit";
   }
   if (src === null || src === "") {

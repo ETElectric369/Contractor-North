@@ -182,8 +182,13 @@ export type PortalJobView = {
    *  circuits in space order, customer-safe fields only (lib/panel/directory). Empty when off. */
   panels: DirectoryPanel[];
   /** The work not on a bill yet, at the customer's price. null on a job that bills a contract or draws. */
-  unbilled: CustomerUnbilled | null;
+  unbilled: PortalUnbilled | null;
 };
+
+/** The work not on a bill yet, and (cn-v1177) whether the amount it nets holds money asked for ahead by
+ *  a payment request (a deposit, a materials payment, any other): the page then never calls it "the
+ *  deposit", which would be untrue of a materials payment. */
+export type PortalUnbilled = CustomerUnbilled & { netsRequests?: boolean };
 
 /** The default sea-glass teal (org-settings DEFAULT_SETTINGS.glass_tint). */
 const DEFAULT_TINT = "#1b9488";
@@ -243,7 +248,7 @@ export function shapePortalJob(
   raw: PortalJobRaw,
   extra: {
     signed: ReadonlyMap<string, string>;
-    unbilled: CustomerUnbilled | null;
+    unbilled: PortalUnbilled | null;
     now: Date;
     /** The org's supplier names (fetchSupplierNames, pinned to the scope's org). */
     suppliers?: ReadonlySet<string>;

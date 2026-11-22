@@ -5,7 +5,7 @@ import { PrintButton } from "@/components/print-button";
 import { sharePdfReady } from "@/lib/pdf-cache";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { templateFor } from "@/components/doc-templates";
-import { PublicQuoteAccept } from "./accept";
+import { PublicQuoteAccept, type PublicDeposit } from "./accept";
 import { QuoteDocument } from "@/components/quote-document";
 import { isEstimateFormat, type EstimateFormat } from "@/lib/doc-style";
 import { docLabel } from "@/lib/doc-label";
@@ -31,12 +31,30 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   return { title: q ? docPageTitle(q.quote_number, projectionPlace(data as any)) : "Quote", robots: NO_INDEX };
 }
 
+/**
+ * THE DEPOSIT, READ OFF public_quote (cn-v1177, 0414): deposit_amount (the figure the estimate stored),
+ * deposit_state ('none' | 'due' | 'requested' | 'paid') and can_take_card. A key that is missing, a
+ * state that is not one of the four, or a figure that is not above 0 reads as NO deposit: an estimate
+ * saved before 0414 states nothing and is offered nothing. Not exported: a page exports its page.
+ */
+function depositFromProjection(q: Record<string, unknown> | null | undefined): PublicDeposit {
+  const amount = Number(q?.deposit_amount);
+  const state = q?.deposit_state;
+  if (!Number.isFinite(amount) || amount <= 0.005 || (state !== "due" && state !== "requested" && state !== "paid")) {
+    return { amount: 0, state: "none", canTakeCard: false };
+  }
+  return { amount: Math.round(amount * 100) / 100, state, canTakeCard: q?.can_take_card === true };
+}
+
 export default async function PublicQuotePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>;
+  searchParams?: Promise<{ deposit?: string | string[] }>;
 }) {
   const { token } = await params;
+  const sp = searchParams ? await searchParams : {};
   const supabase = await createClient();
   const { data } = await supabase.rpc("public_quote", { p_token: token });
   if (!data) notFound();
@@ -49,6 +67,15 @@ export default async function PublicQuotePage({
   const co = companyFromOrg(org);
   const template = templateFor(org, "quote");
   const label = docLabel(q);
+  const deposit = depositFromProjection(q as Record<string, unknown>);
+  // THE CARD DOOR CAME BACK REFUSED (/api/pay/deposit/<token> → ?deposit=unavailable): one plain line,
+  // with the company's phone when the letterhead projection carries one. The button stays, to try again.
+  const depositTrouble =
+    sp.deposit === "unavailable" && deposit.state !== "none"
+      ? co.phone
+        ? `We couldn't open the deposit payment just now. Try again, or call us at ${co.phone}.`
+        : "We couldn't open the deposit payment just now. Try again in a few minutes."
+      : null;
   // THE FORMAT, AS public_quote RESOLVED IT (0387, 0395; said outright since 0408). The RPC resolves
   // the estimate's own choice else the company's — the same coalesce estimateFormatFor makes for the
   // office's paper — and since 0408 ships that one word as quote.estimate_format, because a breakdown
@@ -105,6 +132,8 @@ export default async function PublicQuotePage({
         tax={q.tax}
         total={q.total}
         notes={q.notes}
+        // The deposit line under the totals (cn-v1177): the figure the estimate stored, when it states one.
+        depositDue={deposit.state === "none" ? null : deposit.amount}
         // The public RPC deliberately omits org.settings (no leak), so quote_terms /
         // document_footer aren't available on this surface — the document falls back
         // to its default footer, the same as before.
@@ -124,6 +153,8 @@ export default async function PublicQuotePage({
               declined={q.status === "declined"}
               brand={co.brand}
               docLabel={label}
+              deposit={deposit}
+              depositTrouble={depositTrouble}
             />
           )
         }

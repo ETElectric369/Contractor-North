@@ -36,6 +36,14 @@ const state = vi.hoisted(() => ({
   tasksCloseFails: false,
   /** The open-task head count the Finish window reads (cn-v1174); null = the read fails. */
   openTaskCount: 0 as number | null,
+  /** The job's payment requests (cn-v1177), read by lib/payment-request through this fake, and the
+   *  person's language (profiles.language). */
+  requests: [] as Record<string, unknown>[],
+  requestLines: [] as Record<string, unknown>[],
+  /** The prepaid_credit lines on the job's bills, and those bills' statuses (cn-v1177). */
+  creditLines: [] as Record<string, unknown>[],
+  carriers: [] as Record<string, unknown>[],
+  lang: null as string | null,
 }));
 
 vi.mock("@/lib/staff-guard", () => ({
@@ -92,6 +100,14 @@ function fake() {
         if (table === "jobs" && cols === "customer_id, name, description") return { customer_id: "cust-1", name: "Tess Zane", description: null };
         if (table === "jobs") return null; // pricing levels: none
         if (table === "invoices" && cols === "invoice_number, total, invoice_kind") return state.made;
+        // THE PAYMENT REQUESTS' READS (lib/payment-request readPrepaymentStates, cn-v1177): routed by
+        // their own columns, so the real reader runs and sees what the books hold, never an error.
+        if (table === "invoices" && cols === "id, invoice_number, status, title, created_at, amount_paid") return state.requests;
+        if (table === "invoice_items" && cols === "invoice_id, line_total") return state.requestLines;
+        if (table === "invoice_items" && cols === "invoice_id, line_total, prepaid_invoice_id") return state.creditLines;
+        if (table === "invoices" && cols === "id, status") return state.carriers;
+        if (table === "customer_credits") return [];
+        if (table === "profiles" && cols === "language") return { language: state.lang };
         if (table === "invoices" && (cols === "id" || cols === "id, invoice_number")) return state.draws; // the live draws
         if (table === "invoices") return single ? null : [];
         if (table === "payment_milestones") return single ? null : [];
@@ -145,6 +161,54 @@ beforeEach(() => {
   state.tasksClosed = [];
   state.tasksCloseFails = false;
   state.openTaskCount = 0;
+  state.requests = [];
+  state.requestLines = [];
+  state.creditLines = [];
+  state.carriers = [];
+  state.lang = null;
+});
+
+describe("Finish and a payment request (cn-v1177; re-pinned on purpose after skeptic #80)", () => {
+  // A paid $3,000 request on a plain T&M job with $2,437.50 of work not on a bill. A request never
+  // "covers" work: the bill is BUILT for the work, its sync takes the request off (down to $0.00, the
+  // line naming the request), and what was paid that no bill used is said after it with its refund door.
+  const paidRequest = () => {
+    state.billingType = "tm";
+    state.draws = [];
+    state.requests = [{ id: "req-1", invoice_number: "INV-900", status: "paid", title: "Deposit", created_at: "2026-11-01T17:00:00Z", amount_paid: 3000 }];
+    state.requestLines = [{ invoice_id: "req-1", line_total: 3000 }];
+    state.blankInvoice.mockImplementation(async () => {
+      // The built bill's sync took the request off, capped at the bill's own lines.
+      state.creditLines = [{ invoice_id: "inv-083", line_total: -2437.5, prepaid_invoice_id: "req-1" }];
+      state.carriers = [{ id: "inv-083", status: "draft" }];
+      return { ok: true, id: "inv-083" };
+    });
+    state.made = { invoice_number: "INV-083", total: 0 };
+  };
+  it("English: the bill is built for the work, the job finishes, and the $562.50 no bill used is said with its refund door", async () => {
+    paidRequest();
+    const res = await finishJob(JOB, {});
+    expect(res.ok).toBe(true);
+    expect(state.blankInvoice).toHaveBeenCalledTimes(1);
+    expect(res).toMatchObject({ id: "inv-083", final: true });
+    expect(res.speak).not.toContain("covers");
+    expect(res.speak).toContain("Started INV-083");
+    expect(res.speak).toContain("$562.50 was paid ahead and no bill used it. Refund it from INV-900.");
+    expect(res.warning).toBe("$562.50 was paid ahead and no bill used it. Refund it from INV-900.");
+  });
+  it("Spanish: the unused money is said in Spanish", async () => {
+    paidRequest();
+    state.lang = "es";
+    const res = await finishJob(JOB, {});
+    expect(res.warning).toBe("$562.50 se pagó por adelantado y ninguna factura lo usó. Reembólsalo desde INV-900.");
+  });
+  it("the Finish window says a bill is started for the whole work, never that the request covers it", async () => {
+    paidRequest();
+    const pre = await finishJobPreview(JOB);
+    expect(pre).toMatchObject({ ok: true, finalBuilds: true, finalDoc: "invoice" });
+    expect((pre as { final?: string }).final).toContain("Finishing starts an invoice for $2,437.50 of work not yet billed");
+    expect((pre as { final?: string }).final).not.toContain("asked for ahead");
+  });
 });
 
 /** The deed's write (cn-v1174): the job's open tasks checked off, by the person who finished it. */

@@ -4,11 +4,23 @@ import { useTransition } from "react";
 import { useToast } from "@/components/toast";
 import { canBeDiscount, DISCOUNT_KIND, groupInvoiceLines, LINE_KIND_LABEL, PICKABLE_LINE_KINDS, storedLineKind, type PickableLineKind } from "@/lib/invoice-math";
 import { countsAsWorkCompleted } from "@/lib/portal/line-kind";
+import { isCreditSource, isPrepaymentKind, PREPAYMENT_LINE } from "@/lib/prepayments";
 import type { InvoiceItem } from "@/lib/types";
 import { useSaveInFlight } from "@/lib/saves-in-flight";
 import { setInvoiceItemKind } from "../actions";
 
 /** Where the customer's Cost Breakdown files this line today: the one reading every document makes. */
+/**
+ * A LINE THE APP KEEPS, NOT A HAND (the server's locked-line rule, said on the page): a credit line
+ * (a draw's "Less previous billings", a payment request taken off: isCreditSource), a milestone line,
+ * and a payment request's own line (cn-v1177). The page draws it with no Edit, no Remove and no Kind
+ * chips, so no tap ends in a refusal.
+ */
+export function lineLockedByApp(item: Pick<InvoiceItem, "import_source">, invoiceKind?: string | null): boolean {
+  const src = item.import_source ?? null;
+  return isCreditSource(src) || src === "milestone" || src === PREPAYMENT_LINE || isPrepaymentKind(invoiceKind);
+}
+
 export function lineKindNow(item: Pick<InvoiceItem, "description" | "line_total" | "import_source" | "unit" | "line_kind">): PickableLineKind | "credit" | typeof DISCOUNT_KIND {
   const g = groupInvoiceLines([item]);
   if (g.credits.lines.length) return "credit";
@@ -47,8 +59,9 @@ export function LineKindChips({
   // it, and the header's Preview waits for the count. A hook, so it stands above the early return.
   useSaveInFlight(pending);
   const src = item.import_source ?? null;
-  // The draw's own credit and milestone lines are locked, like every other write to them.
-  if (src === "draw_credit" || src === "milestone") return null;
+  // Credit lines, milestone lines and a payment request's own line are locked, like every other
+  // write to them (lineLockedByApp).
+  if (lineLockedByApp(item, invoiceKind)) return null;
   const said = storedLineKind(item.line_kind);
   const now = lineKindNow(item);
   // NOTHING SILENT (Erik, 2026-09-26): whether this line counts as work completed on the Progress

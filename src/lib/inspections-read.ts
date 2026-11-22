@@ -105,6 +105,8 @@ export async function readInspectionBuckets(supabase: SupabaseClient, opts: { no
         .select(BILLED_JOB_COLUMNS)
         .not("job_id", "is", null)
         .not("status", "in", "(draft,void)")
+        // A payment request (cn-v1177) is money asked for ahead of the work, never billed work.
+        .neq("invoice_kind", "prepayment")
         .order("id")
         .range(from, to),
     ),

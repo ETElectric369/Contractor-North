@@ -61,7 +61,8 @@ describe("the doors", () => {
     const fn = body(actions, "export async function duplicateQuote(");
     expect(fn).toContain("opts?: { revision?: boolean }");
     // The estimate's own job site (address, unit, city, state, zip) rides since cn-v1158: a revision is the same paper, so it prints the same place.
-    expect(fn).toContain('const columns = "customer_id, title, description, notes, tax_rate, valid_until, doc_type, circuits, job_id, inquiry_id, status, address, unit, city, state, zip" as const;');
+    // Re-pinned on purpose (cn-v1177): the deposit (deposit_amount, deposit_by_hand, 0414) is part of the same paper, so a revision carries it too.
+    expect(fn).toContain('const columns = "customer_id, title, description, notes, tax_rate, valid_until, doc_type, circuits, job_id, inquiry_id, status, address, unit, city, state, zip, deposit_amount, deposit_by_hand" as const;');
     expect(fn).toContain('select(`${columns}, estimate_format`)'); // the copy keeps the paper format (cn-v1131), two rungs across the 0395 gap
     expect(fn).toContain("const withFormat = !(first.error && isMissingColumn(first.error));");
     expect(fn).toContain('ws.say("qs_onlySentRevised")'); // the caller's words (cn-v1145); the English is the catalog's

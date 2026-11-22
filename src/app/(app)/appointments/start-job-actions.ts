@@ -313,7 +313,8 @@ export async function startJobFromVisit(input: {
     ok: true,
     jobId,
     jobNumber,
-    message: startedWords({ jobNumber, customer, tz, clock, existing }, lang, words),
+    // cn-v1177 (pick 3): the estimate that stands for this sale is now this job's, said in one line.
+    message: [startedWords({ jobNumber, customer, tz, clock, existing }, lang, words), made.tied].filter(Boolean).join(" "),
     ...(warnings.length ? { warning: warnings.join(" ") } : {}),
     ...(undoEntryId ? { undoEntryId } : {}),
   };

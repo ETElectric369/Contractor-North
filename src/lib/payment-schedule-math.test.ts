@@ -90,9 +90,12 @@ describe("scheduleStatus", () => {
   // Audit v921: each percent milestone rounded to cents on its own, so an odd-cent contract left
   // a cent that no draw ever billed and nothing flagged (the percents DO sum to 100).
   it("an odd-cent contract is partitioned exactly — the final milestone absorbs the rounding", () => {
-    const s = scheduleStatus(defaultSchedule(30), 100.01);
+    // cn-v1177: defaultSchedule takes the contract and the deposit rule; 30% with no cap is the old 30.
+    const s = scheduleStatus(defaultSchedule(100.01, { percent: 30, cap: 0 }), 100.01);
     expect(s.scheduledTotal).toBe(100.01);
-    expect(s.rows.map((r) => r.dollars)).toEqual([30, 35, 35.01]);
+    // The deposit row is depositFor's $30.00 to the cent (29.997...% of the contract), so the progress
+    // row's half of the rest rounds up to $35.01 and the final absorbs the cent: still exactly the contract.
+    expect(s.rows.map((r) => r.dollars)).toEqual([30, 35.01, 35]);
     expect(s.percentOff).toBe(false);
     expect(s.overContract).toBe(false);
   });
@@ -109,16 +112,35 @@ describe("scheduleStatus", () => {
 });
 
 describe("defaultSchedule", () => {
-  it("deposit + progress + final always sum to exactly 100", () => {
-    for (const dep of [0, 10, 25, 33, 50]) {
-      const s = defaultSchedule(dep);
-      expect(s.reduce((t, m) => t + (m.percent ?? 0), 0)).toBe(100);
-      expect(s.length).toBe(3);
-    }
+  // cn-v1177 RE-PIN, ON PURPOSE: this used to take a bare percent and answer 30 for 0, because 0 was the
+  // setting's default and meant "never chose". The default is now 10% up to $1,000 (lib/deposit-rule,
+  // Erik 2026-11-21) and a stored 0 is a company's choice of NO deposit, so 0 answers no deposit row;
+  // and the deposit row is depositFor of the contract (the cap included), never its own percent math.
+  it("the rows always sum to exactly 100, for any rule and any contract", () => {
+    for (const total of [0, 100.01, 5000, 30000, 50000, 123456.78])
+      for (const rule of [{ percent: 0, cap: 0 }, { percent: 10, cap: 1000 }, { percent: 25, cap: 0 }, { percent: 33, cap: 2500 }, { percent: 100, cap: 0 }]) {
+        const s = defaultSchedule(total, rule);
+        expect(Math.round(s.reduce((t, m) => t + (m.percent ?? 0), 0) * 1_000_000), `${total} ${JSON.stringify(rule)}`).toBe(100_000_000);
+        expect(s.map((m) => m.sort_order)).toEqual(s.map((_, i) => i));
+      }
   });
-  it("uses the org deposit % when given, else 30", () => {
-    expect(defaultSchedule(25)[0].percent).toBe(25);
-    expect(defaultSchedule(0)[0].percent).toBe(30);
+  it("the deposit row is depositFor of the contract: 10% under the cap, the cap's share above it", () => {
+    expect(defaultSchedule(5000, { percent: 10, cap: 1000 })[0]).toMatchObject({ label: "Deposit", percent: 10 });
+    expect(defaultSchedule(50000, { percent: 10, cap: 1000 })[0]).toMatchObject({ label: "Deposit", percent: 2 });
+    const odd = defaultSchedule(30000, { percent: 10, cap: 1000 });
+    expect(odd.map((m) => m.percent)).toEqual([3.333333, 48.333334, 48.333333]);
+    // The cap to the cent: $1,000.00, not the $999 a two-place percent would bill.
+    expect(scheduleStatus(odd, 30000).rows[0].dollars).toBe(1000);
+    expect(scheduleStatus(odd, 30000).scheduledTotal).toBe(30000);
+    expect(defaultSchedule(20000, { percent: 25, cap: 0 })[0].percent).toBe(25);
+  });
+  it("0% is no deposit: progress and final only; with no contract the rule's own percent stands; never above 90", () => {
+    expect(defaultSchedule(20000, { percent: 0, cap: 1000 })).toEqual([
+      { sort_order: 0, label: "Progress payment", percent: 50 },
+      { sort_order: 1, label: "Final payment", percent: 50 },
+    ]);
+    expect(defaultSchedule(0, { percent: 10, cap: 1000 })[0]).toMatchObject({ label: "Deposit", percent: 10 });
+    expect(defaultSchedule(1000, { percent: 100, cap: 0 })[0].percent).toBe(90);
   });
 });
 

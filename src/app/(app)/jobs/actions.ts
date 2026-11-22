@@ -24,6 +24,7 @@ import { reportError } from "@/lib/observe";
 import { fillText, translator } from "@/lib/i18n";
 import { closeJobTasks, countOpenJobTasks, isMissingColumn } from "@/lib/job-tasks";
 import { callerLang } from "@/lib/lang-of";
+import type { Lang } from "@/lib/locale";
 import { isCostableCategory, NOT_A_COST_CATEGORY, type PaperTie } from "@/lib/job-photos";
 import { RECEIPT_TIE_COLUMNS, receiptsNotOnABill, tieReadFilters, type ReceiptDoc } from "@/lib/action-items/receipts-not-on-a-bill";
 import { formatCurrency, formatPhone } from "@/lib/utils";
@@ -32,11 +33,13 @@ import { estimateIsTheContract, shouldImportActuals } from "@/lib/invoice-import
 import { revalidateMoney } from "@/lib/revalidate-money";
 import { claimedSourcesOnJob, unbilledWorkForJob } from "@/lib/unbilled-work";
 import { changeOrderLines, type ChangeOrderRow } from "@/lib/change-order-billing";
-import { depositCoversWords, finalFinishWords, finishedWithWorkOffBill, finishWouldLeaveOffBill, LAST_BILL_DOOR } from "@/lib/finish-job-words";
+import { depositCoversWords, finalFinishWords, finishedWithWorkOffBill, finishWouldLeaveOffBill, LAST_BILL_DOOR, paidAheadUnusedWords } from "@/lib/finish-job-words";
 // THE BILLING STEP A FINISH RUNS, IN ONE PLACE FOR BOTH DOORS THAT END A JOB (M3). It used to live
 // here as tmFinishPlan, which left the paid-in-full gate (lib/complete-job-when-paid) with no way to
 // reach it: that door wrote the finish without ever asking what the job had worked.
-import { finishBillingStep, type FinishBillingStep } from "@/lib/finish-bills-first";
+import { finishBillingStep, paidAheadAtFinish, type FinishBillingStep } from "@/lib/finish-bills-first";
+import { readPrepaymentStates } from "@/lib/payment-request";
+import { PREPAYMENT_KIND } from "@/lib/prepayments";
 import { guardedFieldsMoved, planBillEdit, type BillClaimHolder } from "./bill-claims";
 import { bucketOf } from "@/lib/business-cost-buckets";
 import { jobCostRefusal } from "@/lib/job-cost-guard";
@@ -414,7 +417,9 @@ export async function createInvoiceForJob(
   // means it is billed; what is new goes on the next bill (below).
   let quoteBilled = !!quote && standards.some((r) => r.quote_id === quote.id);
   if (quote && !quoteBilled) {
-    const { data: fromEstimate, error: estErr } = await supabase.from("invoices").select("id").eq("quote_id", quote.id).neq("status", "void").limit(1);
+    // A deposit request (cn-v1177) carries the estimate's quote_id and bills none of its work: the
+    // contract is still to be billed, and that bill takes the request off.
+    const { data: fromEstimate, error: estErr } = await supabase.from("invoices").select("id").eq("quote_id", quote.id).neq("status", "void").neq("invoice_kind", "prepayment").limit(1);
     if (estErr) return { ok: false, error: dbError(estErr) };
     quoteBilled = (fromEstimate ?? []).length > 0;
   }
@@ -809,6 +814,11 @@ async function finishTmWithFinal(
   plan: Extract<FinishBillingStep, { kind: "plan" }>,
   complete: () => Promise<{ ok: true } | { ok: false; error: string }>,
   withoutBilling = false,
+  /** The person's language and translator (cn-v1177): the request's words are said in it. */
+  lang?: Lang,
+  words?: (key: string) => string,
+  /** Where the money paid ahead that no bill used is left for finishJob to say (cn-v1177). */
+  closing?: { unused?: string | null },
 ): Promise<FinishJobResult> {
   const { door, draft } = plan;
   if (door.kind === "open") {
@@ -822,7 +832,7 @@ async function finishTmWithFinal(
       const off = `${formatCurrency(plan.work)} of work is not on a bill. ${name} is still a draft for set amounts: send it (or delete it), then bill the work.`;
       return { ok: true, ...(draft ? { id: draft.id } : {}), sent: false, speak: `Job finished. ${off}`, warning: off };
     }
-    return { ok: false, error: `${finalFinishWords(plan.door, plan.draft, plan.work).line} The job was not marked complete.` };
+    return { ok: false, error: `${finalFinishWords(plan.door, plan.draft, plan.work, plan.lump).line} The job was not marked complete.` };
   }
   // "Finish Without Billing" was pressed on a draft that is no longer in the way: what this press
   // would do now is build a bill, which is not what was asked. Nothing is done; said.
@@ -834,6 +844,8 @@ async function finishTmWithFinal(
     if (!done.ok) return done;
     // The job is finished, so there is no later bill: the deposit and the work are said in figures,
     // and a deposit worth more than the work is a warning (money to settle with the customer).
+    // "covered" is the draw pool's alone (cn-v1177); a paid request no bill used is said by finishJob.
+    if (closing) closing.unused = paidAheadUnusedWords(plan.prepaid ?? null, lang, words);
     const said = depositCoversWords(plan.work, plan.lump);
     const over = plan.lump - plan.work > 0.005;
     return { ok: true, sent: false, speak: `Job finished. ${said}`, ...(over ? { warning: said } : {}) };
@@ -856,6 +868,16 @@ async function finishTmWithFinal(
   const done = await complete();
   if (!done.ok) {
     return { ok: false, id: built.id, error: `${num} is built as a draft (not sent), but the job couldn't be marked complete: ${done.error}` };
+  }
+  // AFTER THE FINAL BILL (cn-v1177): it took the job's payment requests off (the sync, capped at its own
+  // lines), so what was paid ahead and no bill used is read now, and said with its refund door. A job
+  // with no requests reads nothing more. A read that fails is reported; the finish stands.
+  if (closing && plan.prepaid) {
+    try {
+      closing.unused = paidAheadUnusedWords(paidAheadAtFinish(await readPrepaymentStates(supabase, jobId)), lang, words);
+    } catch (e) {
+      reportError("finishJob.paidAheadAfterFinal", e, { jobId });
+    }
   }
   const speak =
     door.kind === "add" && draft?.id === built.id
@@ -895,8 +917,13 @@ export async function finishJob(
   // THE DEED CLOSES THE JOB'S TASKS (cn-v1174): every path below that marks the job complete goes
   // through `complete`, which checks its open tasks off once the status is written; the answer then
   // says how many (or that the close failed: the finish stands either way).
-  const closing: { said: { speak?: string; warning?: string } | null } = { said: null };
-  const res = await finishJobBilling(jobId, opts, closing);
+  const closing: { said: { speak?: string; warning?: string } | null; unused?: string | null } = { said: null };
+  const billed = await finishJobBilling(jobId, opts, closing);
+  // Money paid ahead that no bill used, on a job that finished: a warning every surface relays.
+  const res =
+    billed.ok && closing.unused
+      ? { ...billed, speak: billed.speak ? `${billed.speak} ${closing.unused}` : closing.unused, warning: billed.warning ? `${billed.warning} ${closing.unused}` : closing.unused }
+      : billed;
   return closing.said ? withTasksSaid(res, closing.said) : res;
 }
 
@@ -904,11 +931,14 @@ export async function finishJob(
 async function finishJobBilling(
   jobId: string,
   opts: { importLabor?: boolean; importCosts?: boolean; sendInvoice?: boolean; withoutBilling?: boolean },
-  closing: { said: { speak?: string; warning?: string } | null },
+  closing: { said: { speak?: string; warning?: string } | null; unused?: string | null },
 ): Promise<FinishJobResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  // The person's language (cn-v1177): the payment requests' words at the finish are said in it.
+  const lang = await callerLang(supabase, ctx.userId);
+  const words = translator(lang);
 
   // One place marks the job complete — checked (the silent-write law: a zero-row update on a
   // cross-org or deleted id is a 204, and "finished" would have been a lie).
@@ -946,7 +976,10 @@ async function finishJobBilling(
   // here would reach profiles.bill_rate, which 0216 revokes from the authenticated role.
   const plan = await finishBillingStep(supabase, jobId, { kind: "staff" });
   if (plan.kind === "error") return { ok: false, error: plan.error };
-  if (plan.kind === "plan") return finishTmWithFinal(supabase, jobId, plan, complete, !!opts.withoutBilling);
+  if (plan.kind === "plan") return finishTmWithFinal(supabase, jobId, plan, complete, !!opts.withoutBilling, lang, words, closing);
+  // NOTHING LEFT TO BILL, MONEY PAID AHEAD THAT NO BILL USED (cn-v1177): said with its refund door once
+  // the job is finished (finishJob puts it on the answer's warning), in the person's language.
+  closing.unused = paidAheadUnusedWords(plan.prepaid ?? null, lang, words);
 
   // A draw-billed job is finished with a Final draw, not a standard invoice. Mark it
   // complete without creating a conflicting standard invoice (H4), and hand back the
@@ -1216,6 +1249,7 @@ export async function deleteJob(
     { count: permits },
     { count: changeOrders },
     reportsRead,
+    requestsRead,
   ] = await Promise.all([
     headCount("contracts", (q: any) => q.eq("status", "signed")),
     headCount("contracts", (q: any) => q.in("status", ["draft", "sent"])),
@@ -1227,6 +1261,7 @@ export async function deleteJob(
     headCount("permits"),
     headCount("change_orders"),
     headCount("daily_reports"),
+    headCount("invoices", (q: any) => q.eq("invoice_kind", PREPAYMENT_KIND)),
   ]);
 
   /* ── A DAILY REPORT IS SOMEBODY'S DAY (0411): a report filed for this job keeps its job (the key
@@ -1244,6 +1279,18 @@ export async function deleteJob(
       ok: false,
       error: `This job has ${reports} daily report${reports > 1 ? "s" : ""} filed on it, and a report stays with its job, so set the job to Cancelled instead of deleting it.`,
     };
+  }
+
+  /* ── A PAYMENT REQUEST STAYS WITH ITS JOB (cn-v1177, skeptic #80): a bill on the books names this job,
+     and the bills that take a request off are held to the same job by the database (0414), so a delete
+     would fail there in a raw sentence about something else. Refused here first, in the person's
+     language, naming the one way: Cancelled. A failed count is never "none". */
+  if ((requestsRead as { error?: unknown }).error) {
+    reportError("deleteJob.paymentRequests", (requestsRead as { error?: unknown }).error, { jobId: id });
+    return { ok: false, error: translator(await callerLang(supabase, ctx.userId))("jb_deleteRequestsUnread") };
+  }
+  if (Number((requestsRead as { count?: number | null }).count ?? 0) > 0) {
+    return { ok: false, error: translator(await callerLang(supabase, ctx.userId))("jb_deleteHasRequests") };
   }
 
   // ── Tier 1: legal records that a delete must never be able to take with it ──

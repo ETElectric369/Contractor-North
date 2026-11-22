@@ -97,6 +97,8 @@ describe("readInspectionBuckets", () => {
       ["select", [BILLED_JOB_COLUMNS]],
       ["not", ["job_id", "is", null]],
       ["not", ["status", "in", "(draft,void)"]],
+      // Re-pinned on purpose (cn-v1177): a payment request is money asked for ahead, never billed work.
+      ["neq", ["invoice_kind", "prepayment"]],
       ["order", ["id"]],
       ["range", [0, PAGE_ROWS - 1]],
     ]);

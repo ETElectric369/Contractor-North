@@ -72,7 +72,9 @@ import { unbilledCardDoor, openDraftOnJob, type CardDoor, type OpenDraft } from 
 import { DRAW_KINDS } from "@/lib/invoice-math";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { fixedBillingsNotYetNetted, unbilledWorkForJob } from "@/lib/unbilled-work";
-import { depositCoversWords, paidLeftWorkOffBill, type NotBilled } from "@/lib/finish-job-words";
+import { depositCoversWords, paidAheadUnusedWords, paidLeftWorkOffBill, type NotBilled, type PaidAheadAtFinish } from "@/lib/finish-job-words";
+import { prepaymentsLeft, type PrepaymentState } from "@/lib/prepayments";
+import { readPrepaymentStates } from "@/lib/payment-request";
 import { reportError } from "@/lib/observe";
 import { formatCurrency } from "@/lib/utils";
 
@@ -88,7 +90,13 @@ import { formatCurrency } from "@/lib/utils";
  *            is (the hours, the receipts, the takes) so every sentence counts it the same way.
  */
 export type FinishBillingStep =
-  | { kind: "skip" }
+  | {
+      kind: "skip";
+      /** Money asked for ahead (payment requests, cn-v1177) on a Time & Material job with nothing
+       *  left to bill: what was paid and that no bill used is said, with the refund door. Absent on a
+       *  job this rule does not read (not T&M, or a payment schedule). */
+      prepaid?: PaidAheadAtFinish | null;
+    }
   | {
       kind: "error";
       /** For the PERSON WHO PRESSED Finish Job: an imperative is fair, they can press it again. */
@@ -106,9 +114,16 @@ export type FinishBillingStep =
       draft: OpenDraft | null;
       drawBilled: boolean;
       work: number;
+      /** The DRAW pool's money no bill has taken off yet (fixedBillingsNotYetNetted), and nothing else.
+       *  A payment request is never in it (cn-v1177): a draw's credit cannot take a bill below zero, so
+       *  a draw needs "covered"; a request's credit is capped at the bill's own lines, so the bill is
+       *  built for the work and the sync takes the requests off it. */
       lump: number;
       /** The hours, receipts and takes behind `work`, for the words (finish-job-words notBilledWords). */
       notBilled: NotBilled;
+      /** The job's payment requests at the finish (cn-v1177), for the WORDS only: no decision reads
+       *  it. null when the job has none. */
+      prepaid?: PaidAheadAtFinish | null;
     };
 
 /**
@@ -188,9 +203,10 @@ export async function finishBillingStep(
   const drawBilled = (drawsRead.data ?? []).length > 0;
   let unbilled: Awaited<ReturnType<typeof unbilledWorkForJob>>;
   let draft: OpenDraft | null;
-  let lump: number;
+  let drawLump: number;
+  let prepaid: PaidAheadAtFinish | null;
   try {
-    [unbilled, draft, lump] = await Promise.all([
+    [unbilled, draft, drawLump, prepaid] = await Promise.all([
       // THE ONE ARGUMENT THIS WHOLE PARAGRAPH IS ABOUT: it switches fetchJobLaborRows onto the explicit
       // profiles read for the service role, pins the org's settings by id instead of limit(1), and
       // org-filters the non-billable job codes. The other two reads below are narrowed by the JOB, which
@@ -198,6 +214,9 @@ export async function finishBillingStep(
       unbilledWorkForJob(supabase, jobId, scope),
       openDraftOnJob(supabase, jobId),
       drawBilled ? fixedBillingsNotYetNetted(supabase, jobId) : Promise.resolve(0),
+      // MONEY ASKED FOR AHEAD (cn-v1177): the job's payment requests, read through their one reader
+      // (it throws on a failed read, so a lost read is this step's error, never "no requests").
+      readPrepaymentStates(supabase, jobId).then(paidAheadAtFinish),
     ]);
   } catch (e) {
     reportError("finishBillingStep.read", e, { jobId });
@@ -212,6 +231,11 @@ export async function finishBillingStep(
       "billing is mid-upgrade for a few minutes, so the hours not yet billed can't be told apart and the job wasn't finished.",
     );
   }
+  // THE DECISION READS THE DRAW POOL ONLY (cn-v1177, skeptic #80). A payment request is never counted
+  // as "covering" the work: the bill is built for the work and the sync takes the requests off it (a
+  // request worth more than the work leaves a bill that comes to zero and names the request). The
+  // requests are read for the words alone: money in hand that no bill used, with its refund door.
+  const lump = drawLump;
   const stock = unbilled.stockCount ?? 0;
   const workPending = unbilled.hours > 0 || unbilled.billsCount > 0 || stock > 0;
   const newWork = Math.round((unbilled.laborAmount + unbilled.billsBilled + (unbilled.stockBilled ?? 0)) * 100) / 100;
@@ -226,7 +250,7 @@ export async function finishBillingStep(
     drawBilled,
     money: formatCurrency,
   });
-  if (!workPending || !door) return { kind: "skip" };
+  if (!workPending || !door) return prepaid ? { kind: "skip", prepaid } : { kind: "skip" };
   return {
     kind: "plan",
     door,
@@ -234,6 +258,7 @@ export async function finishBillingStep(
     drawBilled,
     work: unbilled.total > 0.005 ? unbilled.total : newWork,
     lump,
+    prepaid,
     notBilled: {
       hours: unbilled.hours,
       laborAmount: unbilled.laborAmount,
@@ -267,8 +292,25 @@ export async function finishBillingStep(
  */
 export type PaidDoorVerdict = { finish: boolean; why: string } & ({ say: string; title: string } | { say: null; title: null });
 
+/** The job's payment requests at the finish, from their states; null when the job has none. */
+export function paidAheadAtFinish(states: readonly PrepaymentState[]): PaidAheadAtFinish | null {
+  if (!states?.length) return null;
+  const unused = states.filter((s) => s.moneyLeft > 0.005).map((s) => ({ number: s.number, amount: s.moneyLeft }));
+  return {
+    left: prepaymentsLeft(states),
+    moneyLeft: Math.round(unused.reduce((t, u) => t + u.amount, 0) * 100) / 100,
+    unused,
+  };
+}
+
 export function paidDoorVerdict(step: FinishBillingStep, jobSaid: string): PaidDoorVerdict {
-  if (step.kind === "skip") return { finish: true, say: null, title: null, why: "" };
+  if (step.kind === "skip") {
+    // A paid request no bill used is money in hand on a job that is ending: said, with its door.
+    const unused = paidAheadUnusedWords(step.prepaid ?? null);
+    return unused
+      ? { finish: true, say: `${jobSaid} is finished. ${unused}`, title: "Job finished", why: "" }
+      : { finish: true, say: null, title: null, why: "" };
+  }
   if (step.kind === "error") {
     return {
       finish: false,
@@ -278,7 +320,9 @@ export function paidDoorVerdict(step: FinishBillingStep, jobSaid: string): PaidD
     };
   }
   if (step.door.kind === "covered") {
-    return { finish: true, say: `${jobSaid} is finished. ${depositCoversWords(step.work, step.lump)}`, title: "Job finished", why: "" };
+    // "covered" is the draw pool's alone; a paid request no bill used is said after it, with its door.
+    const unused = paidAheadUnusedWords(step.prepaid ?? null);
+    return { finish: true, say: `${jobSaid} is finished. ${depositCoversWords(step.work, step.lump)}${unused ? ` ${unused}` : ""}`, title: "Job finished", why: "" };
   }
   const said = paidLeftWorkOffBill(jobSaid, step.notBilled);
   return {

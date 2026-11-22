@@ -7,6 +7,7 @@ import { returnCreditCost, returnLinesAgainstPurchases } from "@/lib/supplier-re
 import { contractTotalFromQuotes } from "@/lib/payment-schedule-math";
 import { lumpLineRule } from "@/lib/invoice-math";
 import { countsAsWorkCompleted } from "@/lib/portal/line-kind";
+import { isCreditSource, isPrepaymentKind } from "@/lib/prepayments";
 
 export type JobProgressFinancials = {
   /** Sum of the job's quotes — the agreed estimate (a cap on fixed-price, a
@@ -148,11 +149,17 @@ export function billedWorkOnInvoices(
   let sum = 0;
   for (const inv of invoices ?? []) {
     if (inv.status === "void") continue;
+    // A PAYMENT REQUEST (cn-v1177) is money asked for ahead of the work, never work billed: its
+    // amount comes back off the next bill as a prepaid_credit line, which is skipped below too, so
+    // a request and the bill that took it off leave the work billed exactly the bill's own work.
+    if (isPrepaymentKind(inv.invoice_kind)) continue;
     const items = inv.invoice_items ?? [];
     const isLump = lumpLineRule(inv.invoice_kind, items);
     for (const it of items) {
       const src = it.import_source ?? null;
-      if (src === "draw_credit" || src === "milestone" || isLump(it)) continue;
+      // Every credit line (a draw's "Less previous billings", a payment request taken off) is
+      // money netted, never negative work (isCreditSource, the one rule).
+      if (isCreditSource(src) || src === "milestone" || isLump(it)) continue;
       if (!countsAsWorkCompleted(it, inv.invoice_kind ?? null)) continue;
       sum += num(it.line_total);
     }

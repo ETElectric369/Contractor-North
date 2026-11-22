@@ -91,6 +91,8 @@ describe("unbilledCardDoor — the card never offers what the server refuses", (
 
   it("with no draft, a deposit not yet taken off a bill is netted the way the server nets it", () => {
     // Covered: no button, the card says why (the server would mint and delete a draw).
+    // Re-pinned on purpose BACK to "deposit" (cn-v1177, skeptic #80): the lump is the DRAW pool's alone;
+    // a payment request never covers work, so these words are a draw deposit's again.
     expect(unbilledCardDoor({ ...base, openDraft: null, lumpToNet: 2000 })).toEqual({
       kind: "covered",
       note: "The $2,000.00 deposit not yet taken off a bill still covers this, so there is nothing new to bill yet.",

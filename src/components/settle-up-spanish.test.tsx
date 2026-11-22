@@ -172,9 +172,9 @@ describe("the Settle Up catalog (su_)", () => {
   /** English Title Case through the one judge (tests/title-case-words, cn-v1148). */
   const titleCase = (s: string) => titleCaseIn(s, "en");
 
-  it("names the one screen that reads it, and nothing else", () => {
+  it("names the screens that read it, and nothing else: the Get Paid sheet and, since cn-v1177, the Request a Payment form", () => {
     expect(su).toBeTruthy();
-    expect(su.files).toEqual(["src/components/settle-up-button.tsx"]);
+    expect(su.files).toEqual(["src/components/settle-up-button.tsx", "src/components/request-payment.tsx"]);
   });
 
   it("every su_btn_ key is Title Case in both languages; Apple's short form is Apple's in both and is not a su_btn_ key", () => {
@@ -334,8 +334,13 @@ describe("the Settle Up catalog (su_)", () => {
       su_btn_method_transfer: "Transfer",
       su_btn_method_other: "Other",
     };
-    // The table is the catalog, whole: a key added to one and not the other is a hole.
-    expect(Object.keys(replaced).sort()).toEqual(Object.keys(su.en).sort());
+    // The table is the catalog, whole: a key added to one and not the other is a hole. The keys cn-v1177
+    // added (Request a Payment, its link in the job hub's sheet, Paid Ahead: su_rp_, su_pa_, su_btn_rp…,
+    // su_btn_request…) replaced no literal; they are new words, pinned in components/request-payment.test.
+    // The money lane's refusal words for requestPayment (su_req_) are new words of the same release.
+    const NEW_1177 = /^su_(?:rp_|pa_|req_|btn_rp|btn_request)/;
+    expect(Object.keys(replaced).sort()).toEqual(Object.keys(su.en).filter((k) => !NEW_1177.test(k)).sort());
+    expect(Object.keys(su.en).filter((k) => /^su_(?:rp_|pa_|btn_rp|btn_request)/.test(k))).toHaveLength(44);
     for (const [k, literal] of Object.entries(replaced)) expect(dict("en")[k], k).toBe(literal);
     // The sentences the old sheet assembled, re-assembled through the slots, are the old sentences.
     expect(fillText(dict("en").su_paidByCardDone, { amount: "$420.00" })).toBe("Paid — $420.00 by card. Done.");

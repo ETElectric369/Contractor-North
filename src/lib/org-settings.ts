@@ -2,6 +2,7 @@
 // here with defaults so the app can read settings safely anywhere.
 
 import type { Block } from "@/lib/site-blocks";
+import { DEFAULT_DEPOSIT_CAP, DEFAULT_DEPOSIT_PERCENT, clampDepositRule } from "./deposit-rule";
 import { withPlace } from "@/lib/doc-place";
 import { ALL_ON, normalizeFeatures, normalizeTradeKey, type FeatureMap, type TradeKey } from "@/lib/features";
 import { DEFAULT_PAYMENT_METHODS } from "@/lib/payment-method";
@@ -26,7 +27,10 @@ export interface OrgSettings {
    *  object so ONE whitelisted key can ride the public_* RPCs (never to_jsonb). Raw here; every
    *  renderer normalizes via lib/doc-style (sanitize on read). */
   doc_style: Record<string, unknown>;
+  /** THE DEPOSIT RULE (lib/deposit-rule): a percent of the estimate's total (0 = no deposit)... */
   deposit_percent: number;
+  /** ...held under this many dollars (0 = no cap). cn-v1177. Clamped on read, in getOrgSettings. */
+  deposit_cap_amount: number;
   /** Per-org document number PREFIX, keyed by the trigger's doc_type ("job","quote",
    *  "invoice","wo","co","po","contract"). The counter/next-number lives server-side in
    *  doc_counters; next_doc_number() reads these prefixes (falling back to the built-in
@@ -407,7 +411,9 @@ export const DEFAULT_SETTINGS: OrgSettings = {
     "1. Payment is due per the schedule above. 2. Any change to the scope of work will be handled by a written change order. 3. Contractor warrants workmanship for one (1) year from completion. 4. Either party may cancel in writing before work begins; deposits cover materials and scheduling already committed. 5. This agreement is governed by the laws of the state where the work is performed.",
   document_footer: "",
   doc_style: {},
-  deposit_percent: 0,
+  // cn-v1177: a company that never chose gets 10% up to $1,000 (lib/deposit-rule). A stored 0 is a choice.
+  deposit_percent: DEFAULT_DEPOSIT_PERCENT,
+  deposit_cap_amount: DEFAULT_DEPOSIT_CAP,
   doc_prefixes: { job: "J-", quote: "Q-", invoice: "INV-", wo: "WO-", co: "CO-", po: "PO-", contract: "C-" },
   default_labor_rate: 0,
   mileage_rate: 0.7,
@@ -674,6 +680,14 @@ export function getOrgSettings(raw: unknown): OrgSettings {
     // "true" or 1 must not read as a door being open. A payment door opens on a boolean somebody
     // meant, or it stays shut.
     merged.bank_transfer_enabled = merged.bank_transfer_enabled === true;
+  }
+  {
+    // THE DEPOSIT RULE IS MONEY ON A CUSTOMER'S ESTIMATE, so it is clamped here, once, for every
+    // reader (cn-v1177): a percent outside 0..100 or a negative cap never leaves this function, and a
+    // value that is not a number reads as the default, the way a missing key does.
+    const rule = clampDepositRule({ percent: merged.deposit_percent, cap: merged.deposit_cap_amount });
+    merged.deposit_percent = rule.percent;
+    merged.deposit_cap_amount = rule.cap;
   }
   // The owner's one visibility switch (0286). Normalized on read, the doc_style lesson: a stored
   // "false" string or a stray 0 must not quietly hide the card, so only a real boolean false turns

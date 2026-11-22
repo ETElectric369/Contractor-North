@@ -3,6 +3,8 @@
  *  "Request next payment" draws the next pending one. Extracted from the server
  *  action so the money math is unit-tested without a database. */
 
+import { depositFor, type DepositRule } from "./deposit-rule";
+
 const fin = (x: unknown): number => {
   const n = Number(x);
   return Number.isFinite(n) ? n : 0;
@@ -235,17 +237,32 @@ export function leftToBill(
   };
 }
 
-/** A sensible default schedule from the org's deposit %: deposit + progress + final
- *  that always sums to exactly 100. */
-export function defaultSchedule(depositPercent: number): Milestone[] {
-  const dep = Math.min(Math.max(Math.round(fin(depositPercent)), 0), 90);
-  const deposit = dep > 0 ? dep : 30;
-  const rest = 100 - deposit;
+/**
+ * A sensible default schedule from the company's DEPOSIT RULE (cn-v1177): the deposit is what
+ * lib/deposit-rule depositFor makes of the contract (a percent held under a dollar cap), written as the
+ * percent of the contract it comes to, then progress and final split the rest. Always sums to exactly
+ * 100 (in millionths of a percent, so a capped deposit's odd percent never leaves a remainder).
+ *
+ * Before cn-v1177 this took a bare percent and read 0 as "unset", answering 30. A stored 0 is now a
+ * company's choice of no deposit (lib/org-settings), so it answers no deposit row: progress and final.
+ * With no contract to take a capped figure of, the rule's own percent stands.
+ */
+export function defaultSchedule(contractTotal: number, rule: DepositRule): Milestone[] {
+  const total = Math.max(0, fin(contractTotal));
+  const pct = Math.min(Math.max(fin(rule?.percent), 0), 100);
+  const raw = total > 0.005 ? (depositFor(total, rule) / total) * 100 : pct;
+  // In millionths of a percent (a capped deposit's percent is rarely round: $1,000 of $30,000 is
+  // 3.333333%, which bills $1,000.00 to the cent, where 3.33% would bill $999); the deposit never
+  // takes more than 90 so two rows always follow it.
+  const U = 1_000_000;
+  const dep = Math.min(Math.max(Math.round(raw * U), 0), 90 * U);
+  const rest = 100 * U - dep;
   const progress = Math.round(rest / 2);
-  const final = rest - progress; // absorbs the rounding so the three always total 100
-  return [
-    { sort_order: 0, label: "Deposit", percent: deposit },
-    { sort_order: 1, label: "Progress payment", percent: progress },
-    { sort_order: 2, label: "Final payment", percent: final },
+  const final = rest - progress; // absorbs the rounding so the rows always total 100
+  const rows: Omit<Milestone, "sort_order">[] = [
+    ...(dep > 0 ? [{ label: "Deposit", percent: dep / U }] : []),
+    { label: "Progress payment", percent: progress / U },
+    { label: "Final payment", percent: final / U },
   ];
+  return rows.map((r, i) => ({ sort_order: i, ...r }));
 }

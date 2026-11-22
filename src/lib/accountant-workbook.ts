@@ -1,4 +1,6 @@
 import { namesABucket } from "@/lib/business-cost-buckets";
+import { isPrepaymentKind } from "@/lib/prepayments";
+import { PAYMENT_REQUEST_LABEL } from "@/lib/portal/line-kind";
 import {
   computeOwnerMoney,
   countedNotPaidLine,
@@ -925,7 +927,8 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
         i?.invoice_number ?? null,
         j?.job_number ?? null,
         j?.name ?? null,
-        methodLabel(i?.invoice_kind ?? "standard"),
+        // A payment request (cn-v1177) is named by its one word, never "Prepayment".
+        isPrepaymentKind(i?.invoice_kind) ? PAYMENT_REQUEST_LABEL : methodLabel(i?.invoice_kind ?? "standard"),
         methodLabel(status),
         money(cents(i?.subtotal)),
         round3(rate),

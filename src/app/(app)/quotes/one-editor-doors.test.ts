@@ -96,7 +96,7 @@ const base = (c: Call): unknown => {
   if (lastLine(c)) return { data: { sort_order: 4 }, error: null };
   if (lineInsert(c)) return { data: (c.payload as unknown[]).map((_, i) => ({ id: `l-${i + 1}` })), error: null };
   if (lineUpdate(c)) return { data: [{ id: "l1" }], error: null };
-  if (c.table === "quotes" && c.verb === "select" && c.select === "tax_rate") return { data: { tax_rate: 0 }, error: null };
+  if (c.table === "quotes" && c.verb === "select" && c.select?.startsWith("tax_rate")) return { data: { tax_rate: 0 }, error: null };
   if (c.table === "quote_line_items" && c.verb === "select") return { data: [], error: null };
   if (c.table === "quotes" && c.verb === "update") return { data: [{ id: "q1" }], error: null };
   if (quoteInsert(c)) return { data: { id: (c.payload as { id?: string }).id ?? "q-new", quote_number: "E-010" }, error: null };

@@ -49,6 +49,8 @@ import { HELD_HERE_READ_FAILED, costsKeyNames, idKeyNames, laborKeyNames, readHe
 import { removedLines, removedSentence, staleTombstones, textArrayLiteral } from "@/lib/import-reconcile";
 import { linesByBillId, readBillLines, readInvoiceMarkup } from "@/lib/invoice-markup-read";
 import { recalcInvoice } from "@/lib/invoice-recalc";
+import { PREPAID_CREDIT, PREPAYMENT_KIND, PREPAYMENT_LINE, isPrepaymentKind, prepaymentsLeft } from "@/lib/prepayments";
+import { outgoingDraftFirst, readPrepaymentStates, readPrepaymentStatesForOutgoing, resyncJobDrafts } from "@/lib/payment-request";
 // WHAT FOLLOWS A PAYMENT, for every door that writes one (M1): recalc, finish the job, the bell,
 // the refresh. This file used to carry its own copy of all four.
 import { afterPaymentLanded } from "@/lib/after-payment-landed";
@@ -71,6 +73,29 @@ import {
   type StockTake,
 } from "@/lib/stock-billing";
 
+/**
+ * WHAT A PAYMENT REQUEST CAN STILL GIVE BACK (cn-v1177, skeptic #80): the money paid on it, less what was
+ * refunded, less what bills already took off (moneyLeft), and the bills that took it off, by number.
+ * null when the bill is not a live payment request on a job. THROWS on a failed read.
+ */
+async function requestRefundRoom(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  inv: { id: string; job_id?: string | null; invoice_kind?: string | null },
+): Promise<{ moneyLeft: number; takenTotal: number; takers: string; takerCount: number } | null> {
+  if (!isPrepaymentKind(inv.invoice_kind) || !inv.job_id) return null;
+  const state = (await readPrepaymentStates(supabase, inv.job_id)).find((x) => x.id === inv.id);
+  if (!state) return null;
+  const ids = state.taken.map((t) => t.invoiceId);
+  let takers = "";
+  if (ids.length) {
+    const { data, error } = await supabase.from("invoices").select("id, invoice_number").in("id", ids);
+    if (error) throw error;
+    const num = new Map(((data ?? []) as { id: string; invoice_number: string | null }[]).map((r) => [String(r.id), r.invoice_number ?? "a bill"]));
+    takers = joinNumbers(ids.map((id) => num.get(id) ?? "a bill"));
+  }
+  return { moneyLeft: state.moneyLeft, takenTotal: state.takenTotal, takers, takerCount: ids.length };
+}
+
 /** Post a credit/refund to the customer's account from an invoice. disposition
  *  "credit" keeps it on their account; "refund" flags accounting to pay it back. */
 export async function createCustomerCredit(
@@ -88,10 +113,32 @@ export async function createCustomerCredit(
   // RLS) instead of inserting an orphan credit with customer_id:null.
   const { data: inv } = await supabase
     .from("invoices")
-    .select("customer_id")
+    .select("id, customer_id, job_id, invoice_kind, invoice_number")
     .eq("id", invoiceId)
     .maybeSingle();
   if (!inv) return { ok: false, error: "Invoice not found." };
+
+  // A REFUND BY HAND ON A PAYMENT REQUEST (cn-v1177, skeptic #80) gives back only money no bill has
+  // taken off: what a later bill took off is already counted on that bill, and giving it back too would
+  // hand the customer the same dollar twice.
+  let room: Awaited<ReturnType<typeof requestRefundRoom>> = null;
+  if (disposition === "refund") {
+    try {
+      room = await requestRefundRoom(supabase, inv as { id: string; job_id?: string | null; invoice_kind?: string | null });
+    } catch (e) {
+      reportError("createCustomerCredit.requestRoom", e, { invoiceId });
+      return { ok: false, error: "Couldn't check what this payment request can still give back just now, so nothing was recorded. Try again in a moment." };
+    }
+    if (room && amount > room.moneyLeft + 0.005) {
+      const label = (inv as { invoice_number?: string | null }).invoice_number ?? "this payment request";
+      return {
+        ok: false,
+        error: room.takers
+          ? `Only ${formatCurrency(room.moneyLeft)} of ${label} can still be given back, because ${room.takers} took ${formatCurrency(room.takenTotal)} of it off.`
+          : `Only ${formatCurrency(room.moneyLeft)} of ${label} can still be given back.`,
+      };
+    }
+  }
 
   const { error } = await supabase.from("customer_credits").insert({
     customer_id: inv.customer_id ?? null,
@@ -106,6 +153,9 @@ export async function createCustomerCredit(
   // recalc so the balance + collected reflect it (recalcInvoice now sums open credits as
   // payments). A refund is a cash-OUT, tracked in `collected` already, so it doesn't recalc.
   if (disposition === "credit") await recalcInvoice(supabase, invoiceId);
+  // A refund on a request changes what it has left to come off: the job's drafts are resolved again.
+  const reqJob = (inv as { job_id?: string | null; invoice_kind?: string | null });
+  if (disposition === "refund" && isPrepaymentKind(reqJob.invoice_kind) && reqJob.job_id) await resyncJobDrafts(supabase, reqJob.job_id);
   revalidateMoney(invoiceId);
   revalidateMoney();
   if (inv?.customer_id) revalidatePath(`/crm/${inv.customer_id}`);
@@ -135,10 +185,11 @@ export async function recordStripeRefund(input: { invoiceId: string; chargeId: s
   const chargeId = String(input?.chargeId ?? "");
   if (!orgId) return { ok: false, error: "Couldn't tell which company this is." };
   if (!/^ch_[A-Za-z0-9]+$/.test(chargeId)) return { ok: false, error: "That notice doesn't name a Stripe charge, so nothing was recorded." };
-  const { data: inv, error: invErr } = await supabase.from("invoices").select("id, customer_id, invoice_number").eq("id", invoiceId).maybeSingle();
+  const { data: inv, error: invErr } = await supabase.from("invoices").select("id, customer_id, invoice_number, job_id, invoice_kind").eq("id", invoiceId).maybeSingle();
   if (invErr) return { ok: false, error: dbError(invErr) };
   if (!inv) return { ok: false, error: "Invoice not found." };
   const number = String((inv as { invoice_number?: string | null }).invoice_number ?? "this invoice");
+  const reqOf = inv as { id: string; job_id?: string | null; invoice_kind?: string | null };
 
   const { data: org, error: orgErr } = await supabase.from("organizations").select("stripe_account_id").eq("id", orgId).maybeSingle();
   if (orgErr) return { ok: false, error: dbError(orgErr) };
@@ -168,12 +219,30 @@ export async function recordStripeRefund(input: { invoiceId: string; chargeId: s
   const { data: had, error: hadErr } = await supabase.from("customer_credits").select("id, amount").eq("stripe_refund_id", chargeId).limit(1);
   if (hadErr) return { ok: false, error: dbError(hadErr) };
   const existing = (had ?? [])[0] as { id: string; amount: number | string } | undefined;
+  // A REFUND STRIPE ALREADY MADE IS A FACT (cn-v1177, skeptic #80): it is recorded as it is. On a payment
+  // request it can be more than the money no bill has taken off (moneyLeft, read before this row; a row
+  // being raised is already inside it); then one warning line names the bill that still shows that
+  // money taken off. A failed read only loses the warning, never the record.
+  let overWarning = "";
+  try {
+    const room = await requestRefundRoom(supabase, reqOf);
+    const before = room ? room.moneyLeft + (existing ? Number(existing.amount) || 0 : 0) : null;
+    if (room && before !== null && amount > before + 0.005) {
+      overWarning = room.takers
+        ? ` Warning: that is more than the ${formatCurrency(before)} no bill had used; ${room.takers} still ${room.takerCount > 1 ? "show" : "shows"} ${formatCurrency(room.takenTotal)} of ${number} taken off.`
+        : ` Warning: that is more than the ${formatCurrency(before)} no bill had used.`;
+    }
+  } catch (e) {
+    reportError("recordStripeRefund.requestRoom", e, { invoiceId });
+  }
   const finish = async (said: string) => {
+    // A refund on a request changes what it has left to come off: the job's drafts are resolved again.
+    if (isPrepaymentKind(reqOf.invoice_kind) && reqOf.job_id) await resyncJobDrafts(supabase, reqOf.job_id);
     revalidateMoney(invoiceId);
     revalidateMoney();
     const customerId = (inv as { customer_id?: string | null }).customer_id;
     if (customerId) revalidatePath(`/crm/${customerId}`);
-    return { ok: true, message: said, amount };
+    return { ok: true, message: `${said}${overWarning}`, amount };
   };
   if (existing) {
     const was = Number(existing.amount) || 0;
@@ -501,6 +570,28 @@ async function publicInvoiceLink(
 }
 
 /**
+ * NOTHING IS SENT STALE (cn-v1177). A bill on a job takes the job's payment requests off with one
+ * "prepaid_credit" line each, and those lines are re-resolved while the bill is a DRAFT (recalcInvoice
+ * runs syncPrepaidCredit first). So every door that moves a draft out of draft runs the recalc
+ * IMMEDIATELY before the flip, and stops, saying so, when it could not: a bill must never reach a
+ * customer carrying a credit that was not checked against what the job's other bills already took.
+ * A bill that is not a draft is left as it is (its credit lines stand as written once sent).
+ * tests/nothing-sent-stale.test.ts lists every flip in src; a new one fails it until it is listed.
+ * Returns the refusal, or null when the bill is fresh.
+ */
+async function freshBeforeSend(supabase: { from: (t: string) => any }, id: string): Promise<string | null> {
+  const { data, error } = await supabase.from("invoices").select("status, invoice_number").eq("id", id).maybeSingle();
+  if (error) return dbError(error);
+  if (!data) return "Invoice not found.";
+  const row = data as { status?: string | null; invoice_number?: string | null };
+  if (String(row.status ?? "") !== "draft") return null;
+  // THE BILL GOING OUT COMES FIRST (skeptic #80): the job's other drafts give up their derived credit,
+  // this bill takes the requests off, then the others take what is left (lib/payment-request).
+  if (await outgoingDraftFirst(supabase, id)) return null;
+  return `${row.invoice_number ?? "This invoice"} couldn't be brought up to date just now (what it takes off for the job's payment requests), so it wasn't sent. Try again in a moment.`;
+}
+
+/**
  * SHARE SHEET payload for an invoice — the thing that was missing entirely.
  *
  * Erik went to send Marla an invoice, found no Share button, and fell back to the iOS share
@@ -524,6 +615,9 @@ export async function invoiceShareText(
 ): Promise<{ ok: boolean; error?: string; needsSend?: boolean; title?: string; text?: string; url?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  // Before the read, so the balance in the words and the bill the stamp sends are the bill as it goes out.
+  const stale = await freshBeforeSend(ctx.supabase, id);
+  if (stale) return { ok: false, error: stale };
   const { data: invoice } = await ctx.supabase
     .from("invoices")
     // quotes(address, inquiries(address)) (cn-v1160): the link of a bill made straight from an estimate
@@ -637,6 +731,9 @@ export async function previewInvoiceSend(id: string, kind: "invoice" | "receipt"
   if ("error" in ctx) return { ok: false, error: String(ctx.error) };
   if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
   const { supabase, orgId, userId } = ctx;
+  // The sheet says the balance the send will carry: a draft is brought up to date first (cn-v1177).
+  const stale = await freshBeforeSend(supabase, id);
+  if (stale) return { ok: false, error: stale };
   const { data: invoice } = await supabase
     .from("invoices")
     // quotes(address, inquiries(address)): the same link the send itself builds (rowPlace, cn-v1160).
@@ -684,6 +781,9 @@ export async function textInvoice(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  // Before the read: the texted balance is the bill's as it goes out (cn-v1177, nothing sent stale).
+  const stale = await freshBeforeSend(supabase, id);
+  if (stale) return { ok: false, error: stale };
   const { data: invoice } = await supabase
     .from("invoices")
     // quotes(address, inquiries(address)): the street on the texted link (rowPlace, cn-v1160).
@@ -788,6 +888,9 @@ export async function emailInvoice(
   // adds nothing to the length check.
   const checked = checkSendMessage(message, "email", 0);
   if (!checked.ok) return { ok: false, error: sendRefusalSentence(checked.why, "email") };
+  // Before the email is composed: its balance and the bill it stamps sent are the bill as it goes out.
+  const stale = await freshBeforeSend(ctx.supabase, id);
+  if (stale) return { ok: false, error: stale };
   const res = await deliverInvoiceEmail(ctx.supabase, id, {
     message: message ? checked.message : undefined,
     sentBy: ctx.userId,
@@ -1044,6 +1147,9 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
     .select("id, invoice_number, status, invoice_kind")
     .eq("quote_id", quoteId)
     .neq("status", "void")
+    // The estimate's DEPOSIT REQUEST (cn-v1177) carries its quote_id and is not the bill for its work:
+    // the bill made here takes it off instead.
+    .neq("invoice_kind", PREPAYMENT_KIND)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -1233,6 +1339,9 @@ export async function createBlankInvoice(input: {
     .select("id")
     .single();
   if (error) return { ok: false, error: dbError(error) };
+  // EVERY BILL ON A JOB IS BORN THROUGH THE RECALC (cn-v1177): it is where the job's payment requests
+  // come off, so a bill never exists in a state no recalc has seen.
+  if (input.job_id) await recalcInvoice(supabase, data.id);
 
   revalidateMoney();
   if (input.job_id) revalidatePath(`/jobs/${input.job_id}`);
@@ -1372,6 +1481,8 @@ export async function addInvoiceItem(
   // it, and one of them looked like an ordinary status check. Same decision, one source.
   const notEditable = invoiceLineEditRefusal(inv.status);
   if (notEditable) return { ok: false, error: notEditable };
+  const onRequest = prepaymentLineRefusal(inv);
+  if (onRequest) return onRequest;
   if (inv.job_id) {
     const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
     if (conflict) return conflict; // H4: can't add billable lines to a standard invoice on a draw job
@@ -1755,7 +1866,8 @@ export async function setInvoiceItemKind(
   if (kind !== null && !next) return { ok: false, error: "A line is Labor, Materials, Other or Discount." };
   const block = await requireLiveInvoice(supabase, invoiceId);
   if (block) return block;
-  if (await isProtectedCreditLine(supabase, itemId)) return CREDIT_LINE_LOCKED;
+  const locked = await lockedLineRefusal(supabase, itemId);
+  if (locked) return locked;
   // ONLY A LINE THAT TAKES MONEY OFF CAN BE A DISCOUNT (0389): read the line's own figures first.
   if (next === DISCOUNT_KIND) {
     const { data: line } = await supabase.from("invoice_items").select("line_total, import_source").eq("id", itemId).eq("invoice_id", invoiceId).maybeSingle();
@@ -1833,9 +1945,24 @@ function drawConflictError(draw: any): Result {
 /** Guard the IMPORT / ADD-content paths: block when the target is a STANDARD invoice
  *  on a job that already has an active draw. Returns an error Result, else null. */
 async function standardInvoiceOnDrawJob(supabase: any, inv: any, invoiceId: string): Promise<Result | null> {
+  // A PAYMENT REQUEST TAKES NO LINES (cn-v1177): every importer and the hand line pass here.
+  const onRequest = prepaymentLineRefusal(inv);
+  if (onRequest) return onRequest;
   if ((inv?.invoice_kind ?? "standard") !== "standard") return null;
   const draw = await activeDrawOnJob(supabase, inv.job_id, invoiceId);
   return shouldBlockStandardImport(inv?.invoice_kind, !!draw) ? drawConflictError(draw) : null;
+}
+
+/**
+ * A PAYMENT REQUEST ASKS FOR ONE AMOUNT (cn-v1177): its one line is the request, so nothing is added to
+ * it or imported onto it. Work goes on the job's next bill, which takes the request off.
+ */
+function prepaymentLineRefusal(inv: { invoice_kind?: string | null; invoice_number?: string | null } | null | undefined): Result | null {
+  if (!isPrepaymentKind(inv?.invoice_kind)) return null;
+  return {
+    ok: false,
+    error: `${inv?.invoice_number ?? "This"} is a payment request: it asks for one amount and takes no other lines. Put the work on the job's next invoice, which takes the request off.`,
+  };
 }
 
 /** Guard standard-invoice CREATION for a job: block making a new standard invoice for
@@ -3214,8 +3341,18 @@ export async function createProgressReportInvoice(
 
   // SUBTOTAL, not total (audit 8): the credit line is inserted INSIDE this draw's subtotal, so
   // netting a tax-INCLUSIVE figure against pre-tax work credited the customer their own tax.
-  const { data: afterImport } = await supabase.from("invoices").select("subtotal").eq("id", inv.id).maybeSingle();
-  const importedTotal = Number(afterImport?.subtotal ?? 0);
+  // TWO POOLS, NEVER MIXED (cn-v1177): the work this draw itemized, read off its lines, WITHOUT the
+  // lines that take the job's payment requests off (those are the other pool's, and come off after).
+  const { data: afterLines, error: afterErr } = await supabase.from("invoice_items").select("line_total, import_source").eq("invoice_id", inv.id);
+  if (afterErr) {
+    const rolledR = await rollBackDraw(supabase, inv.id, jobId, "labor");
+    return { ok: false, error: `Couldn't read the draw's lines just now.${rolledR}` };
+  }
+  const importedTotal = Math.round(
+    ((afterLines ?? []) as { line_total: unknown; import_source: string | null }[])
+      .filter((l) => l.import_source !== PREPAID_CREDIT)
+      .reduce((t, l) => t + (Number(l.line_total) || 0), 0) * 100,
+  ) / 100;
 
   // What still has to be netted is ONLY money paid against work rather than for itemized work — a
   // fixed-$ / %-of-estimate deposit not yet credited. Prior standard invoices and prior delta draws
@@ -3510,7 +3647,8 @@ export async function updateInvoiceItem(
   // Unchanged by 0269, and checked directly after: the draw's auto credit and its milestone line
   // stay locked whatever the invoice's status is. Editing either desyncs the prior-billings
   // offset or payment_milestones, which is a different failure from "fix a typo on a bill".
-  if (await isProtectedCreditLine(supabase, itemId)) return CREDIT_LINE_LOCKED;
+  const locked = await lockedLineRefusal(supabase, itemId);
+  if (locked) return locked;
   // PATCH semantics (mirrors updateBill): write ONLY the keys the caller sent — an
   // omitted field never touches its column (it used to reset qty to 1 / price to $0).
   const clean: Record<string, unknown> = {};
@@ -3569,7 +3707,8 @@ export async function deleteInvoiceItem(
   const supabase = ctx.supabase;
   const block = await requireLiveInvoice(supabase, invoiceId);
   if (block) return block; // 0269: any live bill may be corrected; void is the ending
-  if (await isProtectedCreditLine(supabase, itemId)) return CREDIT_LINE_LOCKED; // unchanged by 0269
+  const locked = await lockedLineRefusal(supabase, itemId); // unchanged by 0269
+  if (locked) return locked;
   // A DISCOUNT NEVER TAKES THE BILL BELOW $0 — from this side too (audit v1085, carried [8]): the bill
   // without this line is judged before the line goes. Read as a whole; a failed read refuses.
   const { data: rest, error: restErr } = await supabase.from("invoice_items").select("id, line_kind, line_total").eq("invoice_id", invoiceId).neq("id", itemId);
@@ -3602,11 +3741,28 @@ const CREDIT_LINE_LOCKED: Result = {
   error:
     "That's the automatic “less previous billings” credit — it can't be edited or deleted, since it's what keeps this draw from re-billing the deposit and prior draws.",
 };
+/** A payment request's own line (cn-v1177): the amount asked for, which bills take off. */
+const REQUEST_LINE_LOCKED: Result = {
+  ok: false,
+  error: "That's the payment request's own amount, and the job's bills take it off by that figure, so it can't be edited here. To ask for a different amount, void this request and make a new one.",
+};
+/** The line that takes a payment request off a bill (cn-v1177): it follows the request by itself. */
+const PREPAID_CREDIT_LOCKED: Result = {
+  ok: false,
+  error: "That line takes the job's payment request off this bill, and it follows the request by itself while this bill is a draft. To change it, change the request (void it, or make another).",
+};
 // A draw's auto credit line AND its milestone line are tamper-evident: hand-editing either
 // desyncs the prior-billings offset or payment_milestones. (M2 — lock milestone like draw_credit.)
-async function isProtectedCreditLine(supabase: any, itemId: string): Promise<boolean> {
-  const { data } = await supabase.from("invoice_items").select("import_source").eq("id", itemId).maybeSingle();
-  return data?.import_source === "draw_credit" || data?.import_source === "milestone";
+// cn-v1177: a payment request's own line and its "prepaid_credit" lines are locked the same way.
+// A failed read is not permission: it refuses (the line is not known to be free).
+async function lockedLineRefusal(supabase: any, itemId: string): Promise<Result | null> {
+  const { data, error } = await supabase.from("invoice_items").select("import_source").eq("id", itemId).maybeSingle();
+  if (error) return { ok: false, error: dbError(error) };
+  const src = (data as { import_source?: string | null } | null)?.import_source ?? null;
+  if (src === "draw_credit" || src === "milestone") return CREDIT_LINE_LOCKED;
+  if (src === PREPAID_CREDIT) return PREPAID_CREDIT_LOCKED;
+  if (src === PREPAYMENT_LINE) return REQUEST_LINE_LOCKED;
+  return null;
 }
 
 /**
@@ -3660,6 +3816,8 @@ type StatusRow = {
   id: string;
   status: string;
   job_id: string | null;
+  /** cn-v1177: a payment request voids and comes back by its own rule (requestStatusRefusal). */
+  invoice_kind?: string | null;
   invoice_number: string | null;
   amount_paid: number | null;
   /** 0267. NULL means this bill never left the desk, whatever `status` says. */
@@ -3675,7 +3833,7 @@ async function invoiceForStatusChange(supabase: Awaited<ReturnType<typeof create
   const read = (withClaims: boolean, withSentAt: boolean) =>
     supabase
       .from("invoices")
-      .select(`id, status, job_id, invoice_number, amount_paid${withSentAt ? ", sent_at" : ""}, invoice_items(import_source, import_key${withClaims ? ", source_ids" : ""})`)
+      .select(`id, status, job_id, invoice_kind, invoice_number, amount_paid${withSentAt ? ", sent_at" : ""}, invoice_items(import_source, import_key${withClaims ? ", source_ids" : ""})`)
       .eq("id", id)
       .maybeSingle();
   let withClaims = true;
@@ -3755,6 +3913,44 @@ async function unvoidConflict(supabase: Awaited<ReturnType<typeof createClient>>
   };
 }
 
+/**
+ * THE CREDIT LINES OF A VOID BILL THAT WOULD NO LONGER HOLD (cn-v1177, skeptic #80): each names a
+ * payment request that must still be live with that much left (the job's other bills counted, this void
+ * one not). Those that would not hold are deleted, checked; the rest stay. The refusal, or null.
+ */
+async function unvoidDropsStaleCredit(supabase: Awaited<ReturnType<typeof createClient>>, id: string, jobId: string): Promise<string | null> {
+  const unread = "Couldn't check what this bill takes off for the job's payment requests just now, so it wasn't brought back. Try again in a moment.";
+  const { data: lines, error } = await supabase.from("invoice_items").select("id, line_total, prepaid_invoice_id").eq("invoice_id", id).eq("import_source", PREPAID_CREDIT);
+  if (error) {
+    reportError("setInvoiceStatus.unvoidCredit", error, { invoiceId: id });
+    return unread;
+  }
+  const mine = (lines ?? []) as { id: string; line_total: unknown; prepaid_invoice_id: string | null }[];
+  if (!mine.length) return null;
+  let states: Awaited<ReturnType<typeof readPrepaymentStates>>;
+  try {
+    states = await readPrepaymentStates(supabase, jobId, id);
+  } catch (e) {
+    reportError("setInvoiceStatus.unvoidStates", e, { invoiceId: id });
+    return unread;
+  }
+  const room = new Map(states.map((s) => [s.id, s.left]));
+  const drop: string[] = [];
+  for (const l of mine) {
+    const size = Math.abs(Number(l.line_total) || 0);
+    const left = room.get(String(l.prepaid_invoice_id ?? ""));
+    if (left === undefined || size > left + 0.005) drop.push(String(l.id));
+    else room.set(String(l.prepaid_invoice_id), Math.round((left - size) * 100) / 100);
+  }
+  if (!drop.length) return null;
+  const { data: gone, error: dropErr } = await supabase.from("invoice_items").delete().in("id", drop).eq("invoice_id", id).select("id");
+  if (dropErr || (gone ?? []).length !== drop.length) {
+    reportError("setInvoiceStatus.unvoidDrop", dropErr ?? new Error("a stale credit line did not come off"), { invoiceId: id });
+    return "This bill's lines for the job's payment requests couldn't be brought up to date just now, so it wasn't brought back. Try again in a moment.";
+  }
+  return null;
+}
+
 export async function setInvoiceStatus(
   id: string,
   status: string,
@@ -3802,6 +3998,25 @@ export async function setInvoiceStatus(
     const back = await unvoidConflict(supabase, cur);
     if (back) return back;
   }
+  // A BILL COMING BACK FROM VOID (cn-v1177, skeptic #80): while it was void it took nothing off, and
+  // since then a request it named may have been voided, or used by another bill. Its credit lines that
+  // would no longer hold are taken off FIRST (they are derived, never typed); the recalc after the flip
+  // brings it up to date (a draft's sync takes what is left; a bill that went out stands at what holds).
+  if (cur.status === "void" && status !== "void" && cur.job_id && !isPrepaymentKind(cur.invoice_kind)) {
+    const stale = await unvoidDropsStaleCredit(supabase, id, cur.job_id);
+    if (stale) return { ok: false, error: stale };
+  }
+  // A PAYMENT REQUEST (cn-v1177) has no draft stage, and is voided only while no bill that went out
+  // took it off; the drafts that took it off let go first (said and done here, held by 0414 too).
+  if (isPrepaymentKind(cur.invoice_kind) && status !== cur.status) {
+    const refusal = await requestStatusRefusal(supabase, cur, status);
+    if (refusal) return refusal;
+  }
+  // NOTHING IS SENT STALE (cn-v1177): a draft going out is brought up to date immediately before the flip.
+  if (cur.status === "draft" && status !== "draft" && status !== "void") {
+    const stale = await freshBeforeSend(supabase, id);
+    if (stale) return { ok: false, error: stale };
+  }
   // "Sent - I sent it myself" is a PERSON DECLARING THE DEED: they put the bill in the customer's
   // hands by some door this app doesn't own (printed it, handed it over, sent it from their own
   // mail). That is a delivery and it stamps, exactly as email/text/share do. Every other status
@@ -3838,7 +4053,8 @@ export async function setInvoiceStatus(
   // (Marla's Venmo before the invoice went out) leaves this call marked 'sent' and stays
   // there forever — never 'paid', permanently on the AR list. Recompute once the row is no
   // longer a draft; recalcInvoice re-derives status from total vs amount_paid.
-  if (status !== "draft" && status !== "void") await recalcInvoice(supabase, id);
+  // A bill back from void is brought up to date as well, a draft included (its credit, above).
+  if (status !== "void" && (status !== "draft" || cur.status === "void")) await recalcInvoice(supabase, id);
   // Voiding a milestone draw re-opens its milestone — the FK only auto-clears on
   // delete, not void — so "Request next payment" offers that slice again and the
   // schedule's billed-to-date stops counting a cancelled draw.
@@ -3849,9 +4065,52 @@ export async function setInvoiceStatus(
       .eq("invoice_id", id);
     if (mErr) reportError("setInvoiceStatus.unlinkMilestone", mErr, { invoiceId: id });
   }
+  // A bill voided or brought back changes what the job's requests have left (a void bill takes
+  // nothing off; a request voided asks for nothing): every open draft on the job is resolved again.
+  if (cur.job_id && (status === "void" || cur.status === "void")) await resyncJobDrafts(supabase, cur.job_id);
   revalidateMoney();
   revalidateMoney(id);
   return { ok: true };
+}
+
+/**
+ * A PAYMENT REQUEST'S STATUS (cn-v1177). Back to Draft: never (it was born sent, and a draft asks for
+ * nothing, so a bill that took it off would be holding money nobody asked for). Void: refused while a
+ * bill that went out took it off, naming that bill and the one way through; otherwise the DRAFT
+ * bills' lines that take it off come off first, then the void, then every draft on the job is resolved
+ * again (setInvoiceStatus does that). 0414's trigger refuses the same in the database.
+ */
+async function requestStatusRefusal(supabase: any, cur: StatusRow, status: string): Promise<Result | null> {
+  const label = cur.invoice_number ?? "This payment request";
+  if (status === "draft") {
+    return { ok: false, error: `${label} is a payment request, and a request has no draft stage. To stop asking for it, void it.` };
+  }
+  if (status !== "void") return null;
+  const { data: lines, error } = await supabase
+    .from("invoice_items")
+    .select("id, invoice_id")
+    .eq("import_source", PREPAID_CREDIT)
+    .eq("prepaid_invoice_id", cur.id);
+  if (error) return { ok: false, error: dbError(error) };
+  const carrierIds = [...new Set(((lines ?? []) as { invoice_id: string }[]).map((l) => String(l.invoice_id)))];
+  if (!carrierIds.length) return null;
+  const { data: carriers, error: cErr } = await supabase.from("invoices").select("id, invoice_number, status, created_at").in("id", carrierIds);
+  if (cErr) return { ok: false, error: dbError(cErr) };
+  const rows = (carriers ?? []) as { id: string; invoice_number: string | null; status: string | null; created_at: string | null }[];
+  // A line on a bill this person cannot see is not known to be free: refuse rather than guess.
+  if (rows.length !== carrierIds.length) return { ok: false, error: `${label} is taken off a bill that couldn't be read just now, so it wasn't voided. Try again in a moment.` };
+  const sent = rows.filter((r) => r.status !== "draft" && r.status !== "void").sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")));
+  if (sent.length) {
+    const taker = sent[0].invoice_number ?? "a bill that went out";
+    return { ok: false, error: `${label} can't be voided: ${taker} already took it off and went out. Void ${taker} first, or leave ${label} as it is.` };
+  }
+  const draftLines = ((lines ?? []) as { id: string; invoice_id: string }[]).filter((l) => rows.some((r) => r.id === l.invoice_id && r.status === "draft")).map((l) => String(l.id));
+  if (draftLines.length) {
+    const { data: gone, error: dErr } = await supabase.from("invoice_items").delete().in("id", draftLines).eq("import_source", PREPAID_CREDIT).select("id");
+    if (dErr) return { ok: false, error: dbError(dErr) };
+    if ((gone ?? []).length !== draftLines.length) return { ok: false, error: `The drafts that take ${label} off couldn't let go of it just now, so it wasn't voided. Try again in a moment.` };
+  }
+  return null;
 }
 
 /** A "YYYY-MM-DD" payment date → a stable ISO timestamp at NOON IN THE ORG'S TZ. Delegates to the tz
@@ -4049,7 +4308,7 @@ export async function deleteInvoice(id: string): Promise<Result> {
    */
   const { data: inv, error: invErr } = await supabase
     .from("invoices")
-    .select("status")
+    .select("status, job_id")
     .eq("id", id)
     .maybeSingle();
   if (invErr) return { ok: false, error: dbError(invErr) };
@@ -4107,6 +4366,10 @@ export async function deleteInvoice(id: string): Promise<Result> {
         "That invoice didn't delete — it was sent or voided while you were deleting it, or you don't have access. Reload the invoice to see where it stands.",
     };
   }
+  // A draft that took the job's payment requests off let them go with its lines (cn-v1177): the job's
+  // other drafts take them now.
+  const delJob = (inv as { job_id?: string | null }).job_id ?? null;
+  if (delJob) await resyncJobDrafts(supabase, delJob);
   revalidateMoney();
   return { ok: true };
 }
@@ -4274,6 +4537,14 @@ export async function setInvoiceCustomerJob(
   const drawBlock = await blockStandardCreateOnDrawJob(supabase, link.job_id ?? null);
   if (drawBlock) return drawBlock;
 
+  // A PAYMENT REQUEST STAYS WITH ITS JOB AND ITS CUSTOMER (cn-v1177): it was asked of them for that job.
+  const { data: kindRow, error: kindErr } = await supabase.from("invoices").select("invoice_kind, invoice_number").eq("id", invoiceId).maybeSingle();
+  if (kindErr) return { ok: false, error: dbError(kindErr) };
+  if (isPrepaymentKind((kindRow as { invoice_kind?: string | null } | null)?.invoice_kind)) {
+    const label = (kindRow as { invoice_number?: string | null } | null)?.invoice_number ?? "This payment request";
+    return { ok: false, error: `${label} is a payment request asked of this job's customer for this job, so it can't move. Void it and ask on the other job instead.` };
+  }
+
   const clean: Record<string, unknown> = {};
 
   // Validate any chosen ids are visible to this org (RLS scopes the read).
@@ -4306,6 +4577,13 @@ export async function setInvoiceCustomerJob(
   const { data: prevInv } = await supabase.from("invoices").select("job_id").eq("id", invoiceId).maybeSingle();
   const oldJobId = (prevInv as { job_id: string | null } | null)?.job_id ?? null;
 
+  // THE OLD JOB'S REQUESTS STAY ON THE OLD JOB (cn-v1177): a draft that moves lets go of the lines that
+  // took them off first (0414 refuses a move that carries them), and takes the new job's after (recalc).
+  if (link.job_id !== undefined && jobId !== oldJobId) {
+    const { error: offErr } = await supabase.from("invoice_items").delete().eq("invoice_id", invoiceId).eq("import_source", PREPAID_CREDIT).select("id");
+    if (offErr) return { ok: false, error: dbError(offErr) };
+  }
+
   // THE CLASS, NOT THE INSTANCE (cn-v967): this was the fourth `invoices` update in this file with
   // no `.select("id")`. It is draft-only so there is no revision to stamp, but the silent-write law
   // holds all the same - re-pointing an invoice at a customer RLS won't let this person touch would
@@ -4317,6 +4595,11 @@ export async function setInvoiceCustomerJob(
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!wrote?.length) return { ok: false, error: "That didn't save - check your access and try again." };
+  if (link.job_id !== undefined && jobId !== oldJobId) {
+    // The moved draft takes the new job's requests off; the old job's drafts take back what it let go.
+    if (!(await recalcInvoice(supabase, invoiceId))) reportError("setInvoiceCustomerJob.recalc", new Error("recalc did not land"), { invoiceId });
+    if (oldJobId) await resyncJobDrafts(supabase, oldJobId);
+  }
   revalidateMoney(invoiceId);
   for (const jid of new Set([oldJobId, jobId].filter(Boolean) as string[])) revalidatePath(`/jobs/${jid}`);
   return { ok: true };
@@ -4578,6 +4861,24 @@ export async function settleUp(input: {
       if (choice.kind === "needsSend") {
         const sent = await sendDraftForPayment(supabase, bill.id);
         if (!sent.ok) return { ok: false, invoiceId: bill.id, error: sent.error };
+        // The send brought the bill up to date (cn-v1177: what it takes off for the job's payment
+        // requests): the payment lands on the figure it now carries, never the one read before it.
+        const { data: fresh, error: freshErr } = await supabase.from("invoices").select("total, amount_paid").eq("id", bill.id).maybeSingle();
+        if (freshErr || !fresh) return { ok: false, invoiceId: bill.id, error: freshErr ? dbError(freshErr) : "Invoice not found." };
+        const freshTotal = Number((fresh as { total?: unknown }).total ?? 0);
+        const freshPaid = Number((fresh as { amount_paid?: unknown }).amount_paid ?? 0);
+        // THE SEND MAY HAVE LOWERED IT (skeptic #80): a payment more than what the bill now asks is
+        // refused, never cut down to fit (settleExisting caps at the balance). Nothing is recorded.
+        const freshBalance = invoiceBalance(freshTotal, freshPaid);
+        if (input.collect !== "later" && amount > freshBalance + 0.005) {
+          // Never cap it silently: the difference would vanish from the record.
+          return {
+            ok: false,
+            invoiceId: bill.id,
+            error: `${label} has ${formatCurrency(freshBalance)} left, less than the ${formatCurrency(amount)} they paid. Record ${formatCurrency(freshBalance)} on ${label}, then put the rest on a new invoice.`,
+          };
+        }
+        return settleExisting(bill.id, freshTotal, freshPaid);
       }
       return settleExisting(bill.id, Number(bill.total ?? 0), Number(bill.amount_paid ?? 0));
     }
@@ -4593,6 +4894,43 @@ export async function settleUp(input: {
   // A job on the draw path is billed by draws — same guard as every standard-invoice creator.
   const drawBlock = await blockStandardCreateOnDrawJob(supabase, jobId);
   if (drawBlock) return drawBlock;
+
+  /*
+   * MONEY ALREADY IN HAND COMES OFF THIS BILL TOO (cn-v1177). The settle-up bill is minted here for a
+   * job (source "job" with no open bill) AND for a visit that has a job (source "appointment", where
+   * nothing above looked at the job's bills). The job's requests are read once, for both, before
+   * anything is written; a lost read is not "none": refuse, nothing written.
+   * A REQUEST STILL ASKING FOR MONEY IS REFUSED HERE: a recalc takes off what a request ASKED, paid or
+   * not, so minting a bill now would take an unpaid request off it while the request itself still asks
+   * the customer for that money: asked for twice. The payment is taken on that request instead.
+   * Only when every live request is paid in full is what they still have to come off money the customer
+   * already handed over; the settle-up bill then carries the work it settles: the figure they paid now
+   * PLUS that money. Its recalc takes each request off (the sync), so the bill reads the work, less each
+   * request, total = what they just paid. With no money ahead the line is the typed figure, as it
+   * always was.
+   */
+  let ahead = 0;
+  if (jobId) {
+    let states: Awaited<ReturnType<typeof readPrepaymentStates>>;
+    try {
+      // As the bill going out sees them: another draft's credit is cleared before this bill is resolved.
+      states = await readPrepaymentStatesForOutgoing(supabase, jobId);
+    } catch (e) {
+      reportError("settleUp.prepayments", e, { jobId });
+      return { ok: false, error: "Couldn't read this job's payment requests just now, so nothing was recorded. Try again in a moment." };
+    }
+    const owing = states.find((s) => s.amount - s.paid > 0.005);
+    if (owing) {
+      const label = owing.number ?? "This job's payment request";
+      return {
+        ok: false,
+        invoiceId: owing.id,
+        error: `${label} still asks for ${formatCurrency(Math.round((owing.amount - owing.paid) * 100) / 100)}. Take this payment on ${owing.number ?? "that request"}.`,
+      };
+    }
+    ahead = prepaymentsLeft(states);
+  }
+  const lineAmount = ahead > 0.005 ? Math.round((amount + ahead) * 100) / 100 : amount;
 
   // Getting PAID is the win, so the lead's contact materializes here — through the ONE rule the
   // accepted-estimate path uses (dedup by the CRM's keys, the person's address not the site's,
@@ -4657,13 +4995,31 @@ export async function settleUp(input: {
     description: title,
     quantity: 1,
     unit: "EA",
-    unit_price: amount,
+    unit_price: lineAmount,
     sort_order: 0,
   });
   if (itemErr) {
     return { ok: false, invoiceId: inv.id, error: `The invoice was created but its line didn't save — open it and add one. (${dbError(itemErr)})` };
   }
-  await recalcInvoice(supabase, inv.id);
+  // Immediately before the flip below, and checked (cn-v1177, nothing sent stale); the bill going out
+  // comes first (outgoingDraftFirst: the job's other drafts give up their derived credit to it).
+  if (!(await outgoingDraftFirst(supabase, inv.id))) {
+    return { ok: false, invoiceId: inv.id, error: "The invoice was created but couldn't be brought up to date, so it wasn't sent and nothing was recorded. Open it and send it from there." };
+  }
+  // THE BILL MUST COME TO WHAT THEY PAID, to the cent, once the requests are off. If it does not (a
+  // request changed between the read and the recalc), nothing is sent and nothing is recorded: the
+  // draft is left for the person to look at.
+  if (ahead > 0.005) {
+    const { data: after, error: afterErr } = await supabase.from("invoices").select("total").eq("id", inv.id).maybeSingle();
+    const came = Number((after as { total?: unknown } | null)?.total);
+    if (afterErr || !after || !Number.isFinite(came) || Math.abs(came - amount) > 0.005) {
+      return {
+        ok: false,
+        invoiceId: inv.id,
+        error: `${inv.invoice_number ?? "The invoice"} was made, but after the ${formatCurrency(ahead)} already paid ahead came off it, it doesn't come to the ${formatCurrency(amount)} they paid. It wasn't sent and nothing was recorded: open it, check it, then send it and record the payment from there.`,
+      };
+    }
+  }
 
   // Sent, not draft: paidStatus deliberately never advances a DRAFT (a prepayment must not lock
   // an unsent bill's lines) — but this bill has left draft in the real world: delivered, settled,

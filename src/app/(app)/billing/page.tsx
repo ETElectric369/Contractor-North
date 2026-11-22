@@ -33,6 +33,8 @@ import { pendingTransfers, transferOnItsWaySentence } from "@/lib/bank-transfer"
 import { GetPaidPickButton } from "./record-payment-button";
 import { readWaitingToBeBilled } from "@/lib/waiting-to-be-billed";
 import { datedWhen } from "@/lib/action-items/dated-when";
+import { isPrepaymentKind } from "@/lib/prepayments";
+import { PAYMENT_REQUEST_LABEL } from "@/lib/portal/line-kind";
 
 export const dynamic = "force-dynamic";
 
@@ -110,7 +112,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
       // Bounded (audit v921): PostgREST silently truncates at its max-rows cap, so an unbounded
       // list quietly stops showing older rows with nothing on screen saying so. An explicit high
       // limit fails visibly at a known number instead of invisibly at the server's.
-      supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, created_at, customers(name)").order("created_at", { ascending: false }).limit(2000),
+      supabase.from("invoices").select("id, invoice_number, invoice_kind, total, amount_paid, status, due_date, created_at, customers(name)").order("created_at", { ascending: false }).limit(2000),
       // THE QUESTION 0269 BUILT AN INDEX FOR, AND NOBODY EVER ASKED (audit v966).
       //
       // 0269 says it in its own words: the "needs re-sending" question "is asked per org on the
@@ -566,6 +568,10 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
                     <div className="min-w-0">
                       <div className="truncate">
                         <span className="text-sm font-medium text-slate-900">{inv.invoice_number}</span>
+                        {/* A payment request (cn-v1177) wears its one word: money asked for ahead of the work. */}
+                        {isPrepaymentKind(inv.invoice_kind) && (
+                          <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600">{PAYMENT_REQUEST_LABEL}</span>
+                        )}
                         <span className="ml-2 text-sm text-slate-500">{inv.customers?.name ?? "—"}</span>
                       </div>
                       <InvoiceAmountDetail total={Number(inv.total) || 0} paid={Number(inv.amount_paid) || 0} status={inv.status} />

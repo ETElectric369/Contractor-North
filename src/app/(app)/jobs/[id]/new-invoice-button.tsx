@@ -29,12 +29,15 @@ import {
 import { createInvoiceForJob, type CreateInvoiceForJobResult } from "../actions";
 import { createProgressInvoice } from "../../recurring/actions";
 import { createProgressReportInvoice, requestNextPayment } from "../../billing/actions";
+import { RequestPaymentSheet, type PayDoorFacts } from "@/components/request-payment";
 
 /**
  * ERIK'S OPEN QUESTIONS, BUILT AS RECOMMENDED AND EASY TO FLIP (Wave 1 plan, 2026-09-27).
  *
  * TAKE_A_DEPOSIT_LINK: on a job with no estimate (a service call) New Invoice is one tap; this
- *   small link keeps the deposit door the old Progress Payment › Deposit gave. false removes it.
+ *   small link keeps a deposit door beside it. false removes it. Since cn-v1177 it opens the Request a
+ *   Payment form on Deposit (components/request-payment): a payment request the next bill takes off,
+ *   no longer a deposit DRAW that locked the job into draws.
  * JOB_NEW_INVOICE_STARTS_TAXED: with Sales Tax on, a new invoice made here starts at the company's
  *   default rate, shown on the sheet (Tax Rate %) and named in the one-tap toast - as /billing's New
  *   Invoice always did. false puts back today's untaxed start. A draw (a deposit, a part of the
@@ -81,8 +84,8 @@ export type NewInvoiceButtonProps = {
    *  bills its actuals, null (or not passed) means it couldn't be read, and the sheet says so. */
   unbilled?: WorkSoFar | null;
   lumpToNet?: number;
-  /** Settings › Money deposit %: the Deposit box's first value (× the estimate). */
-  depositPercent?: number;
+  /** What the Request a Payment form's Take It Now hands the Get Paid sheet (cn-v1177). */
+  payDoor?: PayDoorFacts;
   /** Pieces taken past the stock, said before an invoice is built (lib/stock-billing). */
   stockShortsWords?: string | null;
   /** The Sales Tax switch (0352). */
@@ -92,6 +95,35 @@ export type NewInvoiceButtonProps = {
 };
 
 const money = (n: number) => formatCurrency(n);
+
+/**
+ * THE SHEET'S CHOICES, WITH DEPOSIT AS A DOOR (cn-v1177, the owner's pick: "the old deposit door becomes
+ * the new payment"). lib/actuals-draw newInvoiceChoices still lists Deposit first; in this sheet it is no
+ * longer a bill the sheet makes (a deposit DRAW locked a time and material job out of a standard
+ * invoice): it opens the Request a Payment form on Deposit. So the sheet starts on the first BILL
+ * choice, and a sheet with no bill choice at all is never opened: the form is.
+ */
+export function sheetChoicesFor(
+  p: Pick<NewInvoiceButtonProps, "billingType" | "estimate" | "hasEstimate" | "billsActuals" | "unbilled" | "lumpToNet" | "drawBilled" | "wholeEstimate" | "changeOrdersToBill">,
+  preset: NewInvoicePreset | null,
+): { choices: NewInvoiceChoice[]; initial: Exclude<NewInvoiceChoice, "deposit"> | null; workDoor: ReturnType<typeof workSoFarDoor> } {
+  const estimate = Math.max(0, Number(p.estimate) || 0);
+  const workDoor = workSoFarDoor(p.unbilled ?? null, Number(p.lumpToNet) || 0, !!p.drawBilled, money);
+  const { choices, initial } = newInvoiceChoices(
+    {
+      billingType: p.billingType,
+      estimate,
+      hasEstimate: !!p.hasEstimate,
+      billsActuals: !!p.billsActuals,
+      workDoor,
+      wholeEstimate: p.wholeEstimate ?? null,
+      changeOrdersToBill: p.changeOrdersToBill ?? 0,
+    },
+    preset === "deposit" ? null : preset,
+  );
+  const bills = choices.filter((c): c is Exclude<NewInvoiceChoice, "deposit"> => c !== "deposit");
+  return { choices, initial: initial !== "deposit" ? initial : (bills[0] ?? null), workDoor };
+}
 
 /**
  * ONE NEW INVOICE ON THE JOB (W1-24). What one tap does is lib/actuals-draw's newInvoiceRoute: an
@@ -107,6 +139,23 @@ export function NewInvoiceButton(p: NewInvoiceButtonProps) {
   const pathname = usePathname();
   const [pending, start] = useTransition();
   const [sheet, setSheet] = useState<{ open: boolean; preset: NewInvoicePreset | null; refusal: string | null }>({ open: false, preset: null, refusal: null });
+  // TAKE A DEPOSIT INSTEAD (cn-v1177): the Request a Payment form, on Deposit. Mounted on its first
+  // opening, never keyed or unmounted after (each opening resets it with state).
+  const [depositFormMounted, setDepositFormMounted] = useState(false);
+  const [depositFormOpen, setDepositFormOpen] = useState(false);
+  /** The sheet's Deposit hands off: the form opens in this commit, the sheet closes in the next (so the
+   *  form is on top when the sheet takes its history entry off; overlay-history hands it over). */
+  const [sheetHandingOff, setSheetHandingOff] = useState(false);
+  function openDepositForm(fromSheet = false) {
+    setDepositFormMounted(true);
+    setDepositFormOpen(true);
+    if (fromSheet) setSheetHandingOff(true);
+  }
+  useEffect(() => {
+    if (!sheetHandingOff) return;
+    setSheetHandingOff(false);
+    setSheet({ open: false, preset: null, refusal: null });
+  }, [sheetHandingOff]);
 
   const facts = {
     openDraft: p.openDraft ?? null,
@@ -119,6 +168,10 @@ export function NewInvoiceButton(p: NewInvoiceButtonProps) {
 
   /** A preset from another door (the param, Take a Deposit Instead, a server's "part" door). */
   function openWith(preset: NewInvoicePreset | null, refusal: string | null = null) {
+    // A DEPOSIT IS A PAYMENT REQUEST NOW (cn-v1177): ?invoice=deposit and every other deposit door open
+    // the Request a Payment form. A request stands beside an open draft or a schedule, so no route
+    // refuses it; the form says itself when the job takes none.
+    if (preset === "deposit") return openDepositForm();
     const r = newInvoiceRoute(facts, preset);
     if (r.kind === "draft") {
       const d = p.openDraft;
@@ -133,6 +186,8 @@ export function NewInvoiceButton(p: NewInvoiceButtonProps) {
       toast("This job bills on its payment schedule - Request Next Payment is its door.", "info");
       return;
     }
+    // A sheet whose only choice would be Deposit is the form.
+    if (sheetChoicesFor(p, preset).initial === null) return openDepositForm();
     setSheet({ open: true, preset, refusal });
   }
 
@@ -223,9 +278,16 @@ export function NewInvoiceButton(p: NewInvoiceButtonProps) {
         <FileText className="h-4 w-4" /> {pending ? "Opening…" : (p.label ?? "New Invoice")}
       </Button>
       {TAKE_A_DEPOSIT_LINK && route.kind === "direct" && (
-        <button type="button" onClick={() => openWith("deposit")} className="inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
+        <button
+          type="button"
+          onClick={() => openDepositForm()}
+          className="inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline"
+        >
           Take a Deposit Instead
         </button>
+      )}
+      {depositFormMounted && (
+        <RequestPaymentSheet jobId={p.jobId} open={depositFormOpen} onClose={() => setDepositFormOpen(false)} purpose="deposit" payDoor={p.payDoor} />
       )}
       {/* Pieces taken past the stock, said BEFORE the tap: the one-tap doors have no sheet to say it
           in (the sheet says it above its Save). */}
@@ -237,6 +299,7 @@ export function NewInvoiceButton(p: NewInvoiceButtonProps) {
           refusal={sheet.refusal}
           taxOn={taxOn}
           loadRate={defaultRate}
+          onDeposit={() => openDepositForm(true)}
           onClose={() => setSheet({ open: false, preset: null, refusal: null })}
         />
       )}
@@ -294,6 +357,8 @@ function NewInvoiceSheet(
     refusal: string | null;
     taxOn: boolean;
     loadRate: () => Promise<number>;
+    /** Deposit: the Request a Payment form (cn-v1177), never a draw made here. */
+    onDeposit: () => void;
     onClose: () => void;
   },
 ) {
@@ -305,23 +370,15 @@ function NewInvoiceSheet(
   const paid = p.paid == null ? null : Math.max(0, Number(p.paid) || 0);
   const left = billed == null ? null : Math.max(0, Math.round((estimate - billed) * 100) / 100);
   const isTM = p.billingType === "tm";
-  const workDoor = useMemo(() => workSoFarDoor(p.unbilled ?? null, Number(p.lumpToNet) || 0, !!p.drawBilled, money), [p.unbilled, p.lumpToNet, p.drawBilled]);
-  const { choices, initial } = newInvoiceChoices(
-    {
-      billingType: p.billingType,
-      estimate,
-      hasEstimate: !!p.hasEstimate,
-      billsActuals: !!p.billsActuals,
-      workDoor,
-      wholeEstimate: p.wholeEstimate ?? null,
-      changeOrdersToBill: p.changeOrdersToBill ?? 0,
-    },
-    p.preset,
+  const { choices, initial, workDoor } = useMemo(
+    () => sheetChoicesFor(p, p.preset),
+    // The page's facts, which do not move while the sheet is open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [p.unbilled, p.lumpToNet, p.drawBilled, p.preset, p.billingType, p.estimate, p.hasEstimate, p.billsActuals, p.wholeEstimate, p.changeOrdersToBill],
   );
   const workNote = workSoFarNote({ billsActuals: !!p.billsActuals, unbilledRead: p.unbilled != null, workDoor });
-  const [choice, setChoice] = useState<NewInvoiceChoice>(initial);
-  const depositSeed = (Number(p.depositPercent) || 0) > 0 && estimate > 0 ? Math.round(estimate * (Number(p.depositPercent) || 0)) / 100 : 0;
-  const [depositAmt, setDepositAmt] = useState(depositSeed);
+  // Never "deposit": that choice is the form's door (sheetChoicesFor). A sheet with no bill choice is not opened.
+  const [choice, setChoice] = useState<Exclude<NewInvoiceChoice, "deposit">>(initial ?? "part");
   const [partPct, setPartPct] = useState(50);
   const [partDollars, setPartDollars] = useState(false);
   const [partAmt, setPartAmt] = useState(0);
@@ -358,9 +415,7 @@ function NewInvoiceSheet(
   const showTax = p.taxOn && ((choice === "work" && workIsStandard) || choice === "changes");
   const partAmount = partDollars ? Math.round((partAmt || 0) * 100) / 100 : drawAmount("percent", partPct, left ?? 0);
   const amount =
-    choice === "deposit"
-      ? Math.round((depositAmt || 0) * 100) / 100
-      : choice === "part"
+    choice === "part"
         ? partAmount
         : choice === "work"
           ? workAmount != null && showTax
@@ -388,9 +443,7 @@ function NewInvoiceSheet(
     setErrorDoor(null);
     start(async () => {
       let res: { ok: boolean; id?: string; error?: string; note?: string; partial?: true; importWarning?: string; billedOn?: { id: string; number: string }; openDraft?: { id: string; number: string } };
-      if (choice === "deposit") {
-        res = await createProgressInvoice(p.jobId, { kind: "deposit", mode: "fixed", value: depositAmt });
-      } else if (choice === "part") {
+      if (choice === "part") {
         res = await createProgressInvoice(p.jobId, { kind: last ? "final" : "progress", mode: partDollars ? "fixed" : "percent", value: partDollars ? partAmt : partPct });
       } else if (choice === "work") {
         // The card's own door: a progress report on a job billed with draws (and for the last bill,
@@ -416,7 +469,7 @@ function NewInvoiceSheet(
       }
       const note = res.note ?? res.importWarning;
       if (note) toast(note, res.partial ? "error" : "info");
-      else toast(choice === "deposit" ? "Deposit started as a draft" : "Invoice started as a draft", "success");
+      else toast("Invoice started as a draft", "success");
       /* OPEN THE NEW BILL WITHOUT CLOSING THE SHEET FIRST (the /billing New Invoice's lesson,
          2026-09-11). Closing a Modal runs history.back() to take its marker off the stack; with the
          push still waiting on the server, Next treats that back as a navigation of its own and throws
@@ -491,6 +544,8 @@ function NewInvoiceSheet(
               role="radio"
               aria-checked={choice === c}
               onClick={() => {
+                // Deposit opens the Request a Payment form; this sheet makes no deposit (cn-v1177).
+                if (c === "deposit") return p.onDeposit();
                 setChoice(c);
                 if (c !== "part" && c !== "work") setLast(false);
               }}
@@ -502,18 +557,6 @@ function NewInvoiceSheet(
             </button>
           ))}
         </div>
-
-        {choice === "deposit" && (
-          <div>
-            <Label htmlFor="ni-deposit">Deposit amount</Label>
-            <NumberInput id="ni-deposit" value={depositAmt} onValueChange={setDepositAmt} className="h-11 w-44" placeholder="$ amount" />
-            {depositSeed > 0 && (
-              <p className="mt-1 text-xs text-slate-500">
-                {Number(p.depositPercent)}% of the {money(estimate)} estimate, your usual deposit (Settings › Money).
-              </p>
-            )}
-          </div>
-        )}
 
         {choice === "part" && (
           <div className="space-y-2">

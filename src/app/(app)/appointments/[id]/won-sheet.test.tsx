@@ -17,8 +17,10 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: 
 vi.mock("../won-actions", () => ({ readWonSheet: vi.fn(), approveVisitEstimate: vi.fn() }));
 vi.mock("../start-job-actions", () => ({ startJobFromSale: vi.fn() }));
 vi.mock("../actions", () => ({ linkAppointmentTo: vi.fn() }));
+vi.mock("../../billing/request-actions", () => ({ readPaymentRequestSeed: vi.fn(), requestPayment: vi.fn() }));
 
-import { WonSheet, WonSheetBody, WonSheetHost, overridesFromTyped, type WonPhase, type WonTyped } from "./won-sheet";
+import { WonSheet, WonSheetBody, WonSheetHost, overridesFromTyped, wonDepositDoor, type WonDeposit, type WonPhase, type WonTyped } from "./won-sheet";
+import type { PaymentRequestSeed } from "@/app/(app)/billing/request-actions";
 import type { WonLine, WonSheet as WonRead } from "@/lib/appointments/won-sheet";
 
 const src = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
@@ -52,7 +54,10 @@ const estimate = (over: Partial<Extract<Ok, { state: "estimate" }>> = {}): Ok =>
   ...over,
 });
 
-const draw = (phase: WonPhase, over: { lang?: string; typed?: WonTyped; busy?: boolean; note?: string | null; billing?: "tm" | "fixed" } = {}) =>
+const draw = (
+  phase: WonPhase,
+  over: { lang?: string; typed?: WonTyped; busy?: boolean; note?: string | null; billing?: "tm" | "fixed"; deposit?: WonDeposit; depositNote?: string | null } = {},
+) =>
   renderToStaticMarkup(
     createElement(WonSheetBody, {
       phase,
@@ -68,6 +73,8 @@ const draw = (phase: WonPhase, over: { lang?: string; typed?: WonTyped; busy?: b
       onFinish: () => {},
       onChoosePlain: () => {},
       onStartPlain: () => {},
+      deposit: over.deposit,
+      depositNote: over.depositNote ?? null,
     }),
   );
 const sheet = (s: Ok): WonPhase => ({ k: "sheet", sheet: s });
@@ -142,7 +149,7 @@ describe("each answer the server gives, drawn, in both languages", () => {
     });
   }
 
-  it("the done step: the deposit's slot is empty, Open the Job is the boxed one, the estimate's door is quiet", () => {
+  it("the done step: with no deposit door, Open the Job is the boxed one and the estimate's door is quiet", () => {
     const html = draw({ k: "done", how: "approve", quote: { id: "q-1", number: "E-900" }, total: 1234.5, job: { id: "j-1", number: "J-900" } });
     expect(html).toContain('href="/jobs/j-1"');
     expect(html).toContain('href="/quotes/q-1"');
@@ -151,7 +158,68 @@ describe("each answer the server gives, drawn, in both languages", () => {
     expect(job.open).toContain("bg-[rgb(var(--glass-ink))]");
     expect(est.text).toBe("Open the Estimate");
     expect(est.open).not.toContain("bg-[rgb(var(--glass-ink))]");
-    expect(SHEET_SRC).toMatch(/\{\/\* cn-v1177: the deposit goes here \*\/\}\n\s+<div className="flex flex-wrap gap-2">\n\s+<Link href=\{`\/jobs\/\$\{phase\.job\.id\}`\}>/);
+  });
+
+  // cn-v1177: the slot the last release left ("cn-v1177: the deposit goes here") is filled.
+  const REQ = { id: "inv-1", number: "INV-900", token: "tok", label: "Deposit", amount: 1000, balance: 1000, status: "sent" };
+  const done = (how: "approve" | "plain"): WonPhase =>
+    how === "approve"
+      ? { k: "done", how, quote: { id: "q-1", number: "E-900" }, total: 12000, job: { id: "j-1", number: "J-900" } }
+      : { k: "done", how, quote: null, total: null, job: { id: "j-1", number: "J-900" } };
+  it("the done step's deposit, after an approval: Take the Deposit Now · $X, Get Paid on INV-900, or the paid line, in both languages", () => {
+    const take = buttons(draw(done("approve"), { deposit: { k: "take", amount: 1000, quoteId: "q-1" } }));
+    expect(take[0].text).toBe("Take the Deposit Now · $1,000.00");
+    expect(take[0].open).toMatch(TARGET);
+    expect(buttons(draw(done("approve"), { lang: "es", deposit: { k: "take", amount: 1000, quoteId: "q-1" } }))[0].text).toBe("Cobrar el Anticipo Ahora · $1,000.00");
+    expect(titleCaseIn("Take the Deposit Now · $1,000.00")).toBe(true);
+    expect(titleCaseIn("Cobrar el Anticipo Ahora · $1,000.00", "es")).toBe(true);
+    const live = buttons(draw(done("approve"), { deposit: { k: "live", request: REQ } }));
+    expect(live[0].text).toBe("Get Paid on INV-900");
+    expect(buttons(draw(done("approve"), { lang: "es", deposit: { k: "live", request: REQ } }))[0].text).toBe("Cobrar INV-900");
+    const paid = textOf(draw(done("approve"), { deposit: { k: "paid", request: { ...REQ, balance: 0 } } }));
+    expect(paid).toContain("INV-900: the deposit is paid.");
+    expect(buttons(draw(done("approve"), { deposit: { k: "paid", request: { ...REQ, balance: 0 } } }))[0].text).toBe("Open the Job");
+    // A read that failed is said, with where to take it instead; a refusal is said as the server worded it.
+    expect(textOf(draw(done("approve"), { deposit: { k: "unread" } }))).toContain("The deposit couldn't be read just now. Take it from the job's Invoices tab.");
+    expect(textOf(draw(done("approve"), { deposit: { k: "take", amount: 5, quoteId: null }, depositNote: "Refused." }))).toContain("Refused.");
+  });
+  it("nothing on a plain start, and nothing when the seed says no deposit", () => {
+    for (const d of [{ k: "take", amount: 1000, quoteId: null }, { k: "live", request: REQ }] as WonDeposit[]) {
+      expect(buttons(draw(done("plain"), { deposit: d }))[0].text).toBe("Open the Job");
+    }
+    expect(buttons(draw(done("approve"), { deposit: { k: "none" } }))[0].text).toBe("Open the Job");
+    // The slot sits between the warnings and the two doors.
+    expect(SHEET_SRC).toMatch(/THE DEPOSIT \(cn-v1177\)[\s\S]*?<div className="flex flex-wrap gap-2">\n\s+<Link href=\{`\/jobs\/\$\{phase\.job\.id\}`\}>/);
+  });
+  it("wonDepositDoor: take only with a deposit due, a customer, a job not over and no live request", () => {
+    const seed = (over: Partial<Extract<PaymentRequestSeed, { ok: true }>> = {}, deposit: Partial<Extract<PaymentRequestSeed, { ok: true }>["deposit"]> = {}): PaymentRequestSeed => ({
+      ok: true,
+      job: { id: "j-1", number: "J-900", over: false, hasCustomer: true },
+      deposit: { due: 1000, quote: { id: "q-1", number: "E-900" }, request: null, ...deposit },
+      materials: { unbilled: 0, suggested: 0 },
+      requests: [],
+      leftToNet: 0,
+      canTakeCard: true,
+      ...over,
+    });
+    expect(wonDepositDoor(seed())).toEqual({ k: "take", amount: 1000, quoteId: "q-1" });
+    expect(wonDepositDoor(seed({ job: { id: "j-1", number: null, over: false, hasCustomer: false } }))).toEqual({ k: "none" });
+    expect(wonDepositDoor(seed({ job: { id: "j-1", number: null, over: true, hasCustomer: true } }))).toEqual({ k: "none" });
+    expect(wonDepositDoor(seed({}, { due: 0 }))).toEqual({ k: "none" });
+    expect(wonDepositDoor(seed({}, { request: REQ }))).toEqual({ k: "live", request: REQ });
+    expect(wonDepositDoor(seed({}, { request: { ...REQ, balance: 0 } }))).toEqual({ k: "paid", request: { ...REQ, balance: 0 } });
+    expect(wonDepositDoor({ ok: false, error: "x" })).toEqual({ k: "unread" });
+  });
+  it("one tap, one request: the deposit's press is guarded while it is out, and it opens the EXISTING Get Paid sheet on the request's bill", () => {
+    expect(SHEET_SRC).toMatch(/if \(deposit\.k !== "take" \|\| depositInFlight\.current\) return;\n\s+depositInFlight\.current = true;/);
+    expect(SHEET_SRC).toContain('import { GetPaidButton } from "@/components/settle-up-button";');
+    expect(SHEET_SRC).toMatch(/<GetPaidButton\s+key=\{payFor\.id\}\s+source="invoice"\s+invoiceId=\{payFor\.id\}\s+balance=\{payFor\.balance\}\s+trigger="none"\s+open=\{payOpen\}/);
+    // The company's payment methods, Venmo and texting facts come with the seed when it has them (cn-v1177 seams).
+    expect(SHEET_SRC).toContain("setPayFacts(seed.payDoor ?? null);");
+    expect(SHEET_SRC).toMatch(/cardEnabled=\{cardOn\}\n\s+methods=\{payFacts\?\.methods\}\n\s+venmoConfigured=\{payFacts\?\.venmoConfigured\}\n\s+textReady=\{payFacts\?\.textReady\}/);
+    // Read once, after an approval that made a job; a plain start never reads it.
+    expect(SHEET_SRC.match(/void readDeposit\(/g)).toHaveLength(1);
+    expect(SHEET_SRC).toMatch(/how: "approve"[^\n]*\n\s+router\.refresh\(\);\n\s+void readDeposit\(r\.job\.id\);/);
   });
 
   it("a warning is never dropped: each one is said under the done line, on both paths", () => {
@@ -313,7 +381,7 @@ describe("Approve waits for every hole, and the sheet sends keys and typed numbe
 describe("the house laws, on the source", () => {
   it("ONE Modal, never keyed; the Inspector draws the sheet for the office whatever the door says, never keyed", () => {
     expect(SHEET_SRC.match(/<Modal\s/g)).toHaveLength(1); // the one drawn (a comment's "<Modal>" is not one)
-    expect(SHEET_SRC).toContain('<Modal open={open} onClose={onClose} title={t("vi_btn_wonStartTheJob")} holdOpen={busy} size="md">');
+    expect(SHEET_SRC).toContain('<Modal open={open} onClose={onClose} title={t("vi_btn_wonStartTheJob")} holdOpen={busy || depositBusy} size="md">');
     expect(INSPECTOR_SRC.match(/<WonSheet\b/g)).toHaveLength(1);
     expect(INSPECTOR_SRC).toContain("{office && <WonSheet appointmentId={appointmentId} open={wonOpen} onClose={closeWon} />}");
     expect(INSPECTOR_SRC).not.toMatch(/<WonSheet[^>]*\bkey=/);

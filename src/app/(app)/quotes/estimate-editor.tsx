@@ -39,6 +39,8 @@ import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
 import { estimateStatusLabel } from "@/lib/statuses";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
+import type { DepositRule } from "@/lib/deposit-rule";
+import { depositShown } from "@/lib/estimate/estimate-deposit";
 import { useToast } from "@/components/toast";
 import {
   appendQuoteLines,
@@ -53,6 +55,7 @@ import {
   readQuoteLineIds,
   saveQuote,
   setQuoteCustomer,
+  setQuoteDeposit,
   setQuoteType,
   updateQuoteItem,
   updateQuoteMeta,
@@ -175,6 +178,10 @@ export interface EditorCatalog {
   textReady: boolean;
   /** The Estimates switch (Duplicate / Revise are its doors; a lock keeps them). */
   estimatesOn: boolean;
+  /** THE COMPANY'S DEPOSIT RULE (cn-v1177; getOrgSettings deposit_percent / deposit_cap_amount, already
+   *  clamped): the Deposit field shows what the next save stores. Absent = the rule is not known here,
+   *  so the field shows the stored figure only. */
+  depositRule?: DepositRule;
 }
 
 /** /quotes/new's seed: what the door the estimate was opened from already knows. */
@@ -222,6 +229,9 @@ export interface SavedQuoteRow {
   valid_until: string | null;
   estimate_format?: string | null;
   circuits?: unknown;
+  /** THE DEPOSIT THIS ESTIMATE STATES (0414): null = saved before 0414; deposit_by_hand = a person typed it. */
+  deposit_amount?: number | string | null;
+  deposit_by_hand?: boolean | null;
   job_id: string | null;
   inquiry_id?: string | null;
   customer_id: string | null;
@@ -427,6 +437,128 @@ function aroundLink(words: string, link: React.ReactNode) {
 }
 
 /** Words with nothing to press: a commit queued behind the write on the wire, a line waiting for its id. */
+/**
+ * THE DEPOSIT FIELD (cn-v1177), beside Valid until. It shows the figure the estimate states, or, while
+ * the offer is open, the figure its next save stores (lib/estimate/estimate-deposit depositShown: the
+ * same rule the server writes with), and one quiet line under it saying where that figure comes from.
+ * Typing a figure stores it as this estimate's own (setQuoteDeposit), which later saves leave alone;
+ * Use the Default gives it back to the company's rule. It writes on its own door, never through the
+ * line store, so a deposit is never a line. Only on a saved estimate whose offer is open and that is
+ * not locked; otherwise it reads only.
+ */
+function DepositField({
+  quoteId,
+  status,
+  total,
+  stored,
+  byHand,
+  rule,
+  locked,
+  busy,
+  t,
+  lang,
+}: {
+  quoteId: string | null;
+  status: string;
+  total: number;
+  stored: unknown;
+  byHand: boolean;
+  rule: DepositRule | null;
+  locked: boolean;
+  busy: boolean;
+  t: (key: string) => string;
+  lang: ReturnType<typeof useLang>;
+}) {
+  const router = useRouter();
+  // What the server answered last, until the page's own read catches up (the props are the truth after).
+  const [mine, setMine] = useState<{ stored: unknown; byHand: boolean } | null>(null);
+  const propsKey = `${String(stored)}|${byHand}`;
+  const seen = useRef(propsKey);
+  useEffect(() => {
+    if (seen.current === propsKey) return;
+    seen.current = propsKey;
+    setMine(null);
+  }, [propsKey]);
+  const facts = { total, status, stored: mine ? mine.stored : stored, byHand: mine ? mine.byHand : byHand, rule };
+  const shown = depositShown(facts);
+  const [typing, setTyping] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const editable = !!quoteId && !locked && (status === "draft" || status === "sent");
+
+  async function write(typed: number | null) {
+    if (!quoteId) return;
+    setSaving(true);
+    setErr(null);
+    let res: Awaited<ReturnType<typeof setQuoteDeposit>>;
+    try {
+      res = await setQuoteDeposit(quoteId, typed);
+    } catch {
+      res = { ok: false, error: t("qe_couldntBeSaved") };
+    }
+    setSaving(false);
+    if (!res.ok) {
+      setErr(res.error);
+      return;
+    }
+    setMine({ stored: res.deposit, byHand: res.byHand });
+    setTyping(null);
+    router.refresh();
+  }
+
+  function commit() {
+    if (typing === null) return;
+    const raw = typing.trim();
+    if (raw === "") {
+      setTyping(null);
+      return;
+    }
+    const n = Number(raw.replace(/[$,\s]/g, ""));
+    if (shown.from === "typed" && Math.abs(n - shown.amount) < 0.005) {
+      setTyping(null);
+      return;
+    }
+    // Not a number: sent as one the server refuses in words (a negative), never guessed into a figure.
+    void write(Number.isFinite(n) ? n : -1);
+  }
+
+  const source =
+    shown.amount <= 0
+      ? t("qe_depositNone")
+      : shown.from === "typed"
+        ? t("qe_depositTyped")
+        : rule
+          ? rule.cap > 0
+            ? fillText(t("qe_depositDefault"), { percent: String(rule.percent), cap: formatCurrency(rule.cap, lang).replace(/\.00$/, "") })
+            : fillText(t("qe_depositDefaultNoCap"), { percent: String(rule.percent) })
+          : null;
+
+  return (
+    <div>
+      <Label htmlFor="deposit">{t("qe_deposit")}</Label>
+      <Input
+        id="deposit"
+        inputMode="decimal"
+        value={typing ?? (shown.amount > 0 ? shown.amount.toFixed(2) : "0.00")}
+        disabled={!editable || busy || saving}
+        onChange={(e) => setTyping(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        }}
+      />
+      {source && <p className="mt-1 text-xs text-slate-500">{source}</p>}
+      {editable && shown.notStatedYet && <p className="mt-0.5 text-xs text-slate-500">{t("qe_depositNotYet")}</p>}
+      {editable && (shown.from === "typed" || shown.notStatedYet) && (
+        <button type="button" className="mt-0.5 text-xs font-medium text-brand hover:underline disabled:opacity-60" disabled={busy || saving} onClick={() => void write(null)}>
+          {t("qe_btn_useTheDefault")}
+        </button>
+      )}
+      {err && <p className="mt-1 text-xs text-red-600">{err}</p>}
+    </div>
+  );
+}
+
 function Waiting({ words }: { words?: string }) {
   return words ? <p className="mt-1 text-xs text-amber-700">{words}</p> : null;
 }
@@ -1732,6 +1864,18 @@ export function EstimateEditor(props: EstimateEditorProps) {
                   <DayField id="valid" value={header.validUntil} disabled={busy} onChange={(iso) => typeField("validUntil", iso)} onBlur={() => commitField("validUntil")} />
                   {fieldWords("header:validUntil")}
                 </div>
+                <DepositField
+                  quoteId={savedPage ? savedId : null}
+                  status={status}
+                  total={total}
+                  stored={savedPage?.quote.deposit_amount ?? null}
+                  byHand={savedPage?.quote.deposit_by_hand === true}
+                  rule={catalog.depositRule ?? null}
+                  locked={readOnly}
+                  busy={busy}
+                  t={t}
+                  lang={lang}
+                />
               </div>
               <div>
                 <Label htmlFor="notes">{t("qe_notes")}</Label>

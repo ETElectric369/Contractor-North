@@ -1,4 +1,5 @@
 import { invoiceBalance } from "@/lib/invoice-math";
+import { isPrepaymentKind } from "@/lib/prepayments";
 // THE open rules, one per kind of record (lib/open-counts). The A/R aging's rows and its count both
 // read isOwedInvoice, so the number over the card is the number of rows in it (M3).
 import { isOwedInvoice } from "@/lib/open-counts";
@@ -103,7 +104,7 @@ export const JOB_BILLING_STATUS_LABEL: Record<JobBillingStatus, string> = {
 
 /** The invoice fields the tag needs — amount_paid is THE rolled-up payments figure
  *  (recalcTotals keeps it in sync with the payments table), the same field AR reads. */
-export type JobBillingInvoice = { status: string; total?: number | null; amount_paid?: number | null };
+export type JobBillingInvoice = { status: string; total?: number | null; amount_paid?: number | null; /** cn-v1177: a payment request is not a bill for the work. */ invoice_kind?: string | null };
 
 /**
  * ONE definition of "where does this job's money stand", shared by the /jobs
@@ -129,7 +130,9 @@ export function jobBillingStatus(
   opts: { hasOpenMilestones?: boolean } = {},
 ): JobBillingStatus {
   const live = (invoices ?? []).filter((i) => i.status !== "void");
-  const billed = live.filter((i) => i.status !== "draft");
+  // A PAYMENT REQUEST IS NOT A BILL FOR THE WORK (cn-v1177): a finished job whose only bill is a request
+  // (paid or not) is still to be invoiced. A request's balance still counts as money owed below.
+  const billed = live.filter((i) => i.status !== "draft" && !isPrepaymentKind(i.invoice_kind));
   if (billed.length === 0) return "to_be_invoiced";
   const owed = live.reduce((s, i) => s + invoiceBalance(i.total, i.amount_paid), 0);
   // An un-drawn payment-schedule milestone is contract money not yet billed — the SAME
@@ -138,7 +141,8 @@ export function jobBillingStatus(
   // routine state: the deposit is paid, most of the contract is still to bill, and
   // getMoneyPipeline shows the job in "Done — not invoiced". It must never read green.
   if (owed <= 0.005) return opts.hasOpenMilestones ? "partial" : "paid_in_full";
-  const paid = billed.reduce((s, i) => {
+  // Money in from any sent bill, a paid request included: paid ahead is paid (cn-v1177).
+  const paid = live.filter((i) => i.status !== "draft").reduce((s, i) => {
     const n = Number(i.amount_paid);
     return s + (Number.isFinite(n) && n > 0 ? n : 0);
   }, 0);

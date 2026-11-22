@@ -22,12 +22,18 @@ import { ESTIMATE_FORMATS } from "@/lib/doc-style";
  */
 const FILE = "0408_one_materials_line_under_each_task.sql";
 const body = readFileSync(join(process.cwd(), "supabase/migrations", FILE), "utf8");
+/** WHERE public_quote's body lives NOW (cn-v1177): 0414 re-made it as 0408's body plus three deposit
+ *  keys on the quote object (tests/migration-0414.test.ts proves it differs by those additions only),
+ *  so every check below reads the live body; task_parts_total, the column's check and the grant are
+ *  still 0408's own. */
+const LIVE_FILE = "0414_money_ahead.sql";
+const live = readFileSync(join(process.cwd(), "supabase/migrations", LIVE_FILE), "utf8");
 /** A function's text, from its header to the `$$;` that closes it (never the self-check after it). */
-const fnOf = (header: string) => {
-  const at = body.indexOf(header);
-  return body.slice(at, body.indexOf("$$;", at) + 3);
+const fnOf = (header: string, text: string = body) => {
+  const at = text.indexOf(header);
+  return text.slice(at, text.indexOf("$$;", at) + 3);
 };
-const fn = fnOf("create or replace function public.public_quote");
+const fn = fnOf("create or replace function public.public_quote", live);
 const totalFn = fnOf("create or replace function public.task_parts_total");
 /** The SQL with its comments taken out: what the database runs, not what the header says about it. */
 const strip = (s: string) => s.replace(/--[^\n]*/g, "");
@@ -49,9 +55,9 @@ const SECRETS = ["cost", "code", "words", "task_id", "kit_id", "person_id", "rat
 
 describe("public_quote's detail (0408)", () => {
   it("is pinned on the migration that holds the body now", () => {
-    const live = liveFunctionBody("public_quote");
-    expect(live, "no migration creates public.public_quote").not.toBeNull();
-    expect(live!.file, "a later migration re-creates public_quote: re-point this test at it, do not delete it").toBe(FILE);
+    const now = liveFunctionBody("public_quote");
+    expect(now, "no migration creates public.public_quote").not.toBeNull();
+    expect(now!.file, "a later migration re-creates public_quote: re-point this test at it, do not delete it").toBe(LIVE_FILE);
     expect(fn.startsWith("create or replace function public.public_quote(p_token text)\nreturns json language sql stable security definer set search_path = public as $$")).toBe(true);
     expect(detailBranch.length).toBeGreaterThan(1000);
     expect(detailedArm.length).toBeGreaterThan(400);
@@ -93,7 +99,8 @@ describe("public_quote's detail (0408)", () => {
       expect(code, who).not.toContain(who);
     }
     const tables = [...code.matchAll(/\bfrom public\.([a-z_]+)/g)].map((m) => m[1]).sort();
-    expect([...new Set(tables)]).toEqual(["customers", "inquiries", "jobs", "organizations", "quote_line_items", "quotes"]);
+    // invoices since 0414: the deposit_state key asks whether the estimate's deposit request is paid.
+    expect([...new Set(tables)]).toEqual(["customers", "inquiries", "invoices", "jobs", "organizations", "quote_line_items", "quotes"]);
   });
 
   it("'detailed' keeps hours, rate, units and the parts' name / qty / sell so an old line still reads — nothing the company keeps to itself", () => {

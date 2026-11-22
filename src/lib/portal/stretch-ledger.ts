@@ -58,12 +58,20 @@
  * charge and the credit cancel in the same stretch, and the payment reads as what it is, money
  * paid ahead. Its row says "taken off the deposit" or "taken off an earlier bill".
  *
+ * A PAYMENT REQUEST AND THE LINE THAT TAKES IT OFF LAND TOGETHER TOO (cn-v1177). A request (a bill
+ * of kind "prepayment") is money asked for ahead of the work: its own line reads under Payment
+ * Requests, never as work, and the "prepaid_credit" line a later bill carries for it is dated the
+ * day of the request it names (invoice_items.prepaid_invoice_id, a certain link), so the two cancel
+ * in the same stretch and the payment reads as paid ahead. The two pools are never mixed: a draw
+ * credit never takes off a request, and a request credit never takes off a draw.
+ *
  * Every figure is carried in integer cents (and hours in integer hundredths) and only turned into
  * dollars on the way out, so "reconciles" is an equality, not a tolerance.
  */
 import { todayStrInTz } from "@/lib/tz";
 import { SUPPLIES_AND_TAX_LABEL, customerLineWords, isSuppliesAndTaxLine, lumpDrawAmount } from "@/lib/invoice-math";
 import { LINE_GROUP_LABEL, LINE_GROUP_ORDER, isHoursUnit, lineGroup, type LineGroup } from "./line-kind";
+import { DRAW_CREDIT, PREPAID_CREDIT, isCreditSource, isPrepaymentKind } from "@/lib/prepayments";
 
 export type LedgerStretchIn = { id: string; label: string; starts_on: string; ends_on: string; sort?: number | null };
 export type LedgerInvoiceIn = {
@@ -76,8 +84,9 @@ export type LedgerInvoiceIn = {
   amount_paid: number | string | null;
   created_at: string;
   sent_at?: string | null;
-  /** deposit | progress | final | standard. A deposit bill's lines are the Deposit group, and a
-   *  draw credit is dated by the earliest deposit bill (MR5). */
+  /** deposit | progress | final | standard | prepayment. A deposit bill's lines are the Deposit
+   *  group, and a draw credit is dated by the earliest deposit bill (MR5). A prepayment's lines are
+   *  Payment Requests, and its credit is dated by the request it names (cn-v1177). */
   invoice_kind?: string | null;
 };
 export type LedgerEntryIn = { person: string | null; clock_in: string; clock_out: string | null; lunch_minutes: number | null };
@@ -93,6 +102,9 @@ export type LedgerLineIn = {
   import_source: string | null;
   /** What the line was said to be (0342; absent before 0342 is applied): read first by lineGroup. */
   line_kind?: string | null;
+  /** A "prepaid_credit" line's request (0414). Absent from a read that does not carry it: the credit
+   *  is then dated by the requests in the order they were taken off (oldest first). */
+  prepaid_invoice_id?: string | null;
   entries?: LedgerEntryIn[] | null;
   sources?: LedgerSourceIn[] | null;
 };
@@ -120,8 +132,9 @@ export type ItemRow = {
   invoiceNumber: string | null;
   /** "purchase": the day it was bought. "bill": it has no day of its own, so it carries its bill's.
    *  "deposit": a credit taken off the deposit, dated with the deposit bill it takes off (MR5).
-   *  "draw": a credit taken off an earlier fixed or percent payment request, dated with that bill. */
-  datedBy: "purchase" | "bill" | "deposit" | "draw";
+   *  "draw": a credit taken off an earlier fixed or percent payment request, dated with that bill.
+   *  "request": a payment request (cn-v1177) taken off this bill, dated with the request. */
+  datedBy: "purchase" | "bill" | "deposit" | "draw" | "request";
 };
 /** One group's figure at one level (a day, a stretch, the job). */
 export type SplitLine = { group: LineGroup; label: string; amount: number };
@@ -322,6 +335,7 @@ export function buildJobLedger(input: LedgerInput): JobLedger {
   );
 
   const creditPieces = placeDrawCredits(invoices, lines, invDay);
+  for (const [ln, pieces] of placePrepaidCredits(invoices, lines, invDay)) creditPieces.set(ln, pieces);
   for (const ln of lines) {
     const inv = invById.get(ln.invoice_id);
     if (!inv) continue; // a line of a bill this customer is not shown
@@ -373,7 +387,7 @@ export function buildJobLedger(input: LedgerInput): JobLedger {
       }
       if (date) datedBy = "purchase";
     }
-    const kind: ItemKind = src === "costs" || group === "materials" ? "material" : src === "draw_credit" ? "credit" : "charge";
+    const kind: ItemKind = src === "costs" || group === "materials" ? "material" : isCreditSource(src) ? "credit" : "charge";
     const pieces = creditPieces.get(ln);
     if (pieces) {
       // A credit is listed once per bill it takes off, each piece on that bill's day (MR5).
@@ -587,13 +601,15 @@ function placeDrawCredits(
   const order = (a: LedgerInvoiceIn, b: LedgerInvoiceIn) =>
     invDay(a).localeCompare(invDay(b)) || String(a.created_at).localeCompare(String(b.created_at)) || a.id.localeCompare(b.id);
 
+  // THE DRAW POOL ONLY: a payment request is never a lump a draw credit takes off (cn-v1177).
   const lumps = invoices
+    .filter((inv) => !isPrepaymentKind(inv.invoice_kind))
     .map((inv) => ({ inv, left: toCents(lumpDrawAmount({ status: inv.status, invoice_kind: inv.invoice_kind, items: byInv.get(inv.id) ?? [] })) }))
     .filter((x) => x.left > 0)
     .sort((a, b) => order(a.inv, b.inv));
 
   const credits = lines
-    .filter((ln) => ln.import_source === "draw_credit" && invById.has(ln.invoice_id))
+    .filter((ln) => ln.import_source === DRAW_CREDIT && invById.has(ln.invoice_id))
     .sort((a, b) => order(invById.get(a.invoice_id)!, invById.get(b.invoice_id)!) || (a.sort_order ?? 0) - (b.sort_order ?? 0));
 
   const out = new Map<LedgerLineIn, CreditPiece[]>();
@@ -612,6 +628,72 @@ function placeDrawCredits(
       const last = pieces[pieces.length - 1];
       if (last && last.date === date && last.datedBy === datedBy) last.cents -= take;
       else pieces.push({ cents: -take, date, datedBy });
+    }
+    const rest = L - pieces.reduce((s, p) => s + p.cents, 0);
+    if (rest !== 0 || pieces.length === 0) pieces.push({ cents: rest, date: null, datedBy: "bill" });
+    out.set(ln, pieces);
+  }
+  return out;
+}
+
+/**
+ * WHICH PAYMENT REQUEST EACH "prepaid_credit" LINE TAKES OFF (cn-v1177), so the request and its
+ * credit cancel in the same stretch. The line names its request (prepaid_invoice_id): that request's
+ * day, when the customer is shown that request. A read that does not carry the name falls back to
+ * the order the office's sync takes requests off in (lib/prepayments: oldest request first, the
+ * credits in the order of their bills), each piece on its request's day. Whatever is left (a request
+ * the customer is not shown) stays on the credit's own bill's day. Pieces are integer cents and sum
+ * to the line.
+ */
+function placePrepaidCredits(
+  invoices: LedgerInvoiceIn[],
+  lines: LedgerLineIn[],
+  invDay: (inv: LedgerInvoiceIn | undefined) => string,
+): Map<LedgerLineIn, CreditPiece[]> {
+  const invById = new Map(invoices.map((i) => [i.id, i] as const));
+  const out = new Map<LedgerLineIn, CreditPiece[]>();
+  const credits = lines.filter((ln) => ln.import_source === PREPAID_CREDIT && invById.has(ln.invoice_id));
+  if (!credits.length) return out;
+  const live = (i: LedgerInvoiceIn) => i.status !== "void" && i.status !== "draft";
+  const byCreated = (a: LedgerInvoiceIn, b: LedgerInvoiceIn) =>
+    String(a.created_at).localeCompare(String(b.created_at)) || String(a.invoice_number ?? a.id).localeCompare(String(b.invoice_number ?? b.id));
+  const asked = new Map<string, number>();
+  for (const ln of lines) {
+    const inv = invById.get(ln.invoice_id);
+    if (inv && isPrepaymentKind(inv.invoice_kind)) asked.set(inv.id, (asked.get(inv.id) ?? 0) + toCents(ln.line_total));
+  }
+  const queue = invoices
+    .filter((i) => isPrepaymentKind(i.invoice_kind) && live(i))
+    .sort(byCreated)
+    .map((inv) => ({ inv, left: Math.max(0, asked.get(inv.id) ?? 0) }));
+  // A named credit spends its own request first, so the queue only hands out what is left.
+  for (const ln of credits) {
+    const req = ln.prepaid_invoice_id ? queue.find((q) => q.inv.id === ln.prepaid_invoice_id) : undefined;
+    if (req) req.left = Math.max(0, req.left - Math.max(0, -toCents(ln.line_total)));
+  }
+  const ordered = [...credits].sort(
+    (a, b) => byCreated(invById.get(a.invoice_id)!, invById.get(b.invoice_id)!) || (a.sort_order ?? 0) - (b.sort_order ?? 0),
+  );
+  for (const ln of ordered) {
+    const L = toCents(ln.line_total);
+    const named = ln.prepaid_invoice_id ? invById.get(ln.prepaid_invoice_id) : undefined;
+    if (ln.prepaid_invoice_id) {
+      // A certain link: the request's day when it is shown, else the credit's own bill's day.
+      out.set(ln, [named && isPrepaymentKind(named.invoice_kind) ? { cents: L, date: invDay(named), datedBy: "request" } : { cents: L, date: null, datedBy: "bill" }]);
+      continue;
+    }
+    let owed = Math.max(0, -L);
+    const pieces: CreditPiece[] = [];
+    for (const q of queue) {
+      if (owed === 0) break;
+      if (q.left === 0) continue;
+      const take = Math.min(q.left, owed);
+      q.left -= take;
+      owed -= take;
+      const date = invDay(q.inv);
+      const last = pieces[pieces.length - 1];
+      if (last && last.date === date) last.cents -= take;
+      else pieces.push({ cents: -take, date, datedBy: "request" });
     }
     const rest = L - pieces.reduce((s, p) => s + p.cents, 0);
     if (rest !== 0 || pieces.length === 0) pieces.push({ cents: rest, date: null, datedBy: "bill" });

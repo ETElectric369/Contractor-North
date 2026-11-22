@@ -56,6 +56,8 @@ import { NEW_INTAKE_COUNT_CAP, leadStage, loadNewIntake, standingFor, type LeadS
 import { KIND_WORDS, PROGRESS_WORDS, WORK_WORDS, circuitName, sizeWords, sourceWords, spaceMap, titleWords } from "@/lib/panel/model";
 import { spaceWords } from "@/lib/panel/directory";
 import type { JobCircuit, JobPanel } from "@/lib/types";
+import { isPrepaymentKind } from "@/lib/prepayments";
+import { PAYMENT_REQUEST_LABEL } from "@/lib/portal/line-kind";
 
 /**
  * Read-only data tools for the in-app assistant.
@@ -752,6 +754,10 @@ function embedName(rel: any): string | null {
 }
 
 const money = (n: any) => Math.round(Number(n ?? 0) * 100) / 100;
+/** WHAT A BILL IS, as the assistant reads it out (cn-v1177): a payment request by its one word
+ *  (PAYMENT_REQUEST_LABEL), a draw by its stage, anything else an invoice. */
+const invoiceKindRead = (k: unknown): string =>
+  isPrepaymentKind(String(k ?? "")) ? PAYMENT_REQUEST_LABEL : k === "deposit" ? "Deposit" : k === "progress" ? "Progress Payment" : k === "final" ? "Final Payment" : "Invoice";
 
 /** Compute [startISO, endISO) for a named window, in UTC (matches the calendar).
  *  `weekStart` is the company's own (Settings → Scheduling): "this week" has to mean the same seven
@@ -914,7 +920,7 @@ export async function runDataTool(
         const today = await orgTodayStr(supabase);
         let q = supabase
           .from("invoices")
-          .select("id, invoice_number, status, total, amount_paid, due_date, created_at, customers(name)")
+          .select("id, invoice_number, invoice_kind, status, total, amount_paid, due_date, created_at, customers(name)")
           .order("created_at", { ascending: false })
           .limit(40);
         if (input.customer_id) q = q.eq("customer_id", String(input.customer_id)); // narrow to one customer's invoices
@@ -927,6 +933,8 @@ export async function runDataTool(
           return {
             id: r.id, // pass to get_invoice / payment.record
             invoice: r.invoice_number,
+            // What the bill is (cn-v1177): a payment request is money asked for ahead of the work.
+            kind: invoiceKindRead(r.invoice_kind),
             status: r.status,
             total,
             paid,
@@ -2008,7 +2016,7 @@ export async function runDataTool(
         const { data: inv, error } = await supabase
           .from("invoices")
           .select(
-            "id, invoice_number, status, subtotal, tax, total, amount_paid, due_date, customers(name), invoice_items(id, description, quantity, unit, unit_price)",
+            "id, invoice_number, invoice_kind, status, subtotal, tax, total, amount_paid, due_date, customers(name), invoice_items(id, description, quantity, unit, unit_price)",
           )
           .eq("id", invId)
           .maybeSingle();
@@ -2023,6 +2031,7 @@ export async function runDataTool(
           found: true,
           invoice_id: inv.id, // pass to invoice.addItem / payment.record
           invoice: inv.invoice_number,
+          kind: invoiceKindRead((inv as any).invoice_kind),
           status: inv.status,
           customer: embedName(inv.customers),
           subtotal: money(inv.subtotal),

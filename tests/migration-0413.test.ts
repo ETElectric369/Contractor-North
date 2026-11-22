@@ -200,9 +200,8 @@ describe("migration 0413: the customer's own Accept finds the right customer, an
   const columns = sql.slice(at(COLUMNS), at(FUNCTION));
   const self = sql.slice(at(SELF));
 
-  it("is the newest migration, the one 0413, under the house timeouts, with no transaction of its own", () => {
+  it("is the one 0413 (what sits past it is the newest migration's own test: migration-0414.test.ts), under the house timeouts, with no transaction of its own", () => {
     expect(names.filter((n) => n.startsWith("0413_"))).toEqual(["0413_who_said_yes.sql"]);
-    expect(names[names.length - 1]).toBe("0413_who_said_yes.sql");
     expect(code).toContain("set local lock_timeout = '3s';");
     expect(code).toContain("set local statement_timeout = '15s';");
     expect(code).not.toMatch(/^\s*(begin|commit|rollback|start transaction)\b[^;\n]*;/im);

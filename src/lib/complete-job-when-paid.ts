@@ -5,6 +5,7 @@ import { BILLING_STEP_WRONG_COMPANY, finishBillingStep, paidDoorVerdict, type Bi
 import { jobSaidLabel } from "@/lib/job-pick-label";
 import { reportError } from "@/lib/observe";
 import { closeJobTasks, type CloseJobTasks } from "@/lib/job-tasks";
+import { isPrepaymentKind } from "@/lib/prepayments";
 
 /**
  * PAID COMPLETES THE JOB (209451e1, the money half, 2026-09-30).
@@ -129,6 +130,9 @@ export async function completeJobWhenPaid(
     if (!row) return { completed: false, why: "invoice not found" };
     if (row.status !== "paid") return { completed: false, why: `the invoice is ${row.status ?? "not paid"}, not paid` };
     const kind = row.invoice_kind ?? "standard";
+    // A PAID PAYMENT REQUEST (cn-v1177) is money asked for ahead of the work, never the end of it, and
+    // never a draw: it has its own kind and its own words.
+    if (isPrepaymentKind(kind)) return { completed: false, why: "a paid payment request is money ahead of the work, not its end" };
     if (kind !== "standard") return { completed: false, why: `a paid ${kind} draw is a stage of the job, not its end` };
     const jobId = row.job_id ?? null;
     if (!jobId) return { completed: false, why: "the invoice isn't on a job" };

@@ -43,6 +43,8 @@ import { addCaptureItemsToJobList, canonicalMaterialListId } from "../materials/
 import { reportError } from "@/lib/observe";
 import { visitWork } from "@/lib/appointments/visit-work";
 import { jobShort } from "@/lib/appointments/visit-start";
+import { isNotSoldOutcome, isWonVisitType, type WonSheet } from "@/lib/appointments/won-sheet";
+import { readWonSheet } from "./won-actions";
 import { narrowJobRows, visitJobArms } from "@/lib/appointments/narrow-jobs";
 import { callerLang } from "@/lib/lang-of";
 import { fillSlots } from "@/lib/lang-words";
@@ -1783,7 +1785,16 @@ export async function rescheduleAppointment(
 export async function createJobFromAppointment(
   appointmentId: string,
   opts?: { asSale?: boolean; billingType?: "tm" | "fixed" },
-): Promise<Result & { note?: string; /** The visit already had a job (maybe one made a moment ago on another device); `id` is that job. */ already?: boolean }> {
+): Promise<
+  Result & {
+    note?: string;
+    /** The visit already had a job (maybe one made a moment ago on another device); `id` is that job. */
+    already?: boolean;
+    /** cn-v1177 (pick 3): the standing estimate this visit's job now carries, said in one line
+     *  ("E-900 is now this job's estimate."), in the caller's language. */
+    tied?: string;
+  }
+> {
   const asSale = opts?.asSale === true;
   const saleKind = asSale && (opts?.billingType === "tm" || opts?.billingType === "fixed") ? opts.billingType : null;
   const ctx = await requireStaff();
@@ -1799,11 +1810,36 @@ export async function createJobFromAppointment(
     // The rows typed on site (`capture`, cn-v1069) and the sheet's tasks are read by visitWork below.
     // type + outcome (cn-v1176, E1): a sales visit that becomes a job is WON, stamped on the claim below.
     // status: the sale's start marks a booked inspection Done (asSale).
-    .select("id, title, type, outcome, status, customer_id, location, unit, city, state, zip, job_id, starts_at, ends_at, planned_minutes, inquiry_id, notes")
+    // capture_quote (cn-v1177): the estimate written up from this visit (its capture backlink), the one
+    // a sales visit's job is tied to below.
+    .select("id, title, type, outcome, status, customer_id, location, unit, city, state, zip, job_id, capture_quote:capture->>quote_id, starts_at, ends_at, planned_minutes, inquiry_id, notes")
     .eq("id", appointmentId)
     .maybeSingle();
   if (!appt) return { ok: false, error: await ws.say("ag_srv_apptNotFound") };
   if (appt.job_id) return { ok: true, id: appt.job_id, already: true };
+
+  /* A SALE'S OLDER DOOR MAY NOT START A SECOND JOB (cn-v1177, Erik's pick 3). Start a Job from This Visit
+     and Convert to Job made a job with no look at the estimate the visit was priced on, and that
+     estimate's acceptance then made a second job for the same sale. On a sales visit (isWonVisitType),
+     not the Won sheet's own start (asSale asks the same question before it calls here):
+       · an ACCEPTED estimate behind the visit or its lead is refused exactly as the Won sheet's start
+         refuses it: the Won sheet's own decision is CALLED (readWonSheet), never copied;
+       · otherwise the standing estimate is TIED to the new job after the claim lands (tieStandingEstimate,
+         below), so its acceptance at either door reuses this job. A visit marked Not Sold or cancelled is
+         not a sale being started and is left as it always was. */
+  const visitTypeNow = (appt as { type?: string | null }).type ?? null;
+  const saleVisit =
+    !asSale &&
+    isWonVisitType(visitTypeNow) &&
+    (appt as { status?: string | null }).status !== "cancelled" &&
+    !isNotSoldOutcome((appt as { outcome?: string | null }).outcome);
+  if (saleVisit) {
+    const sheet = await readWonSheet(appointmentId);
+    // A failed read is never "no estimate": nothing is made, and the sheet's own words say why.
+    if (!sheet.ok) return { ok: false, error: sheet.error };
+    const refusal = await acceptedSaleRefusal(sheet, ws);
+    if (refusal) return { ok: false, error: refusal };
+  }
   // THE SLOT THE JOB TAKES: the visit's own, except on a sale, where the job waits for a day.
   const slotStart: string | null = asSale ? null : (appt.starts_at ?? null);
 
@@ -1985,6 +2021,16 @@ export async function createJobFromAppointment(
     ? undefined
     : await ws.say("ag_srv_visitGoneMidJob");
 
+  // THE STANDING ESTIMATE IS TIED TO THE JOB THE CLAIM JUST GAVE THIS VISIT (cn-v1177, pick 3).
+  const tie = saleVisit && absorbed?.length
+    ? await tieStandingEstimate(supabase, ws, {
+        orgId: ctx.orgId,
+        jobId: job.id,
+        behindId: (appt as { capture_quote?: string | null }).capture_quote ?? null,
+        inquiryId,
+      })
+    : null;
+
   /* A THREE-DAY VISIT CONVERTS TO A THREE-DAY JOB. scheduled_end above is clamped to one working
      day (it is a wall-clock pair), so without segments a Mon–Wed visit became a Monday job — and
      Tuesday and Wednesday, which the appointment had rightly marked busy, sprang free the moment
@@ -2069,7 +2115,104 @@ export async function createJobFromAppointment(
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
   revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
   const note = [absorbNote, ...work.notes, tasksNote, materialsNote].concat(doneNote ?? []).filter(Boolean).join(" ");
-  return { ok: true, id: job.id, ...(note ? { note } : {}) };
+  // An estimate that could not be tied (several open, a lost read, a refused write) is said with the rest.
+  const said = [note, tie?.warning].filter(Boolean).join(" ");
+  return { ok: true, id: job.id, ...(said ? { note: said } : {}), ...(tie?.tied ? { tied: tie.tied } : {}) };
+}
+
+/** The Won sheet's start refuses an accepted estimate in these words (start-job-actions startJobFromSale);
+ *  the older door says the same for the same decision. null: nothing accepted stands, the start goes on. */
+async function acceptedSaleRefusal(sheet: WonSheet, ws: Said): Promise<string | null> {
+  if (!sheet.ok) return sheet.error;
+  const nothing = await ws.say("vp_nothingWasStarted");
+  if (sheet.state === "finish") {
+    return ws.say("vp_saleEstimateAccepted", { estimate: sheet.quote.number ?? (await ws.say("vp_btn_theEstimate")) });
+  }
+  if (sheet.state === "refer") {
+    const tie = sheet.job.number ? await ws.say("vi_btn_wonTieTo", { j: sheet.job.number }) : await ws.say("vi_btn_wonTieToTheJob");
+    return `${await ws.say("qs_wonRefer", { quote: sheet.quote.number ?? "", job: sheet.job.number ?? "", tie })} ${nothing}`;
+  }
+  // An accepted estimate behind the visit already has its job (the visit itself has none): that job is the sale's.
+  if (sheet.state === "has_job") return `${await ws.say("qs_wonHasJob")} ${nothing}`;
+  return null;
+}
+
+/**
+ * WHICH ESTIMATE A SALES VISIT'S NEW JOB CARRIES, AND THE TIE (cn-v1177, pick 3). By a certain link only,
+ * never by a name:
+ *   1. the estimate written up from THIS visit (its capture backlink): tied when it is a draft or sent
+ *      and has no job. One that already has a job, or is not draft or sent, ends the search: the
+ *      visit's own estimate is known, and a lead's other estimate is not put in its place.
+ *   2. no estimate from this visit: the lead's live estimates (draft or sent, no job). Exactly one is
+ *      tied; more than one, none is, and the warning says how many and which.
+ * THE TIE is compare-and-set: job_id is written only where it is still empty, in the caller's company,
+ * and the row is selected back (the silent-write law: zero rows is not a tie). An estimate that already
+ * has a job is never touched. A failed read or write is said, never treated as "no estimate".
+ */
+async function tieStandingEstimate(
+  supabase: SupabaseClient,
+  ws: Said,
+  who: { orgId: string | null; jobId: string; behindId: string | null; inquiryId: string | null },
+): Promise<{ tied?: string; warning?: string } | null> {
+  type Q = { id: string; quote_number: string | null; status: string | null; job_id: string | null };
+  const live = (q: Q) => (q.status === "draft" || q.status === "sent") && !q.job_id;
+  let pick: Q | null = null;
+  try {
+    if (who.behindId) {
+      let read = supabase.from("quotes").select("id, quote_number, status, job_id").eq("id", who.behindId);
+      if (who.orgId) read = read.eq("org_id", who.orgId);
+      const { data, error } = await read.maybeSingle();
+      if (error) throw error;
+      const behind = (data as Q | null) ?? null;
+      if (behind && (behind.status === "draft" || behind.status === "sent")) {
+        if (!live(behind)) return null; // the visit's own estimate already has a job: left exactly as it is
+        pick = behind;
+      }
+    }
+    if (!pick && who.inquiryId) {
+      let read = supabase.from("quotes").select("id, quote_number, status, job_id").eq("inquiry_id", who.inquiryId);
+      if (who.orgId) read = read.eq("org_id", who.orgId);
+      const { data, error } = await read
+        .in("status", ["draft", "sent"])
+        .is("job_id", null)
+        .order("created_at", { ascending: true })
+        .limit(25);
+      if (error) throw error;
+      const open = ((data ?? []) as Q[]).filter(live);
+      if (open.length > 1) {
+        const job = await jobNumberOf(supabase, who.jobId, ws);
+        return {
+          warning: await ws.say("ag_srv_estimatesNotTied", {
+            n: open.length,
+            list: open.map((q) => q.quote_number ?? "—").join(", "),
+            job,
+          }),
+        };
+      }
+      pick = open[0] ?? null;
+    }
+  } catch (e) {
+    reportError("createJobFromAppointment:standingEstimate", e, { jobId: who.jobId });
+    return { warning: await ws.say("ag_srv_estimateTieUnread", { job: await jobNumberOf(supabase, who.jobId, ws) }) };
+  }
+  if (!pick) return null;
+  const estimate = pick.quote_number ?? (await ws.say("vp_btn_theEstimate"));
+  let write = supabase.from("quotes").update({ job_id: who.jobId, updated_at: new Date().toISOString() }).eq("id", pick.id).is("job_id", null);
+  if (who.orgId) write = write.eq("org_id", who.orgId);
+  const { data: tied, error: tieErr } = await write.select("id");
+  if (tieErr || !tied?.length) {
+    if (tieErr) reportError("createJobFromAppointment:tie", tieErr, { jobId: who.jobId, quoteId: pick.id });
+    return { warning: await ws.say("ag_srv_estimateNotTied", { estimate, job: await jobNumberOf(supabase, who.jobId, ws) }) };
+  }
+  revalidatePath(`/quotes/${pick.id}`);
+  revalidatePath("/quotes");
+  return { tied: await ws.say("ag_srv_estimateTied", { estimate }) };
+}
+
+/** The new job's number for a sentence ("J-900"), or the words for "this job" when it can't be read. */
+async function jobNumberOf(supabase: SupabaseClient, jobId: string, ws: Said): Promise<string> {
+  const { data } = await supabase.from("jobs").select("job_number").eq("id", jobId).maybeSingle();
+  return ((data as { job_number?: string | null } | null)?.job_number ?? "").trim() || (await ws.say("ag_srv_thisJob"));
 }
 
 export async function deleteAppointment(id: string): Promise<Result> {

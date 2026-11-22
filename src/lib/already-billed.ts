@@ -29,6 +29,7 @@
 
 import { lumpLineRule, isHoursUnit } from "@/lib/invoice-math";
 import { countsAsWorkCompleted, lineGroup } from "@/lib/portal/line-kind";
+import { isCreditSource, isPrepaymentKind } from "@/lib/prepayments";
 import { formatCurrency } from "@/lib/utils";
 import { todayStrInTz } from "@/lib/tz";
 import { billableBillCost, type BillLine } from "@/lib/bill-itemisation";
@@ -73,9 +74,11 @@ export type AbInvoice = {
 const cents = (n: number) => Math.round(n * 100) / 100;
 
 /** A draft is still open (Add To puts the cost there); a void bills nothing; a deposit bills a part
- *  of the job up front, never this cost. */
+ *  of the job up front, never this cost; nor does a payment request (cn-v1177), money asked for ahead
+ *  of the work (0364's mark_already_billed refuses its line as a set part, not work item by item). */
 export function eligibleInvoice(inv: Pick<AbInvoice, "status" | "invoice_kind">): boolean {
-  return inv.status !== "draft" && inv.status !== "void" && (inv.invoice_kind ?? "standard") !== "deposit";
+  const kind = inv.invoice_kind ?? "standard";
+  return inv.status !== "draft" && inv.status !== "void" && kind !== "deposit" && !isPrepaymentKind(kind);
 }
 
 /**
@@ -112,7 +115,7 @@ export function eligibleLines(inv: AbInvoice, target: { kind: AlreadyBilledKind;
   const want = matchingGroup(target.kind);
   const ok = inv.lines.filter((l) => {
     const total = Number(l.line_total) || 0;
-    if (l.import_source === "draw_credit" || isLump(l) || total === 0) return false;
+    if (isCreditSource(l.import_source) || isLump(l) || total === 0) return false;
     if (l.import_source != null && l.edited !== true) return false;
     if (target.negative) {
       const g = lineGroup(l, inv.invoice_kind);

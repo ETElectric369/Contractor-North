@@ -798,7 +798,8 @@ async function buildActionItems(ctx: {
     // The kind rides along: a deposit or progress draw is money for work NOT done yet, so the two
     // needs-a-day feeders read a narrower set.
     isStaff
-      ? supabase.from("invoices").select("id, job_id, invoice_kind, status, created_at").not("job_id", "is", null).not("status", "in", "(draft,void)").limit(5000)
+      ? // A payment request (cn-v1177) is money asked for ahead of the work, never real billing.
+        supabase.from("invoices").select("id, job_id, invoice_kind, status, created_at").not("job_id", "is", null).not("status", "in", "(draft,void)").neq("invoice_kind", "prepayment").limit(5000)
       : empty,
     doneP,
     // ── Estimates started and never sent ───────────────────────────────────────

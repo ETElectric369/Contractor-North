@@ -11,6 +11,45 @@
 import { formatCurrency } from "./utils";
 import { isDrawKind } from "./invoice-math";
 import type { CardDoor } from "./actuals-draw";
+import { say, type Words } from "./lang-words";
+import type { Lang } from "./locale";
+
+/**
+ * A JOB'S PAYMENT REQUESTS AT ITS FINISH (cn-v1177; lib/finish-bills-first paidAheadAtFinish builds it
+ * from readPrepaymentStates). `left`: what the requests still take off a bill, paid or not.
+ * `moneyLeft` / `unused`: money PAID ahead that no bill has used, per request, so the words can name
+ * the bill its refund door is on.
+ */
+export type PaidAheadAtFinish = {
+  left: number;
+  moneyLeft: number;
+  unused: { number: string | null; amount: number }[];
+};
+
+/** "INV-900", "INV-900 and INV-901", "INV-900, INV-901 and INV-902"; a request with no number yet is
+ *  "the payment request". */
+function billList(nums: readonly (string | null)[], and: string): string {
+  const named = nums.map((n) => (n ?? "").trim() || "the payment request");
+  if (named.length <= 1) return named[0] ?? "the payment request";
+  return `${named.slice(0, -1).join(", ")} ${and} ${named[named.length - 1]}`;
+}
+
+/**
+ * MONEY IN HAND THAT NO BILL USED, ON A JOB THAT IS ENDING (cn-v1177). Erik's deposit or materials
+ * payment came in ahead of the work; when the job finishes with some of it never taken off a bill,
+ * the money is the customer's until it is used or given back, so the sentence says how much and names
+ * the one door: Refund on that request's own bill. null when there is none. English inline (a lib
+ * reads no catalog); a Spanish reader's caller hands its translator (jb_finPaidAheadUnused).
+ */
+export function paidAheadUnusedWords(p: PaidAheadAtFinish | null | undefined, lang?: Lang | string | null, words?: Words): string | null {
+  if (!p || !(p.moneyLeft > 0.005)) return null;
+  const money = formatCurrency(p.moneyLeft);
+  const from = billList(
+    p.unused.map((u) => u.number),
+    lang === "es" ? "y" : "and",
+  );
+  return say(lang, words, "jb_finPaidAheadUnused", `${money} was paid ahead and no bill used it. Refund it from ${from}.`, { money, from });
+}
 
 export type NotBilled = {
   hours: number;
@@ -101,6 +140,8 @@ export function finalFinishWords(
       doc: null,
     };
   }
+  // "covered" is the DRAW pool's alone (cn-v1177): a payment request never covers the work, the bill
+  // is built and the request comes off it.
   if (door.kind === "covered") return { line: `${depositCoversWords(work, lump)} Finishing marks the job complete.`, blocked: false, builds: false, doc: null };
   if (door.kind === "add") {
     const asFinal = !!draft && isDrawKind(draft.kind);

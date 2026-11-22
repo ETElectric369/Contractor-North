@@ -1,4 +1,6 @@
 "use server";
+import { recalcInvoice } from "@/lib/invoice-recalc";
+import { PREPAID_CREDIT, isPrepaymentKind } from "@/lib/prepayments";
 import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
@@ -232,10 +234,19 @@ export async function createProgressInvoice(
   // the job page + modal so the "% of remaining" base can't diverge by an outstanding draft).
   const [{ data: quotes }, { data: invoices }] = await Promise.all([
     supabase.from("quotes").select("total, status, created_at").eq("job_id", jobId),
-    supabase.from("invoices").select("total, status").eq("job_id", jobId),
+    supabase.from("invoices").select("total, status, invoice_kind, invoice_items(line_total, import_source)").eq("job_id", jobId),
   ]);
   const estimate = contractTotalFromQuotes((quotes ?? []) as any);
-  const billed = (invoices ?? []).reduce((s: number, i: any) => (i.status !== "void" && i.status !== "draft" ? s + Number(i.total ?? 0) : s), 0);
+  // THE WORK BILLED, not the money asked ahead (cn-v1177): a payment request is not part of it (its
+  // money comes off this draw by itself, through the recalc below), and a bill that took one off is
+  // counted at its work, its "prepaid_credit" lines added back. Counted once, never twice.
+  const billed = (invoices ?? []).reduce((s: number, i: any) => {
+    if (i.status === "void" || i.status === "draft" || isPrepaymentKind(i.invoice_kind)) return s;
+    const tookOff = ((i.invoice_items ?? []) as { line_total?: unknown; import_source?: string | null }[])
+      .filter((l) => l.import_source === PREPAID_CREDIT)
+      .reduce((t, l) => t + Math.abs(Number(l.line_total) || 0), 0);
+    return s + Number(i.total ?? 0) + tookOff;
+  }, 0);
   const remaining = Math.max(0, estimate - billed);
 
   const titleFor: Record<string, string> = { deposit: "Deposit", progress: "Progress payment", final: "Final invoice" };
@@ -287,6 +298,12 @@ export async function createProgressInvoice(
     sort_order: 0,
   });
   if (liErr) return { ok: false, error: liErr.message };
+  // EVERY BILL ON A JOB IS BORN THROUGH THE RECALC (cn-v1177): it is where the job's payment requests
+  // come off (lib/invoice-recalc runs the sync on a draft), so this draw never sits beside one
+  // un-netted. A recalc that did not land is said: the draft stands with the figure it was given.
+  if (!(await recalcInvoice(supabase, inv.id))) {
+    return { ok: false, error: "The draw was started but its total couldn't be brought up to date. Open it on Billing and check it before sending." };
+  }
 
   revalidatePath(`/jobs/${jobId}`);
   revalidatePath("/billing");

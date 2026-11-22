@@ -430,6 +430,10 @@ export const words: WordCatalog = {
     jb_finishClosesTasksOne: "1 task is still open on this job. Finishing checks it off.",
     jb_finishClosesTasksMany: "{n} tasks are still open on this job. Finishing checks them off.",
     jb_finishTasksUnread: "Couldn't read this job's tasks just now. Finishing still checks off any left open.",
+    // ── cn-v1177: money asked for ahead at the finish (lib/finish-job-words, said in the reader's language) ──
+    jb_finPaidAheadUnused: "{money} was paid ahead and no bill used it. Refund it from {from}.",
+    jb_deleteHasRequests: "This job has payment requests on it, and a bill on the books stays with its job, so set the job to Cancelled instead of deleting it.",
+    jb_deleteRequestsUnread: "Couldn't check this job's payment requests just now, so nothing was deleted. Try again.",
   },
   es: {
     // ── shared ─────────────────────────────────────────────────────────────────────────────────
@@ -813,5 +817,9 @@ export const words: WordCatalog = {
     jb_finishClosesTasksOne: "1 tarea sigue abierta en este trabajo. Al terminarlo, queda marcada como hecha.",
     jb_finishClosesTasksMany: "{n} tareas siguen abiertas en este trabajo. Al terminarlo, quedan marcadas como hechas.",
     jb_finishTasksUnread: "No se pudieron leer las tareas de este trabajo ahora. Al terminarlo, igual se marcan como hechas las que sigan abiertas.",
+    // ── cn-v1177: el dinero pedido por adelantado al terminar (lib/finish-job-words) ──
+    jb_finPaidAheadUnused: "{money} se pagó por adelantado y ninguna factura lo usó. Reembólsalo desde {from}.",
+    jb_deleteHasRequests: "Este trabajo tiene solicitudes de pago, y una factura registrada se queda con su trabajo, así que cambia el trabajo a Cancelado en lugar de borrarlo.",
+    jb_deleteRequestsUnread: "No se pudieron revisar las solicitudes de pago de este trabajo en este momento, así que no se borró nada. Inténtalo de nuevo.",
   },
 };

@@ -2,6 +2,8 @@ import "server-only";
 import { recalcTotals } from "@/lib/invoice-math";
 import { bustDocPdf } from "@/lib/pdf-cache";
 import { reportError } from "@/lib/observe";
+import { PREPAID_CREDIT, isPrepaymentKind } from "@/lib/prepayments";
+import { syncPrepaidCredit } from "@/lib/payment-request";
 
 /** Recompute an invoice's totals from items + payments, and auto-advance paid status.
  *  Applied customer credits (disposition "credit", still open) count toward amount_paid
@@ -28,8 +30,26 @@ import { reportError } from "@/lib/observe";
  * their hands must check this.
  */
 export async function recalcInvoice(supabase: any, invoiceId: string): Promise<boolean> {
+  /**
+   * THE JOB'S PAYMENT REQUESTS COME OFF FIRST (cn-v1177). A DRAFT bill on a job that is not itself a
+   * payment request has its "prepaid_credit" lines re-resolved (lib/payment-request syncPrepaidCredit)
+   * BEFORE its money is read, so the totals below are the totals of the bill as it will go out. A
+   * sync that could not be done writes nothing here either: the bill keeps the figures it had, and
+   * the caller is told (false), because a send must never go out on a credit it could not check.
+   * A sent bill, a bill with no job and a request itself are left as they are (the sync says true).
+   */
+  const head = await supabase.from("invoices").select("status, job_id, invoice_kind").eq("id", invoiceId).maybeSingle();
+  if (head.error || !head.data) {
+    reportError("recalcInvoice:read", head.error ?? new Error("invoice not found"), { invoiceId });
+    return false;
+  }
+  const h = head.data as { status?: string | null; job_id?: string | null; invoice_kind?: string | null };
+  if (String(h.status ?? "") === "draft" && h.job_id && !isPrepaymentKind(h.invoice_kind)) {
+    if (!(await syncPrepaidCredit(supabase, invoiceId))) return false;
+  }
+
   const [itemsRes, paysRes, creditsRes, invRes] = await Promise.all([
-    supabase.from("invoice_items").select("line_total").eq("invoice_id", invoiceId),
+    supabase.from("invoice_items").select("line_total, import_source").eq("invoice_id", invoiceId),
     supabase.from("payments").select("amount").eq("invoice_id", invoiceId),
     supabase.from("customer_credits").select("amount").eq("invoice_id", invoiceId).eq("disposition", "credit").eq("status", "open"),
     supabase.from("invoices").select("tax_rate, status").eq("id", invoiceId).single(),
@@ -54,14 +74,19 @@ export async function recalcInvoice(supabase: any, invoiceId: string): Promise<b
   const credits = creditsRes.data;
   const inv = invRes.data;
 
+  // A payment request taken off this bill is in its subtotal and never in its tax base (THE RECORD,
+  // cn-v1177): those lines ride in their own argument. Every other line is where it always was.
+  const taxedLines = (items ?? []).filter((i: any) => i?.import_source !== PREPAID_CREDIT);
+  const untaxedLines = (items ?? []).filter((i: any) => i?.import_source === PREPAID_CREDIT);
   const { subtotal, tax, total, amountPaid, status } = recalcTotals(
-    (items ?? []).map((i: any) => Number(i.line_total ?? 0)),
+    taxedLines.map((i: any) => Number(i.line_total ?? 0)),
     (pays ?? []).map((p: any) => Number(p.amount ?? 0)),
     Number(inv?.tax_rate ?? 0),
     inv?.status ?? "draft",
     // Credits ride in their own argument now: they may reduce a balance, never inflate a
     // payment past the total (audit 8 — the compounding overpay-credit bug).
     (credits ?? []).map((c: any) => Number(c.amount ?? 0)),
+    untaxedLines.map((i: any) => Number(i.line_total ?? 0)),
   );
 
   const { error } = await supabase

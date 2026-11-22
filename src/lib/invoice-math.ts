@@ -2,6 +2,7 @@
  *  be unit-tested without a database. The actions do the DB I/O around these.
  *  Inputs come from the DB / JSONB / free-edit UI, so every numeric input is run
  *  through `fin` — a single NaN/Infinity/null must never poison a money total. */
+import { isCreditSource, isPrepaymentKind } from "./prepayments";
 
 /** Coerce to a finite number, else 0. */
 const fin = (x: unknown): number => {
@@ -83,9 +84,20 @@ export function isDrawKind(kind: string | null | undefined): boolean {
 export function subtotalTaxTotal(
   lineTotals: number[],
   taxRate: number,
+  /**
+   * LINES IN THE SUBTOTAL AND NEVER IN THE TAX BASE (cn-v1177): a payment request taken off this bill
+   * (a "prepaid_credit" line). Tax is on the work sold; money asked for ahead of it is not a discount,
+   * so it does not lower the tax. With none (every caller before cn-v1177), the tax base IS the
+   * subtotal and every figure is what it always was, to the cent. A draw's "Less previous billings"
+   * line is NOT passed here: it stays in lineTotals, as it always has.
+   */
+  untaxedLineTotals: number[] = [],
 ): { subtotal: number; tax: number; total: number } {
-  const subtotal = cents(lineTotals.reduce((s, n) => s + fin(n), 0));
-  const tax = cents(subtotal * fin(taxRate));
+  const taxed = (lineTotals ?? []).reduce((s, n) => s + fin(n), 0);
+  const untaxed = (untaxedLineTotals ?? []).reduce((s, n) => s + fin(n), 0);
+  const taxBase = cents(taxed);
+  const subtotal = (untaxedLineTotals ?? []).length ? cents(taxed + untaxed) : taxBase;
+  const tax = cents(taxBase * fin(taxRate));
   const total = cents(subtotal + tax);
   return { subtotal, tax, total };
 }
@@ -114,8 +126,10 @@ export function recalcTotals(
    * left the row to be re-summed by the next recalc from anywhere else.
    */
   creditAmounts: number[] = [],
+  /** Lines in the subtotal, never in the tax base: see subtotalTaxTotal. */
+  untaxedLineTotals: number[] = [],
 ): { subtotal: number; tax: number; total: number; amountPaid: number; status: string } {
-  const { subtotal, tax, total } = subtotalTaxTotal(lineTotals, taxRate);
+  const { subtotal, tax, total } = subtotalTaxTotal(lineTotals, taxRate, untaxedLineTotals);
   const cash = cents(paymentAmounts.reduce((s, n) => s + fin(n), 0));
   const credits = cents(creditAmounts.reduce((s, n) => s + fin(n), 0));
   const creditApplied = cents(Math.max(0, Math.min(credits, total - cash)));
@@ -182,11 +196,16 @@ export function lumpLineRule(
 ): (line: { import_source?: string | null }) => boolean {
   const kind = invoiceKind ?? "standard";
   if (kind === "standard") return () => false;
+  // A PAYMENT REQUEST (cn-v1177) is not draw money: it has its own pool (lib/prepayments), netted by
+  // its own "prepaid_credit" lines, never by a draw's "Less previous billings". Counted here it
+  // would come off twice.
+  if (isPrepaymentKind(kind)) return () => false;
   const itemized = (items ?? []).some((it) => ITEMIZED_SOURCES.has(it.import_source ?? ""));
   const lump = kind === "deposit" || !itemized;
   return (it) => {
     const src = it.import_source ?? null;
-    if (src === "draw_credit") return false;
+    // A credit line of either pool takes money off; it is never lump money itself.
+    if (isCreditSource(src)) return false;
     return src === "milestone" || (lump && !ITEMIZED_SOURCES.has(src ?? ""));
   };
 }
@@ -681,7 +700,7 @@ export function groupInvoiceLines(items: InvoiceLine[]): LineBreakdown {
             ? "discounts"
             : "other" // a 'discount' that takes nothing off is not one (the write guards refuse it; this is the net)
           : stored
-      : src === "draw_credit" || worded === "credit"
+      : isCreditSource(src) || worded === "credit"
         ? "credits"
         : src === "labor" || worded === "labor"
           ? "labor"
@@ -735,7 +754,7 @@ export function groupedOrder(items: ReadonlyArray<OrderedLine>): string[] {
     if (said) return said === "labor" ? 0 : said === "materials" ? 1 : said === "credit" ? 3 : 2;
     const src = it.import_source;
     const d = it.description ?? "";
-    if (src === "draw_credit" || /less previous billings/i.test(d)) return 3;
+    if (isCreditSource(src) || /less previous billings/i.test(d)) return 3;
     if (src === "labor" || /^labor — /i.test(d)) return 0;
     if (src === "costs" || /^materials — /i.test(d)) return 1;
     return 2;

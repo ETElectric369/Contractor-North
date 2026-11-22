@@ -187,6 +187,30 @@ describe("a paid online bill prices the job's work in the job's own company", ()
   });
 
   /**
+   * MONEY ASKED FOR AHEAD IS READ THROUGH THIS FAKE, NEVER MISSED (cn-v1177), AND NEVER "COVERS" THE WORK
+   * (re-pinned on purpose after skeptic #80). The billing step reads the job's payment requests (the
+   * request bills, their lines, their refunds, the prepaid_credit lines) through this fake, for the words;
+   * the decision reads the draw pool only. So a paid $3,000 request does not finish the job over $2,925.00
+   * of work no bill claims: the work goes on a bill (whose sync takes the request off), and the office is
+   * told what is waiting. A paid bill finishing the job with the work on no bill was the defect.
+   */
+  it("a paid $3,000 payment request on the books is read, and the job is NOT finished with $2,925.00 of work on no bill", async () => {
+    const books = serviceBooks();
+    books.invoices.push({ id: "inv-req", org_id: ET, job_id: JOB, invoice_number: "INV-00090", invoice_kind: "prepayment", status: "paid", title: "Deposit", created_at: "2026-09-02T17:00:00Z", amount_paid: 3000, invoice_items: [] });
+    books.invoice_items.push({ id: "ii-req", org_id: ET, invoice_id: "inv-req", import_source: "prepayment", line_total: 3000, prepaid_invoice_id: null });
+    books.customer_credits = [];
+    const db = fakeDb(books);
+    const r = await paidOff(db, { kind: "service", orgId: ET });
+    expect(calls.reported).not.toContain("finishBillingStep.read");
+    expect(db.log.some((l) => l.table === "invoices" && l.filters.includes("eq:invoice_kind"))).toBe(true);
+    expect(db.log.some((l) => l.table === "customer_credits")).toBe(true);
+    expect(r.completed).toBe(false);
+    const say = (r as { say?: string }).say ?? "";
+    expect(say).toContain("19.5 h ($2,925.00)");
+    expect(say).not.toContain("covers");
+  });
+
+  /**
    * NO DEPOSIT, SO NO FLIP — but the one figure Erik acts on was still wrong, by the whole gap between
    * his bill rate and a foreign company's default. "Nothing dropped from a figure unsaid."
    */

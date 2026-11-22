@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1177", date: "2026-11-22", line: "Deposits · An estimate states its deposit and the customer's link takes it by card. A job has Request a Payment for a deposit or materials; it comes off the next invoice." },
   { version: "cn-v1176", date: "2026-11-21", line: "Won · Start the Job at the bottom of an inspection approves the estimate in person and starts the job. The customer's Accept link matches customers more carefully. Menu rows show their counts." },
   { version: "cn-v1175", date: "2026-11-21", line: "Needs You counts every item and tucks old ones into Older. A job's tasks sit under it on My Day. An inspection ends three ways. The fence asks for the daily report. Bug Watch gets a Later list." },
   { version: "cn-v1174", date: "2026-11-21", line: "Share opens on the first tap. A daily report is asked at clock-out for one job and kept in that job's Time tab. Finishing a job checks off its tasks. A job's papers say what they are and their total." },

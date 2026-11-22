@@ -10,6 +10,8 @@ import { PortalDocuments } from "./portal-documents";
 import { PortalPanel } from "./portal-panel";
 import { fmtHours, portalJobStatus, siteLine } from "./portal-format";
 import { docPlace, withPlace } from "@/lib/doc-place";
+import { isPrepaymentKind } from "@/lib/prepayments";
+import { PAYMENT_REQUEST_LABEL } from "@/lib/portal/line-kind";
 
 /**
  * THE CUSTOMER'S JOB PAGE (/portal/<token>/jobs/<jobId>), drawn from PortalJobView and nothing
@@ -101,7 +103,7 @@ export function PortalJobPage({
         </p>
       </div>
 
-      <MoneyCard view={view} payable={payable} unbilledTotal={unbilled?.total ?? 0} lessDeposit={unbilled?.lessDeposit ?? 0} />
+      <MoneyCard view={view} payable={payable} unbilledTotal={unbilled?.total ?? 0} lessDeposit={unbilled?.lessDeposit ?? 0} aheadWords={aheadWords(unbilled)} />
 
       {sections.length > 1 ? (
         <nav aria-label="On this page" className="-mx-4 mt-4 overflow-x-auto px-4 [scrollbar-width:none]">
@@ -196,12 +198,15 @@ function MoneyCard({
   payable,
   unbilledTotal,
   lessDeposit = 0,
+  aheadWords = DEPOSIT_WORDS,
 }: {
   view: PortalJobView;
   payable: PortalInvoice[];
   unbilledTotal: number;
   /** The deposit the next bill takes off this work (netOfDeposit): the figure said is the net. */
   lessDeposit?: number;
+  /** What that money is called (aheadWords): the deposit, or money asked for ahead by a request. */
+  aheadWords?: AheadWords;
 }) {
   const { ledger } = view;
   const ahead = ledger.balance < -0.005;
@@ -242,7 +247,7 @@ function MoneyCard({
             <a href="#unbilled" className="font-semibold text-[rgb(var(--glass-ink))] underline underline-offset-2">
               {formatCurrency(netUnbilled)} of work {notYet}
             </a>
-            {lessDeposit > 0.005 ? `, after the ${formatCurrency(lessDeposit)} deposit` : ""}.
+            {lessDeposit > 0.005 ? `, after the ${formatCurrency(lessDeposit)} ${aheadWords.after}` : ""}.
           </p>
         ) : unbilledTotal > 0.005 && lessDeposit > 0.005 ? (
           <p className="mt-2 text-sm text-slate-700">
@@ -250,7 +255,7 @@ function MoneyCard({
             <a href="#unbilled" className="font-semibold text-[rgb(var(--glass-ink))] underline underline-offset-2">
               {formatCurrency(unbilledTotal)} of work {notYet}
             </a>{" "}
-            is covered by the deposit.
+            is covered by {aheadWords.covered}.
           </p>
         ) : null}
         {payable.length ? (
@@ -271,6 +276,18 @@ function MoneyCard({
       </div>
     </div>
   );
+}
+
+/**
+ * WHAT THE MONEY THE NEXT BILL TAKES OFF IS CALLED (cn-v1177). A draw's deposit is "the deposit". Once a
+ * payment request's money is in the figure (a deposit request, a materials payment, any other) the words
+ * say "asked for ahead", which is true of every request; "deposit" would be untrue of a materials payment.
+ */
+type AheadWords = { after: string; covered: string; row: string };
+const DEPOSIT_WORDS: AheadWords = { after: "deposit", covered: "the deposit", row: "Less Deposit" };
+const ASKED_AHEAD_WORDS: AheadWords = { after: "asked for ahead", covered: "what was asked for ahead", row: "Less Asked For Ahead" };
+function aheadWords(u: { netsRequests?: boolean } | null | undefined): AheadWords {
+  return u?.netsRequests ? ASKED_AHEAD_WORDS : DEPOSIT_WORDS;
 }
 
 /**
@@ -331,7 +348,7 @@ function UnbilledSplit({ unbilled, totalLabel }: { unbilled: NonNullable<PortalJ
       ) : null}
       {(unbilled.lessDeposit ?? 0) > 0.005 ? (
         <div className="mx-3 mt-1 flex justify-between gap-3 border-t border-slate-300/80 pt-2">
-          <span className="font-medium text-slate-900">Less Deposit</span>
+          <span className="font-medium text-slate-900">{aheadWords(unbilled).row}</span>
           <span className="tabular-nums text-emerald-800">−{formatCurrency(unbilled.lessDeposit ?? 0)}</span>
         </div>
       ) : null}
@@ -363,6 +380,13 @@ function BillCard({ b, place, explainBalance }: { b: PortalInvoice; place: strin
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-slate-900">{b.number ?? "Bill"}</div>
           <div className="text-sm text-slate-700">
+            {/* A payment request (cn-v1177) says what it is: money asked for ahead of the work. */}
+            {isPrepaymentKind(b.doc?.invoiceKind) ? (
+              <>
+                {PAYMENT_REQUEST_LABEL}
+                <span aria-hidden> · </span>
+              </>
+            ) : null}
             {b.isDraft ? "Running total, not sent yet" : status}
             <span aria-hidden> · </span>
             <span className="tabular-nums">Total {formatCurrency(b.total)}</span>

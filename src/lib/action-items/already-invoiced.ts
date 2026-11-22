@@ -1,5 +1,6 @@
 import { dbError } from "@/lib/db-error";
 import { isDrawKind } from "@/lib/invoice-math";
+import { isPrepaymentKind } from "@/lib/prepayments";
 import type { AlreadyInvoicedTarget } from "./types";
 
 /**
@@ -77,8 +78,9 @@ export async function loadAlreadyInvoiced(db: Db, orgId: string, t: AlreadyInvoi
   if (ctx.customerId) q = q.eq("customer_id", ctx.customerId);
   const { data, error } = await q;
   if (error) return { ok: false, error: dbError(error) };
-  // A deposit or progress draw is never offered: the tie refuses it (no dead-end choice).
-  const choices: InvoiceChoice[] = ((data ?? []) as any[]).filter((r) => !isDrawKind(r.invoice_kind) || r.invoice_kind === "final").map((r) => ({
+  // A deposit or progress draw is never offered: the tie refuses it (no dead-end choice). Nor is a
+  // payment request (cn-v1177): money asked for ahead of the work never settles the work.
+  const choices: InvoiceChoice[] = ((data ?? []) as any[]).filter((r) => !isPrepaymentKind(r.invoice_kind) && (!isDrawKind(r.invoice_kind) || r.invoice_kind === "final")).map((r) => ({
     id: String(r.id),
     number: r.invoice_number ?? null,
     total: Number(r.total ?? 0),
@@ -121,6 +123,10 @@ export async function tieAlreadyInvoiced(db: Db, orgId: string, t: AlreadyInvoic
   const num = inv.invoice_number || "That invoice";
   // A deposit or a progress draw is money for work still ahead: it never settles the work (quoteSettled's
   // rule), so tying one would write a fact that changes nothing. A final draw finishes it and ties.
+  // A payment request (cn-v1177) is money asked for ahead of the work: never tied as what billed it.
+  if (isPrepaymentKind(inv.invoice_kind)) {
+    return { ok: false, error: `${num} is a payment request: money asked for ahead of the work, so it doesn't settle this. Pick the invoice that billed the finished work. Nothing was changed.` };
+  }
   if (isDrawKind(inv.invoice_kind) && inv.invoice_kind !== "final") {
     return { ok: false, error: `${num} is a ${inv.invoice_kind === "deposit" ? "deposit" : "progress draw"}: money for work still ahead, so it doesn't settle this. Pick the invoice that billed the finished work. Nothing was changed.` };
   }

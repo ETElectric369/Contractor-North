@@ -62,6 +62,8 @@ describe("UnbilledCard - Open: $X and the door that bills it", () => {
     const html = card({ drawBilled: true, lumpToNet: 1000 });
     expect(html).toContain("Open: $2,197.90");
     expect(html).toContain("Create Progress Payment for $2,197.90");
+    // Re-pinned on purpose BACK to "deposit" (cn-v1177, skeptic #80): the page hands the card the DRAW
+    // pool's lump alone; a payment request comes off the bill built for the work, never "covers" it.
     expect(html).toContain("less the $1,000.00 deposit not yet taken off a bill");
   });
 
@@ -152,8 +154,9 @@ describe("UnbilledCard - one figure, the reasoning in a Why? fold (W1-19)", () =
     expect(html).toContain(shorts);
     expect(fold).not.toContain(shorts);
     // The deposit note is said beside the figure, not folded.
+    // Re-pinned on purpose BACK to "deposit" (cn-v1177, skeptic #80): the draw pool's words again.
     expect(html).toContain("less the $1,000.00 deposit not yet taken off a bill");
-    expect(fold).not.toContain("deposit not yet taken off a bill");
+    expect(fold).not.toContain("asked for ahead and not yet taken off a bill");
   });
 
   it("nothing new: the sentence, no fold", () => {

@@ -653,6 +653,15 @@ describe("the Inspector catalog (vi_)", () => {
       vi_wonNoCustomer: "The job will have no customer until one is added.",
       vi_wonApproved: "Approved · {n} · {total}",
       vi_wonJobStarted: "Job started",
+      // cn-v1177: the done step's deposit, born in the catalog (no literal replaced): pinned as written.
+      vi_btn_wonTakeDeposit: "Take the Deposit Now · {amount}",
+      vi_btn_wonGetPaidOn: "Get Paid on {n}",
+      vi_btn_wonGetPaidOnTheDeposit: "Get Paid on the Deposit",
+      vi_wonDepositReading: "Reading the deposit…",
+      vi_wonDepositUnread: "The deposit couldn't be read just now. Take it from the job's Invoices tab.",
+      vi_wonDepositDidntGo: "The deposit request didn't go through. Take it from the job's Invoices tab.",
+      vi_wonDepositPaid: "{n}: the deposit is paid.",
+      vi_wonTheDeposit: "The deposit request",
     };
     // The table is the catalog, whole: a key added to one and not the other is a hole.
     expect(Object.keys(replaced).sort()).toEqual(Object.keys(vi_.en).sort());

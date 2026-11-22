@@ -1,8 +1,9 @@
 import { attachRates, payRateMap } from "@/lib/profile-columns";
 import { storyForJob } from "@/lib/story";
 import { SettleUpButton } from "@/components/settle-up-button";
-import { smsReadiness } from "@/lib/sms";
-import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
+import { PaidAheadCard, RequestPaymentButton } from "@/components/request-payment";
+import { readPaymentRequestSeed } from "../../billing/request-actions";
+import { payDoorFacts } from "@/lib/payment-request";
 import { OpenInspectorButton } from "./open-inspector-button";
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
@@ -1011,6 +1012,20 @@ export default async function JobDetailPage({
   // THE JOB'S NEW INVOICE, ONE SET OF FACTS (W1-24, W1-19): the Invoices tab's button and the Left To
   // Bill card's are the same button with the same props, so the two can never answer differently.
   // Every prop is a fact this page already read; what one tap does is lib/actuals-draw newInvoiceRoute.
+  // THE PAY-DOOR FACTS (cn-v1177): what a Get Paid sheet opened from the Request a Payment form needs,
+  // read once from the company row the header's Get Paid already reads them from.
+  // ONE RULE IN ONE FUNCTION (cn-v1177 seams): lib/payment-request payDoorFacts, the same function the
+  // seed's payDoor is filled by; the organizations read above names its four columns (PAY_DOOR_ORG_COLUMNS).
+  const payDoor = payDoorFacts(org as Parameters<typeof payDoorFacts>[0]);
+  // PAID AHEAD (cn-v1177): the job's payment requests, read through the form's own seed (one read, one
+  // shape), for the office only. A failed read is said on the tab, never an empty card.
+  const requestSeed = viewerIsStaff ? await readPaymentRequestSeed(j.id).catch(() => null) : null;
+  /** What the job's payment requests still have to come off a bill (cn-v1177): the header's Get Paid says it. */
+  const paidAhead = requestSeed && requestSeed.ok ? requestSeed.leftToNet : 0;
+  // THE CARDS' DECISIONS READ THE DRAW POOL ONLY (cn-v1177, skeptic #80): the Not Billed Yet card, its
+  // door and New Invoice's seed get the draw money no bill took off (lumpToNet), as Finish does. A
+  // payment request never "covers" work: the bill is built for the work and the sync takes the request
+  // off it; the Paid Ahead card says what comes off the next invoice.
   const newInvoiceProps = {
     jobId: j.id as string,
     billingType: (j as any).billing_type ?? "fixed",
@@ -1045,7 +1060,9 @@ export default async function JobDetailPage({
           }
         : null,
     lumpToNet,
-    depositPercent: getOrgSettings((org as any)?.settings).deposit_percent,
+    // cn-v1177: the pay-door facts the Request a Payment form's Take It Now hands the Get Paid sheet
+    // (every deposit door in the New Invoice button opens that form; the sheet makes no deposit draw).
+    payDoor,
     // Pieces taken past the stock: said BEFORE a bill is built (the sheet says it above Save).
     stockShortsWords,
     salesTax: on("sales_tax"),
@@ -2140,11 +2157,21 @@ export default async function JobDetailPage({
               this page already read; what one tap does is lib/actuals-draw newInvoiceRoute. Staff only
               (a tech never sees this tab, and never a price). */}
           {viewerIsStaff && (
-            <div className="flex justify-end">
+            <div className="flex flex-wrap items-start justify-end gap-2">
+              {/* REQUEST A PAYMENT (cn-v1177): a quiet door beside New Invoice on every job, a job billed
+                  with draws included (the header's Get Paid is hidden there). */}
+              <RequestPaymentButton jobId={j.id} payDoor={payDoor} />
               {/* The page's facts, computed once (newInvoiceProps): the Overview's Left to Bill card
                   mounts the same button with the same props, opened on Part of the Estimate. */}
               <NewInvoiceButton {...newInvoiceProps} />
             </div>
+          )}
+          {/* PAID AHEAD (cn-v1177): only when the job has a live payment request; staff only. */}
+          {viewerIsStaff && (
+            <PaidAheadCard
+              readError={!requestSeed || !requestSeed.ok}
+              seed={requestSeed && requestSeed.ok ? { requests: requestSeed.requests, leftToNet: requestSeed.leftToNet, jobOver: requestSeed.job.over } : null}
+            />
           )}
           {/* EACH INVOICE IS A CARD OF ITS OWN (cn-v1174, the owner: "bring more attention to the
               invoices on the top as they blend in to the box below"). The house look the Leads,
@@ -2201,7 +2228,7 @@ export default async function JobDetailPage({
               jobId={j.id}
               billingType={(j as any).billing_type ?? "fixed"}
               contractTotal={contractTotal}
-              depositPercent={getOrgSettings((org as any)?.settings).deposit_percent}
+              depositRule={{ percent: getOrgSettings((org as any)?.settings).deposit_percent, cap: getOrgSettings((org as any)?.settings).deposit_cap_amount }}
               milestones={(paymentMilestones as any) ?? []}
               // Without this the gate inside the card is dead code: it defaults to false meaning
               // "no draws", so Set Up Schedule kept being offered on a job whose draws have already
@@ -2353,10 +2380,11 @@ export default async function JobDetailPage({
               source="job"
               id={j.id}
               compact
-              cardEnabled={canAcceptPayments(connectStateFromOrg((org ?? {}) as any))}
-              methods={getOrgSettings((org as any)?.settings).payment_methods}
-              venmoConfigured={Boolean(getOrgSettings((org as any)?.settings).venmo_handle?.trim())}
-              textReady={smsReadiness(org as { settings?: unknown } | null).ready}
+              cardEnabled={payDoor.cardEnabled}
+              methods={payDoor.methods}
+              venmoConfigured={payDoor.venmoConfigured}
+              textReady={payDoor.textReady}
+              paidAhead={paidAhead}
             />
           )}
           {/* The Inspector — every note, photo and intake answer from any entrance point, one tap

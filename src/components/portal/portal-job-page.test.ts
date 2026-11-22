@@ -233,6 +233,15 @@ describe("the customer's job page, drawn from the allowlisted view", () => {
     const part = text(renderToStaticMarkup(createElement(PortalJobPage, { view: shape(sent, { signed, unbilled: { ...work, lessDeposit: 150 }, now: NOW }), homeHref: "/portal/x" })));
     expect(part).toMatch(/Plus \$250\.00 of work not on a bill yet ?, after the \$150\.00 deposit\./);
     expect(part).toMatch(/Less Deposit −\$150\.00 Not Billed Yet \$250\.00/);
+ 
+    // A PAYMENT REQUEST'S MONEY IN THE FIGURE (cn-v1177): a materials payment is not a deposit, so the
+    // words say what is true of every request.
+    const asked = text(renderToStaticMarkup(createElement(PortalJobPage, { view: shape(sent, { signed, unbilled: { ...work, lessDeposit: 150, netsRequests: true }, now: NOW }), homeHref: "/portal/x" })));
+    expect(asked).toMatch(/Plus \$250\.00 of work not on a bill yet ?, after the \$150\.00 asked for ahead\./);
+    expect(asked).toMatch(/Less Asked For Ahead −\$150\.00 Not Billed Yet \$250\.00/);
+    expect(asked).not.toMatch(/deposit/i);
+    const askedAll = text(renderToStaticMarkup(createElement(PortalJobPage, { view: shape(sent, { signed, unbilled: { ...work, lessDeposit: 400, netsRequests: true }, now: NOW }), homeHref: "/portal/x" })));
+    expect(askedAll).toContain("The $400.00 of work not on a bill yet is covered by what was asked for ahead.");
   });
 
   it("a photo's date is the day it was added, never claimed as the day it was taken", () => {

@@ -33,6 +33,7 @@ vi.mock("./actions", () => ({
   // The Job Site line under the customer card (cn-v1158) is drawn with every saved estimate.
   setQuoteSite: vi.fn(),
   setQuoteType: vi.fn(),
+  setQuoteDeposit: vi.fn(),
   readQuoteLineIds: vi.fn(),
   deleteQuote: vi.fn(),
   createJobFromQuote: vi.fn(),

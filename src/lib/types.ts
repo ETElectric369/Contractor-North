@@ -356,6 +356,11 @@ export interface EditorQuote extends Quote {
   /** WHO RECORDED IT (0413): the office person's profile id; null on the customer's link, before 0413,
    *  or once that profile is gone (on delete set null). */
   accepted_by: string | null;
+  /** THE DEPOSIT THIS ESTIMATE STATES (0414, cn-v1177): written by the estimate's save from the company's
+   *  rule (lib/deposit-rule) unless a person typed it. null = saved before 0414, none stated; 0 = no deposit. */
+  deposit_amount?: number | null;
+  /** A person typed the deposit, so a later save leaves it alone (0414). */
+  deposit_by_hand?: boolean | null;
 }
 
 export interface WorkOrder {
@@ -513,6 +518,8 @@ export interface InvoiceItem {
   /** What the line was said to be (0342): labor / materials / other / credit, or null = read it
    *  from the import and the words (groupInvoiceLines). Absent before 0342 is applied. */
   line_kind?: string | null;
+  /** On a "prepaid_credit" line only (0414, cn-v1177): the payment request this line takes off the bill. */
+  prepaid_invoice_id?: string | null;
 }
 
 export interface Payment {

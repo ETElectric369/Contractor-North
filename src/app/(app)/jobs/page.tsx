@@ -64,7 +64,8 @@ export default async function JobsPage({
     needBillingTags
       ? supabase
           .from("invoices")
-          .select("job_id, status, total, amount_paid")
+          // invoice_kind (cn-v1177): jobBillingStatus never reads a payment request as the job's bill.
+          .select("job_id, status, total, amount_paid, invoice_kind")
           .not("job_id", "is", null)
           // Bounded like its siblings — an unbounded select truncates silently at 1000.
           .order("created_at", { ascending: false })

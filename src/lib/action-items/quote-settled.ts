@@ -1,4 +1,5 @@
 import { isDrawKind } from "@/lib/invoice-math";
+import { isPrepaymentKind } from "@/lib/prepayments";
 
 /**
  * IS THIS ESTIMATE SETTLED? ONE RULE, ONE FUNCTION (the owner, 2026-11-04: Needs You showed June
@@ -80,8 +81,9 @@ export function saleWentAway(input: {
 }
 
 const real = (i: SettledInvoice) => i.status !== "draft" && i.status !== "void";
-/** A standard invoice or the final draw: the bill that says the work is over. */
-const finishes = (i: SettledInvoice) => !isDrawKind(i.invoice_kind) || i.invoice_kind === "final";
+/** A standard invoice or the final draw: the bill that says the work is over. Never a payment request
+ *  (cn-v1177): money asked for ahead of the work, which carries the estimate's quote_id as its deposit. */
+const finishes = (i: SettledInvoice) => !isPrepaymentKind(i.invoice_kind) && (!isDrawKind(i.invoice_kind) || i.invoice_kind === "final");
 
 export function quoteSettled(input: {
   quote: SettledQuote;

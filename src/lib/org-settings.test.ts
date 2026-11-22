@@ -304,3 +304,36 @@ describe("office_sees_owner_money: the owner's one switch, normalized on read (0
     }
   });
 });
+
+/**
+ * THE DEPOSIT RULE (cn-v1177). Erik, 2026-11-21: "california has a 10% or $1000 cap so that should be the
+ * default". A company that never chose reads 10% up to $1,000; a stored 0 percent is a choice (no deposit)
+ * and stays 0; both are clamped HERE, on read, for every reader (the settings are jsonb with no validation
+ * in front of the write). Before cn-v1177 the default was 0 and nothing clamped it.
+ */
+describe("deposit_percent and deposit_cap_amount", () => {
+  it("a company that never chose: 10% up to $1,000", () => {
+    for (const raw of [undefined, null, {}, { deposit_percent: undefined }]) {
+      const s = getOrgSettings(raw as never);
+      expect(s.deposit_percent).toBe(10);
+      expect(s.deposit_cap_amount).toBe(1000);
+    }
+  });
+  it("a stored 0 percent is a choice (no deposit) and a stored 0 cap is no cap: both stay 0", () => {
+    const s = getOrgSettings({ deposit_percent: 0, deposit_cap_amount: 0 });
+    expect(s.deposit_percent).toBe(0);
+    expect(s.deposit_cap_amount).toBe(0);
+    // One company stores 0 and no cap key: it keeps no deposit, and the cap reads the default.
+    expect(getOrgSettings({ deposit_percent: 0 })).toMatchObject({ deposit_percent: 0, deposit_cap_amount: 1000 });
+  });
+  it("clamped on read: a percent into 0..100, a cap never negative, a number typed as text read as the number", () => {
+    expect(getOrgSettings({ deposit_percent: 150, deposit_cap_amount: -5 })).toMatchObject({ deposit_percent: 100, deposit_cap_amount: 0 });
+    expect(getOrgSettings({ deposit_percent: -3 }).deposit_percent).toBe(0);
+    expect(getOrgSettings({ deposit_percent: "25", deposit_cap_amount: "2500" })).toMatchObject({ deposit_percent: 25, deposit_cap_amount: 2500 });
+  });
+  it("what is not a number reads as the default, the way a missing key does", () => {
+    for (const odd of ["ten", true, null, {}, Number.NaN]) {
+      expect(getOrgSettings({ deposit_percent: odd as never, deposit_cap_amount: odd as never })).toMatchObject({ deposit_percent: 10, deposit_cap_amount: 1000 });
+    }
+  });
+});

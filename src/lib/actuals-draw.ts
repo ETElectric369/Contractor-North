@@ -33,9 +33,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isDrawKind, resolveDrawCredit, DRAW_KINDS } from "./invoice-math";
 import { isLiveQuote, nextInvoiceImportsActuals } from "./invoice-import-rule";
+import { DRAW_CREDIT } from "./prepayments";
 
-/** Line sources only the actuals importers (and the report's own prior-billings credit) write. */
-const ACTUALS_SOURCES = new Set(["labor", "costs", "draw_credit"]);
+/** Line sources only the actuals importers (and the report's own prior-billings credit) write. THE DRAW
+ *  POOL'S credit only (cn-v1177): a "prepaid_credit" line is written onto ANY bill on the job that takes
+ *  a payment request off, a contract draw included, so it says nothing about how the draw was built. */
+const ACTUALS_SOURCES = new Set(["labor", "costs", DRAW_CREDIT]);
 /** The import keys those importers mint: labor per person, bills, receipt lines, orders. */
 const ACTUALS_KEY = /^(labor|bill|bli|po):/;
 
@@ -229,6 +232,8 @@ export function unbilledCardDoor(input: {
     if (!d.ok) {
       return {
         kind: "covered",
+        // THE DRAW POOL ONLY (cn-v1177, skeptic #80): every caller hands the draw money alone; a payment
+        // request never "covers" work, the bill is built and the request comes off it.
         note: `The ${money(lump)} deposit not yet taken off a bill still covers this, so there is nothing new to bill yet.`,
       };
     }

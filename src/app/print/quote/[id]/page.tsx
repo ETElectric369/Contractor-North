@@ -113,6 +113,9 @@ export default async function QuotePrintPage({
         documentFooter={settings.document_footer}
         docStyle={settings.doc_style}
         estimateFormat={estimateFormat}
+        // THE DEPOSIT LINE (cn-v1177): the figure the estimate stored (0414, in the row's `*`); the PDF and
+        // the customer's Download are these same bytes.
+        depositDue={(q as { deposit_amount?: number | string | null }).deposit_amount ?? null}
       />
     </div>
   );

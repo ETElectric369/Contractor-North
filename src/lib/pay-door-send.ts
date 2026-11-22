@@ -1,6 +1,7 @@
 import "server-only";
 import { markInvoiceSent } from "@/lib/invoice-sent-stamp";
 import { recalcInvoice } from "@/lib/invoice-recalc";
+import { outgoingDraftFirst } from "@/lib/payment-request";
 import { revalidateMoney } from "@/lib/revalidate-money";
 import { sendFirstQuestion } from "@/lib/pay-door-words";
 
@@ -26,6 +27,14 @@ export async function sendDraftForPayment(
   supabase: { from: (t: string) => any },
   invoiceId: string,
 ): Promise<{ ok: boolean; error?: string }> {
+  // NOTHING IS SENT STALE (cn-v1177): the draft's money is brought up to date immediately before the
+  // flip (the recalc re-resolves what it takes off for the job's payment requests), and a recalc that
+  // could not land sends nothing.
+  // The bill going out comes first: the job's other drafts give up their derived credit to it
+  // (lib/payment-request outgoingDraftFirst).
+  if (!(await outgoingDraftFirst(supabase, invoiceId))) {
+    return { ok: false, error: "This invoice couldn't be brought up to date just now, so it wasn't sent and there's nothing for them to pay yet. Try again in a moment." };
+  }
   const sent = await markInvoiceSent(supabase, invoiceId);
   if (!sent.ok) return { ok: false, error: sent.error ?? "Couldn't send this invoice, so there's nothing for them to pay yet." };
   await recalcInvoice(supabase, invoiceId);

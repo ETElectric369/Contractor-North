@@ -105,7 +105,8 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   // team and the tax rates: the same catalog /quotes/new hands the editor.
   const [{ data: existingInv }, { data: existingWo }, { data: existingMl }, { data: customers }, { data: priceItems, error: priceItemsErr }, kitsRead, { data: orgRow }, { data: visitBehind }, { data: taxRates }, { data: peopleRows, error: peopleErr }, { data: otherJobRows, error: otherJobsErr }] =
     await Promise.all([
-      supabase.from("invoices").select("id").eq("quote_id", id).limit(1).maybeSingle(),
+      // A deposit request (cn-v1177) carries this estimate's quote_id and is no invoice cut from it.
+      supabase.from("invoices").select("id").eq("quote_id", id).neq("invoice_kind", "prepayment").limit(1).maybeSingle(),
       supabase.from("work_orders").select("id").eq("quote_id", id).limit(1).maybeSingle(),
       supabase.from("material_lists").select("id").eq("quote_id", id).limit(1).maybeSingle(),
       supabase.from("customers").select("id, name, company_name").order("name"),
@@ -297,6 +298,8 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           leadPlans,
           textReady: smsReadiness(org).ready,
           estimatesOn: featureOn(orgS.features, "estimates"),
+          // The Deposit field's rule (cn-v1177): already clamped by getOrgSettings.
+          depositRule: { percent: orgS.deposit_percent, cap: orgS.deposit_cap_amount },
         }}
       />
     </div>

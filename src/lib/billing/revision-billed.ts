@@ -59,7 +59,8 @@ export async function findRevisedOriginalBilled(
   });
 
   // (a) An invoice cut from one of them.
-  const { data: byQuote, error: qErr } = await supabase.from("invoices").select("id, invoice_number, quote_id").in("quote_id", ids).neq("status", "void");
+  // A deposit request (cn-v1177) names its estimate too, and bills none of its work: never "billed".
+  const { data: byQuote, error: qErr } = await supabase.from("invoices").select("id, invoice_number, quote_id").in("quote_id", ids).neq("status", "void").neq("invoice_kind", "prepayment");
   if (qErr) return { unread: dbError(qErr) };
   const hit = ((byQuote ?? []) as Array<{ id: string; invoice_number: string | null; quote_id: string }>).find((r) => r.id !== exceptInvoiceId);
   if (hit) return billed(hit.quote_id, hit.invoice_number);

@@ -3,9 +3,44 @@
 import { useState } from "react";
 import { Check, Loader2, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { formatCurrency } from "@/lib/utils";
 import { acceptPublicQuote } from "./actions";
 
 type Outcome = "open" | "accepted" | "declined";
+
+/**
+ * THE DEPOSIT, AS public_quote STATES IT (cn-v1177, 0414): the figure the estimate stored, where its
+ * deposit request stands, and whether the company can take a card. "none" = no deposit stated (null,
+ * 0, or an estimate saved before 0414). Read by the page (depositFromProjection) and handed down.
+ */
+export type PublicDeposit = { amount: number; state: "none" | "due" | "requested" | "paid"; canTakeCard: boolean };
+
+/**
+ * What the customer reads about the deposit once the estimate is accepted. PAYING IS NEVER REQUIRED TO
+ * ACCEPT: this shows only after the yes, and the yes made no money record (the card door below finds
+ * or makes the one deposit bill when, and only when, the customer taps it). Customer words, English.
+ */
+function DepositAfterYes({ token, deposit, trouble }: { token: string; deposit: PublicDeposit; trouble?: string | null }) {
+  if (deposit.state === "none" || !(deposit.amount > 0)) return null;
+  const amount = formatCurrency(deposit.amount);
+  if (deposit.state === "paid") {
+    return <p className="mt-3 text-center text-sm font-medium text-slate-700">Deposit received. Thank you.</p>;
+  }
+  if (!deposit.canTakeCard) {
+    return <p className="mt-3 text-center text-sm text-slate-700">A deposit of {amount} is due. We&apos;ll be in touch about how to pay it.</p>;
+  }
+  return (
+    <div className="mt-3 text-center">
+      {trouble && <p className="mb-2 text-sm text-slate-700">{trouble}</p>}
+      <a
+        href={`/api/pay/deposit/${encodeURIComponent(token)}`}
+        className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-6 py-3 text-base font-semibold text-white shadow-sm hover:bg-slate-800"
+      >
+        Pay the Deposit · {amount} by Card
+      </a>
+    </div>
+  );
+}
 
 export function PublicQuoteAccept({
   token,
@@ -13,6 +48,8 @@ export function PublicQuoteAccept({
   declined,
   brand,
   docLabel = "Quote",
+  deposit = { amount: 0, state: "none", canTakeCard: false },
+  depositTrouble = null,
 }: {
   token: string;
   accepted: boolean;
@@ -20,6 +57,10 @@ export function PublicQuoteAccept({
   brand: string;
   /** "Estimate" or "Quote" — so the button/outcome copy matches the doc type. */
   docLabel?: string;
+  /** The deposit public_quote states (cn-v1177); absent = none. */
+  deposit?: PublicDeposit;
+  /** The card door came back refused (?deposit=unavailable): the page's one plain line. */
+  depositTrouble?: string | null;
 }) {
   const lower = docLabel.toLowerCase();
   const [outcome, setOutcome] = useState<Outcome>(accepted ? "accepted" : declined ? "declined" : "open");
@@ -64,8 +105,11 @@ export function PublicQuoteAccept({
 
   if (outcome === "accepted") {
     return (
-      <div className="no-print flex items-center justify-center gap-2 rounded-xl bg-green-50 px-4 py-3 text-sm font-medium text-green-700">
-        <Check className="h-5 w-5" /> {docLabel} accepted — thank you! We'll be in touch to schedule.
+      <div className="no-print">
+        <div className="flex items-center justify-center gap-2 rounded-xl bg-green-50 px-4 py-3 text-sm font-medium text-green-700">
+          <Check className="h-5 w-5" /> {docLabel} accepted — thank you! We'll be in touch to schedule.
+        </div>
+        <DepositAfterYes token={token} deposit={deposit} trouble={depositTrouble} />
       </div>
     );
   }

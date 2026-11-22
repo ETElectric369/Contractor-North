@@ -97,6 +97,16 @@ function fakeSupabase(route: (q: Q) => Reply, calls: Q[]) {
     if (r === undefined && q.table === "invoices" && q.verb === "select" && q.cols === HELD_HERE_COLUMNS) {
       r = { data: { invoice_number: null, status: "draft", created_at: "", job_id: null, invoice_items: [] } };
     }
+    // cn-v1177, routed once for every test: the recalc reads its head first (status, job, kind: the
+    // sync runs only on a draft on a job) and its lines with their source (a payment request taken off
+    // is out of the tax base); a door brings a draft up to date before it goes out; the status door
+    // reads the kind. Each answers as the read it grew from did, unless a test routes its own.
+    if (r === undefined && q.table === "invoice_items" && q.verb === "select" && q.cols === "line_total, import_source") r = route({ ...q, cols: "line_total" });
+    if (r === undefined && q.table === "invoices" && q.verb === "select" && q.cols === "status, job_id, invoice_kind") r = route({ ...q, cols: "tax_rate, status" });
+    if (r === undefined && q.table === "invoices" && q.verb === "select" && q.cols === "status, invoice_number") r = route({ ...q, cols: "status" });
+    if (r === undefined && q.table === "invoices" && q.verb === "select" && q.cols.startsWith("id, status, job_id, invoice_kind, invoice_number")) {
+      r = route({ ...q, cols: q.cols.replace("invoice_kind, ", "") });
+    }
     if (r === undefined) throw new Error(`unrouted: ${q.table}.${q.verb} [${q.cols}] ${JSON.stringify(q.payload ?? null)}`);
     // `range` AND `limit` ARE HONOURED, because PostgREST cuts a read and says nothing about it: status
     // 200, no error, the rest simply missing. A fake that handed every row back whatever was asked for
@@ -625,6 +635,9 @@ function drawRoute(opts: { laborRpcError?: any; costsRpcError?: any; bills?: any
       if (q.cols === "invoice_id") return { data: [] };
       if (q.cols === "source_ids") return { data: [] }; // returns credited on this new draw (none)
       if (q.cols === "line_total") return { data: [] };
+      // cn-v1177: the work the draw itemized is read off its own lines (the draw pool never counts a
+      // line that takes a payment request off): the 7 hr the labor import landed.
+      if (q.cols === "line_total, import_source") return { data: [{ line_total: 665, import_source: "labor" }] };
       if (q.cols === "import_key, line_total, edited") return { data: [] };
       // The draw's labor, already landed when the costs import measures a return's room.
       if (q.cols === "import_source, import_key, line_total, edited") return { data: [{ import_source: "labor", import_key: "labor:p-1", line_total: 665, edited: false }] };
@@ -1543,6 +1556,12 @@ describe("setInvoiceStatus — a draft marked sent by hand starts its terms from
       return { data: { ...row, revised_at: null, total: 900, amount_paid: 0, payments: [] } };
     }
     if (q.table === "invoices" && q.verb === "select" && q.cols === "org_id") return { data: { org_id: "org-1" } };
+    // cn-v1177: a draft going out is brought up to date first (freshBeforeSend, then recalcInvoice).
+    if (q.table === "invoices" && q.verb === "select" && q.cols === "status, invoice_number") return { data: { status: row.status, invoice_number: "INV-081" } };
+    // The bill going out comes first (outgoingDraftFirst, skeptic #80): its own read; a bill with no job
+    // is only recalculated.
+    if (q.table === "invoices" && q.verb === "select" && q.cols === "id, org_id, job_id, status, invoice_kind")
+      return { data: { id: DRAFT, org_id: "org-1", job_id: null, status: row.status, invoice_kind: "standard" } };
     if (q.table === "organizations") return { data: { settings: { timezone: "America/Los_Angeles", invoice_due_days: 14 } } };
     if (q.table === "invoices" && q.verb === "update") {
       updates.push(q);
@@ -1561,12 +1580,17 @@ describe("setInvoiceStatus — a draft marked sent by hand starts its terms from
     const updates: Q[] = [];
     state.client = fakeSupabase(route({ status: "draft", sent_at: null }, updates), calls);
     expect(await setInvoiceStatus(DRAFT, "sent")).toEqual({ ok: true });
-    expect(updates[0].payload).toMatchObject({ status: "sent" });
-    expect(updates[0].payload).not.toHaveProperty("due_date");
-    expect(Object.keys(updates[1].payload)).toEqual(["due_date"]);
+    // cn-v1177: the recalc that brings the draft up to date writes its totals FIRST (nothing is sent
+    // stale); then the status write, then the due date. The two this test is about, in that order.
+    const at = updates.findIndex((u) => "sent_at" in (u.payload ?? {}));
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(updates.slice(0, at).every((u) => "total" in (u.payload ?? {}))).toBe(true);
+    expect(updates[at].payload).toMatchObject({ status: "sent" });
+    expect(updates[at].payload).not.toHaveProperty("due_date");
+    expect(Object.keys(updates[at + 1].payload)).toEqual(["due_date"]);
     const sendDay = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
     const due = new Date(Date.parse(`${sendDay}T00:00:00Z`) + 14 * 86_400_000).toISOString().slice(0, 10);
-    expect(new Date(updates[1].payload.due_date).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" })).toBe(due);
+    expect(new Date(updates[at + 1].payload.due_date).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" })).toBe(due);
   });
 
   it("a bill that went out and came Back to Draft keeps the date the customer holds", async () => {

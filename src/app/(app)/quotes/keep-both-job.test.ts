@@ -152,13 +152,15 @@ describe("keepBothEstimates on the duplex, the job's own rules running", () => {
   });
 
   it("an invoice already cut from the first unit is found by the billing guard's own read and named; both estimates still come to stand", async () => {
-    duplex({ invoices: [{ id: "inv-1", org_id: ORG, invoice_number: "INV-0012", quote_id: "unit-a", job_id: "job-1", status: "sent" }] });
+    // invoice_kind as the database always holds it (NOT NULL, default standard): the billing guard leaves a
+    // payment request out by kind (cn-v1177), and a NULL kind fails that filter as it would in Postgres.
+    duplex({ invoices: [{ id: "inv-1", org_id: ORG, invoice_number: "INV-0012", quote_id: "unit-a", job_id: "job-1", status: "sent", invoice_kind: "standard" }] });
     const res = await keepBothEstimates("unit-b");
     expect(res.ok).toBe(true);
     expect(quote("unit-a").status).toBe("accepted");
     expect(res.warning).toBe(`${PARTS_NOTE} Q-0041 is already billed on INV-0012, and Q-0043 can be billed beside it now. Bill Q-0043 only if it is separate work.`);
     // A void invoice bills nothing.
-    duplex({ invoices: [{ id: "inv-1", org_id: ORG, invoice_number: "INV-0012", quote_id: "unit-a", job_id: "job-1", status: "void" }] });
+    duplex({ invoices: [{ id: "inv-1", org_id: ORG, invoice_number: "INV-0012", quote_id: "unit-a", job_id: "job-1", status: "void", invoice_kind: "standard" }] });
     expect((await keepBothEstimates("unit-b")).warning).toBe(PARTS_NOTE);
   });
 });

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
+import { isPrepaymentKind } from "@/lib/prepayments";
 import { contractTotalFromQuotes, milestoneAmount, type Milestone } from "@/lib/payment-schedule-math";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
@@ -46,7 +47,8 @@ export function milestoneSettled(input: {
   jobStatus: string | null | undefined;
   jobInvoices: readonly { status?: string | null; invoice_kind?: string | null; created_at?: string | null }[];
 }): boolean {
-  const live = input.jobInvoices.filter((i) => i.status !== "draft" && i.status !== "void");
+  // A payment request (cn-v1177) is money asked for ahead of the work: it never settles a milestone.
+  const live = input.jobInvoices.filter((i) => i.status !== "draft" && i.status !== "void" && !isPrepaymentKind(i.invoice_kind));
   if (input.jobStatus === "invoiced" && live.length > 0) return true;
   const since = input.milestoneAt ? Date.parse(input.milestoneAt) : NaN;
   const day = (ms: number) => Math.floor(ms / 86_400_000);
@@ -127,8 +129,9 @@ export async function getMoneyPipeline(supabase: SupabaseClient): Promise<MoneyP
   const quotes = (quoteRes.data ?? []) as any[];
   const openMilestones = (msRes.data ?? []) as any[];
 
-  // A job is "invoiced" if it has any non-void invoice.
-  const invoicedJobIds = new Set(invoices.filter((i) => i.status !== "void" && i.job_id).map((i) => i.job_id as string));
+  // A job is "invoiced" if it has any non-void invoice. A payment request (cn-v1177) is not a bill for
+  // the work: a finished job whose only bill is one still waits in "Done - Not Invoiced".
+  const invoicedJobIds = new Set(invoices.filter((i) => i.status !== "void" && i.job_id && !isPrepaymentKind(i.invoice_kind)).map((i) => i.job_id as string));
   // Keep every quote per job for contract math (accepted preferred — contractTotalFromQuotes).
   const quotesByJob: Record<string, { total: number | null; status: string | null; created_at: string | null }[]> = {};
   for (const q of quotes) {

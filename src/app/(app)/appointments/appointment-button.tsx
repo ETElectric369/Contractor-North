@@ -507,6 +507,10 @@ export function AppointmentButton({
     start(async () => {
       const res = await createJobFromAppointment(appointment.id);
       if (!res.ok || !res.id) return setError(res.error ?? t("vp_couldNotCreateJob"));
+      // cn-v1177 (pick 3): the estimate now tied to this job is said in one line, and anything the
+      // job was made without (an estimate that could not be tied among them) is said too, never dropped.
+      if (res.tied) toast(res.tied, "success");
+      if (res.note) toast(res.note, "info", undefined, { sticky: true });
       leave("push", `/jobs/${res.id}`);
     });
   }

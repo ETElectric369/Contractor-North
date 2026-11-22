@@ -3,10 +3,12 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { customerUnbilled, fixedBillingsToNet, netOfDeposit, unbilledWorkForJob, type CustomerUnbilled, type PriorInvoiceRow } from "@/lib/unbilled-work";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
+import { prepaymentsLeft } from "@/lib/prepayments";
+import { readPrepaymentStates } from "@/lib/payment-request";
 import { reportError } from "@/lib/observe";
 import { readSupplierNames } from "@/lib/supplier-names";
 import { newInvoiceDocCache, readInvoiceDocumentProps, type InvoiceDocRead } from "@/lib/invoice-document-props";
-import { portalPathsToSign, shapePortalJob, type PortalJobRaw, type PortalJobView } from "./job-view-shape";
+import { portalPathsToSign, shapePortalJob, type PortalJobRaw, type PortalJobView, type PortalUnbilled } from "./job-view-shape";
 
 /**
  * THE CUSTOMER'S JOB PAGE, READ LIVE (/portal/<token>/jobs/<jobId>).
@@ -52,7 +54,7 @@ function isMissingFunction(err: unknown): boolean {
  * to the org by hand. 0 while a draft is open: the draft takes the work, as the card's "Add to"
  * does. Throws on a failed read, so the unbilled figure is left off rather than shown gross.
  */
-async function depositToNet(svc: ReturnType<typeof createServiceClient>, orgId: string, jobId: string): Promise<number> {
+async function depositToNet(svc: ReturnType<typeof createServiceClient>, orgId: string, jobId: string): Promise<{ amount: number; requests: number }> {
   const { data, error } = await svc
     .from("invoices")
     .select("id, status, invoice_kind, invoice_items(import_source, line_total)")
@@ -61,8 +63,13 @@ async function depositToNet(svc: ReturnType<typeof createServiceClient>, orgId: 
     .neq("status", "void");
   if (error) throw error;
   const rows = (data ?? []) as PriorInvoiceRow[];
-  if (rows.some((r) => r.status === "draft")) return 0;
-  return fixedBillingsToNet(rows);
+  if (rows.some((r) => r.status === "draft")) return { amount: 0, requests: 0 };
+  // PAYMENT REQUESTS COME OFF THE NEXT BILL TOO (cn-v1177): what the job's requests still have to
+  // come off (paid or not) is netted beside the draw money, so the money card's "work not on a bill
+  // yet" is what the next bill will ask for. Its own pool, its own rule (lib/prepayments); a failed
+  // read throws, so the figure is left off rather than shown gross.
+  const requestsLeft = prepaymentsLeft(await readPrepaymentStates(svc, jobId));
+  return { amount: Math.round((fixedBillingsToNet(rows) + requestsLeft) * 100) / 100, requests: requestsLeft };
 }
 
 export async function readPortalJob(token: string, jobId: string): Promise<PortalJobRead> {
@@ -99,14 +106,18 @@ export async function readPortalJob(token: string, jobId: string): Promise<Porta
     namesP.then((r) => r.names),
     billsActuals
       ? Promise.all([unbilledWorkForJob(svc, raw.scope.job_id, { orgId }), depositToNet(svc, orgId, raw.scope.job_id)]).then(
-          ([u, lump]): CustomerUnbilled | null => netOfDeposit(customerUnbilled(u), lump),
-          (e): CustomerUnbilled | null => {
+          ([u, lump]): PortalUnbilled | null => {
+            const net = netOfDeposit(customerUnbilled(u), lump.amount);
+            // The amount holds a payment request's money: the page says "asked for ahead", never "deposit".
+            return lump.requests > 0.005 && (net.lessDeposit ?? 0) > 0.005 ? { ...net, netsRequests: true } : net;
+          },
+          (e): PortalUnbilled | null => {
             // A failed total is left off the page, never shown as $0 of work.
             reportError("portal.jobView.unbilled", e, { jobId });
             return null;
           },
         )
-      : Promise.resolve<CustomerUnbilled | null>(null),
+      : Promise.resolve<PortalUnbilled | null>(null),
     Promise.all(
       billIds.map((id) =>
         readInvoiceDocumentProps(svc, id, { kind: "service", orgId, jobId: raw.scope.job_id }, { cache }).then(

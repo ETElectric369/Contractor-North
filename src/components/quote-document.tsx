@@ -68,6 +68,7 @@ export function QuoteDocument({
   showContact = false,
   docStyle,
   estimateFormat,
+  depositDue,
 }: {
   co: any;
   template: any;
@@ -105,6 +106,10 @@ export function QuoteDocument({
    *  doc_style.estimate_format itself and the paper, the PDF, the public link and the studio cannot
    *  disagree about one estimate. */
   estimateFormat: EstimateFormat;
+  /** THE DEPOSIT THIS ESTIMATE STATES (cn-v1177, quotes.deposit_amount): one line under the totals when it
+   *  is above 0. null / absent = saved before 0414 or no deposit: nothing is printed. English on purpose:
+   *  this is customer paper, and no document component reads the word catalog. */
+  depositDue?: number | string | null;
 }) {
   const ds = normalizeDocStyle(docStyle);
   const coSized = { ...co, logoSize: ds.logo_size };
@@ -242,6 +247,9 @@ export function QuoteDocument({
 
       {/* Totals — no balance passed, so Total itself is the bold emphasis (no Paid/Balance rows). */}
       <DocTotals subtotal={subtotal} taxRate={taxRate} tax={tax} total={total} />
+      {Number(depositDue) > 0.005 && (
+        <p className="mt-2 text-right text-sm font-medium text-slate-800">Deposit due on acceptance: {formatCurrency(Number(depositDue))}</p>
+      )}
 
       {/* Accept/decline — customer-facing surface only (the office print copy omits it). */}
       {acceptSlot && <div className="mt-8 [break-inside:avoid]">{acceptSlot}</div>}

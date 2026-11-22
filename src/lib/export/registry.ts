@@ -111,6 +111,9 @@ export const EXPORT_TABLES: readonly ExportTable[] = [
       "description", "notes", "address", "unit", "city", "state", "zip", "circuits", "tax_rate", "subtotal", "tax", "total", "valid_until",
       // accepted_how / accepted_by (0413): how the estimate was accepted and which office person recorded it.
       "follow_up_at", "accepted_at", "accepted_how", "accepted_by", "declined_at", "created_by", "created_at", "updated_at",
+      // deposit_amount / deposit_by_hand (0414): the deposit the estimate states, and whether the office
+      // typed it; it is part of what the customer was offered, so it leaves with the estimate.
+      "deposit_amount", "deposit_by_hand",
     ],
   },
   { table: "quote_line_items", order: "id", columns: ["id", "quote_id", "description", "detail", "category", "quantity", "unit", "unit_price", "line_total", "sort_order"] },
@@ -269,6 +272,9 @@ export const EXPORT_TABLES: readonly ExportTable[] = [
     columns: [
       "id", "invoice_id", "line_kind", "description", "quantity", "unit", "unit_price", "line_total", "sort_order", "import_source", "import_key",
       "source_ids", "hand_claims", "edited",
+      // prepaid_invoice_id (0414): the payment request a "prepaid_credit" line takes off its bill. Without
+      // it an exported bill says "Less deposit (INV-900)" with nothing that ties the line to the request.
+      "prepaid_invoice_id",
     ],
   },
   {

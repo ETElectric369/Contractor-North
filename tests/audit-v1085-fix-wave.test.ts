@@ -26,7 +26,10 @@ describe("class 1 — the revision family is billed once", () => {
         { id: "CO", org_id: ORG, quote_number: "Q-0050", status: "accepted", revises_quote_id: null, job_id: "J1" }, // a change order
       ],
       quote_line_items: [{ id: "A-l1", quote_id: "A" }, { id: "B-l1", quote_id: "B" }, { id: "C-l1", quote_id: "C" }],
-      invoices,
+      // Every bill carries its kind, as the database always does (invoice_kind is not null, default
+      // 'standard'): the reader now leaves payment requests out with .neq("invoice_kind", "prepayment")
+      // (cn-v1177), and a missing column would read as NULL, which <> never matches.
+      invoices: invoices.map((i) => ({ invoice_kind: "standard", ...i })),
     });
   it("refuses billing C when A (two hops up) was billed by an invoice cut from it", async () => {
     const { sb } = family([{ id: "I1", invoice_number: "INV-0010", status: "sent", quote_id: "A", job_id: "J1" }]);
@@ -49,7 +52,8 @@ describe("class 1 — the revision family is billed once", () => {
   });
   it("fails CLOSED: a read that errors, or a claims reader that throws, refuses the bill", async () => {
     const { sb } = family([{ id: "I1", invoice_number: "INV-0010", status: "sent", quote_id: "A", job_id: "J1" }]);
-    const broken = { from: (t: string) => (t === "invoices" ? { select: () => ({ in: () => ({ neq: () => Promise.resolve({ data: null, error: { message: "timeout" } }) }) }) } : sb.from(t)) } as never;
+    const failed = () => Promise.resolve({ data: null, error: { message: "timeout" } });
+    const broken = { from: (t: string) => (t === "invoices" ? { select: () => ({ in: () => ({ neq: () => ({ neq: failed }) }) }) } : sb.from(t)) } as never;
     expect(await revisedOriginalBilled(broken, { revises_quote_id: "B", job_id: "J1" }, undefined, claims())).toContain("could not be read");
     const clean = family();
     const throwing = { claims: async () => { throw new Error("overlaps timed out"); } };

@@ -171,7 +171,10 @@ describe("who feeds the count, and who asks it", () => {
   it("the invoice's line-kind chips count their own transition, above the early return for a locked line", () => {
     const body = feedsItsTransition("src/app/(app)/billing/[id]/line-kind-chips.tsx", "LineKindChips");
     expect(body).toContain("const res = await setInvoiceItemKind(item.id, invoiceId, kind);");
-    expect(body.indexOf("useSaveInFlight(pending);")).toBeLessThan(body.indexOf('if (src === "draw_credit" || src === "milestone") return null;'));
+    // Re-pinned on purpose (cn-v1177): the early return for a locked line now asks ONE rule, lineLockedByApp
+    // (credit lines of both pools, milestones, a payment request's own line); the count still stands above it.
+    expect(body.indexOf("useSaveInFlight(pending);")).toBeGreaterThan(-1);
+    expect(body.indexOf("useSaveInFlight(pending);")).toBeLessThan(body.indexOf("if (lineLockedByApp(item, invoiceKind)) return null;"));
   });
 
   it("Preview asks at the tap (never from a render), waits, then goes; a save that has not landed is said", () => {

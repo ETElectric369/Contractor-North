@@ -28,6 +28,7 @@ import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item
 import { smsReadiness } from "@/lib/sms";
 import { jobProgressFinancials, receivedBeforeThisInvoice } from "@/lib/job-financials";
 import { invoiceBalance, isDrawKind, invoiceOverpayment } from "@/lib/invoice-math";
+import { DRAW_CREDIT, isPrepaymentKind } from "@/lib/prepayments";
 import { listCustomerOptions } from "@/lib/schedule-options";
 /* THE TWO QUESTIONS A REVISED BILL RAISES, each with one home (lib/invoice-revision: 0269, narrowed
    2026-11-07 with 0405). The NOTICE: they paid on an older figure and the money changed since, with a
@@ -304,7 +305,11 @@ export default async function InvoicePage({
      it is refreshed exactly like a standard invoice, and it was the only one that couldn't be.
      Any other draw bills a slice of the contract: no imports (the server refuses them too). The
      rule is the server's own; a failed schedule read counts as "scheduled", which only hides. */
-  let importMode: "standard" | "actuals" | "none" = !isDrawKind(drawKind)
+  // A PAYMENT REQUEST (cn-v1177) is one line of money asked for ahead: nothing is imported onto it
+  // (the server refuses it too), so its page offers no import row.
+  let importMode: "standard" | "actuals" | "none" = isPrepaymentKind(drawKind)
+    ? "none"
+    : !isDrawKind(drawKind)
     ? "standard"
     : isActualsDraw({
           invoiceKind: drawKind,
@@ -321,7 +326,9 @@ export default async function InvoicePage({
   let importHeld: string | null = null;
   if (importMode === "actuals" && (inv as any).job_id) {
     const ownCredit = ((items ?? []) as { import_source?: string | null; line_total?: unknown }[])
-      .filter((i) => i.import_source === "draw_credit")
+      // THE DRAW POOL ONLY: the lump below is draw money, so only a draw credit nets it (a payment
+      // request's prepaid_credit line is the other pool, lib/prepayments).
+      .filter((i) => i.import_source === DRAW_CREDIT)
       .reduce((t, i) => t + Math.abs(Number(i.line_total) || 0), 0);
     const lump = await fixedBillingsNotYetNetted(supabase, (inv as any).job_id, id).catch(() => null);
     const open = lump === null ? null : Math.round((lump - ownCredit) * 100) / 100;

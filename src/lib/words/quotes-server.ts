@@ -160,6 +160,12 @@ export const words: WordCatalog = {
     qs_estimateNotHere: "That estimate isn't here to update.",
     qs_customerUnavailable: "That customer isn't available.",
     qs_estimateUnavailable: "That estimate isn't available.",
+    // setQuoteDeposit and the copy's typed deposit (cn-v1177). Each names the one thing to do.
+    qs_depositNotANumber: "Type the deposit as an amount of $0 or more.",
+    qs_depositOverTotal: "A deposit can't be more than this estimate's total of {total}. Type a smaller amount.",
+    qs_depositOfferClosed: "This estimate's deposit can't change now: it was part of the offer. Revise the estimate to offer a different deposit.",
+    qs_depositRuleUnread: "The company's deposit setting couldn't be read, so nothing was changed. Try again.",
+    qs_copyNoDeposit: "The copy is made, but the deposit typed on the original didn't come with it: it asks for the company's default. Type it again on the copy.",
     // setQuoteSite (cn-v1158), the estimate's own job site. Each names the one thing to do.
     qs_siteNeedsAddress: "Type the street address of the job site first.",
     qs_siteTooLong: "That address is too long to save. Shorten it and try again.",
@@ -407,6 +413,12 @@ export const words: WordCatalog = {
     qs_estimateNotHere: "Ese presupuesto no está aquí para actualizarlo.",
     qs_customerUnavailable: "Ese cliente no está disponible.",
     qs_estimateUnavailable: "Ese presupuesto no está disponible.",
+    // setQuoteDeposit: anticipo, the house word for a deposit.
+    qs_depositNotANumber: "Escribe el anticipo como una cantidad de $0 o más.",
+    qs_depositOverTotal: "Un anticipo no puede ser mayor que el total de este presupuesto, {total}. Escribe una cantidad menor.",
+    qs_depositOfferClosed: "El anticipo de este presupuesto ya no puede cambiar: era parte de la oferta. Revisa el presupuesto para ofrecer otro anticipo.",
+    qs_depositRuleUnread: "No se pudo leer la configuración de anticipo de la empresa, así que no se cambió nada. Inténtalo de nuevo.",
+    qs_copyNoDeposit: "La copia está hecha, pero el anticipo escrito en el original no vino con ella: pide el predeterminado de la empresa. Escríbelo de nuevo en la copia.",
     // setQuoteSite: sitio de trabajo, as the clock and the geofence say a job site (tc_theJobsite, gf_theJobSite).
     qs_siteNeedsAddress: "Primero escribe la dirección del sitio de trabajo.",
     qs_siteTooLong: "Esa dirección es demasiado larga para guardarla. Acórtala e inténtalo de nuevo.",

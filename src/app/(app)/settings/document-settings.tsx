@@ -13,6 +13,9 @@ export function DocumentSettings({ settings }: { settings: OrgSettings }) {
   const [expiry, setExpiry] = useState(settings.quote_expiry_days);
   const [due, setDue] = useState(settings.invoice_due_days);
   const [deposit, setDeposit] = useState(settings.deposit_percent);
+  // THE DEPOSIT RULE (cn-v1177, lib/deposit-rule): a percent of the estimate held under a dollar cap.
+  // Both are clamped on read (getOrgSettings), so what this shows is what every estimate uses.
+  const [depositCap, setDepositCap] = useState(settings.deposit_cap_amount);
   const [quoteTerms, setQuoteTerms] = useState(settings.quote_terms);
   const [invoiceTerms, setInvoiceTerms] = useState(settings.invoice_terms);
   const [contractTerms, setContractTerms] = useState(settings.contract_terms);
@@ -33,6 +36,7 @@ export function DocumentSettings({ settings }: { settings: OrgSettings }) {
         quote_expiry_days: expiry,
         invoice_due_days: due,
         deposit_percent: deposit,
+        deposit_cap_amount: depositCap,
         quote_terms: quoteTerms,
         invoice_terms: invoiceTerms,
         contract_terms: contractTerms,
@@ -47,7 +51,7 @@ export function DocumentSettings({ settings }: { settings: OrgSettings }) {
   return (
     <div className="space-y-4">
       {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         {estimates && (
           <div>
             <Label htmlFor="ds-expiry">Estimate valid for (days)</Label>
@@ -62,7 +66,12 @@ export function DocumentSettings({ settings }: { settings: OrgSettings }) {
           <Label htmlFor="ds-deposit">Default deposit (%)</Label>
           <NumberInput id="ds-deposit" value={deposit} onValueChange={setDeposit} />
         </div>
+        <div>
+          <Label htmlFor="ds-deposit-cap">Deposit cap ($)</Label>
+          <NumberInput id="ds-deposit-cap" value={depositCap} onValueChange={setDepositCap} />
+        </div>
       </div>
+      <p className="-mt-2 text-xs text-slate-500">0% means no deposit. A cap of 0 means no cap.</p>
       {estimates && (
         <div>
           <Label htmlFor="ds-qterms">Default estimate terms</Label>

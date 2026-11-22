@@ -17,7 +17,7 @@ import { useToast } from "@/components/toast";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { addLineAsk, customerLineWords, groupedOrder, invoiceBalance, invoiceDiscountSplit, invoiceOverpayment, isDrawKind, linesToGroup, movedOrder, supplierNameSet, storedLineKind, discountRowLabel, type LineMove } from "@/lib/invoice-math";
 import { UNIT_DATALIST_ID } from "@/lib/pricing/units";
-import { LineKindChips } from "./line-kind-chips";
+import { LineKindChips, lineLockedByApp } from "./line-kind-chips";
 import { processorFeeLabel } from "@/lib/processor-fee";
 import { markupBoxApplied, markupBoxOnSeed, markupBoxStart, markupBoxTyped, markupBoxWords, materialsImportPlan, type MarkupSeed } from "@/lib/invoice-markup";
 import { paymentMethodChoices, paymentMethodKey, paymentMethodLabel } from "@/lib/payment-method";
@@ -1264,7 +1264,9 @@ export function InvoiceDetail({
                         dead end Erik walked into, and the whole-row target made it the easiest
                         thing on the page to hit by accident. Since cn-v962 void is the only status
                         that takes this branch; a sent or paid bill gets the real button back. */}
-                    {linesLocked ? (
+                    {linesLocked || lineLockedByApp(it, (invoice as any).invoice_kind ?? null) ? (
+                      // A line the app keeps (a credit, a milestone, a payment request's own line)
+                      // reads the same, with no edit door: the server refuses every write to it.
                       <div className="min-w-0 flex-1">
                         <LineRowText item={it} notes={lineNotes} />
                       </div>
@@ -1308,24 +1310,28 @@ export function InvoiceDetail({
                             <ArrowUpDown className="h-4 w-4" />
                           </button>
                         )}
-                        <button
-                          onClick={() => startEdit(it)}
-                          disabled={pending}
-                          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-brand"
-                          aria-label="Edit"
-                          title="Edit"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => start(async () => { const res = await deleteInvoiceItem(it.id, invoice.id); if (!res?.ok) { toast(res?.error ?? "Couldn't remove the line item — try again.", "error"); return; } refresh(); })}
-                          disabled={pending}
-                          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-red-600"
-                          aria-label="Remove"
-                          title="Remove"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        {!lineLockedByApp(it, (invoice as any).invoice_kind ?? null) && (
+                          <>
+                            <button
+                              onClick={() => startEdit(it)}
+                              disabled={pending}
+                              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-brand"
+                              aria-label="Edit"
+                              title="Edit"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => start(async () => { const res = await deleteInvoiceItem(it.id, invoice.id); if (!res?.ok) { toast(res?.error ?? "Couldn't remove the line item — try again.", "error"); return; } refresh(); })}
+                              disabled={pending}
+                              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-red-600"
+                              aria-label="Remove"
+                              title="Remove"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </>
+                        )}
                       </>
                     )}
                   </div>

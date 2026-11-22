@@ -23,6 +23,9 @@ import { addressWithoutWon } from "@/lib/appointments/inspection-page";
 import { approveVisitEstimate, readWonSheet } from "../won-actions";
 import { startJobFromSale } from "../start-job-actions";
 import { linkAppointmentTo } from "../actions";
+import { readPaymentRequestSeed, requestPayment, type PaymentRequestSeed } from "../../billing/request-actions";
+import type { PayDoorFacts, RequestRef } from "@/lib/payment-request";
+import { GetPaidButton } from "@/components/settle-up-button";
 
 /**
  * WON · START THE JOB (cn-v1176): ONE sheet, drawn as ONE <Modal> inside the Inspector, always
@@ -54,6 +57,32 @@ export type WonPhase =
   | { k: "sheet"; sheet: ReadOk }
   | { k: "plain_chosen"; noCustomer: boolean }
   | { k: "done"; how: "approve" | "plain"; quote: WonRef | null; total: number | null; job: WonRef; warnings?: string[] };
+
+/**
+ * THE DEPOSIT AT THE DONE STEP (cn-v1177), after an approval only (a plain start has no estimate and
+ * so no deposit). What the job's seed says decides it, never a figure of the sheet's own:
+ *   take   a deposit is due on the accepted estimate, the job has a customer, is not over, and no live
+ *          request for it exists: Take the Deposit Now · $X (makes the request, opens Get Paid on it);
+ *   live   the estimate's live deposit request is owed: Get Paid on INV-900;
+ *   paid   that request is paid: said in one line;
+ *   unread the read failed: said, with where to take it instead;
+ *   none   nothing (no deposit, no customer, a job that is over).
+ */
+export type WonDeposit =
+  | { k: "none" }
+  | { k: "reading" }
+  | { k: "unread" }
+  | { k: "take"; amount: number; quoteId: string | null }
+  | { k: "live"; request: RequestRef }
+  | { k: "paid"; request: RequestRef };
+
+export function wonDepositDoor(seed: PaymentRequestSeed): WonDeposit {
+  if (!seed.ok) return { k: "unread" };
+  const live = seed.deposit.request;
+  if (live) return live.balance > 0.005 ? { k: "live", request: live } : { k: "paid", request: live };
+  if (seed.deposit.due > 0.005 && seed.job.hasCustomer && !seed.job.over) return { k: "take", amount: seed.deposit.due, quoteId: seed.deposit.quote?.id ?? null };
+  return { k: "none" };
+}
 
 /** What he typed on a hole row: the text as typed (a half-typed "1." stays "1."), and Remove. */
 export type WonTyped = Record<string, { qty?: string; price?: string; remove?: boolean }>;
@@ -132,6 +161,60 @@ export function WonSheet({ appointmentId, open, onClose }: { appointmentId: stri
   const billingPickedRef = useRef(false);
   /** The opening a read belongs to: an answer that comes back after the sheet closed is dropped. */
   const openingRef = useRef(0);
+  // THE DEPOSIT (cn-v1177): its door, the one request in flight, and the Get Paid sheet on top for it.
+  const [deposit, setDeposit] = useState<WonDeposit>({ k: "none" });
+  const [depositNote, setDepositNote] = useState<string | null>(null);
+  const [depositBusy, setDepositBusy] = useState(false);
+  const depositInFlight = useRef(false);
+  const [cardOn, setCardOn] = useState(false);
+  /** The company's payment methods, Venmo and texting facts, when the seed carries them (cn-v1177 seams). */
+  const [payFacts, setPayFacts] = useState<PayDoorFacts | null>(null);
+  const [payFor, setPayFor] = useState<RequestRef | null>(null);
+  const [payOpen, setPayOpen] = useState(false);
+
+  async function readDeposit(jobId: string) {
+    const opening = openingRef.current;
+    setDeposit({ k: "reading" });
+    try {
+      const seed = await readPaymentRequestSeed(jobId);
+      if (opening !== openingRef.current) return;
+      if (seed.ok) {
+        setCardOn(seed.canTakeCard);
+        setPayFacts(seed.payDoor ?? null);
+      }
+      setDeposit(wonDepositDoor(seed));
+    } catch {
+      if (opening === openingRef.current) setDeposit({ k: "unread" });
+    }
+  }
+
+  async function takeDeposit(jobId: string) {
+    if (deposit.k !== "take" || depositInFlight.current) return;
+    depositInFlight.current = true;
+    const opening = openingRef.current;
+    setDepositBusy(true);
+    setDepositNote(null);
+    try {
+      const r = await requestPayment({ jobId, purpose: "deposit", amount: deposit.amount, quoteId: deposit.quoteId });
+      if (opening !== openingRef.current) return;
+      if (r.ok) {
+        setDeposit(r.request.balance > 0.005 ? { k: "live", request: r.request } : { k: "paid", request: r.request });
+        if (r.request.balance > 0.005) {
+          setPayFor(r.request);
+          setPayOpen(true);
+        }
+        router.refresh();
+        return;
+      }
+      setDepositNote(r.error || translator(langRef.current)("vi_wonDepositDidntGo"));
+      if (r.request) setDeposit(r.request.balance > 0.005 ? { k: "live", request: r.request } : { k: "paid", request: r.request });
+    } catch {
+      if (opening === openingRef.current) setDepositNote(translator(langRef.current)("vi_wonDepositDidntGo"));
+    } finally {
+      depositInFlight.current = false;
+      if (opening === openingRef.current) setDepositBusy(false);
+    }
+  }
 
   async function read(keepNote = false) {
     const opening = openingRef.current;
@@ -162,6 +245,11 @@ export function WonSheet({ appointmentId, open, onClose }: { appointmentId: stri
       setTyped({});
       setBusy(false);
       setNote(null);
+      setDeposit({ k: "none" });
+      setDepositNote(null);
+      setDepositBusy(false);
+      depositInFlight.current = false;
+      setPayOpen(false);
       void read();
     }
     if (!open && wasOpen.current) openingRef.current += 1;
@@ -180,6 +268,7 @@ export function WonSheet({ appointmentId, open, onClose }: { appointmentId: stri
       if (r.ok && r.job) {
         setPhase({ k: "done", how: "approve", quote: r.quote, total: r.total, job: r.job, warnings: r.warnings });
         router.refresh();
+        void readDeposit(r.job.id);
         return;
       }
       if (r.ok) {
@@ -251,31 +340,60 @@ export function WonSheet({ appointmentId, open, onClose }: { appointmentId: stri
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={t("vi_btn_wonStartTheJob")} holdOpen={busy} size="md">
-      <WonSheetBody
-        phase={phase}
-        lang={lang}
-        billing={billing}
-        onBilling={(b) => {
-          billingPickedRef.current = true;
-          setBilling(b);
-        }}
-        typed={typed}
-        onTyped={(key, patch) => setTyped((cur) => ({ ...cur, [key]: { ...cur[key], ...patch } }))}
-        busy={busy}
-        note={note}
-        onRetry={() => void read()}
-        onApprove={onApprove}
-        onFinish={(quote) => void approve(quote.id, "", [])}
-        onChoosePlain={() => {
-          const noCustomer = phase.k === "sheet" && (phase.sheet.state === "estimate" || phase.sheet.state === "plain") ? phase.sheet.noCustomer : false;
-          setNote(null);
-          setPhase({ k: "plain_chosen", noCustomer });
-        }}
-        onStartPlain={() => void startPlain()}
-        onTie={(job) => void tie(job)}
-      />
-    </Modal>
+    <>
+      <Modal open={open} onClose={onClose} title={t("vi_btn_wonStartTheJob")} holdOpen={busy || depositBusy} size="md">
+        <WonSheetBody
+          phase={phase}
+          lang={lang}
+          billing={billing}
+          onBilling={(b) => {
+            billingPickedRef.current = true;
+            setBilling(b);
+          }}
+          typed={typed}
+          onTyped={(key, patch) => setTyped((cur) => ({ ...cur, [key]: { ...cur[key], ...patch } }))}
+          busy={busy}
+          note={note}
+          onRetry={() => void read()}
+          onApprove={onApprove}
+          onFinish={(quote) => void approve(quote.id, "", [])}
+          onChoosePlain={() => {
+            const noCustomer = phase.k === "sheet" && (phase.sheet.state === "estimate" || phase.sheet.state === "plain") ? phase.sheet.noCustomer : false;
+            setNote(null);
+            setPhase({ k: "plain_chosen", noCustomer });
+          }}
+          onStartPlain={() => void startPlain()}
+          onTie={(job) => void tie(job)}
+          deposit={deposit}
+          depositNote={depositNote}
+          depositBusy={depositBusy}
+          onTakeDeposit={() => {
+            if (phase.k === "done") void takeDeposit(phase.job.id);
+          }}
+          onGetPaid={(r) => {
+            setPayFor(r);
+            setPayOpen(true);
+          }}
+        />
+      </Modal>
+      {/* THE EXISTING GET PAID SHEET for the deposit's own bill, on top of this one. Keyed by the bill
+          only while it is closed (a later opening's request is another bill). */}
+      {payFor && (
+        <GetPaidButton
+          key={payFor.id}
+          source="invoice"
+          invoiceId={payFor.id}
+          balance={payFor.balance}
+          trigger="none"
+          open={payOpen}
+          onClose={() => setPayOpen(false)}
+          cardEnabled={cardOn}
+          methods={payFacts?.methods}
+          venmoConfigured={payFacts?.venmoConfigured}
+          textReady={payFacts?.textReady}
+        />
+      )}
+    </>
   );
 }
 
@@ -322,6 +440,11 @@ export function WonSheetBody({
   onChoosePlain,
   onStartPlain,
   onTie = () => {},
+  deposit = { k: "none" },
+  depositNote = null,
+  depositBusy = false,
+  onTakeDeposit = () => {},
+  onGetPaid = () => {},
 }: {
   phase: WonPhase;
   lang: string;
@@ -338,6 +461,12 @@ export function WonSheetBody({
   onStartPlain: () => void;
   /** The refer state's Tie button (cn-v1176 fix F9). */
   onTie?: (job: WonRef) => void;
+  /** The done step's deposit door (cn-v1177), after an approval only. */
+  deposit?: WonDeposit;
+  depositNote?: string | null;
+  depositBusy?: boolean;
+  onTakeDeposit?: () => void;
+  onGetPaid?: (r: RequestRef) => void;
 }) {
   const t = translator(lang);
   const money = (n: number) => formatCurrency(n, lang);
@@ -402,7 +531,30 @@ export function WonSheetBody({
             {w}
           </p>
         ))}
-        {/* cn-v1177: the deposit goes here */}
+        {/* THE DEPOSIT (cn-v1177): after an approval only; what wonDepositDoor read from the job decides it. */}
+        {phase.how === "approve" && deposit.k === "reading" && (
+          <p className="flex items-center gap-2 text-sm text-slate-500">
+            <Loader2 className="h-4 w-4 animate-spin" /> {t("vi_wonDepositReading")}
+          </p>
+        )}
+        {phase.how === "approve" && deposit.k === "unread" && <p className="text-sm text-slate-600">{t("vi_wonDepositUnread")}</p>}
+        {phase.how === "approve" && depositNote && (
+          <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">{depositNote}</p>
+        )}
+        {phase.how === "approve" && deposit.k === "take" && (
+          <Button type="button" className="w-full" disabled={depositBusy} onClick={onTakeDeposit}>
+            {depositBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+            {fillText(t("vi_btn_wonTakeDeposit"), { amount: money(deposit.amount) })}
+          </Button>
+        )}
+        {phase.how === "approve" && deposit.k === "live" && (
+          <Button type="button" className="w-full" onClick={() => onGetPaid(deposit.request)}>
+            {deposit.request.number ? fillText(t("vi_btn_wonGetPaidOn"), { n: deposit.request.number }) : t("vi_btn_wonGetPaidOnTheDeposit")}
+          </Button>
+        )}
+        {phase.how === "approve" && deposit.k === "paid" && (
+          <p className="text-sm text-slate-600">{fillText(t("vi_wonDepositPaid"), { n: deposit.request.number || t("vi_wonTheDeposit") })}</p>
+        )}
         <div className="flex flex-wrap gap-2">
           <Link href={`/jobs/${phase.job.id}`}>
             <Button type="button">{t("ag_btn_openTheJob")}</Button>

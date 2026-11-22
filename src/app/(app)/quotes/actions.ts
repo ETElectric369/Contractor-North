@@ -18,6 +18,9 @@ import { pickReadablePlans } from "@/lib/plan-brief";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { createNotifications } from "@/lib/notifications";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
+import { depositFor, type DepositRule } from "@/lib/deposit-rule";
+import { formatCurrency } from "@/lib/utils";
+import { depositFollowsTotal, storedDepositAfterSave } from "@/lib/estimate/estimate-deposit";
 import { QUOTE_STATUSES } from "@/lib/statuses";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
@@ -605,7 +608,7 @@ export async function quoteEditLock(quoteId: string): Promise<{ reason: string }
  *  circuits and the row's own address. A const so each select is a string literal the client's select
  *  parser can read into a row type, where a template built at run time is not. */
 const EDITOR_QUOTE_COLUMNS =
-  "id, quote_number, customer_id, job_id, inquiry_id, status, doc_type, title, description, notes, tax_rate, subtotal, tax, total, valid_until, follow_up_at, estimate_format, revises_quote_id, public_token, circuits, address, unit, city, state, zip, accepted_at, declined_at, accepted_how, accepted_by, created_by, created_at, updated_at" as const;
+  "id, quote_number, customer_id, job_id, inquiry_id, status, doc_type, title, description, notes, tax_rate, subtotal, tax, total, deposit_amount, deposit_by_hand, valid_until, follow_up_at, estimate_format, revises_quote_id, public_token, circuits, address, unit, city, state, zip, accepted_at, declined_at, accepted_how, accepted_by, created_by, created_at, updated_at" as const;
 const EDITOR_ITEM_COLUMNS = "id, quote_id, description, quantity, unit, unit_price, line_total, sort_order, category, detail" as const;
 
 /**
@@ -633,7 +636,16 @@ export async function readQuoteForEditor(
   if (li.error) return { ok: false, error: dbError(li.error) };
   const n = (v: unknown): number => Number(v ?? 0) || 0;
   const row = q.data as Record<string, unknown>;
-  const quote = { ...row, tax_rate: n(row.tax_rate), subtotal: n(row.subtotal), tax: n(row.tax), total: n(row.total) } as unknown as EditorQuote;
+  const quote = {
+    ...row,
+    tax_rate: n(row.tax_rate),
+    subtotal: n(row.subtotal),
+    tax: n(row.tax),
+    total: n(row.total),
+    // null stays null: saved before 0414, no deposit stated (never read as $0, which is "no deposit").
+    deposit_amount: row.deposit_amount == null ? null : n(row.deposit_amount),
+    deposit_by_hand: row.deposit_by_hand === true,
+  } as unknown as EditorQuote;
   const items = ((li.data ?? []) as Record<string, unknown>[]).map(
     (r) =>
       ({
@@ -764,7 +776,9 @@ async function recalcQuote(supabase: any, quoteId: string) {
   // `(items ?? [])` turned one transient timeout into subtotal/tax/total = 0 written straight
   // over a real estimate — with the PDF busted so the customer's copy showed $0 too.
   const [quoteRes, itemsRes] = await Promise.all([
-    supabase.from("quotes").select("tax_rate").eq("id", quoteId).maybeSingle(),
+    // The deposit's facts (0414) ride the one read: the status (an offer still open follows its total),
+    // the company (its rule), and the two columns as they stand.
+    supabase.from("quotes").select("tax_rate, status, org_id, deposit_amount, deposit_by_hand").eq("id", quoteId).maybeSingle(),
     supabase.from("quote_line_items").select("line_total").eq("quote_id", quoteId),
   ]);
   if (quoteRes.error || itemsRes.error || !itemsRes.data) {
@@ -781,9 +795,26 @@ async function recalcQuote(supabase: any, quoteId: string) {
     itemsRes.data.map((i: any) => Number(i.line_total ?? 0)),
     Number(quoteRes.data?.tax_rate ?? 0),
   );
+  // THE DEPOSIT IS WRITTEN WITH THE TOTAL IT IS A PART OF (cn-v1177), in the same statement: every
+  // writer of an estimate's totals funnels through here (saveQuote, the line doors, updateQuoteMeta),
+  // so no total lands without its deposit. The rule is lib/estimate/estimate-deposit: an offer still
+  // open follows the company's rule or the typed figure (never above the total); one no longer on
+  // offer keeps what it stated. The company's rule is read only when it is needed; a failed read
+  // leaves the stored figure as it is (said to the error sink), never a guessed one.
+  const q = (quoteRes.data ?? null) as { status?: string | null; org_id?: string | null; deposit_amount?: unknown; deposit_by_hand?: unknown } | null;
+  let rule: DepositRule | null = null;
+  if (q && depositFollowsTotal(q.status) && q.deposit_by_hand !== true && q.org_id) {
+    const { data: org, error: orgErr } = await supabase.from("organizations").select("settings").eq("id", q.org_id).maybeSingle();
+    if (orgErr || !org) reportError("recalcQuote:depositRule", orgErr ?? new Error("the company could not be read"), { quoteId });
+    else {
+      const st = getOrgSettings((org as { settings?: unknown }).settings);
+      rule = { percent: st.deposit_percent, cap: st.deposit_cap_amount };
+    }
+  }
+  const deposit = q ? storedDepositAfterSave({ total, status: q.status, stored: q.deposit_amount, byHand: q.deposit_by_hand, rule }) : undefined;
   const { data: upd, error: updErr } = await supabase
     .from("quotes")
-    .update({ subtotal, tax, total })
+    .update({ subtotal, tax, total, ...(deposit !== undefined ? { deposit_amount: deposit } : {}) })
     .eq("id", quoteId)
     .select("id");
   if (updErr || !upd?.length) reportError("recalcQuote:write", updErr ?? new Error("zero rows"), { quoteId });
@@ -1222,6 +1253,64 @@ export async function updateQuoteMeta(
   revalidatePath("/quotes");
   revalidatePath("/closing");
   return { ok: true };
+}
+
+/**
+ * THE ESTIMATE'S DEPOSIT, SET BY HAND OR GIVEN BACK TO THE COMPANY'S RULE (cn-v1177; the editor's
+ * Deposit field). `typed` a figure: it is stored as typed (deposit_by_hand), so later saves leave it,
+ * and it is refused above the estimate's total. `typed` null: Use the Default, the company's rule
+ * (lib/deposit-rule depositFor) over the stored total, written with the flag off in one statement.
+ * Only while the offer is open (draft or sent): an accepted estimate's deposit is what the customer
+ * said yes to, so a different one is a revision. Every write is read back (silent-write law) and drops
+ * the stored PDF, which prints the deposit line.
+ */
+export async function setQuoteDeposit(
+  quoteId: string,
+  typed: number | null,
+): Promise<{ ok: true; deposit: number; byHand: boolean } | { ok: false; error: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: String(ctx.error) };
+  const supabase: any = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
+  if (typed !== null && (typeof typed !== "number" || !Number.isFinite(typed) || typed < 0)) {
+    return { ok: false, error: await ws.say("qs_depositNotANumber") };
+  }
+  const { data: q, error: readErr } = await supabase
+    .from("quotes")
+    .select("id, status, total, org_id")
+    .eq("id", quoteId)
+    .eq("org_id", ctx.orgId)
+    .maybeSingle();
+  if (readErr) return { ok: false, error: dbError(readErr) };
+  if (!q) return { ok: false, error: await ws.say("qs_quoteNotFound") };
+  if (!depositFollowsTotal(q.status)) return { ok: false, error: await ws.say("qs_depositOfferClosed") };
+  const total = Math.max(0, Math.round(Number(q.total ?? 0) * 100) / 100);
+  let patch: { deposit_by_hand: boolean; deposit_amount: number };
+  if (typed !== null) {
+    const amount = Math.round(typed * 100) / 100;
+    if (amount > total + 0.005) {
+      return { ok: false, error: await ws.say("qs_depositOverTotal", { total: formatCurrency(total, await ws.lang()) }) };
+    }
+    patch = { deposit_by_hand: true, deposit_amount: amount };
+  } else {
+    const { data: org, error: orgErr } = await supabase.from("organizations").select("settings").eq("id", q.org_id).maybeSingle();
+    if (orgErr) return { ok: false, error: dbError(orgErr) };
+    if (!org) return { ok: false, error: await ws.say("qs_depositRuleUnread") };
+    const st = getOrgSettings((org as { settings?: unknown }).settings);
+    patch = { deposit_by_hand: false, deposit_amount: depositFor(total, { percent: st.deposit_percent, cap: st.deposit_cap_amount }) };
+  }
+  const { data: landed, error } = await supabase
+    .from("quotes")
+    .update(patch)
+    .eq("id", quoteId)
+    .eq("org_id", ctx.orgId)
+    .in("status", ["draft", "sent"])
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!landed?.length) return { ok: false, error: await ws.say("qs_estimateNotHere") };
+  await bustDocPdf("quote", quoteId);
+  revalidatePath(`/quotes/${quoteId}`);
+  return { ok: true, deposit: patch.deposit_amount, byHand: patch.deposit_by_hand };
 }
 
 /**
@@ -1938,7 +2027,9 @@ export async function duplicateQuote(
   // into a row type, where a template built at run time is not.)
   // address, unit, city, state, zip ride too (cn-v1158): the estimate's OWN job site, there since
   // 0177 / 0187 and written by the Job Site line (setQuoteSite above). See the stamp below.
-  const columns = "customer_id, title, description, notes, tax_rate, valid_until, doc_type, circuits, job_id, inquiry_id, status, address, unit, city, state, zip" as const;
+  // deposit_amount, deposit_by_hand ride too (cn-v1177, 0414): a typed deposit is carried (below); one
+  // that follows the company's rule is recomputed by the copy's own save, from the same lines.
+  const columns = "customer_id, title, description, notes, tax_rate, valid_until, doc_type, circuits, job_id, inquiry_id, status, address, unit, city, state, zip, deposit_amount, deposit_by_hand" as const;
   const first = await supabase.from("quotes").select(`${columns}, estimate_format`).eq("id", id).maybeSingle();
   const withFormat = !(first.error && isMissingColumn(first.error));
   const { data: quote } = withFormat ? first : await supabase.from("quotes").select(columns).eq("id", id).maybeSingle();
@@ -2009,6 +2100,26 @@ export async function duplicateQuote(
 
   // What the copy could not bring with it, each said in its own sentence (the copy itself is made).
   const warnings: string[] = [];
+
+  // A TYPED DEPOSIT COMES WITH IT (cn-v1177). saveQuote stated the company's deposit on the copy (its
+  // recalc); a deposit a person typed on the original is a choice about this work, so a copy and a
+  // revision carry it, written onto the new draft and read back, then recalculated (the one rule keeps
+  // it at or under the copy's total). A lost write is said: the copy stands with the company's figure.
+  const typedDeposit = (quote as { deposit_by_hand?: unknown; deposit_amount?: unknown });
+  if (res.id && typedDeposit.deposit_by_hand === true && typedDeposit.deposit_amount != null && Number.isFinite(Number(typedDeposit.deposit_amount))) {
+    const { data: carried, error: depErr } = await supabase
+      .from("quotes")
+      .update({ deposit_by_hand: true, deposit_amount: Number(typedDeposit.deposit_amount) })
+      .eq("id", res.id)
+      .eq("status", "draft")
+      .select("id");
+    if (depErr || !carried?.length) {
+      reportError("quotes.duplicateQuote.deposit", depErr ?? new Error("zero rows"), { from: id, to: res.id });
+      warnings.push(await ws.say("qs_copyNoDeposit"));
+    } else {
+      await recalcQuote(supabase, res.id);
+    }
+  }
 
   // THE COPY PRINTS THE PLACE ITS PAPER PRINTED (cn-v1158), in two halves.
   //
