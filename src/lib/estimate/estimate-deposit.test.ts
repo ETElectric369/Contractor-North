@@ -10,7 +10,7 @@ const CA = { percent: 10, cap: 1000 };
 describe("storedDepositAfterSave", () => {
   it("an open offer follows its total through the company's rule", () => {
     expect(storedDepositAfterSave({ total: 4800, status: "draft", stored: null, byHand: false, rule: CA })).toBe(480);
-    expect(storedDepositAfterSave({ total: 25000, status: "sent", stored: 480, byHand: false, rule: CA })).toBe(1000);
+    expect(storedDepositAfterSave({ total: 25000, status: "draft", stored: 480, byHand: false, rule: CA })).toBe(1000);
     expect(storedDepositAfterSave({ total: 0, status: "draft", stored: 480, byHand: false, rule: CA })).toBe(0);
     expect(storedDepositAfterSave({ total: 4800, status: "draft", stored: null, byHand: false, rule: { percent: 0, cap: 1000 } })).toBe(0);
     expect(storedDepositAfterSave({ total: "4800.00", status: "draft", stored: "1.00", byHand: false, rule: { percent: 25, cap: 0 } })).toBe(1200);
@@ -18,7 +18,7 @@ describe("storedDepositAfterSave", () => {
 
   it("a typed deposit survives the save and is never above the total", () => {
     expect(storedDepositAfterSave({ total: 4800, status: "draft", stored: 2000, byHand: true, rule: CA })).toBe(2000);
-    expect(storedDepositAfterSave({ total: 4800, status: "sent", stored: "2000.00", byHand: true, rule: null })).toBe(2000);
+    expect(storedDepositAfterSave({ total: 4800, status: "draft", stored: "2000.00", byHand: true, rule: null })).toBe(2000);
     expect(storedDepositAfterSave({ total: 1500, status: "draft", stored: 2000, byHand: true, rule: CA })).toBe(1500);
     expect(storedDepositAfterSave({ total: 4800, status: "draft", stored: 0, byHand: true, rule: CA })).toBe(0);
   });
@@ -37,8 +37,14 @@ describe("storedDepositAfterSave", () => {
     expect(storedDepositAfterSave({ total: 100, status: "draft", stored: 480, byHand: false, rule: null })).toBe(100);
   });
 
-  it("only draft and sent follow the total", () => {
-    expect(["draft", "sent", "accepted", "declined", "expired", "superseded"].map(depositFollowsTotal)).toEqual([true, true, false, false, false, false]);
+  it("only a draft follows the total (cn-v1178: a sent estimate is the customer's copy)", () => {
+    expect(["draft", "sent", "accepted", "declined", "expired", "superseded"].map(depositFollowsTotal)).toEqual([true, false, false, false, false, false]);
+  });
+
+  it("cn-v1178 (decision 3): a SENT estimate keeps the deposit it stated, whatever the company's rule says now; one saved before 0414 stays null", () => {
+    expect(storedDepositAfterSave({ total: 4800, status: "sent", stored: 480, byHand: false, rule: { percent: 50, cap: 0 } })).toBeUndefined();
+    expect(storedDepositAfterSave({ total: 4800, status: "sent", stored: null, byHand: false, rule: CA })).toBeUndefined();
+    expect(storedDepositAfterSave({ total: 4800, status: "sent", stored: 2000, byHand: true, rule: CA })).toBeUndefined();
   });
 });
 
@@ -50,8 +56,13 @@ describe("depositShown (the editor's field)", () => {
     expect(depositShown({ total: 4800, status: "draft", stored: 480, byHand: false, rule: { percent: 0, cap: 0 } })).toEqual({ amount: 0, from: "none", notStatedYet: false });
   });
 
-  it("an open estimate saved before 0414 shows the figure it WOULD store, marked as not stated yet", () => {
-    expect(depositShown({ total: 4800, status: "sent", stored: null, byHand: false, rule: CA })).toEqual({ amount: 480, from: "default", notStatedYet: true });
+  it("a draft saved before 0414 shows the figure it WOULD store, marked as not stated yet", () => {
+    expect(depositShown({ total: 4800, status: "draft", stored: null, byHand: false, rule: CA })).toEqual({ amount: 480, from: "default", notStatedYet: true });
+  });
+
+  it("a sent estimate shows what it stated, never today's rule; one that stated nothing shows none", () => {
+    expect(depositShown({ total: 4800, status: "sent", stored: 480, byHand: false, rule: { percent: 50, cap: 0 } })).toEqual({ amount: 480, from: "default", notStatedYet: false });
+    expect(depositShown({ total: 4800, status: "sent", stored: null, byHand: false, rule: CA })).toEqual({ amount: 0, from: "none", notStatedYet: false });
   });
 
   it("an accepted estimate shows the stored figure, and none when it stated none", () => {

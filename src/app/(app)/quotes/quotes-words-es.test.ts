@@ -41,6 +41,7 @@ function builder(table: string) {
     eq: () => b,
     in: () => b,
     is: () => b,
+    neq: () => b,
     not: () => b,
     order: () => b,
     limit: () => b,
@@ -51,7 +52,8 @@ function builder(table: string) {
   return b;
 }
 /** A fresh session client per call, the way requireStaff makes one (the words' memo lives on it). */
-const fresh = () => ({ from: (t: string) => builder(t), auth: { getUser: async () => ({ data: { user: { id: "office-1" } } }) } });
+// rpc (cn-v1178): the sale's family read (quote_family_ids) answers no other estimate here.
+const fresh = () => ({ from: (t: string) => builder(t), rpc: async () => ({ data: [], error: null }), auth: { getUser: async () => ({ data: { user: { id: "office-1" } } }) } });
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => fresh()), createServiceClient: vi.fn(() => fresh()) }));
 vi.mock("@/lib/staff-guard", () => ({ requireStaff: async () => ({ supabase: fresh(), userId: "office-1", orgId: "org-1" }) }));
@@ -147,6 +149,14 @@ describe("a Spanish-reading office hears the estimates' refusals in Spanish", ()
     expect(await addQuoteItem("q1", { description: "Snowbell outlet", quantity: 1, unit_price: 50 })).toEqual({
       ok: false,
       error: "E-7 se aceptó y ya se facturaron 2 de sus pagos programados — un cambio ahora volvería a calcular los pagos restantes. Usa Crear Revisión en su lugar (o anula el pago).",
+    });
+  });
+
+  it("cn-v1178: a SENT estimate's line is refused in the caller's words, naming Back to Draft", async () => {
+    db.rows = { quotes: { status: "sent", job_id: null, quote_number: "E-7", doc_type: "estimate" } };
+    expect(await addQuoteItem("q1", { description: "Snowbell outlet", quantity: 1, unit_price: 50 })).toEqual({
+      ok: false,
+      error: "E-7 ya se envió: es la copia del cliente, así que sus partidas, totales y anticipo no cambian mientras está afuera. Toca Volver a Borrador para cambiarlo y luego envíalo otra vez.",
     });
   });
 

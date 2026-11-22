@@ -5,7 +5,7 @@ import { BILLING_STEP_WRONG_COMPANY, finishBillingStep, paidDoorVerdict, type Bi
 import { jobSaidLabel } from "@/lib/job-pick-label";
 import { reportError } from "@/lib/observe";
 import { closeJobTasks, type CloseJobTasks } from "@/lib/job-tasks";
-import { isPrepaymentKind } from "@/lib/prepayments";
+import { PREPAID_CREDIT, isPrepaymentKind } from "@/lib/prepayments";
 
 /**
  * PAID COMPLETES THE JOB (209451e1, the money half, 2026-09-30).
@@ -115,24 +115,66 @@ export async function completeJobWhenPaid(
   access: BillingAccess,
   /** The side effects of a completion, injectable for tests. Defaults to the calendar push and the revalidates. */
   touch: (jobId: string) => Promise<void> = touchCompletedJob,
+  /** Internal: 1 when a paid request asked again for the paid bill that took it off (never recurses twice). */
+  depth = 0,
 ): Promise<CompleteWhenPaid> {
   try {
     const { data: inv, error: invErr } = await supabase
       .from("invoices")
-      .select("id, job_id, invoice_kind, status")
+      .select("id, org_id, job_id, invoice_kind, status")
       .eq("id", invoiceId)
       .maybeSingle();
     if (invErr) {
       reportError("completeJobWhenPaid:read-invoice", invErr, { invoiceId });
       return { completed: false, why: "the invoice couldn't be read" };
     }
-    const row = inv as { id: string; job_id?: string | null; invoice_kind?: string | null; status?: string | null } | null;
+    const row = inv as { id: string; org_id?: string | null; job_id?: string | null; invoice_kind?: string | null; status?: string | null } | null;
     if (!row) return { completed: false, why: "invoice not found" };
     if (row.status !== "paid") return { completed: false, why: `the invoice is ${row.status ?? "not paid"}, not paid` };
     const kind = row.invoice_kind ?? "standard";
     // A PAID PAYMENT REQUEST (cn-v1177) is money asked for ahead of the work, never the end of it, and
     // never a draw: it has its own kind and its own words.
-    if (isPrepaymentKind(kind)) return { completed: false, why: "a paid payment request is money ahead of the work, not its end" };
+    // PAID LAST, IT IS THE JOB'S LAST PAYMENT (cn-v1178, audit D2 = E2): a request paid after the bill
+    // that took it off left that bill's own gate refused ("1 other open bill", the request) and nothing
+    // asked again, so the job sat In Progress over every bill paid. So the same gate is asked again for
+    // THAT bill: a paid standard bill on this job that carries a "prepaid_credit" line naming this
+    // request. Only that one (skeptic S2): any other paid bill (a trip charge paid weeks before the
+    // request existed) was never held up by it, and a paid request must not end a job through it. No
+    // such bill: the paid request ends nothing, as before. Nothing here decides anything of its own (a
+    // fixed-price job, an unstarted job, another open bill all answer as they did).
+    if (isPrepaymentKind(kind)) {
+      const ahead = "a paid payment request is money ahead of the work, not its end";
+      if (!row.job_id || depth > 0) return { completed: false, why: ahead };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- a PostgREST builder, pinned or not
+      const pin = (q: any): any => (row.org_id ? q.eq("org_id", row.org_id) : q);
+      const { data: creditLines, error: creditErr } = await pin(
+        supabase.from("invoice_items").select("invoice_id, prepaid_invoice_id, import_source").eq("import_source", PREPAID_CREDIT).eq("prepaid_invoice_id", invoiceId),
+      );
+      if (creditErr) {
+        reportError("completeJobWhenPaid:read-credit-lines", creditErr, { invoiceId, jobId: row.job_id });
+        return { completed: false, why: "the bills that took this request off couldn't be read" };
+      }
+      const carriers = [
+        ...new Set(
+          ((creditLines ?? []) as { invoice_id?: string | null; prepaid_invoice_id?: string | null; import_source?: string | null }[])
+            .filter((l) => l.import_source === PREPAID_CREDIT && String(l.prepaid_invoice_id ?? "") === invoiceId && l.invoice_id)
+            .map((l) => String(l.invoice_id)),
+        ),
+      ].filter((id) => id !== invoiceId);
+      if (!carriers.length) return { completed: false, why: ahead };
+      const { data: paidBills, error: paidErr } = await pin(
+        supabase.from("invoices").select("id, job_id, status, invoice_kind, created_at").in("id", carriers).eq("job_id", row.job_id).eq("status", "paid"),
+      );
+      if (paidErr) {
+        reportError("completeJobWhenPaid:read-paid-bills", paidErr, { invoiceId, jobId: row.job_id });
+        return { completed: false, why: "the job's other bills couldn't be read" };
+      }
+      const last = ((paidBills ?? []) as { id: string; job_id?: string | null; status?: string | null; invoice_kind?: string | null; created_at?: string | null }[])
+        .filter((inv) => carriers.includes(String(inv.id)) && inv.job_id === row.job_id && inv.status === "paid" && (inv.invoice_kind ?? "standard") === "standard")
+        .sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")))[0];
+      if (!last) return { completed: false, why: ahead };
+      return await completeJobWhenPaid(supabase, String(last.id), access, touch, depth + 1);
+    }
     if (kind !== "standard") return { completed: false, why: `a paid ${kind} draw is a stage of the job, not its end` };
     const jobId = row.job_id ?? null;
     if (!jobId) return { completed: false, why: "the invoice isn't on a job" };

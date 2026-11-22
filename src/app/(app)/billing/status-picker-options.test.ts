@@ -155,3 +155,27 @@ describe("INV-071 as the ⋯ offers it", () => {
     expect(src).not.toMatch(/<option value="sent-by-hand">/);
   });
 });
+
+/**
+ * A PAYMENT REQUEST'S DEEDS SAY WHAT IS TRUE OF A REQUEST (cn-v1178, audit D4): it billed no hours and
+ * no materials, so its void confirm never says they go back to unbilled; and it has no draft stage, so
+ * Back to Draft (which the server always refuses for it) is not offered. A standard bill is unchanged.
+ */
+describe("a payment request's ⋯ deeds", () => {
+  const voidOf = (kind: string | null) => invoiceStatusItems({ status: "sent", invoiceNumber: "INV-900", invoiceKind: kind }).find((d) => d.id === "st-void") as { confirm?: string } | undefined;
+  it("the void confirm of a request says it billed nothing, and a standard bill's is as it was", () => {
+    expect(voidOf("prepayment")?.confirm).toBe(
+      "Void INV-900? It stays on the books as cancelled and asks for nothing more. It billed no hours and no materials, so nothing goes back to unbilled; a draft that takes it off lets go of it.",
+    );
+    expect(voidOf("standard")?.confirm).toBe("Void INV-900? It stays on the books as cancelled and bills nothing; the hours and materials it billed go back to unbilled.");
+  });
+  it("a request offers no Back to Draft and no note about it", () => {
+    const ids = invoiceStatusItems({ status: "paid", invoiceNumber: "INV-900", invoiceKind: "prepayment", amountPaid: 500, sentAt: "2026-11-01T00:00:00Z" }).map((d) => d.id);
+    expect(ids).not.toContain("st-draft");
+    expect(ids).not.toContain("st-draft-note");
+  });
+  it("the page hands the menu the bill's kind", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/billing/[id]/page.tsx"), "utf8");
+    expect(src).toContain("invoiceKind={(inv as { invoice_kind?: string | null }).invoice_kind ?? null}");
+  });
+});

@@ -69,3 +69,14 @@ describe("dbError — never swallows what it doesn't recognise", () => {
       expect(dbError(v).length).toBeGreaterThan(0);
   });
 });
+
+describe("dbError — one sale, one deposit (cn-v1178, carried C38)", () => {
+  it("0414's one-live-deposit index says what stands and the way out, never the generic duplicate", () => {
+    const said = dbError({ code: "23505", message: 'duplicate key value violates unique constraint "invoices_one_live_deposit_request_per_estimate"' });
+    expect(said).toBe("This estimate already has a live deposit request. Void that one first, or use it. Nothing was changed.");
+  });
+  it("0416's guard speaks for itself: its words pass through as the database says them", () => {
+    const msg = "This sale already has a deposit request: INV-900. Use that one. Nothing was made.";
+    expect(dbError({ code: "P0001", message: msg })).toBe(msg);
+  });
+});

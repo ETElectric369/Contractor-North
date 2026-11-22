@@ -26,6 +26,8 @@ import { playbookForForm } from "@/lib/playbook/parse";
 import { ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
 import { NewInspectionButton } from "../../appointments/new-inspection-button";
 import { EstimateEditor } from "../estimate-editor";
+import { readUsualBillingKind } from "@/lib/schedule-options";
+import { docTypeOfBillingKind } from "@/lib/appointments/won-sheet";
 
 export const dynamic = "force-dynamic";
 // The estimator runs inside this page's server actions (generateQuoteDraft and kin, quotes/actions):
@@ -453,6 +455,8 @@ export default async function NewQuotePage({
           initialScope,
           items: seededLines,
           quoteExpiryDays: expiryDays,
+          // The paper's word a new estimate starts with (cn-v1178, decision 2): the company's usual kind's.
+          docType: docTypeOfBillingKind(await readUsualBillingKind(supabase)),
         }}
         catalog={{
           orgId,

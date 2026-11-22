@@ -4,7 +4,7 @@ import { signDocumentUrls } from "@/lib/signed-docs";
 import { customerUnbilled, fixedBillingsToNet, netOfDeposit, unbilledWorkForJob, type CustomerUnbilled, type PriorInvoiceRow } from "@/lib/unbilled-work";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { prepaymentsLeft } from "@/lib/prepayments";
-import { readPrepaymentStates } from "@/lib/payment-request";
+import { readPrepaymentStatesInCompany } from "@/lib/payment-request";
 import { reportError } from "@/lib/observe";
 import { readSupplierNames } from "@/lib/supplier-names";
 import { newInvoiceDocCache, readInvoiceDocumentProps, type InvoiceDocRead } from "@/lib/invoice-document-props";
@@ -68,7 +68,8 @@ async function depositToNet(svc: ReturnType<typeof createServiceClient>, orgId: 
   // come off (paid or not) is netted beside the draw money, so the money card's "work not on a bill
   // yet" is what the next bill will ask for. Its own pool, its own rule (lib/prepayments); a failed
   // read throws, so the figure is left off rather than shown gross.
-  const requestsLeft = prepaymentsLeft(await readPrepaymentStates(svc, jobId));
+  // Pinned to the company the gate named, every read (cn-v1178, D7): the service role has no RLS.
+  const requestsLeft = prepaymentsLeft(await readPrepaymentStatesInCompany(svc, orgId, jobId));
   return { amount: Math.round((fixedBillingsToNet(rows) + requestsLeft) * 100) / 100, requests: requestsLeft };
 }
 

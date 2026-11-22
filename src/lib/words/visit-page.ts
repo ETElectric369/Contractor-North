@@ -335,7 +335,7 @@ export const words: WordCatalog = {
     //    already in the caller's language (cs_) and rides through as received. ──
     vp_onlyOfficeStartsJob: "Only the office can start a job. Ask the office to start it, then clock in here.",
     vp_visitNotFound: "That visit could not be found.",
-    vp_visitCancelledNothingStarted: "This visit was cancelled. Nothing was started.",
+    vp_visitCancelledNothingStarted: "This visit was cancelled. Tap Put It Back on the Schedule in its ⋯ first. Nothing was started.",
     vp_nothingWasStarted: "Nothing was started.",
     vp_onClockSwitchHere: "You're on the clock on {label} since {since}. Switch to This Job moves your clock here now. Nothing was started yet.",
     vp_onClockLinkInstead: "You're on the clock on {job}, the job {customer} already has from today. Link this visit to {job} instead. Nothing was started.",
@@ -649,7 +649,7 @@ export const words: WordCatalog = {
 
     vp_onlyOfficeStartsJob: "Solo la oficina puede empezar un trabajo. Pídele a la oficina que lo empiece, y luego marca entrada aquí.",
     vp_visitNotFound: "No se encontró esa visita.",
-    vp_visitCancelledNothingStarted: "Esta visita se canceló. No se empezó nada.",
+    vp_visitCancelledNothingStarted: "Esta visita se canceló. Toca Devolverla a la Agenda en su ⋯ primero. No se empezó nada.",
     vp_nothingWasStarted: "No se empezó nada.",
     vp_onClockSwitchHere: "Desde {since} estás en el reloj en {label}. Cambiar a Este Trabajo mueve tu reloj aquí ahora. Aún no se ha empezado nada.",
     vp_onClockLinkInstead: "Estás en el reloj en {job}, el trabajo que {customer} ya tiene de hoy. Mejor enlaza esta visita a {job}. No se empezó nada.",

@@ -498,6 +498,12 @@ export function WonSheetBody({
       </div>
     </div>
   );
+  // AN ESTIMATE THAT STANDS BILLS AS ITS OWN WORD SAYS (cn-v1178, the owner's decision 2): a Quote is a
+  // Fixed Price job, an Estimate a Time and Material one. Said, with no choice to make; the server takes
+  // the paper's word whatever is sent. Only the visit's own lines (no paper yet) ask for the kind.
+  const paperKind = (k: BillingKind) => (
+    <p className="text-sm text-slate-600">{fillText(t("qt_wonBillsAsThePaper"), { kind: t(k === "tm" ? "ag_rail_billingTm" : "ag_rail_billingFixed") })}</p>
+  );
   const noCustomerLine = <p className="text-xs text-slate-500">{t("vi_wonNoCustomer")}</p>;
 
   if (phase.k === "reading") {
@@ -614,7 +620,7 @@ export function WonSheetBody({
       <div className="space-y-3">
         {said}
         <p className="text-sm text-slate-700">{cap(fillText(t("vi_wonFinish"), { n: estimateName(s.quote) }))}</p>
-        {billingChoice}
+        {paperKind(s.billingKind)}
         <Button type="button" className="w-full" disabled={busy} onClick={() => onFinish(s.quote)}>
           {spin}
           {s.quote.number ? fillText(t("vi_btn_wonFinishFrom"), { n: s.quote.number }) : t("vi_btn_wonFinishFromTheEstimate")}
@@ -729,7 +735,7 @@ export function WonSheetBody({
           <dd className="tabular-nums">{money(view.totals.total)}</dd>
         </div>
       </dl>
-      {billingChoice}
+      {visit ? billingChoice : paperKind(s.billingKind)}
       {s.noCustomer && noCustomerLine}
       {!visit && view.holesLeft && s.quote && (
         <Link href={`/quotes/${s.quote.id}`} className="inline-flex min-h-[44px] items-center text-sm font-medium text-[rgb(var(--glass-ink))] underline">

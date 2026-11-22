@@ -341,6 +341,8 @@ export const words: WordCatalog = {
     qt_toEstimateNone: "No inspections are waiting on an estimate.",
     qt_toEstimateFailed: "The inspections waiting on an estimate couldn't load. Reload to try again.",
     qt_allEstimatesHeading: "All Estimates",
+    // ── cn-v1178: the Won sheet says the paper's word ──
+    qt_wonBillsAsThePaper: "The job bills as {kind}, as the paper says.",
   },
   es: {
     qt_status_draft: "borrador",
@@ -581,5 +583,7 @@ export const words: WordCatalog = {
     qt_toEstimateNone: "No hay inspecciones esperando un presupuesto.",
     qt_toEstimateFailed: "No se pudieron cargar las inspecciones que esperan un presupuesto. Recarga para intentar de nuevo.",
     qt_allEstimatesHeading: "Todos los Presupuestos",
+    // ── cn-v1178 ──
+    qt_wonBillsAsThePaper: "El trabajo se cobra como {kind}, como dice el documento.",
   },
 };

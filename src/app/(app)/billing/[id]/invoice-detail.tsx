@@ -1942,10 +1942,13 @@ export function InvoiceStatusMenuItems({
   sentAt,
   amountPaid,
   changedSinceSent = false,
+  invoiceKind = null,
 }: {
   invoiceId: string;
   invoiceNumber?: string | null;
   status: string;
+  /** invoices.invoice_kind: a payment request's void confirm says what is true of a request. */
+  invoiceKind?: string | null;
   sentAt?: string | null;
   amountPaid?: number | null;
   /** THE RECORD: the bill changed since it last went out (lib/invoice-revision changedSinceSent,
@@ -1956,7 +1959,7 @@ export function InvoiceStatusMenuItems({
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
-  const items = invoiceStatusItems({ status, invoiceNumber, sentAt, amountPaid, changedSinceSent });
+  const items = invoiceStatusItems({ status, invoiceNumber, sentAt, amountPaid, changedSinceSent, invoiceKind });
   function run(value: string, confirmText?: string) {
     if (confirmText && !confirm(confirmText)) return;
     const next = statusToSend(value);

@@ -69,6 +69,7 @@ export function QuoteDocument({
   docStyle,
   estimateFormat,
   depositDue,
+  depositReceived = false,
 }: {
   co: any;
   template: any;
@@ -110,6 +111,9 @@ export function QuoteDocument({
    *  is above 0. null / absent = saved before 0414 or no deposit: nothing is printed. English on purpose:
    *  this is customer paper, and no document component reads the word catalog. */
   depositDue?: number | string | null;
+  /** THE SALE'S DEPOSIT IS PAID (cn-v1178, audit B6): the line says "Deposit received" with the amount
+   *  in place of "Deposit due on acceptance", on the customer's link and on the office's paper alike. */
+  depositReceived?: boolean;
 }) {
   const ds = normalizeDocStyle(docStyle);
   const coSized = { ...co, logoSize: ds.logo_size };
@@ -248,7 +252,9 @@ export function QuoteDocument({
       {/* Totals — no balance passed, so Total itself is the bold emphasis (no Paid/Balance rows). */}
       <DocTotals subtotal={subtotal} taxRate={taxRate} tax={tax} total={total} />
       {Number(depositDue) > 0.005 && (
-        <p className="mt-2 text-right text-sm font-medium text-slate-800">Deposit due on acceptance: {formatCurrency(Number(depositDue))}</p>
+        <p className="mt-2 text-right text-sm font-medium text-slate-800">
+          {depositReceived ? "Deposit received" : "Deposit due on acceptance"}: {formatCurrency(Number(depositDue))}
+        </p>
       )}
 
       {/* Accept/decline — customer-facing surface only (the office print copy omits it). */}

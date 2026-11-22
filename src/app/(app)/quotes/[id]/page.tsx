@@ -8,6 +8,7 @@ import { BackLink } from "@/components/back-link";
 import { getOrgSettings } from "@/lib/org-settings";
 import { normalizeDocStyle } from "@/lib/doc-style";
 import { quoteEditLock } from "../actions";
+import { liveRequestForQuote } from "@/lib/payment-request";
 import { EstimateEditor, type SavedLineRow, type SavedQuoteRow } from "../estimate-editor";
 import { extOf, intakePaths, uploadDisplayName } from "@/lib/playbook/uploads";
 import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
@@ -177,6 +178,17 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   // so a status-only gate would have hidden controls that still work. null = every control stays
   // live. Read once: the editor shows its reason, and the Duplicate door follows it.
   const lock = await quoteEditLock(q.id);
+  // THE SALE'S DEPOSIT REQUEST (cn-v1178, decision 1): this estimate's or one in its revision family. When
+  // there is one, the Deposit field shows IT, as a fact, and never the stored figure beside it. A read
+  // that fails is said in the field ("unread"), never read as "no request".
+  let depositRequest: { number: string | null; amount: number; balance: number; status: string } | null | "unread" = null;
+  try {
+    const r = await liveRequestForQuote(supabase as never, String((q as { org_id?: string | null }).org_id ?? ""), q.id);
+    depositRequest = r ? { number: r.number, amount: r.amount, balance: r.balance, status: r.status } : null;
+  } catch (e) {
+    reportError("quotes/[id]:depositRequest", e, { quoteId: id });
+    depositRequest = "unread";
+  }
   // THE CIRCUIT SCHEDULE IS ASKED FOR, NOT DRAWN ON EVERY ESTIMATE (cn-v1160). The owner, 2026-11-10:
   // "we do not need the circuit schedule on the estimates page, right now it shows up on the bottom
   // of every one and i imagine that will be chosen as an option". Panel Map on used to draw an empty
@@ -255,6 +267,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           quote: q,
           items: lineItems,
           lock,
+          depositRequest,
           customer: q.customers ?? null,
           lead: q.inquiry ? { ...q.inquiry, intakePaths: intakePaths(q.inquiry.intake), row: q.inquiry } : null,
           customers: (customers ?? []) as { id: string; name: string; company_name: string | null }[],

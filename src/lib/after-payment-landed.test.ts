@@ -21,11 +21,12 @@ const calls = vi.hoisted(() => ({
   reported: [] as string[],
   rang: [] as { org: string | null | undefined; people: string[]; kind: string; line: { title: string; body?: string | null; url?: string | null } }[],
   staff: ["erik", "office-2", "office-3"] as string[],
+  busted: [] as { doc: string; id: string; org: string | null | undefined }[],
 }));
 vi.mock("next/cache", () => ({ revalidatePath: (p: string) => calls.revalidated.push(p) }));
 vi.mock("@/lib/calendar-sync", () => ({ pushCalendarItem: async (_k: string, id: string) => void calls.pushedToGoogle.push(id) }));
 vi.mock("@/lib/observe", () => ({ reportError: (where: string) => void calls.reported.push(where) }));
-vi.mock("@/lib/pdf-cache", () => ({ bustDocPdf: async () => {} }));
+vi.mock("@/lib/pdf-cache", () => ({ bustDocPdf: async (doc: string, id: string, org?: string | null) => void calls.busted.push({ doc, id, org }) }));
 vi.mock("@/lib/push", () => ({ orgStaffIds: async () => calls.staff }));
 vi.mock("@/lib/notifications", () => ({
   notifyPeople: async (org: string | null | undefined, people: (string | null | undefined)[], kind: string, line: any) => {
@@ -313,5 +314,50 @@ describe("every door that records a payment goes through the one helper", () => 
       expect(src, f).not.toMatch(/completeJobWhenPaid\(/);
       expect(src, f).not.toMatch(/sendPushToProfiles\(/);
     }
+  });
+});
+
+/**
+ * SKEPTIC S8 · A DEPOSIT REQUEST'S PAYMENT DROPS ITS SALE'S STORED ESTIMATE PDFS. The paper says "Deposit
+ * received" once the request is paid, but the share door hands out a stored copy whose status still
+ * matches (api/share-pdf), and paying a request touches no estimate row. So the request's estimate and
+ * every other estimate of its sale (quote_family_ids) lose their stored PDF; nothing fails the payment.
+ */
+describe("afterPaymentLanded — a deposit request's sale papers", () => {
+  beforeEach(() => {
+    calls.busted.length = 0;
+    calls.reported.length = 0;
+  });
+  const requestBooks = () => ({
+    invoices: [{ id: "inv-900", org_id: ORG, job_id: JOB, invoice_kind: "prepayment", quote_id: "q-900", status: "sent", invoice_number: "INV-900", tax_rate: 0, total: 480, amount_paid: 0 }],
+    invoice_items: [{ invoice_id: "inv-900", line_total: 480 }],
+    payments: [{ invoice_id: "inv-900", amount: 480 }],
+    customer_credits: [] as any[],
+    jobs: [{ id: JOB, status: "in_progress" }],
+  });
+  const withFamily = (db: any, answer: { data: unknown; error: unknown }) => Object.assign(db, { rpc: async (fn: string) => (fn === "quote_family_ids" ? answer : { data: null, error: { message: "no such function" } }) });
+
+  it("the request's estimate and its sale's other estimates are dropped, in the request's company", async () => {
+    const db = withFamily(fakeDb(requestBooks()), { data: ["q-900", "q-901"], error: null });
+    const r = await afterPaymentLanded(db, { invoiceId: "inv-900", orgId: ORG, access: STAFF });
+    expect(r.settled).toBe(true);
+    expect(calls.busted.filter((b) => b.doc === "quote")).toEqual([
+      { doc: "quote", id: "q-900", org: ORG },
+      { doc: "quote", id: "q-901", org: ORG },
+    ]);
+  });
+
+  it("a family that cannot be read still drops the request's own estimate, and the payment stands", async () => {
+    const db = withFamily(fakeDb(requestBooks()), { data: null, error: { message: "statement timeout" } });
+    const r = await afterPaymentLanded(db, { invoiceId: "inv-900", orgId: ORG, access: STAFF });
+    expect(r.settled).toBe(true);
+    expect(calls.busted.filter((b) => b.doc === "quote")).toEqual([{ doc: "quote", id: "q-900", org: ORG }]);
+    expect(calls.reported).toContain("afterPaymentLanded:sale-papers");
+  });
+
+  it("a standard bill drops no estimate's paper", async () => {
+    const db = withFamily(fakeDb(books(1000)), { data: ["q-900"], error: null });
+    await afterPaymentLanded(db, { invoiceId: INV, orgId: ORG, access: STAFF });
+    expect(calls.busted.filter((b) => b.doc === "quote")).toEqual([]);
   });
 });

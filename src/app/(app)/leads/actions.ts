@@ -6,7 +6,7 @@ import { planDayTimes } from "../schedule/actions";
 
 import { customerAddressFrom } from "@/lib/inquiries/lead-address";
 import { bustBillsOfQuotes, bustDocPdf, bustLeadPdfs } from "@/lib/pdf-cache";
-import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
+import { findCustomerMatch, findMatchingCustomerId, normName, sureCustomerMatch, type DupCustomer } from "@/lib/crm/duplicates";
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
@@ -15,7 +15,7 @@ import { appointmentTypeFor, bookingTitle, workKind } from "@/lib/schedule/work-
 import { standingFor } from "@/lib/leads/new-intake";
 import { reopenNotSold } from "@/lib/leads/not-sold";
 import { closeVisitsBehindLead } from "@/lib/appointments/behind-quote";
-import { carryFromCustomer, matchKnownCustomer, type CustomerMatch, type KnownCustomer } from "@/lib/inquiries/known-customer";
+import { carryFromCustomer, type CustomerMatch, type KnownCustomer } from "@/lib/inquiries/known-customer";
 import { createServiceClient } from "@/lib/supabase/server";
 import { customerForInquiry } from "@/lib/actions/win-customer";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
@@ -239,14 +239,40 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
       if (postedErr) reportError("leads:create:posted-customer", postedErr);
       posted = (row as KnownCustomer | null) ?? null;
     }
+    /**
+     * ONLY A SURE MATCH LINKS (cn-v1178, A1). This ran matchKnownCustomer, a name alone: a new caller
+     * typed with his own phone was linked to a stranger of the same name, the stranger's email was
+     * carried into the empty box, and every later door (the estimate, the customer's Accept, Won, Book
+     * It) trusted the link. It is the one matcher every other door uses now (lib/crm/duplicates
+     * sureCustomerMatch): a phone, then an email, then a name that is no placeholder, the only one of
+     * its kind in the book, and contradicted by nothing typed. A name that is not sure links nothing and
+     * says why. A failed read of the book is said too, never read as "nobody".
+     */
     let m: CustomerMatch;
     if (posted) m = { kind: "one", customer: posted };
     else {
-      const { data: known } = await supabase
+      const { data: known, error: bookErr } = await supabase
         .from("customers")
         .select("id, name, phone, email, address, city, state, zip, company_name")
         .limit(5000);
-      m = matchKnownCustomer(name, (known ?? []) as KnownCustomer[]);
+      if (bookErr) {
+        reportError("leads:create:customer-book", bookErr);
+        m = { kind: "none" };
+        link_note = await ws.say("ld_srv_bookUnread");
+      } else {
+        const book = (known ?? []) as KnownCustomer[];
+        const candidate = { name, phone: fields.phone ?? null, email: fields.email ?? null };
+        const dup = (c: KnownCustomer): DupCustomer => ({ id: c.id, name: c.name ?? null, company_name: c.company_name ?? null, email: c.email ?? null, phone: c.phone ?? null });
+        const sure = sureCustomerMatch(candidate, book.map(dup));
+        const sameName = normName(name) ? book.filter((c) => normName(c.name) === normName(name)) : [];
+        if (sure) m = { kind: "one", customer: book.find((c) => c.id === sure.id)! };
+        else if (sameName.length > 1) m = { kind: "ambiguous", count: sameName.length };
+        else {
+          m = { kind: "none" };
+          // One customer of that name, and what was typed disagrees with what is on file: another person.
+          if (findCustomerMatch(candidate, book.map(dup))?.disagrees) link_note = await ws.say("ld_srv_sameNameNotSure", { name });
+        }
+      }
     }
     if (m.kind === "one") {
       linkedCustomerId = m.customer.id;

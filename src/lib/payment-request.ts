@@ -34,6 +34,7 @@ import {
   type PrepaymentState,
 } from "./prepayments";
 import { invoiceBalance } from "./invoice-math";
+import { saleQuoteIds } from "./sale-quotes";
 import { recalcInvoice } from "./invoice-recalc";
 import { markInvoiceSent } from "./invoice-sent-stamp";
 import { reportError } from "./observe";
@@ -52,6 +53,9 @@ export type RequestRef = {
   /** What is still owed on the request itself. */
   balance: number;
   status: string;
+  /** The job the request is on, and the estimate it is the deposit of (null for materials or other). */
+  jobId?: string | null;
+  quoteId?: string | null;
 };
 
 export type RequestRefusal =
@@ -75,8 +79,8 @@ const num = (x: unknown): number => {
 };
 
 /** The columns a RequestRef is read from. */
-const REF_COLUMNS = "id, invoice_number, public_token, title, total, amount_paid, status";
-type RefRow = { id: string; invoice_number: string | null; public_token: string | null; title: string | null; total: unknown; amount_paid: unknown; status: string | null };
+const REF_COLUMNS = "id, invoice_number, public_token, title, total, amount_paid, status, job_id, quote_id";
+type RefRow = { id: string; invoice_number: string | null; public_token: string | null; title: string | null; total: unknown; amount_paid: unknown; status: string | null; job_id?: string | null; quote_id?: string | null };
 
 export function requestRefOf(row: RefRow): RequestRef {
   return {
@@ -87,16 +91,25 @@ export function requestRefOf(row: RefRow): RequestRef {
     amount: cents(num(row.total)),
     balance: invoiceBalance(num(row.total), num(row.amount_paid)),
     status: String(row.status ?? ""),
+    jobId: row.job_id ?? null,
+    quoteId: row.quote_id ?? null,
   };
 }
 
-/** The live (not void) deposit request of one estimate, in one company. Throws on a failed read. */
-async function liveRequestForQuote(db: SupabaseClient, orgId: string, quoteId: string): Promise<RequestRef | null> {
+/**
+ * THE SALE'S LIVE DEPOSIT REQUEST (cn-v1178): the live (not void) deposit request of this estimate OR of
+ * any estimate in its revision family (lib/sale-quotes saleQuoteIds, the database's quote_family_ids), in
+ * one company; the oldest first. A revision of an estimate whose deposit was requested or paid has THAT
+ * request: no door makes a second one for the same sale. Every reader of "this estimate's deposit
+ * request" asks here. Throws on a failed read (a door that cannot tell must not make another).
+ */
+export async function liveRequestForQuote(db: SupabaseClient, orgId: string, quoteId: string): Promise<RequestRef | null> {
+  const sale = await saleQuoteIds(db, quoteId);
   const { data, error } = await db
     .from("invoices")
     .select(REF_COLUMNS)
     .eq("org_id", orgId)
-    .eq("quote_id", quoteId)
+    .in("quote_id", sale)
     .eq("invoice_kind", PREPAYMENT_KIND)
     .neq("status", "void")
     .order("created_at", { ascending: true })
@@ -125,7 +138,7 @@ async function finishBirth(db: SupabaseClient, orgId: string, jobId: string, liv
   const sent = await markInvoiceSent(db, live.id);
   if (!sent.ok) return null;
   if (!(await recalcInvoice(db, live.id))) reportError("createPaymentRequest.finishBirth.recalc", new Error("recalc did not land"), { invoiceId: live.id });
-  await resyncJobDrafts(db, jobId);
+  await resyncJobDrafts(db, jobId, null, orgId);
   const { data: back, error: backErr } = await db.from("invoices").select(REF_COLUMNS).eq("id", live.id).eq("org_id", orgId).maybeSingle();
   if (backErr || !back) return null;
   const ref = requestRefOf(back as RefRow);
@@ -138,7 +151,17 @@ async function dropUnborn(db: SupabaseClient, orgId: string, id: string): Promis
   if (error) reportError("createPaymentRequest.dropUnborn", error, { invoiceId: id });
 }
 
-/** Make one payment request on a job (or hand back the live deposit request its estimate already has). */
+/**
+ * THE DATABASE SAID A DEPOSIT REQUEST ALREADY STANDS FOR THIS SALE: 0414's one-live-per-estimate index
+ * (23505) or 0416's one-per-sale guard (its own words; a raised exception carries no code of its own).
+ */
+export function lostToTheStandingRequest(err: unknown): boolean {
+  const e = (err ?? {}) as { code?: unknown; message?: unknown };
+  if (String(e.code ?? "") === "23505") return true;
+  return /already has a deposit request/i.test(String(e.message ?? ""));
+}
+
+/** Make one payment request on a job (or hand back the live deposit request its sale already has). */
 export async function createPaymentRequest(
   db: SupabaseClient,
   input: {
@@ -221,9 +244,10 @@ export async function createPaymentRequest(
       .select("id")
       .single();
     if (madeErr || !made) {
-      // ONE LIVE DEPOSIT REQUEST PER ESTIMATE (0414's unique index): a second tap that lost the race
-      // is handed the one that won, never an error.
-      if (quoteId && String((madeErr as { code?: string } | null)?.code ?? "") === "23505") {
+      // ONE LIVE DEPOSIT REQUEST PER ESTIMATE (0414's unique index), AND PER SALE (0416's guard,
+      // invoices_one_deposit_per_sale): a second tap that lost the race, or a revision whose sale got its
+      // request a moment ago, is handed the one that stands, never an error and never a second.
+      if (quoteId && lostToTheStandingRequest(madeErr)) {
         const live = await liveRequestForQuote(db, orgId, quoteId);
         if (live) {
           const whole = await finishBirth(db, orgId, jobId, live);
@@ -263,8 +287,9 @@ export async function createPaymentRequest(
     }
     if (!(await recalcInvoice(db, id))) reportError("createPaymentRequest.recalcAfterSend", new Error("recalc did not land"), { invoiceId: id });
 
-    // Every open draft on the job takes it off now, oldest first.
-    await resyncJobDrafts(db, jobId);
+    // Every open draft on the job takes it off now, oldest first (in the job's company: this runs on the
+    // service client from the customer's own tap).
+    await resyncJobDrafts(db, jobId, null, orgId);
 
     const { data: back, error: backErr } = await db.from("invoices").select(REF_COLUMNS).eq("id", id).eq("org_id", orgId).maybeSingle();
     if (backErr || !back) throw backErr ?? new Error("the request could not be read back");
@@ -301,7 +326,8 @@ export async function ensureDepositRequestForQuoteToken(admin: SupabaseClient, q
     if (quote.status !== "accepted") return { ok: false, why: "not_accepted" };
     if (!quote.job_id) return { ok: false, why: "no_job" };
 
-    // THE SAME DECISION public_quote MAKES (0414, deposit_state), so the page never draws a button whose
+    // THE SAME DECISION public_quote MAKES (0414, deposit_state; 0416 reads the sale), so the page never
+    // draws a button whose
     // tap can only be refused: a live request is handed back (it is owed, on a finished job too; a
     // draft one has its birth finished by createPaymentRequest, never handed to a card door); with none
     // live, nothing is made when no deposit is stated, when the office voided the estimate's request (a
@@ -314,11 +340,13 @@ export async function ensureDepositRequestForQuoteToken(admin: SupabaseClient, q
       const deposit = cents(num(live ? live.amount : quote.deposit_amount));
       if (!live) {
         if (quote.deposit_amount == null || deposit < 0.01) return { ok: false, why: "no_deposit" };
+        // A request the office voided ANYWHERE IN THE SALE (cn-v1178): public_quote reads the family
+        // the same way, so the page offers no button this tap would refuse.
         const { data: voided, error: voidErr } = await admin
           .from("invoices")
           .select("id")
           .eq("org_id", orgId)
-          .eq("quote_id", quote.id)
+          .in("quote_id", await saleQuoteIds(admin, quote.id))
           .eq("invoice_kind", PREPAYMENT_KIND)
           .eq("status", "void")
           .limit(1);
@@ -429,6 +457,15 @@ async function readStates(
     }))
     .filter((c) => !(ignoreDrafts && c.invoice_status === "draft"));
   return prepaymentStates(bills, creditRows, exceptInvoiceId ?? null);
+}
+
+/**
+ * Where every request on one job stands, every read pinned to ONE company (cn-v1178, audit D7): for a
+ * service client, which no RLS narrows. THROWS on a failed read.
+ */
+export async function readPrepaymentStatesInCompany(db: SupabaseClient, orgId: string, jobId: string): Promise<PrepaymentState[]> {
+  if (!orgId) throw new Error("readPrepaymentStatesInCompany: no company");
+  return readStates(db, jobId, orgId);
 }
 
 /** Where every request on one job stands. THROWS on a failed read: an empty list must mean none. */
@@ -558,12 +595,17 @@ export async function syncPrepaidCredit(db: SupabaseClient, invoiceId: string): 
 
 /** After a request is made or voided: every open draft bill on the job is resolved again and recalculated.
  *  `exceptInvoiceId`: a draft left as it is (the bill going out, already resolved first). */
-export async function resyncJobDrafts(db: SupabaseClient, jobId: string, exceptInvoiceId?: string | null): Promise<void> {
+export async function resyncJobDrafts(
+  db: SupabaseClient,
+  jobId: string,
+  exceptInvoiceId?: string | null,
+  /** The job's company: every read is pinned to it (required in effect on a service client, D7). */
+  orgId?: string | null,
+): Promise<void> {
   try {
-    const { data, error } = await db
-      .from("invoices")
-      .select("id")
-      .eq("job_id", jobId)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- a PostgREST builder, pinned or not
+    const pin = (q: any): any => (orgId ? q.eq("org_id", orgId) : q);
+    const { data, error } = await pin(db.from("invoices").select("id").eq("job_id", jobId))
       .eq("status", "draft")
       .neq("invoice_kind", PREPAYMENT_KIND)
       .order("created_at", { ascending: true });

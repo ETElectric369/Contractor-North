@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { milestoneAmount, milestoneKind, scheduleStatus, defaultSchedule, contractTotalFromQuotes, leftToBill } from "@/lib/payment-schedule-math";
+import { milestoneAmount, milestoneKind, scheduleStatus, defaultSchedule, contractTotalFromQuotes, leftToBill, depositIsRequested } from "@/lib/payment-schedule-math";
 
 describe("contractTotalFromQuotes (shared contract-base rule)", () => {
   it("uses the accepted quote(s) when any are accepted (ignores a superseded draft/revision)", () => {
@@ -295,5 +295,26 @@ describe("leftToBill — the one figure on a job billed by its contract (W1-19)"
     const l = leftToBill({ estimate: NaN as unknown as number, invoiced: Infinity as unknown as number }, undefined);
     expect(l.left).toBe(0);
     expect(Number.isFinite(l.billed)).toBe(true);
+  });
+});
+
+/**
+ * THE PREFILL DOES NOT ASK THE DEPOSIT AGAIN (cn-v1178, audit D6). On a job whose deposit was already
+ * requested (paid or not), a Deposit row would bill the same figure as a draw the request then nets to
+ * $0.00, a bill of nothing sent to the customer. The prefill proposes progress and final only.
+ */
+describe("defaultSchedule on a job with a live deposit request", () => {
+  it("proposes no Deposit row, and the rows still sum to 100", () => {
+    const rows = defaultSchedule(30000, { percent: 10, cap: 1000 }, { depositRequested: true });
+    expect(rows.map((r) => r.label)).toEqual(["Progress payment", "Final payment"]);
+    expect(rows.reduce((t, r) => t + Number(r.percent), 0)).toBe(100);
+    expect(defaultSchedule(30000, { percent: 10, cap: 1000 })[0].label).toBe("Deposit");
+  });
+  it("a deposit request is one that is an estimate's deposit or was made as a deposit; a materials payment is not", () => {
+    expect(depositIsRequested([{ quoteId: "q-900", label: "Deposit", status: "paid" }])).toBe(true);
+    expect(depositIsRequested([{ quoteId: null, label: "Deposit", status: "sent" }])).toBe(true);
+    expect(depositIsRequested([{ quoteId: null, label: "Materials Payment", status: "sent" }])).toBe(false);
+    expect(depositIsRequested([{ quoteId: "q-900", label: "Deposit", status: "void" }])).toBe(false);
+    expect(depositIsRequested(null)).toBe(false);
   });
 });

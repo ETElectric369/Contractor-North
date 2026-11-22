@@ -60,7 +60,7 @@ const { saveQuote, updateQuoteMeta, duplicateQuote } = await import("./actions")
 const base = (c: Call): unknown => {
   if (c.table === "quotes" && c.verb === "select" && c.select?.startsWith("tax_rate")) return { data: { tax_rate: 0 }, error: null };
   // The one read before an update (cn-v1132): the row stands here as a draft, with no lead behind it.
-  if (c.table === "quotes" && c.verb === "select" && c.select === "id, status, inquiry_id") return { data: { id: "q1", status: "draft", inquiry_id: null }, error: null };
+  if (c.table === "quotes" && c.verb === "select" && c.select === "id, status, inquiry_id, doc_type") return { data: { id: "q1", status: "draft", inquiry_id: null }, error: null };
   if (c.table === "quote_line_items" && c.verb === "select") return { data: [], error: null };
   if (c.table === "quote_line_items" && c.verb === "insert") return { data: null, error: null };
   if (c.table === "quotes" && c.verb === "insert") return { data: { id: "q-new", quote_number: "E-010" }, error: null };

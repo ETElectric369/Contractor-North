@@ -1,4 +1,3 @@
-import { notFound } from "next/navigation";
 import { pickSite } from "@/lib/site-address";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
@@ -11,6 +10,7 @@ import { isEstimateFormat, type EstimateFormat } from "@/lib/doc-style";
 import { docLabel } from "@/lib/doc-label";
 import { docPageTitle, projectionPlace } from "@/lib/doc-place";
 import { NO_INDEX } from "@/lib/no-index";
+import { cardFeeDecision, feePctLabel } from "@/lib/org-settings";
 import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
 
@@ -32,10 +32,19 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
 }
 
 /**
- * THE DEPOSIT, READ OFF public_quote (cn-v1177, 0414): deposit_amount (the figure the estimate stored),
- * deposit_state ('none' | 'due' | 'requested' | 'paid') and can_take_card. A key that is missing, a
- * state that is not one of the four, or a figure that is not above 0 reads as NO deposit: an estimate
- * saved before 0414 states nothing and is offered nothing. Not exported: a page exports its page.
+ * THE DEPOSIT, READ OFF public_quote (cn-v1177, 0414; cn-v1178, 0416): deposit_amount (the sale's live
+ * request's ask, else the figure the estimate stored), deposit_state ('none' | 'due' | 'requested' |
+ * 'paid'), can_take_card, and since 0416 deposit_due (what is still owed on a live unpaid request, else
+ * null) and card_fee_percent (the company's). A key that is missing, a state that is not one of the four,
+ * or a figure that is not above 0 reads as NO deposit: an estimate saved before 0414 states nothing and
+ * is offered nothing. A projection from before 0416 has neither new key: the button then names the ask
+ * and no fee, as it always did. Not exported: a page exports its page.
+ *
+ * WHAT THE BUTTON NAMES IS WHAT THE CARD DOOR CHARGES (audit B3, D5): the door charges the request's
+ * balance plus the company's card fee (/api/pay/<token>, cardFeeDecision), so the button names
+ * deposit_due when there is one, else the ask, through THE SAME cardFeeDecision the invoice's own pay
+ * page and the card door read, and says the fee the way that page does. A partly paid request says
+ * what was received and what is left.
  */
 function depositFromProjection(q: Record<string, unknown> | null | undefined): PublicDeposit {
   const amount = Number(q?.deposit_amount);
@@ -43,7 +52,21 @@ function depositFromProjection(q: Record<string, unknown> | null | undefined): P
   if (!Number.isFinite(amount) || amount <= 0.005 || (state !== "due" && state !== "requested" && state !== "paid")) {
     return { amount: 0, state: "none", canTakeCard: false };
   }
-  return { amount: Math.round(amount * 100) / 100, state, canTakeCard: q?.can_take_card === true };
+  const ask = Math.round(amount * 100) / 100;
+  const dueRaw = q?.deposit_due == null ? Number.NaN : Number(q.deposit_due);
+  // What is still owed: deposit_due when the projection says it (never above the ask, never below 0).
+  const owed = state === "paid" ? 0 : Number.isFinite(dueRaw) ? Math.min(ask, Math.max(0, Math.round(dueRaw * 100) / 100)) : ask;
+  const received = state === "paid" ? ask : Math.round((ask - owed) * 100) / 100;
+  const fee = cardFeeDecision(owed, Number(q?.card_fee_percent ?? 0));
+  return {
+    amount: ask,
+    state,
+    canTakeCard: q?.can_take_card === true,
+    owed,
+    received: received > 0.005 ? received : 0,
+    charge: fee.cardTotal,
+    fee: fee.fee > 0 ? { pct: feePctLabel(fee.pct), amount: fee.fee } : null,
+  };
 }
 
 export default async function PublicQuotePage({
@@ -57,7 +80,20 @@ export default async function PublicQuotePage({
   const sp = searchParams ? await searchParams : {};
   const supabase = await createClient();
   const { data } = await supabase.rpc("public_quote", { p_token: token });
-  if (!data) notFound();
+  // NOT SERVED (cn-v1178, decision 3): public_quote answers nothing for a token it does not know AND for
+  // an estimate the company took back to draft to change it (a sent estimate is the customer's copy;
+  // Back to Draft is how it changes). The customer who opens the link they were sent in that window is
+  // told the one thing true of both: it is not available now, and the company sends it again.
+  if (!data) {
+    return (
+      <div className="min-h-screen bg-slate-100 px-4 py-16">
+        <div className="mx-auto max-w-md rounded-xl bg-white px-6 py-8 text-center shadow-sm">
+          <p className="text-base font-medium text-slate-800">This page isn&apos;t available right now.</p>
+          <p className="mt-2 text-sm text-slate-600">If the company is updating it, they&apos;ll send it to you again when it&apos;s ready.</p>
+        </div>
+      </div>
+    );
+  }
 
   const q = data.quote;
   const pdfReady = await sharePdfReady("quote", token, String(q.status ?? ""));
@@ -132,8 +168,10 @@ export default async function PublicQuotePage({
         tax={q.tax}
         total={q.total}
         notes={q.notes}
-        // The deposit line under the totals (cn-v1177): the figure the estimate stored, when it states one.
+        // The deposit line under the totals (cn-v1177): the sale's request's ask, else the figure the
+        // estimate stored; "Deposit received" once the request is paid (cn-v1178, audit B6).
         depositDue={deposit.state === "none" ? null : deposit.amount}
+        depositReceived={deposit.state === "paid"}
         // The public RPC deliberately omits org.settings (no leak), so quote_terms /
         // document_footer aren't available on this surface — the document falls back
         // to its default footer, the same as before.

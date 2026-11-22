@@ -244,3 +244,19 @@ describe("a visit's Get Paid on a job with a payment request (source appointment
     expect(bill).toMatchObject({ total: 300, amount_paid: 300, status: "paid" });
   });
 });
+
+/**
+ * A PAYMENT REQUEST IS NEVER "THIS TAP" (cn-v1178, audit D8). The re-tap read looks for a same-total bill
+ * this door wrote in the last five minutes; a $500 request made and paid a moment ago matched it, the
+ * door answered done, and the $500 cash in hand was recorded nowhere.
+ */
+describe("settleUp right after a same-amount payment request was paid", () => {
+  it("records the payment on its own bill; the request is not taken for a re-tap", async () => {
+    const r = paidRequest("inv-900", 500, new Date().toISOString());
+    db.invoices.push(r.inv);
+    db.invoice_items.push(r.line);
+    expect(await settle(500)).toMatchObject({ ok: true });
+    expect(db.payments.map((p) => [p.amount, p.invoice_id === "inv-900"])).toEqual([[500, false]]);
+    expect(theBill()).toMatchObject({ total: 500, amount_paid: 500, status: "paid" });
+  });
+});

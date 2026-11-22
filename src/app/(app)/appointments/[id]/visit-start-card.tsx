@@ -131,7 +131,7 @@ export function VisitStartCard({
   openEntry: VisitStartOpenEntry | null;
   linkInstead: (VisitStartJob & { customer: string | null }) | null;
   /** What the job will be, from the same fields createJobFromAppointment carries. */
-  preview: { name: string; customer: string | null; address: string | null; scheduledStart: string | null };
+  preview: { name: string; customer: string | null; address: string | null; scheduledStart: string | null; /** A sales visit's job is not put on the visit's own time (cn-v1178): it waits for a day. */ waitsForADay?: boolean };
   officePhone: string | null;
   /** The end of the tapper's latest finished shift: a Visit Time start inside it is not offered. */
   lastClockOut?: string | null;
@@ -524,10 +524,10 @@ export function VisitStartCard({
                   <dt className="w-20 shrink-0 text-slate-500">{t("vp_address")}</dt>
                   <dd className="text-slate-800">{preview.address ?? t("vp_noAddressYet")}</dd>
                 </div>
-                {preview.scheduledStart && (
+                {(preview.waitsForADay || preview.scheduledStart) && (
                   <div className="flex gap-2">
                     <dt className="w-20 shrink-0 text-slate-500">{t("vp_planned")}</dt>
-                    <dd className="text-slate-800">{formatDateTime(preview.scheduledStart, tz, lang)}</dd>
+                    <dd className="text-slate-800">{preview.waitsForADay ? t("vp_waitingForADay") : preview.scheduledStart ? formatDateTime(preview.scheduledStart, tz, lang) : null}</dd>
                   </div>
                 )}
               </dl>

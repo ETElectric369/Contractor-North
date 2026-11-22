@@ -98,7 +98,8 @@ describe("the customer's own Accept link", () => {
     const accept = page.slice(page.indexOf("async function accept()"), page.indexOf("async function decline()"));
     expect(accept).toContain("await acceptPublicQuote(token)");
     expect(accept).not.toContain('rpc("accept_public_quote"'); // the RPC runs on the server now
-    expect(page).toContain('{busy === "accept" ? "Accepting…" : `Accept this ${lower}`}');
+    // cn-v1178 (audit B7): the button is Title Case with the paper's own word.
+    expect(page).toContain('{busy === "accept" ? "Accepting…" : `Accept This ${docLabel}`}');
     expect(page).not.toContain("finishPublicAcceptance");
     expect(page).not.toContain("notifyQuoteAccepted"); // one call from the page, the chain is server-side
   });

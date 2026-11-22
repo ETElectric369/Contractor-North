@@ -213,7 +213,7 @@ describe("the buy list follows too (0390)", () => {
 describe("the deferred items (cn-v1084)", () => {
   it("an estimate moved off a job: that job follows too, named, and the estimate's paperwork moves with it", () => {
     const fn = body(actions, "export async function setQuoteJob(");
-    expect(fn).toContain('select("status, job_id")');
+    expect(fn).toContain('select("status, job_id, customer_id, quote_number")'); // cn-v1178: the customer and number ride the one read (Q6)
     expect(fn).toContain("if (accepted && from && from !== jobId) {");
     expect(fn).toContain('tasks: left.label ? await ws.say("qs_leftJobFollowsNamed", { job: left.label }) : await ws.say("qs_leftJobFollows")'); // the caller's words (cn-v1145)
     expect(fn).toContain('for (const [table, what] of [["work_orders", "qs_workOrderNotMoved"], ["material_lists", "qs_materialsListNotMoved"]] as const)');

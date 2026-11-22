@@ -91,8 +91,9 @@ describe("Clear the Date", () => {
     expect(read("src/app/(app)/jobs/[id]/page.tsx")).toContain('a.starts_at ? formatDateTime(a.starts_at, undefined, lang) : t("jb_waitingForADay")');
     // A waiting visit made into a job makes a job waiting for a day, not a "scheduled" one with none.
     // cn-v1176 (re-pinned on purpose): the slot is the visit's own start, or none on a sale (the Won sheet).
+    // cn-v1178 (re-pinned on purpose, C2): a sale by either door, the Won sheet or the older door on a sales visit.
     const actions = read("src/app/(app)/appointments/actions.ts");
-    expect(actions).toContain('const slotStart: string | null = asSale ? null : (appt.starts_at ?? null);');
+    expect(actions).toContain('const slotStart: string | null = sale ? null : (appt.starts_at ?? null);');
     expect(actions).toContain('status: slotStart ? "scheduled" : "to_be_scheduled"');
   });
 

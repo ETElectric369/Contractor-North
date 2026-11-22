@@ -61,9 +61,9 @@ describe("migration 0415: money ahead is not a legacy line", () => {
   const now = guardText(sql);
   const was = guardText(migration("0260_"));
 
-  it("is the newest migration, the one 0415, under the house timeouts, with no transaction of its own", () => {
+  it("is the one 0415 (what sits past it is the newest migration's own test: migration-0416.test.ts), under the house timeouts, with no transaction of its own", () => {
     expect(names.filter((n) => n.startsWith("0415_"))).toEqual(["0415_money_ahead_is_not_a_legacy_line.sql"]);
-    expect(names[names.length - 1]).toBe("0415_money_ahead_is_not_a_legacy_line.sql");
+    // The newest-migration line moved to migration-0416.test.ts the night 0416 was written.
     expect(code).toContain("set local lock_timeout = '3s';");
     expect(code).toContain("set local statement_timeout = '15s';");
     expect(code).not.toMatch(/^\s*(begin|commit|rollback|start transaction)\b[^;\n]*;/im);
@@ -142,9 +142,12 @@ describe("migration 0415: money ahead is not a legacy line", () => {
 
   it("the app's twin of the legacy read asks that predicate, once, where it decides", () => {
     const actions = readFileSync(join(process.cwd(), "src/app/(app)/billing/actions.ts"), "utf8");
-    expect(count(actions, "const legacyLabor = items.some(")).toBe(1);
+    // cn-v1178 (carried C37): the read is named `unclaimed` now, because a draw's "Less previous billings"
+    // line among those lines gets a sentence of its own; the predicate is asked in the same place, once.
+    expect(count(actions, "const unclaimed = items.filter(")).toBe(1);
     expect(actions).toContain(
-      "const legacyLabor = items.some((it) => !!it.import_source && !isMoneyAheadLine(it.import_source) && !it.source_ids?.length && !claimedIdsOfLines([it]).length);",
+      "const unclaimed = items.filter((it) => !!it.import_source && !isMoneyAheadLine(it.import_source) && !it.source_ids?.length && !claimedIdsOfLines([it]).length);",
     );
+    expect(actions).toContain("const legacyLabor = unclaimed.some((it) => it.import_source !== DRAW_CREDIT);");
   });
 });

@@ -287,7 +287,9 @@ describe("migration 0413: the customer's own Accept finds the right customer, an
 
     it("holds the live function to 0409's body or its own, and 0379's usual kind to its body, by the statements alone", () => {
       const makers = names.filter((n) => /function\s+(public\.)?accept_public_quote\s*\(/i.test(readFileSync(join(migrations, n), "utf8")));
-      expect(makers.slice(-2)).toEqual(["0409_born_from_an_estimate.sql", "0413_who_said_yes.sql"]);
+      // 0416 re-made it from this file's body with one expression changed (the job bills by the paper's
+      // word); tests/migration-0416.test.ts proves that byte for byte.
+      expect(makers.slice(-3)).toEqual(["0409_born_from_an_estimate.sql", "0413_who_said_yes.sql", "0416_one_sale_one_deposit.sql"]);
       for (const n of names.filter((x) => x >= "0410_" && x < "0413_")) expect(readFileSync(join(migrations, n), "utf8"), n).not.toContain("accept_public_quote");
       expect(statementsMd5(was.body)).toBe(M0409_MD5);
       expect(statementsMd5(accept.body)).toBe(M0413_MD5);

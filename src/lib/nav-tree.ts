@@ -180,15 +180,19 @@ export function invoiceStatusItems(inv: {
    *  the server (0269). Not the money-only notice (customerHoldsOlderCopy) - the body's amber notice
    *  reads that one; this door opens for any change since the send (2026-11-07). */
   changedSinceSent?: boolean;
+  /** invoices.invoice_kind. A payment request ("prepayment") billed no hours and no materials, and has
+   *  no draft stage (cn-v1178): its void confirm says what is true of it, and Back to Draft is not offered. */
+  invoiceKind?: string | null;
 }): InvoiceStatusDeed[] {
   const isDraft = inv.status === "draft";
   const isVoid = inv.status === "void";
-  const canReturnToDraft = !(Number(inv.amountPaid ?? 0) > 0 && !!inv.sentAt);
+  const isRequest = inv.invoiceKind === "prepayment";
+  const canReturnToDraft = !isRequest && !(Number(inv.amountPaid ?? 0) > 0 && !!inv.sentAt);
   const items: InvoiceStatusDeed[] = [];
   if (isDraft) items.push({ id: "st-sent", label: "Mark Sent - I Sent It Myself", value: SENT_BY_HAND });
   else if (!isVoid && inv.changedSinceSent) items.push({ id: "st-resent", label: "Mark Sent Again - I Re-Sent It", value: SENT_BY_HAND });
   if (!isDraft && canReturnToDraft) items.push({ id: "st-draft", label: "Back to Draft", value: "draft" });
-  if (!isDraft && !isVoid && !canReturnToDraft) {
+  if (!isDraft && !isVoid && !canReturnToDraft && !isRequest) {
     items.push({
       id: "st-draft-note",
       note: "This one is with the customer and has money on it, so it can't go back to Draft. You don't need Draft to fix it: change the lines, then send it again.",
@@ -200,7 +204,9 @@ export function invoiceStatusItems(inv: {
       id: "st-void",
       label: "Void Invoice",
       value: "void",
-      confirm: `Void ${doc}? It stays on the books as cancelled and bills nothing; the hours and materials it billed go back to unbilled.`,
+      confirm: isRequest
+        ? `Void ${doc}? It stays on the books as cancelled and asks for nothing more. It billed no hours and no materials, so nothing goes back to unbilled; a draft that takes it off lets go of it.`
+        : `Void ${doc}? It stays on the books as cancelled and bills nothing; the hours and materials it billed go back to unbilled.`,
     });
   }
   return items;

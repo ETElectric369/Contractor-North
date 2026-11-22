@@ -3,10 +3,12 @@
  * this file decides what ONE estimate's `deposit_amount` (0414) holds after a save, and what the editor
  * shows for it, so the server's write and the editor's figure are one rule in one function.
  *
- *   An estimate still on offer (draft or sent) follows its total: the company's rule (depositFor), or,
- *   when a person typed a figure (deposit_by_hand), that figure, never above the total.
- *   An estimate no longer on offer (accepted, declined, expired, superseded) keeps what it stated: the
- *   deposit is a term of the offer the customer saw. It is only ever lowered to the total, so the
+ *   A DRAFT follows its total: the company's rule (depositFor), or, when a person typed a figure
+ *   (deposit_by_hand), that figure, never above the total.
+ *   Every other estimate keeps what it stated. A SENT one is the customer's copy (cn-v1178, decision 3):
+ *   a header edit (Valid Until, notes) re-runs the save, and today's company rule must not rewrite the
+ *   deposit the customer was shown; to change it, Back to Draft. Accepted, declined, expired and
+ *   superseded ones too: the deposit is a term of the offer the customer saw. It is only ever lowered to the total, so the
  *   paper never asks for more than the work. One saved before 0414 (null) stays null: nothing is
  *   stated for it and nothing is offered.
  *   A company rule that could not be read (null) changes nothing it would have computed: the stored
@@ -28,9 +30,9 @@ function meant(x: unknown): number | null {
   return null;
 }
 
-/** Draft and sent are the two states in which the offer can still change. */
+/** Only a draft's deposit follows its total (cn-v1178): a sent estimate is the customer's copy. */
 export function depositFollowsTotal(status: unknown): boolean {
-  return status === "draft" || status === "sent";
+  return status === "draft";
 }
 
 export type EstimateDepositFacts = {
@@ -66,8 +68,8 @@ export type DepositShown = {
 };
 
 /**
- * What the editor's Deposit field shows: on offer, the figure the next save stores (the same rule as
- * storedDepositAfterSave over the live total); no longer on offer, the stored figure.
+ * What the editor's Deposit field shows: a draft, the figure the next save stores (the same rule as
+ * storedDepositAfterSave over the live total); any other estimate, the stored figure.
  */
 export function depositShown(f: EstimateDepositFacts): DepositShown {
   const total = Math.max(0, cents(meant(f.total) ?? 0));

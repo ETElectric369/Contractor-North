@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
 vi.mock("@/lib/pdf-cache", () => ({ bustDocPdf: vi.fn(async () => {}) }));
 
-import { createPaymentRequest, ensureDepositRequestForQuoteToken, payDoorFacts, planPrepaidCredit, readPrepaymentStates, resyncJobDrafts, syncPrepaidCredit } from "./payment-request";
+import { createPaymentRequest, ensureDepositRequestForQuoteToken, liveRequestForQuote, lostToTheStandingRequest, payDoorFacts, planPrepaidCredit, readPrepaymentStates, readPrepaymentStatesInCompany, resyncJobDrafts, syncPrepaidCredit } from "./payment-request";
 import { recalcInvoice } from "./invoice-recalc";
 import { prepaymentStates } from "./prepayments";
 import { fakeDb, failingReads, type Write } from "./prepayment-db.test-util";
@@ -266,6 +266,157 @@ describe("the customer's link makes nothing the page would not offer (skeptic #8
     db.invoices.push(...request("inv-901", 420, { status: "sent", quote_id: "q-900", public_token: "tok-901", total: 420 }));
     db.jobs[0].status = "complete";
     expect(await door()).toEqual({ ok: true, invoiceToken: "tok-901", paid: false });
+  });
+});
+
+/**
+ * ONE SALE, ONE DEPOSIT (cn-v1178, audit B1). A revision of an estimate whose deposit was requested or
+ * paid is the same sale: the customer's tap on the revision's link is HANDED that request, paid or not,
+ * and never makes a second; the office's form is handed it as existing. The stand-in answers
+ * quote_family_ids by migration 0416's rule from its quotes table, and refuses a second live request in
+ * a family as 0416's guard does. Stand-ins: E-900 (q-900) revised by E-901 (q-901), INV-901.
+ */
+describe("one sale, one deposit: a revision's deposit is its sale's request (cn-v1178, B1)", () => {
+  beforeEach(() => {
+    db.quotes.push(
+      { id: "q-900", org_id: ORG, job_id: JOB, status: "superseded", public_token: "qt-900", deposit_amount: 420, revises_quote_id: null },
+      { id: "q-901", org_id: ORG, job_id: JOB, status: "accepted", public_token: "qt-901", deposit_amount: 420, revises_quote_id: "q-900" },
+    );
+  });
+  const live = (o: Row = {}) => {
+    db.invoices.push(...request("inv-901", 420, { status: "paid", amount_paid: 420, quote_id: "q-900", public_token: "tok-901", total: 420, ...o }));
+    db.invoice_items.push(line("inv-901", 420, { import_source: "prepayment", description: "Deposit" }));
+  };
+  const deposits = () => db.invoices.filter((i) => i.invoice_kind === "prepayment" && i.quote_id);
+
+  it("the customer's tap on the revision is handed the original's PAID request; nothing new is made", async () => {
+    live();
+    expect(await ensureDepositRequestForQuoteToken(fake(db), "qt-901")).toEqual({ ok: true, invoiceToken: "tok-901", paid: true });
+    expect(deposits()).toHaveLength(1);
+  });
+  it("and its unpaid one, the same way", async () => {
+    live({ status: "sent", amount_paid: 0 });
+    expect(await ensureDepositRequestForQuoteToken(fake(db), "qt-901")).toEqual({ ok: true, invoiceToken: "tok-901", paid: false });
+    expect(deposits()).toHaveLength(1);
+  });
+  it("a request the office voided anywhere in the sale: the revision's tap makes nothing", async () => {
+    live({ status: "void", amount_paid: 0 });
+    expect(await ensureDepositRequestForQuoteToken(fake(db), "qt-901")).toEqual({ ok: false, why: "no_deposit" });
+    expect(deposits()).toHaveLength(1);
+  });
+  it("the office's door hands back the sale's request as existing, on the original or on the revision", async () => {
+    live({ status: "sent", amount_paid: 0 });
+    const r = await createPaymentRequest(fake(db), { orgId: ORG, jobId: JOB, purpose: "deposit", amount: 420, quoteId: "q-901", createdBy: null });
+    expect(r).toMatchObject({ ok: true, existing: true, request: { id: "inv-901" } });
+    expect((await liveRequestForQuote(fake(db), ORG, "q-900"))?.id).toBe("inv-901");
+    expect(deposits()).toHaveLength(1);
+  });
+  it("Keep Both (the pointer cleared) makes two sales: the second estimate gets its own request", async () => {
+    live({ status: "sent", amount_paid: 0 });
+    db.quotes[1].revises_quote_id = null;
+    const r = await createPaymentRequest(fake(db), { orgId: ORG, jobId: JOB, purpose: "deposit", amount: 420, quoteId: "q-901", createdBy: null });
+    expect(r).toMatchObject({ ok: true, existing: false });
+    expect(deposits()).toHaveLength(2);
+  });
+  it("THE LOST RACE: a request the read missed and the database's guard refused is read again and handed back, never 'failed'", async () => {
+    live({ status: "sent", amount_paid: 0 });
+    const client = fake(db);
+    const honest = client.rpc;
+    let first = true;
+    // The first family read answers as if the original's request were not there yet (another tap landed
+    // between the read and the insert): the insert then meets 0416's guard, as on a real database.
+    client.rpc = async (fn: string, args: Record<string, unknown>) => (first ? ((first = false), { data: [args.p_quote], error: null }) : honest(fn, args));
+    const r = await createPaymentRequest(client, { orgId: ORG, jobId: JOB, purpose: "deposit", amount: 420, quoteId: "q-901", createdBy: null });
+    expect(r).toMatchObject({ ok: true, existing: true, request: { id: "inv-901" } });
+    expect(writes.some((w) => w.table === "invoices" && w.verb === "refused")).toBe(true);
+    expect(deposits()).toHaveLength(1);
+  });
+  it("the guard's words and 0414's index are both read as 'a request already stands'", () => {
+    expect(lostToTheStandingRequest({ code: "P0001", message: "This sale already has a deposit request: INV-901. Use that one. Nothing was made." })).toBe(true);
+    expect(lostToTheStandingRequest({ code: "23505", message: "duplicate key" })).toBe(true);
+    expect(lostToTheStandingRequest({ code: "42501", message: "permission denied" })).toBe(false);
+  });
+  it("a database without quote_family_ids is an ERROR, never 'no request': the tap makes nothing", async () => {
+    const client = fakeDb(db, { org: ORG, writes, seq, noFamilyFn: true });
+    expect(await ensureDepositRequestForQuoteToken(client, "qt-901")).toEqual({ ok: false, why: "failed" });
+    expect(deposits()).toHaveLength(0);
+  });
+});
+
+/**
+ * THE SERVICE CLIENT NAMES THE COMPANY (cn-v1178, audit D7). A read that is not pinned by hand reads
+ * every company on the database; job ids are unique today, so the stand-in puts another company's row
+ * under the same job id to see whether a read asks.
+ */
+describe("service-client reads of a job's requests are pinned to one company (cn-v1178, D7)", () => {
+  beforeEach(() => {
+    db.invoices.push(
+      { id: "inv-snow", org_id: "org-snowbell", job_id: JOB, invoice_kind: "prepayment", status: "sent", title: "Deposit", invoice_number: "INV-950", amount_paid: 0, tax_rate: 0, created_at: "2026-11-01T00:00:00Z" },
+      { id: "draft-snow", org_id: "org-snowbell", job_id: JOB, invoice_kind: "standard", status: "draft", invoice_number: "INV-951", amount_paid: 0, tax_rate: 0, created_at: "2026-11-02T00:00:00Z" },
+    );
+    db.invoice_items.push(line("inv-snow", 777, { org_id: "org-snowbell", import_source: "prepayment" }), line("draft-snow", 900, { org_id: "org-snowbell" }));
+  });
+  it("readPrepaymentStatesInCompany reads only that company's requests", async () => {
+    const states = await readPrepaymentStatesInCompany(fake(db), ORG, JOB);
+    expect(states.map((x) => x.id)).toEqual(["inv-900"]);
+  });
+  it("resyncJobDrafts with the company touches no other company's draft", async () => {
+    await resyncJobDrafts(fake(db), JOB, null, ORG);
+    expect(writes.filter((w) => w.table === "invoice_items" && w.verb === "insert")).toEqual([]);
+    expect(db.invoice_items.filter((l) => l.invoice_id === "draft-snow" && l.import_source === "prepaid_credit")).toEqual([]);
+  });
+  it("the customer's tap resyncs in the estimate's company only", async () => {
+    db.quotes.push({ id: "q-900", org_id: ORG, job_id: JOB, status: "accepted", public_token: "qt-900", deposit_amount: 420 });
+    expect(await ensureDepositRequestForQuoteToken(fake(db), "qt-900")).toMatchObject({ ok: true });
+    expect(db.invoice_items.filter((l) => l.invoice_id === "draft-snow" && l.import_source === "prepaid_credit")).toEqual([]);
+  });
+});
+
+/**
+ * THE STAND-IN ITSELF IS HONEST (cn-v1178, the audit's L2): a read of invoices or quotes gets only what it
+ * named; a second live deposit request for one estimate is 0414's 23505; an unknown function is an error.
+ */
+describe("the in-memory database answers what a read asks, and holds the deposit boundary", () => {
+  it("projects invoices and quotes to the select list (aliases too), embeds as before", async () => {
+    db.quotes.push({ id: "q-900", org_id: ORG, status: "accepted", deposit_amount: 420 });
+    const c = fake(db);
+    expect((await c.from("invoices").select("id, status").eq("id", "inv-900").maybeSingle()).data).toEqual({ id: "inv-900", status: "sent" });
+    expect((await c.from("quotes").select("n:deposit_amount").eq("id", "q-900").maybeSingle()).data).toEqual({ n: 420 });
+    const withLines = (await c.from("invoices").select("id, invoice_items(line_total)").eq("id", "inv-900").maybeSingle()).data;
+    expect(Object.keys(withLines).sort()).toEqual(["id", "invoice_items"]);
+    expect((await c.from("invoices").select("*").eq("id", "inv-900").maybeSingle()).data.invoice_kind).toBe("prepayment");
+  });
+  it("a second live deposit request for one estimate is refused with 0414's index; a void one is not counted", async () => {
+    db.quotes.push({ id: "q-900", org_id: ORG, revises_quote_id: null });
+    db.invoices[0].quote_id = "q-900";
+    const c = fake(db);
+    // The SAME estimate: 0416's guard skips it (d.quote_id <> new.quote_id), so the index answers (skeptic S5).
+    const second = await c.from("invoices").insert({ job_id: JOB, invoice_kind: "prepayment", quote_id: "q-900", status: "draft" }).select("id").single();
+    expect(second.error?.code).toBe("23505");
+    const noGuard = fakeDb(db, { org: ORG, writes, seq, noFamilyFn: true });
+    const viaIndex = await noGuard.from("invoices").insert({ job_id: JOB, invoice_kind: "prepayment", quote_id: "q-900", status: "draft" }).select("id").single();
+    expect(viaIndex.error?.code).toBe("23505");
+    db.invoices[0].status = "void";
+    expect((await c.from("invoices").insert({ job_id: JOB, invoice_kind: "prepayment", quote_id: "q-900", status: "draft" }).select("id").single()).error).toBe(null);
+  });
+  it("skeptic S5: the same estimate answers 23505, another estimate of the sale answers the guard's words", async () => {
+    db.quotes.push({ id: "q-900", org_id: ORG, revises_quote_id: null }, { id: "q-901", org_id: ORG, revises_quote_id: "q-900" });
+    db.invoices[0].quote_id = "q-900";
+    const c = fake(db);
+    const same = await c.from("invoices").insert({ job_id: JOB, invoice_kind: "prepayment", quote_id: "q-900", status: "draft" }).select("id").single();
+    expect(same.error).toEqual({ code: "23505", message: 'duplicate key value violates unique constraint "invoices_one_live_deposit_request_per_estimate"' });
+    const sibling = await c.from("invoices").insert({ job_id: JOB, invoice_kind: "prepayment", quote_id: "q-901", status: "draft" }).select("id").single();
+    expect(sibling.error).toEqual({ code: "P0001", message: `This sale already has a deposit request: ${db.invoices[0].invoice_number}. Use that one. Nothing was made.` });
+  });
+  it("a payment landing on a request is never refused by the guard, even beside a second live one", async () => {
+    db.quotes.push({ id: "q-900", org_id: ORG, revises_quote_id: null }, { id: "q-901", org_id: ORG, revises_quote_id: "q-900" });
+    db.invoices[0].quote_id = "q-900";
+    db.invoices.push(...request("inv-901", 420, { quote_id: "q-901" }));
+    const c = fake(db);
+    expect((await c.from("invoices").update({ status: "paid", amount_paid: 1000 }).eq("id", "inv-900").select("id")).error).toBe(null);
+  });
+  it("an unknown database function is an error", async () => {
+    expect((await fake(db).rpc("no_such_fn", {})).error).toBeTruthy();
   });
 });
 

@@ -11,6 +11,8 @@ import { estimateFormatFor, normalizeDocStyle } from "@/lib/doc-style";
 import { QuoteDocument } from "@/components/quote-document";
 import { docLabel } from "@/lib/doc-label";
 import { docPageTitle, rowPlace } from "@/lib/doc-place";
+import { liveRequestForQuote } from "@/lib/payment-request";
+import { reportError } from "@/lib/observe";
 import type { Metadata } from "next";
 import type { Organization, Quote, QuoteLineItem } from "@/lib/types";
 
@@ -74,6 +76,23 @@ export default async function QuotePrintPage({
   // own share-pdf download, which is these same bytes — printed "Prepared for —". Same order.
   const preparedFor = q.customers ?? (q as any).inquiries;
 
+  // THE DEPOSIT LINE STATES WHAT THE LINK STATES (cn-v1178, audit B6): the sale's live deposit request
+  // (this estimate's or one in its revision family, lib/payment-request liveRequestForQuote) is the
+  // deposit: its ask, and "Deposit received" once it is paid; never the estimate's stored figure beside
+  // it. With no request, the stored figure (0414, in the row's `*`). A read that fails falls back to the
+  // stored figure and is reported (a paper is never refused for it).
+  let depositDue: number | string | null = (q as { deposit_amount?: number | string | null }).deposit_amount ?? null;
+  let depositReceived = false;
+  try {
+    const req = await liveRequestForQuote(supabase as never, String((q as { org_id?: string | null }).org_id ?? ""), id);
+    if (req) {
+      depositDue = req.amount;
+      depositReceived = req.status === "paid" || (req.amount > 0 && req.balance <= 0.005);
+    }
+  } catch (e) {
+    reportError("print/quote:depositRequest", e, { quoteId: id });
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">
       <div className="no-print mx-auto mb-4 flex max-w-3xl items-center justify-between px-4">
@@ -115,7 +134,8 @@ export default async function QuotePrintPage({
         estimateFormat={estimateFormat}
         // THE DEPOSIT LINE (cn-v1177): the figure the estimate stored (0414, in the row's `*`); the PDF and
         // the customer's Download are these same bytes.
-        depositDue={(q as { deposit_amount?: number | string | null }).deposit_amount ?? null}
+        depositDue={depositDue}
+        depositReceived={depositReceived}
       />
     </div>
   );

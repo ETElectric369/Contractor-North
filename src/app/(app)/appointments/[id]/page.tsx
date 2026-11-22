@@ -35,6 +35,7 @@ import type { NavTree } from "@/lib/nav-tree";
 import { wontHappenVerdict } from "@/lib/appointments/wont-happen";
 import { visitHome } from "@/lib/appointments/visit-home";
 import { bookSellPrice, inspectionHeaderStep, startAsked, startAskedHref, startCardShown, startRowShown, visitHeading, wonAsked, wonDoorShown } from "@/lib/appointments/inspection-page";
+import { isWonVisitType } from "@/lib/appointments/won-sheet";
 import { ITEM_OPTIONS_EMBED, type OptionedPriceItem } from "@/lib/pricing/item-options";
 import { NavHome } from "@/components/nav-home";
 import { captureQuoteId, hasCaptureData } from "@/lib/inspections";
@@ -669,6 +670,9 @@ export default async function AppointmentCapturePage({
                 customer: who,
                 address: a.location ?? null,
                 scheduledStart: a.starts_at ?? null,
+                // cn-v1178: the job a SALES visit makes waits for a day (the older door takes the Won
+                // door's path now), so the preview never promises the visit's own time for it.
+                waitsForADay: isWonVisitType(a.type),
               }}
               officePhone={(org as { phone?: string | null } | null)?.phone ?? null}
               lastClockOut={(lastClosedRow as { clock_out?: string | null } | null)?.clock_out ?? null}

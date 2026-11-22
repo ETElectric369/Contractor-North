@@ -13,7 +13,19 @@ type Outcome = "open" | "accepted" | "declined";
  * deposit request stands, and whether the company can take a card. "none" = no deposit stated (null,
  * 0, or an estimate saved before 0414). Read by the page (depositFromProjection) and handed down.
  */
-export type PublicDeposit = { amount: number; state: "none" | "due" | "requested" | "paid"; canTakeCard: boolean };
+export type PublicDeposit = {
+  amount: number;
+  state: "none" | "due" | "requested" | "paid";
+  canTakeCard: boolean;
+  /** cn-v1178 (0416): what is still owed (deposit_due, else the ask); absent = the ask. */
+  owed?: number;
+  /** What was already received on a partly paid request; 0 or absent = nothing yet. */
+  received?: number;
+  /** What the card door will charge: what is owed plus the company's card fee (cardFeeDecision). */
+  charge?: number;
+  /** The card fee, as the invoice's own pay page says it; null or absent = none. */
+  fee?: { pct: string; amount: number } | null;
+};
 
 /**
  * What the customer reads about the deposit once the estimate is accepted. PAYING IS NEVER REQUIRED TO
@@ -22,22 +34,43 @@ export type PublicDeposit = { amount: number; state: "none" | "due" | "requested
  */
 function DepositAfterYes({ token, deposit, trouble }: { token: string; deposit: PublicDeposit; trouble?: string | null }) {
   if (deposit.state === "none" || !(deposit.amount > 0)) return null;
-  const amount = formatCurrency(deposit.amount);
   if (deposit.state === "paid") {
     return <p className="mt-3 text-center text-sm font-medium text-slate-700">Deposit received. Thank you.</p>;
   }
+  // WHAT THE CARD DOOR CHARGES (cn-v1178, audit B3): what is still owed, plus the card fee when the
+  // company charges one; a partly paid deposit says what was received and what is left.
+  const owed = typeof deposit.owed === "number" && Number.isFinite(deposit.owed) ? deposit.owed : deposit.amount;
+  if (!(owed > 0.005)) return <p className="mt-3 text-center text-sm font-medium text-slate-700">Deposit received. Thank you.</p>;
+  const received = deposit.received && deposit.received > 0.005 ? deposit.received : 0;
+  const partly = received > 0 ? (
+    <p className="mb-2 text-sm text-slate-700">
+      We received {formatCurrency(received)} of your {formatCurrency(deposit.amount)} deposit. {formatCurrency(owed)} is left.
+    </p>
+  ) : null;
   if (!deposit.canTakeCard) {
-    return <p className="mt-3 text-center text-sm text-slate-700">A deposit of {amount} is due. We&apos;ll be in touch about how to pay it.</p>;
+    return (
+      <div className="mt-3 text-center">
+        {partly}
+        <p className="text-sm text-slate-700">A deposit of {formatCurrency(owed)} is due. We&apos;ll be in touch about how to pay it.</p>
+      </div>
+    );
   }
+  const charge = typeof deposit.charge === "number" && deposit.charge > 0 ? deposit.charge : owed;
   return (
     <div className="mt-3 text-center">
       {trouble && <p className="mb-2 text-sm text-slate-700">{trouble}</p>}
+      {partly}
       <a
         href={`/api/pay/deposit/${encodeURIComponent(token)}`}
         className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-6 py-3 text-base font-semibold text-white shadow-sm hover:bg-slate-800"
       >
-        Pay the Deposit · {amount} by Card
+        Pay the Deposit · {formatCurrency(charge)} by Card
       </a>
+      {deposit.fee && deposit.fee.amount > 0 && (
+        <p className="mt-1.5 text-xs text-slate-500">
+          Includes a {deposit.fee.pct}% card processing fee of {formatCurrency(deposit.fee.amount)}.
+        </p>
+      )}
     </div>
   );
 }
@@ -62,7 +95,6 @@ export function PublicQuoteAccept({
   /** The card door came back refused (?deposit=unavailable): the page's one plain line. */
   depositTrouble?: string | null;
 }) {
-  const lower = docLabel.toLowerCase();
   const [outcome, setOutcome] = useState<Outcome>(accepted ? "accepted" : declined ? "declined" : "open");
   const [busy, setBusy] = useState<null | "accept" | "decline">(null);
   const [err, setErr] = useState<string | null>(null);
@@ -132,7 +164,7 @@ export function PublicQuoteAccept({
         style={{ backgroundColor: brand }}
       >
         {busy === "accept" ? <Loader2 className="h-5 w-5 animate-spin" /> : <Check className="h-5 w-5" />}
-        {busy === "accept" ? "Accepting…" : `Accept this ${lower}`}
+        {busy === "accept" ? "Accepting…" : `Accept This ${docLabel}`}
       </button>
       <p className="mt-1.5 text-xs text-slate-400">Accepting lets us schedule your work.</p>
       <button
@@ -141,7 +173,7 @@ export function PublicQuoteAccept({
         className="mt-3 inline-flex items-center gap-1.5 text-sm text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline disabled:opacity-60"
       >
         {busy === "decline" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-        No Thanks, Decline This {lower}
+        Decline This {docLabel}
       </button>
     </div>
   );

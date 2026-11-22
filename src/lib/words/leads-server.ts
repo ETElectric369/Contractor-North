@@ -41,6 +41,10 @@ export const words: WordCatalog = {
     ld_srv_lib_field_company_name: "company",
     ld_srv_sameNameMany:
       'You have {count} customers named "{name}" — a name alone can\'t pick between them, so this lead isn\'t linked to either. Add their phone or email and converting it will find the right one.',
+    // cn-v1178 (A1): a lead links to a customer only on a sure match.
+    ld_srv_sameNameNotSure:
+      'A customer named "{name}" is already on file with a different phone or email, so this lead isn\'t linked to them. If they are one person, Find Duplicates shows the pair.',
+    ld_srv_bookUnread: "Couldn't check your customers just now, so this lead isn't linked to anyone yet.",
     ld_srv_wonFailed: "Couldn't mark this lead won — it isn't available, or its contact card couldn't be created.",
     ld_srv_alreadyConverted: "This lead was already converted — open its customer or estimate instead.",
     ld_srv_pickValidDay: "Pick a valid day for the inspection.",
@@ -81,6 +85,9 @@ export const words: WordCatalog = {
     ld_srv_lib_field_company_name: "empresa",
     ld_srv_sameNameMany:
       'Tienes {count} clientes llamados "{name}" — un nombre solo no alcanza para elegir entre ellos, así que este prospecto no quedó enlazado a ninguno. Agrega su teléfono o correo y al convertirlo se encontrará el correcto.',
+    ld_srv_sameNameNotSure:
+      'Ya hay un cliente llamado "{name}" con otro teléfono o correo, así que este prospecto no quedó enlazado a él. Si son la misma persona, Buscar Duplicados muestra el par.',
+    ld_srv_bookUnread: "No se pudieron revisar tus clientes ahora, así que este prospecto todavía no está enlazado a nadie.",
     ld_srv_wonFailed: "No se pudo marcar este prospecto como ganado — no está disponible, o no se pudo crear su tarjeta de contacto.",
     ld_srv_alreadyConverted: "Este prospecto ya se convirtió — abre su cliente o su presupuesto en su lugar.",
     ld_srv_pickValidDay: "Elige un día válido para la inspección.",

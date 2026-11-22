@@ -472,4 +472,19 @@ describe("approve: an estimate that stands, and finish", () => {
     world(w);
     expect(await readWonSheet(VISIT)).toMatchObject({ ok: true, state: "finish", billingKind: "fixed" });
   });
+  it("cn-v1178 (decision 2): a kind sent that disagrees with the paper is not taken; the job bills as the paper's word", async () => {
+    // An Estimate that stands, approved with "fixed" sent: the job is time and material.
+    world(standing("sent"));
+    const s = await readWonSheet(VISIT);
+    if (!s.ok || s.state !== "estimate") throw new Error("not an estimate");
+    await approveVisitEstimate({ appointmentId: VISIT, quoteId: OTHER, stamp: s.stamp, overrides: [], billingType: "fixed" });
+    expect(spies.accept).toHaveBeenCalledWith(OTHER, "accepted", { billingType: "tm", inPerson: true });
+    // An accepted Quote finished with "tm" sent: the job is fixed price.
+    spies.accept.mockClear();
+    const w = standing("accepted");
+    w.quotes[0].doc_type = "quote";
+    world(w);
+    await approveVisitEstimate({ appointmentId: VISIT, quoteId: OTHER, stamp: "", overrides: [], billingType: "tm" });
+    expect(spies.accept).toHaveBeenCalledWith(OTHER, "accepted", { billingType: "fixed", inPerson: true });
+  });
 });

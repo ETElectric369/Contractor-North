@@ -457,7 +457,7 @@ describe("the source: what the door promises the rest of the app", () => {
     const born = src.slice(src.indexOf("export async function createJobFromQuote("), src.indexOf("async function pushQuoteAccepted("));
     // A column you do not select is a column you cannot inherit. (description joined the list in
     // cn-v1160: the scope the job takes; the five address columns are as they were.)
-    expect(born).toContain('.select("id, job_id, status, customer_id, title, quote_number, inquiry_id, address, unit, city, state, zip, revises_quote_id, description")');
+    expect(born).toContain('.select("id, job_id, status, customer_id, title, quote_number, inquiry_id, address, unit, city, state, zip, revises_quote_id, description, doc_type")');
     const inherited = born.slice(born.indexOf("const inheritedAddress = await (async () => {"), born.indexOf("})();", born.indexOf("const inheritedAddress = await (async () => {")));
     const ownFirst = "if (q.address) return { address: q.address, unit: (q as { unit?: string | null }).unit ?? null, city: q.city, state: q.state, zip: q.zip };";
     expect(inherited).toContain(ownFirst);

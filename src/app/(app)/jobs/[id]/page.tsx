@@ -15,7 +15,7 @@ import { FeatureOffLine } from "@/components/feature-off-line";
 import { featureOn, type FeatureKey } from "@/lib/features";
 import { asksForDailyReport } from "@/lib/daily-report-rule";
 import { createClient } from "@/lib/supabase/server";
-import { acceptedQuoteTotal, leftToBill, scheduleStatus, type Milestone } from "@/lib/payment-schedule-math";
+import { acceptedQuoteTotal, depositIsRequested, leftToBill, scheduleStatus, type Milestone } from "@/lib/payment-schedule-math";
 import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -2229,6 +2229,8 @@ export default async function JobDetailPage({
               billingType={(j as any).billing_type ?? "fixed"}
               contractTotal={contractTotal}
               depositRule={{ percent: getOrgSettings((org as any)?.settings).deposit_percent, cap: getOrgSettings((org as any)?.settings).deposit_cap_amount }}
+              // cn-v1178 (D6): a deposit already asked for is not proposed again as the schedule's first row.
+              depositRequested={!!requestSeed && requestSeed.ok && depositIsRequested(requestSeed.requests)}
               milestones={(paymentMilestones as any) ?? []}
               // Without this the gate inside the card is dead code: it defaults to false meaning
               // "no draws", so Set Up Schedule kept being offered on a job whose draws have already

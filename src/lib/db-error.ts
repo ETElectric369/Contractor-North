@@ -60,6 +60,11 @@ const BY_CONSTRAINT: Record<string, string> = {
   // doors say it first, naming the correction (readBillStanding); this is the floor under any door
   // that did not ask.
   bills_corrects_bill_id_fkey: "This bill carries a correction. Delete the correction first, then this bill. Nothing was deleted.",
+  // 0414: one live deposit request per estimate. Reached by voiding a request, making another for the
+  // same estimate, then bringing the first back (carried C38). The doors say it first with the number;
+  // this is the floor under any door that did not ask.
+  invoices_one_live_deposit_request_per_estimate:
+    "This estimate already has a live deposit request. Void that one first, or use it. Nothing was changed.",
 };
 
 /** Column names that read badly in a sentence. Anything else is title-cased as-is. */

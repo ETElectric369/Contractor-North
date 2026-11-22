@@ -7,6 +7,8 @@ import {
   prepaymentLabel,
   prepaymentStates,
   prepaymentsLeft,
+  requestsAtAnEnding,
+  type PrepaymentState,
   type PrepaidCreditRow,
   type PrepaymentBillRow,
 } from "./prepayments";
@@ -121,5 +123,24 @@ describe("the words and the kinds", () => {
     expect(isCreditSource(null)).toBe(false);
     expect(isPrepaymentKind("prepayment")).toBe(true);
     expect(isPrepaymentKind("deposit")).toBe(false);
+  });
+});
+
+/**
+ * SKEPTIC S6 · ONE REQUEST, ONE ENDING. A request with money on it cannot be voided until that is refunded
+ * (billing's requestStatusRefusal), so an open request carries what was paid on it (less refunds) and a
+ * partly paid one is listed once, in `open`, never also in `paidAhead` (two actions for one request).
+ */
+describe("requestsAtAnEnding", () => {
+  const st = (over: Partial<PrepaymentState>): PrepaymentState => ({
+    id: "r", number: "INV-900", label: "Deposit", status: "sent", amount: 600, paid: 0, refunded: 0, taken: [], takenTotal: 0, left: 600, moneyLeft: 0, ...over,
+  });
+  it("nothing paid: open with paid 0; partly paid: open once, with what is on it; paid in full: paid ahead", () => {
+    expect(requestsAtAnEnding([st({})])).toEqual({ open: [{ number: "INV-900", label: "Deposit", amount: 600, paid: 0 }], paidAhead: [] });
+    expect(requestsAtAnEnding([st({ status: "partial", paid: 200, refunded: 50, moneyLeft: 150 })])).toEqual({
+      open: [{ number: "INV-900", label: "Deposit", amount: 400, paid: 150 }],
+      paidAhead: [],
+    });
+    expect(requestsAtAnEnding([st({ status: "paid", paid: 600, moneyLeft: 600 })])).toEqual({ open: [], paidAhead: [{ number: "INV-900", label: "Deposit", amount: 600, paid: 0 }] });
   });
 });

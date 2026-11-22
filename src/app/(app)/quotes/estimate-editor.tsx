@@ -59,6 +59,7 @@ import {
   setQuoteType,
   updateQuoteItem,
   updateQuoteMeta,
+  updateQuoteStatus,
 } from "./actions";
 import { createInvoiceFromQuote } from "../billing/actions";
 import { createWorkOrderFromQuote } from "../work-orders/actions";
@@ -202,6 +203,9 @@ export interface UnsavedSeed {
   /** Line items the INSPECTION already priced, or a lead's configurator lines: real rows, not prose. */
   items: DraftLineItem[];
   quoteExpiryDays: number;
+  /** THE WORD A NEW ESTIMATE STARTS WITH (cn-v1178, decision 2): the company's usual billing kind's
+   *  (readUsualBillingKind -> docTypeOfBillingKind), a Quote at a fixed-price company. Absent = Estimate. */
+  docType?: QuoteDocType;
 }
 
 /** One stored line, as /quotes/[id] reads it (projection law: every column the editor shows). */
@@ -274,6 +278,11 @@ export interface SavedEstimate {
   /** WHO SAID YES (cn-v1176, M6; ./[id]/accepted-line): the page's finished sentence while the estimate
    *  is accepted, else null. Plain text under the status control, office only (this editor is). */
   acceptedSaid?: string | null;
+  /** THE SALE'S DEPOSIT REQUEST (cn-v1178, decision 1; lib/payment-request liveRequestForQuote): the live
+   *  request of this estimate or of any estimate in its revision family. When there is one, IT is the
+   *  deposit: the field shows it as a fact and the stored figure is never offered beside it. null = none;
+   *  absent = not read (the field then reads as it always did). `unread` = the read failed: said. */
+  depositRequest?: { number: string | null; amount: number; balance: number; status: string } | null | "unread";
 }
 
 export type EstimateEditorProps = { catalog: EditorCatalog } & ({ mode: "unsaved"; seed: UnsavedSeed } | { mode: "saved"; saved: SavedEstimate });
@@ -305,7 +314,7 @@ function headerFrom(props: EstimateEditorProps): EstimateHeader {
     leadId: seed.inquiryId ?? "",
     jobId: seed.jobId ?? null,
     captureId: seed.captureId ?? null,
-    docType: "estimate",
+    docType: seed.docType === "quote" ? "quote" : "estimate",
     estimateFormat: null,
     title: "",
     description: "",
@@ -436,6 +445,53 @@ function aroundLink(words: string, link: React.ReactNode) {
   );
 }
 
+/**
+ * BACK TO DRAFT (cn-v1178, the owner's decision 3). A sent estimate is the customer's copy: its lines,
+ * totals and deposit change only after this one tap, which sets it back to draft through the existing
+ * status door (updateQuoteStatus). Its link is then not served until it is sent again. A refusal is said
+ * under the button in the server's words; a success reads the page again.
+ */
+/**
+ * WHAT BACK TO DRAFT SAYS WHEN IT DID NOT LAND (skeptic S9): the server's own sentence when it gave one,
+ * else a whole sentence of its own naming the one action (never the fragment "couldn't be saved.").
+ */
+export function backToDraftRefusal(res: { ok: boolean; error?: string } | null, t: (key: string) => string): string | null {
+  if (res?.ok) return null;
+  return (res && "error" in res && res.error) || t("qe_backToDraftFailed");
+}
+
+export function BackToDraftButton({ id, t }: { id: string; t: (key: string) => string }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function go() {
+    setBusy(true);
+    setErr(null);
+    let res: Awaited<ReturnType<typeof updateQuoteStatus>> | null = null;
+    try {
+      res = await updateQuoteStatus(id, "draft");
+    } catch {
+      res = null;
+    }
+    setBusy(false);
+    const refused = backToDraftRefusal(res, t);
+    if (refused) {
+      setErr(refused);
+      return;
+    }
+    router.refresh();
+  }
+  return (
+    <div className="mt-2">
+      <Button size="sm" variant="outline" disabled={busy} onClick={() => void go()}>
+        {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+        {t("qe_btn_backToDraft")}
+      </Button>
+      {err && <p className="mt-1 text-xs text-red-600">{err}</p>}
+    </div>
+  );
+}
+
 /** Words with nothing to press: a commit queued behind the write on the wire, a line waiting for its id. */
 /**
  * THE DEPOSIT FIELD (cn-v1177), beside Valid until. It shows the figure the estimate states, or, while
@@ -457,6 +513,7 @@ function DepositField({
   busy,
   t,
   lang,
+  request,
 }: {
   quoteId: string | null;
   status: string;
@@ -468,6 +525,8 @@ function DepositField({
   busy: boolean;
   t: (key: string) => string;
   lang: ReturnType<typeof useLang>;
+  /** The sale's live deposit request (SavedEstimate.depositRequest). */
+  request?: SavedEstimate["depositRequest"];
 }) {
   const router = useRouter();
   // What the server answered last, until the page's own read catches up (the props are the truth after).
@@ -520,6 +579,32 @@ function DepositField({
     }
     // Not a number: sent as one the server refuses in words (a negative), never guessed into a figure.
     void write(Number.isFinite(n) ? n : -1);
+  }
+
+  // THE SALE'S REQUEST IS THE DEPOSIT (cn-v1178, decision 1): a fact, never a figure to edit. Its number,
+  // what it asks, and paid, partly paid or not yet; the estimate's stored figure is not shown beside it.
+  if (request === "unread") {
+    return (
+      <div>
+        <Label>{t("qe_deposit")}</Label>
+        <p className="mt-1 text-sm text-slate-600">{t("qe_depositRequestUnread")}</p>
+      </div>
+    );
+  }
+  if (request) {
+    const paid = Math.round((request.amount - request.balance) * 100) / 100;
+    const words =
+      request.balance <= 0.005
+        ? fillText(t("qe_depositRequestPaid"), { request: request.number ?? t("qe_theDepositRequest"), amount: formatCurrency(request.amount, lang) })
+        : paid > 0.005
+          ? fillText(t("qe_depositRequestPartly"), { request: request.number ?? t("qe_theDepositRequest"), amount: formatCurrency(request.amount, lang), paid: formatCurrency(paid, lang), left: formatCurrency(request.balance, lang) })
+          : fillText(t("qe_depositRequestOpen"), { request: request.number ?? t("qe_theDepositRequest"), amount: formatCurrency(request.amount, lang) });
+    return (
+      <div>
+        <Label>{t("qe_deposit")}</Label>
+        <p className="mt-1 text-sm text-slate-800">{words}</p>
+      </div>
+    );
   }
 
   const source =
@@ -1575,6 +1660,10 @@ export function EstimateEditor(props: EstimateEditorProps) {
                         <DuplicateQuoteButton id={savedId} revision number={number || null} />
                       </div>
                     )}
+                    {/* A SENT ESTIMATE IS THE CUSTOMER'S COPY (cn-v1178, decision 3): the one action under the
+                        server's own sentence is Back to Draft, the status door. No key changes around anything
+                        here: the page reads again and the lines open as a draft's. */}
+                    {savedId && status === "sent" && <BackToDraftButton id={savedId} t={t} />}
                   </li>
                 </ul>
               ) : (
@@ -1875,6 +1964,7 @@ export function EstimateEditor(props: EstimateEditorProps) {
                   busy={busy}
                   t={t}
                   lang={lang}
+                  request={savedPage?.depositRequest}
                 />
               </div>
               <div>

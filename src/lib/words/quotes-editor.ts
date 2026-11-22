@@ -219,6 +219,14 @@ export const words: WordCatalog = {
     qe_couldntBeSaved: "couldn't be saved.",
     // The estimate's ⋯ row that opens the Circuit Schedule card on an estimate that has none yet (cn-v1160).
     qe_btn_addCircuitSchedule: "Add Circuit Schedule",
+    // ── cn-v1178: the sale's deposit request is the deposit; Back to Draft ──
+    qe_depositRequestUnread: "This sale's deposit request couldn't be read. Open the page again to see it.",
+    qe_depositRequestOpen: "{request} asks {amount} and is not paid yet. It is this sale's deposit.",
+    qe_depositRequestPartly: "{request} asks {amount}: {paid} received, {left} left. It is this sale's deposit.",
+    qe_depositRequestPaid: "{request} for {amount} is paid. It is this sale's deposit.",
+    qe_theDepositRequest: "The deposit request",
+    qe_btn_backToDraft: "Back to Draft",
+    qe_backToDraftFailed: "This estimate couldn't be taken back to draft. Tap Back to Draft again.",
   },
   es: {
     qe_btn_viewInvoice: "Ver Factura",
@@ -385,5 +393,13 @@ export const words: WordCatalog = {
     qe_aLine: "Una línea",
     qe_couldntBeSaved: "no se pudo guardar.",
     qe_btn_addCircuitSchedule: "Agregar Tabla de Circuitos",
+    // ── cn-v1178 ──
+    qe_depositRequestUnread: "No se pudo leer la solicitud de anticipo de esta venta. Vuelve a abrir la página para verla.",
+    qe_depositRequestOpen: "{request} pide {amount} y aún no está pagada. Es el anticipo de esta venta.",
+    qe_depositRequestPartly: "{request} pide {amount}: {paid} recibidos, faltan {left}. Es el anticipo de esta venta.",
+    qe_depositRequestPaid: "{request} por {amount} está pagada. Es el anticipo de esta venta.",
+    qe_theDepositRequest: "La solicitud de anticipo",
+    qe_btn_backToDraft: "Volver a Borrador",
+    qe_backToDraftFailed: "No se pudo volver este presupuesto a borrador. Toca Volver a Borrador otra vez.",
   },
 };

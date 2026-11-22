@@ -43,7 +43,7 @@ import { addCaptureItemsToJobList, canonicalMaterialListId } from "../materials/
 import { reportError } from "@/lib/observe";
 import { visitWork } from "@/lib/appointments/visit-work";
 import { jobShort } from "@/lib/appointments/visit-start";
-import { isNotSoldOutcome, isWonVisitType, type WonSheet } from "@/lib/appointments/won-sheet";
+import { billingKindOfDocType, isNotSoldOutcome, isWonVisitType, type WonSheet } from "@/lib/appointments/won-sheet";
 import { readWonSheet } from "./won-actions";
 import { narrowJobRows, visitJobArms } from "@/lib/appointments/narrow-jobs";
 import { callerLang } from "@/lib/lang-of";
@@ -1827,21 +1827,30 @@ export async function createJobFromAppointment(
        · otherwise the standing estimate is TIED to the new job after the claim lands (tieStandingEstimate,
          below), so its acceptance at either door reuses this job. A visit marked Not Sold or cancelled is
          not a sale being started and is left as it always was. */
+  /* THE OLDER DOOR ON A SALE TAKES THE SALE'S PATH (cn-v1178, C2). Convert to Job and Start a Job from
+     This Visit on an inspection made the job on the visit's own time and absorbed the visit: a Let Them
+     Pick inspection's job sat on the first offered time while the customer picked another, an inspection
+     held last week made a job Scheduled last week, and the pick link stayed live. On a sales visit
+     (isWonVisitType) the job is now made as the Won door makes it (asSale): it waits for a day, the
+     visit is attached (not absorbed) and answered Done and Won, and a live pick link is withdrawn.
+     A sales visit that is cancelled, or answered Not Sold, is REFUSED in the Won door's own words, with
+     nothing made: a job on a slot nobody is coming to, beside a visit still saying Not Sold, is the
+     record this door used to leave. A work visit is made exactly as it always was. */
   const visitTypeNow = (appt as { type?: string | null }).type ?? null;
-  const saleVisit =
-    !asSale &&
-    isWonVisitType(visitTypeNow) &&
-    (appt as { status?: string | null }).status !== "cancelled" &&
-    !isNotSoldOutcome((appt as { outcome?: string | null }).outcome);
+  const saleVisit = !asSale && isWonVisitType(visitTypeNow);
   if (saleVisit) {
+    if ((appt as { status?: string | null }).status === "cancelled") return { ok: false, error: await ws.say("vp_visitCancelledNothingStarted") };
+    if (isNotSoldOutcome((appt as { outcome?: string | null }).outcome)) return { ok: false, error: await ws.say("vp_saleMarkedNotSold") };
     const sheet = await readWonSheet(appointmentId);
     // A failed read is never "no estimate": nothing is made, and the sheet's own words say why.
     if (!sheet.ok) return { ok: false, error: sheet.error };
     const refusal = await acceptedSaleRefusal(sheet, ws);
     if (refusal) return { ok: false, error: refusal };
   }
+  // A SALE, by either door: the Won sheet's own start (asSale) or the older door on a sales visit.
+  const sale = asSale || saleVisit;
   // THE SLOT THE JOB TAKES: the visit's own, except on a sale, where the job waits for a day.
-  const slotStart: string | null = asSale ? null : (appt.starts_at ?? null);
+  const slotStart: string | null = sale ? null : (appt.starts_at ?? null);
 
   /* WHAT THE VISIT ALREADY KNEW TRAVELS WITH IT.
      Erik: "im not sure why it says 5 hours but i already marked it as a job … we need more
@@ -1921,10 +1930,24 @@ export async function createJobFromAppointment(
 
   // The visit's own size, else the sum of his task hours; neither → 0, unsized, as before. On a sale
   // the visit's size is the INSPECTION's, so only his task hours size the job (none → unsized).
-  const sized = asSale
+  const sized = sale
     ? (visitBirth.plannedMinutes ?? 0)
     : Number((appt as { planned_minutes?: number | null }).planned_minutes ?? 0) || (visitBirth.plannedMinutes ?? 0);
-  const apptEnd = asSale ? null : ((appt as { ends_at?: string | null }).ends_at ?? null);
+  const apptEnd = sale ? null : ((appt as { ends_at?: string | null }).ends_at ?? null);
+
+  /* THE PAPER'S WORD DECIDES HOW THE JOB BILLS (cn-v1178, C1, the owner's decision 2). The older door on
+     a sale finds the estimate it will tie BEFORE the job is made, by the same certain link the tie uses
+     (findStandingEstimate), so the job is born with that paper's word: a Quote a Fixed Price job, an
+     Estimate a Time and Material one (billingKindOfDocType, the Won sheet's rule). With none, or several,
+     or a read that failed, the company's usual kind, as before. */
+  const standing = saleVisit
+    ? await findStandingEstimate(supabase, {
+        orgId: ctx.orgId,
+        behindId: (appt as { capture_quote?: string | null }).capture_quote ?? null,
+        inquiryId,
+      })
+    : null;
+  const bornKind = saleKind ?? (standing?.pick ? billingKindOfDocType(standing.pick.doc_type) : await readUsualBillingKind(supabase));
   const scheduledEnd = sized > 0 && slotStart
     ? new Date(new Date(slotStart).getTime() + Math.min(sized, WORK_DAY_MINUTES) * 60_000).toISOString()
     : // A visit with no size and no end becomes a job of the default length (two hours, "2 hours —
@@ -1940,8 +1963,9 @@ export async function createJobFromAppointment(
       // its default 'fixed' — which not only mislabels the job but switches OFF whether its hours and
       // receipts are offered at invoicing, the Unbilled card, the portal, and step 4 of
       // completeJobWhenPaid. readUsualBillingKind is the company's own answer; a failed read is "tm".
-      // The Won sheet's pick (asSale), else the company's own answer.
-      billing_type: saleKind ?? (await readUsualBillingKind(supabase)),
+      // The Won sheet's pick (asSale), else the word of the estimate the older door ties, else the
+      // company's own answer (bornKind, above).
+      billing_type: bornKind,
       inquiry_id: inquiryId,
       // The visit's notes (the lead's message, what the inspector was told) are the job's scope.
       description: (appt as { notes?: string | null }).notes ?? null,
@@ -1995,7 +2019,7 @@ export async function createJobFromAppointment(
     // …and the visit keeps the same answer the job just got (audit v921) — one contact, both records.
     .update({
       job_id: job.id,
-      ...(asSale ? {} : { absorbed: true }),
+      ...(sale ? {} : { absorbed: true }),
       ...(!appt.customer_id && customerId ? { customer_id: customerId } : {}),
       ...(wonNow ? { outcome: "won", outcome_at: claimAt } : {}),
     })
@@ -2022,13 +2046,10 @@ export async function createJobFromAppointment(
     : await ws.say("ag_srv_visitGoneMidJob");
 
   // THE STANDING ESTIMATE IS TIED TO THE JOB THE CLAIM JUST GAVE THIS VISIT (cn-v1177, pick 3).
-  const tie = saleVisit && absorbed?.length
-    ? await tieStandingEstimate(supabase, ws, {
-        orgId: ctx.orgId,
-        jobId: job.id,
-        behindId: (appt as { capture_quote?: string | null }).capture_quote ?? null,
-        inquiryId,
-      })
+  // The estimate was found before the job was made (its word is the job's); the tie lands here, and
+  // gives an estimate with no customer the job's (C3).
+  const tie = saleVisit && absorbed?.length && standing
+    ? await tieStandingEstimate(supabase, ws, standing, { orgId: ctx.orgId, jobId: job.id, customerId })
     : null;
 
   /* A THREE-DAY VISIT CONVERTS TO A THREE-DAY JOB. scheduled_end above is clamped to one working
@@ -2093,7 +2114,7 @@ export async function createJobFromAppointment(
      (setAppointmentStatus: it withdraws a live pick-a-time link and re-pushes the visit), so the visit
      reads Done, Won, tied to its job. One that is already done (or cancelled) is left as it is. */
   let doneNote: string | undefined;
-  if (asSale && absorbed?.length) {
+  if (sale && absorbed?.length) {
     const st = (appt as { status?: string | null }).status ?? null;
     if (st === "scheduled" || st === "proposed") {
       const done = await setAppointmentStatus(appointmentId, "completed");
@@ -2101,7 +2122,7 @@ export async function createJobFromAppointment(
       else if (done.note) doneNote = done.note;
     }
   }
-  if (!asSale) {
+  if (!sale) {
     // The visit is now represented by the job on the calendar (they draw as one — see gridDataFor),
     // so nothing is lost by leaving the appointment in place: it keeps its capture, its answers and
     // its provenance, and stops competing with the job for the same afternoon.
@@ -2138,39 +2159,37 @@ async function acceptedSaleRefusal(sheet: WonSheet, ws: Said): Promise<string | 
 }
 
 /**
- * WHICH ESTIMATE A SALES VISIT'S NEW JOB CARRIES, AND THE TIE (cn-v1177, pick 3). By a certain link only,
- * never by a name:
- *   1. the estimate written up from THIS visit (its capture backlink): tied when it is a draft or sent
- *      and has no job. One that already has a job, or is not draft or sent, ends the search: the
+ * WHICH ESTIMATE A SALES VISIT'S NEW JOB CARRIES (cn-v1177, pick 3; found BEFORE the job is made since
+ * cn-v1178, so the job is born with its word). By a certain link only, never by a name:
+ *   1. the estimate written up from THIS visit (its capture backlink): it is the one when it is a draft
+ *      or sent and has no job. One that is draft or sent and already has a job ends the search: the
  *      visit's own estimate is known, and a lead's other estimate is not put in its place.
  *   2. no estimate from this visit: the lead's live estimates (draft or sent, no job). Exactly one is
- *      tied; more than one, none is, and the warning says how many and which.
- * THE TIE is compare-and-set: job_id is written only where it is still empty, in the caller's company,
- * and the row is selected back (the silent-write law: zero rows is not a tie). An estimate that already
- * has a job is never touched. A failed read or write is said, never treated as "no estimate".
+ *      the one; more than one, none is, and the tie's warning says how many and which.
+ * A failed read is never "no estimate": it is carried to the tie, which says it.
  */
-async function tieStandingEstimate(
+type StandingQuote = { id: string; quote_number: string | null; status: string | null; job_id: string | null; doc_type: string | null; customer_id: string | null };
+type Standing = { pick: StandingQuote | null; several?: StandingQuote[]; failed?: true };
+async function findStandingEstimate(
   supabase: SupabaseClient,
-  ws: Said,
-  who: { orgId: string | null; jobId: string; behindId: string | null; inquiryId: string | null },
-): Promise<{ tied?: string; warning?: string } | null> {
-  type Q = { id: string; quote_number: string | null; status: string | null; job_id: string | null };
-  const live = (q: Q) => (q.status === "draft" || q.status === "sent") && !q.job_id;
-  let pick: Q | null = null;
+  who: { orgId: string | null; behindId: string | null; inquiryId: string | null },
+): Promise<Standing> {
+  const cols = "id, quote_number, status, job_id, doc_type, customer_id";
+  const live = (q: StandingQuote) => (q.status === "draft" || q.status === "sent") && !q.job_id;
   try {
     if (who.behindId) {
-      let read = supabase.from("quotes").select("id, quote_number, status, job_id").eq("id", who.behindId);
+      let read = supabase.from("quotes").select(cols).eq("id", who.behindId);
       if (who.orgId) read = read.eq("org_id", who.orgId);
       const { data, error } = await read.maybeSingle();
       if (error) throw error;
-      const behind = (data as Q | null) ?? null;
+      const behind = (data as StandingQuote | null) ?? null;
       if (behind && (behind.status === "draft" || behind.status === "sent")) {
-        if (!live(behind)) return null; // the visit's own estimate already has a job: left exactly as it is
-        pick = behind;
+        // The visit's own estimate already has a job: left exactly as it is, and nothing is put in its place.
+        return { pick: live(behind) ? behind : null };
       }
     }
-    if (!pick && who.inquiryId) {
-      let read = supabase.from("quotes").select("id, quote_number, status, job_id").eq("inquiry_id", who.inquiryId);
+    if (who.inquiryId) {
+      let read = supabase.from("quotes").select(cols).eq("inquiry_id", who.inquiryId);
       if (who.orgId) read = read.eq("org_id", who.orgId);
       const { data, error } = await read
         .in("status", ["draft", "sent"])
@@ -2178,28 +2197,61 @@ async function tieStandingEstimate(
         .order("created_at", { ascending: true })
         .limit(25);
       if (error) throw error;
-      const open = ((data ?? []) as Q[]).filter(live);
-      if (open.length > 1) {
-        const job = await jobNumberOf(supabase, who.jobId, ws);
-        return {
-          warning: await ws.say("ag_srv_estimatesNotTied", {
-            n: open.length,
-            list: open.map((q) => q.quote_number ?? "—").join(", "),
-            job,
-          }),
-        };
-      }
-      pick = open[0] ?? null;
+      const open = ((data ?? []) as StandingQuote[]).filter(live);
+      if (open.length > 1) return { pick: null, several: open };
+      return { pick: open[0] ?? null };
     }
   } catch (e) {
-    reportError("createJobFromAppointment:standingEstimate", e, { jobId: who.jobId });
-    return { warning: await ws.say("ag_srv_estimateTieUnread", { job: await jobNumberOf(supabase, who.jobId, ws) }) };
+    reportError("createJobFromAppointment:standingEstimate", e, {});
+    return { pick: null, failed: true };
   }
+  return { pick: null };
+}
+
+/**
+ * THE TIE (cn-v1177, pick 3) is compare-and-set: job_id is written only where it is still empty, in the
+ * caller's company, and the row is selected back (the silent-write law: zero rows is not a tie). An
+ * estimate that already has a job is never touched. A failed read or write is said.
+ *
+ * AN ESTIMATE WITH NO CUSTOMER TAKES THE JOB'S IN THE SAME WRITE (cn-v1178, C3). A lead with no customer
+ * yet, an estimate written from its inspection, and this door: the job got its customer and the tied
+ * estimate kept none, so its acceptance at the office (the catch-up branch, which makes no customer)
+ * billed nobody. The customer is written only where the estimate still has none (compare-and-set on
+ * customer_id too); if one was given to it in that moment, the tie is written once more without it, and
+ * the customer the estimate was given stands.
+ */
+async function tieStandingEstimate(
+  supabase: SupabaseClient,
+  ws: Said,
+  found: Standing,
+  who: { orgId: string | null; jobId: string; customerId: string | null },
+): Promise<{ tied?: string; warning?: string } | null> {
+  if (found.failed) return { warning: await ws.say("ag_srv_estimateTieUnread", { job: await jobNumberOf(supabase, who.jobId, ws) }) };
+  if (found.several?.length) {
+    return {
+      warning: await ws.say("ag_srv_estimatesNotTied", {
+        n: found.several.length,
+        list: found.several.map((q) => q.quote_number ?? "—").join(", "),
+        job: await jobNumberOf(supabase, who.jobId, ws),
+      }),
+    };
+  }
+  const pick = found.pick;
   if (!pick) return null;
   const estimate = pick.quote_number ?? (await ws.say("vp_btn_theEstimate"));
-  let write = supabase.from("quotes").update({ job_id: who.jobId, updated_at: new Date().toISOString() }).eq("id", pick.id).is("job_id", null);
-  if (who.orgId) write = write.eq("org_id", who.orgId);
-  const { data: tied, error: tieErr } = await write.select("id");
+  const tieOnce = async (withCustomer: boolean) => {
+    let write = supabase
+      .from("quotes")
+      .update({ job_id: who.jobId, ...(withCustomer ? { customer_id: who.customerId } : {}), updated_at: new Date().toISOString() })
+      .eq("id", pick.id)
+      .is("job_id", null);
+    if (withCustomer) write = write.is("customer_id", null);
+    if (who.orgId) write = write.eq("org_id", who.orgId);
+    return write.select("id");
+  };
+  const giveCustomer = !pick.customer_id && !!who.customerId;
+  let { data: tied, error: tieErr } = await tieOnce(giveCustomer);
+  if (!tieErr && !tied?.length && giveCustomer) ({ data: tied, error: tieErr } = await tieOnce(false));
   if (tieErr || !tied?.length) {
     if (tieErr) reportError("createJobFromAppointment:tie", tieErr, { jobId: who.jobId, quoteId: pick.id });
     return { warning: await ws.say("ag_srv_estimateNotTied", { estimate, job: await jobNumberOf(supabase, who.jobId, ws) }) };

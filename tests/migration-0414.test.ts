@@ -188,7 +188,9 @@ describe("migration 0414: money ahead of the work", () => {
 
     it("holds the live public_quote to 0408's body by the statements alone, and the self-check to this file's", () => {
       const makers = names.filter((n) => /function\s+(public\.)?public_quote\s*\(/i.test(readFileSync(join(migrations, n), "utf8")));
-      expect(makers.slice(-2)).toEqual(["0408_one_materials_line_under_each_task.sql", "0414_money_ahead.sql"]);
+      // 0416 re-made it from this file's body, changed only in its deposit block (the sale's family,
+      // deposit_due, card_fee_percent); tests/migration-0416.test.ts proves that byte for byte.
+      expect(makers.slice(-3)).toEqual(["0408_one_materials_line_under_each_task.sql", "0414_money_ahead.sql", "0416_one_sale_one_deposit.sql"]);
       for (const n of names.filter((x) => x >= "0409_" && x < "0414_")) {
         expect(readFileSync(join(migrations, n), "utf8").replace(/accept_public_quote|decline_public_quote/g, ""), n).not.toContain("public_quote");
       }

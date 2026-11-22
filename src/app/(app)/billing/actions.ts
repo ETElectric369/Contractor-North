@@ -49,8 +49,8 @@ import { HELD_HERE_READ_FAILED, costsKeyNames, idKeyNames, laborKeyNames, readHe
 import { removedLines, removedSentence, staleTombstones, textArrayLiteral } from "@/lib/import-reconcile";
 import { linesByBillId, readBillLines, readInvoiceMarkup } from "@/lib/invoice-markup-read";
 import { recalcInvoice } from "@/lib/invoice-recalc";
-import { PREPAID_CREDIT, PREPAYMENT_KIND, PREPAYMENT_LINE, isMoneyAheadLine, isPrepaymentKind, prepaymentsLeft } from "@/lib/prepayments";
-import { outgoingDraftFirst, readPrepaymentStates, readPrepaymentStatesForOutgoing, resyncJobDrafts } from "@/lib/payment-request";
+import { DRAW_CREDIT, PREPAID_CREDIT, PREPAYMENT_KIND, PREPAYMENT_LINE, isMoneyAheadLine, isPrepaymentKind, prepaymentsLeft } from "@/lib/prepayments";
+import { liveRequestForQuote, outgoingDraftFirst, readPrepaymentStates, readPrepaymentStatesForOutgoing, resyncJobDrafts } from "@/lib/payment-request";
 // WHAT FOLLOWS A PAYMENT, for every door that writes one (M1): recalc, finish the job, the bell,
 // the refresh. This file used to carry its own copy of all four.
 import { afterPaymentLanded } from "@/lib/after-payment-landed";
@@ -77,13 +77,17 @@ import {
  * WHAT A PAYMENT REQUEST CAN STILL GIVE BACK (cn-v1177, skeptic #80): the money paid on it, less what was
  * refunded, less what bills already took off (moneyLeft), and the bills that took it off, by number.
  * null when the bill is not a live payment request on a job. THROWS on a failed read.
+ * ONLY A BILL THAT WENT OUT HAS TAKEN ANYTHING (cn-v1178, audit D3): a DRAFT's credit line is derived and
+ * re-resolved, and the resync this door runs after a refund shrinks it to what the request has left. So
+ * the room is read as a bill going out reads it (readPrepaymentStatesForOutgoing); counting a draft's hold
+ * refused a refund on a cancelled sale with no way through.
  */
 async function requestRefundRoom(
   supabase: Awaited<ReturnType<typeof createClient>>,
   inv: { id: string; job_id?: string | null; invoice_kind?: string | null },
 ): Promise<{ moneyLeft: number; takenTotal: number; takers: string; takerCount: number } | null> {
   if (!isPrepaymentKind(inv.invoice_kind) || !inv.job_id) return null;
-  const state = (await readPrepaymentStates(supabase, inv.job_id)).find((x) => x.id === inv.id);
+  const state = (await readPrepaymentStatesForOutgoing(supabase, inv.job_id)).find((x) => x.id === inv.id);
   if (!state) return null;
   const ids = state.taken.map((t) => t.invoiceId);
   let takers = "";
@@ -3818,6 +3822,9 @@ type StatusRow = {
   job_id: string | null;
   /** cn-v1177: a payment request voids and comes back by its own rule (requestStatusRefusal). */
   invoice_kind?: string | null;
+  /** cn-v1178: the estimate a deposit request is the deposit of, and the bill's company (one sale, one deposit). */
+  quote_id?: string | null;
+  org_id?: string | null;
   invoice_number: string | null;
   amount_paid: number | null;
   /** 0267. NULL means this bill never left the desk, whatever `status` says. */
@@ -3833,7 +3840,7 @@ async function invoiceForStatusChange(supabase: Awaited<ReturnType<typeof create
   const read = (withClaims: boolean, withSentAt: boolean) =>
     supabase
       .from("invoices")
-      .select(`id, status, job_id, invoice_kind, invoice_number, amount_paid${withSentAt ? ", sent_at" : ""}, invoice_items(import_source, import_key${withClaims ? ", source_ids" : ""})`)
+      .select(`id, status, job_id, invoice_kind, invoice_number, amount_paid${withSentAt ? ", sent_at" : ""}, org_id, quote_id, invoice_items(import_source, import_key${withClaims ? ", source_ids" : ""})`)
       .eq("id", id)
       .maybeSingle();
   let withClaims = true;
@@ -3882,8 +3889,13 @@ async function unvoidConflict(supabase: Awaited<ReturnType<typeof createClient>>
   // off a bill carry an import source and no claim BY DESIGN (they bill no work), and a job with a
   // request always has another live bill, so read as legacy they would close the way back for every
   // bill on such a job, in words that are untrue of it. 0415 says the same in guard_invoice_unvoid.
-  const legacyLabor = items.some((it) => !!it.import_source && !isMoneyAheadLine(it.import_source) && !it.source_ids?.length && !claimedIdsOfLines([it]).length);
-  if (!mine.length && !legacyLabor) return null; // hand-typed lines only: nothing on it can be on another invoice
+  const unclaimed = items.filter((it) => !!it.import_source && !isMoneyAheadLine(it.import_source) && !it.source_ids?.length && !claimedIdsOfLines([it]).length);
+  // A DRAW'S "LESS PREVIOUS BILLINGS" LINE (cn-v1178, carried C37) closes the way back too (nothing
+  // re-resolves it), but it bills no hours, so it is said in its own words, never "built before lines
+  // recorded what they bill". A bill with a real legacy line beside it keeps the legacy sentence.
+  const legacyLabor = unclaimed.some((it) => it.import_source !== DRAW_CREDIT);
+  const drawCreditOnly = !legacyLabor && unclaimed.length > 0;
+  if (!mine.length && !unclaimed.length) return null; // hand-typed lines only: nothing on it can be on another invoice
   const claims = await claimedSourcesOnJob(supabase, inv.job_id ?? null, inv.id, mine);
   const label = inv.invoice_number ?? "this invoice";
   const Label = label.charAt(0).toUpperCase() + label.slice(1);
@@ -3891,6 +3903,13 @@ async function unvoidConflict(supabase: Awaited<ReturnType<typeof createClient>>
     return {
       ok: false,
       error: `Billing is mid-upgrade for a few minutes — ${label} can't come back from void until it's certain no other invoice bills its hours and materials. Try again shortly.`,
+    };
+  }
+  if (drawCreditOnly && claims.invoices.length) {
+    const live = joinNumbers([...claims.invoices].sort((a, b) => a.created_at.localeCompare(b.created_at)).map((i) => i.invoice_number ?? "an unnumbered invoice"));
+    return {
+      ok: false,
+      error: `${Label} can't come back from void: its "Less previous billings" line takes earlier draws off, and ${live} may already take the same money off, so un-voiding it could take it off twice. Leave ${label} void and bill what is left on a fresh invoice; New Invoice on the job works out what is still to take off.`,
     };
   }
   if (legacyLabor && claims.invoices.length) {
@@ -4080,7 +4099,8 @@ export async function setInvoiceStatus(
 /**
  * A PAYMENT REQUEST'S STATUS (cn-v1177). Back to Draft: never (it was born sent, and a draft asks for
  * nothing, so a bill that took it off would be holding money nobody asked for). Void: refused while a
- * bill that went out took it off, naming that bill and the one way through; otherwise the DRAFT
+ * bill that went out took it off, naming that bill and the one way through; refused while money paid on it
+ * has not been given back (cn-v1178); otherwise the DRAFT
  * bills' lines that take it off come off first, then the void, then every draft on the job is resolved
  * again (setInvoiceStatus does that). 0414's trigger refuses the same in the database.
  */
@@ -4088,6 +4108,21 @@ async function requestStatusRefusal(supabase: any, cur: StatusRow, status: strin
   const label = cur.invoice_number ?? "This payment request";
   if (status === "draft") {
     return { ok: false, error: `${label} is a payment request, and a request has no draft stage. To stop asking for it, void it.` };
+  }
+  // BACK FROM VOID BESIDE THE SALE'S STANDING REQUEST (cn-v1178, carried C38): one sale, one deposit.
+  // The database refuses it too (0414's index, 0416's guard); here it is said with the request named.
+  if (cur.status === "void" && status !== "void" && cur.quote_id && cur.org_id) {
+    let standing: Awaited<ReturnType<typeof liveRequestForQuote>> = null;
+    try {
+      standing = await liveRequestForQuote(supabase, String(cur.org_id), String(cur.quote_id));
+    } catch (e) {
+      reportError("requestStatusRefusal.standing", e, { invoiceId: cur.id });
+      return { ok: false, error: `Couldn't check whether this sale already has a deposit request just now, so ${label} wasn't brought back. Try again in a moment.` };
+    }
+    if (standing && standing.id !== cur.id) {
+      const other = standing.number ?? "another deposit request";
+      return { ok: false, error: `${label} can't come back from void: ${other} is this sale's deposit request now. Void ${other} first, or leave ${label} void.` };
+    }
   }
   if (status !== "void") return null;
   const { data: lines, error } = await supabase
@@ -4097,17 +4132,32 @@ async function requestStatusRefusal(supabase: any, cur: StatusRow, status: strin
     .eq("prepaid_invoice_id", cur.id);
   if (error) return { ok: false, error: dbError(error) };
   const carrierIds = [...new Set(((lines ?? []) as { invoice_id: string }[]).map((l) => String(l.invoice_id)))];
-  if (!carrierIds.length) return null;
-  const { data: carriers, error: cErr } = await supabase.from("invoices").select("id, invoice_number, status, created_at").in("id", carrierIds);
-  if (cErr) return { ok: false, error: dbError(cErr) };
-  const rows = (carriers ?? []) as { id: string; invoice_number: string | null; status: string | null; created_at: string | null }[];
-  // A line on a bill this person cannot see is not known to be free: refuse rather than guess.
-  if (rows.length !== carrierIds.length) return { ok: false, error: `${label} is taken off a bill that couldn't be read just now, so it wasn't voided. Try again in a moment.` };
-  const sent = rows.filter((r) => r.status !== "draft" && r.status !== "void").sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")));
-  if (sent.length) {
-    const taker = sent[0].invoice_number ?? "a bill that went out";
-    return { ok: false, error: `${label} can't be voided: ${taker} already took it off and went out. Void ${taker} first, or leave ${label} as it is.` };
+  let rows: { id: string; invoice_number: string | null; status: string | null; created_at: string | null }[] = [];
+  if (carrierIds.length) {
+    const { data: carriers, error: cErr } = await supabase.from("invoices").select("id, invoice_number, status, created_at").in("id", carrierIds);
+    if (cErr) return { ok: false, error: dbError(cErr) };
+    rows = (carriers ?? []) as typeof rows;
+    // A line on a bill this person cannot see is not known to be free: refuse rather than guess.
+    if (rows.length !== carrierIds.length) return { ok: false, error: `${label} is taken off a bill that couldn't be read just now, so it wasn't voided. Try again in a moment.` };
+    const sent = rows.filter((r) => r.status !== "draft" && r.status !== "void").sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")));
+    if (sent.length) {
+      const taker = sent[0].invoice_number ?? "a bill that went out";
+      return { ok: false, error: `${label} can't be voided: ${taker} already took it off and went out. Void ${taker} first, or leave ${label} as it is.` };
+    }
   }
+  // MONEY IN HAND IS NOT VOIDED (cn-v1178, audit D4): a request with money paid on it (less what was
+  // refunded) is the customer's money ahead; voided, no bill would take it off and the next one would
+  // ask for it again. The one way through is to give it back first. Read before any draft lets go.
+  const { data: refunds, error: rErr } = await supabase
+    .from("customer_credits")
+    .select("amount")
+    .eq("invoice_id", cur.id)
+    .eq("disposition", "refund");
+  if (rErr) return { ok: false, error: dbError(rErr) };
+  const refunded = ((refunds ?? []) as { amount: unknown }[]).reduce((t, r) => t + Math.abs(Number(r.amount) || 0), 0);
+  const held = Math.round((Number(cur.amount_paid ?? 0) - refunded) * 100) / 100;
+  if (held > 0.005) return { ok: false, error: `${label} has ${formatCurrency(held)} paid on it. Refund it first, then void it.` };
+  if (!carrierIds.length) return null;
   const draftLines = ((lines ?? []) as { id: string; invoice_id: string }[]).filter((l) => rows.some((r) => r.id === l.invoice_id && r.status === "draft")).map((l) => String(l.id));
   if (draftLines.length) {
     const { data: gone, error: dErr } = await supabase.from("invoice_items").delete().in("id", draftLines).eq("import_source", PREPAID_CREDIT).select("id");
@@ -4819,6 +4869,9 @@ export async function settleUp(input: {
         .is("appointment_id", null) // never trip on another visit's settle-up bill
         .neq("status", "void")
         .neq("status", "draft") // a coincidental same-total DRAFT from another door is not this tap
+        // A PAYMENT REQUEST IS NEVER THIS TAP (cn-v1178, audit D8): one made and paid a moment ago for the
+        // same figure was found here, answered "done", and the cash in hand was recorded nowhere.
+        .neq("invoice_kind", PREPAYMENT_KIND)
         .gte("created_at", new Date(Date.now() - 5 * 60_000).toISOString())
         .limit(1)
         .maybeSingle();

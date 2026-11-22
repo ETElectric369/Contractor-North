@@ -80,6 +80,7 @@ export function PaymentScheduleCard({
   depositRule = { percent: 0, cap: 0 },
   milestones = [],
   drawsBilled = false,
+  depositRequested = false,
 }: {
   jobId: string;
   billingType?: "fixed" | "tm";
@@ -91,6 +92,9 @@ export function PaymentScheduleCard({
   /** True when a non-void deposit/progress/final invoice already exists on this job — the exact
    *  read setPaymentSchedule does before it will attach or replace a schedule. */
   drawsBilled?: boolean;
+  /** cn-v1178 (audit D6): the job has a live deposit request (lib/payment-schedule-math depositIsRequested
+   *  of the Request a Payment seed's requests). The default schedule then proposes no Deposit row. */
+  depositRequested?: boolean;
 }) {
   const router = useRouter();
   const { pending, error, requestNext } = useRequestNextPayment(jobId);
@@ -204,7 +208,7 @@ export function PaymentScheduleCard({
           initial={
             hasSchedule
               ? status.rows.map((r) => ({ label: r.label, percent: Number(r.percent) || 0 }))
-              : defaultSchedule(contractTotal, depositRule).map((m) => ({ label: m.label, percent: Number(m.percent) || 0 }))
+              : defaultSchedule(contractTotal, depositRule, { depositRequested }).map((m) => ({ label: m.label, percent: Number(m.percent) || 0 }))
           }
           onClose={() => setEditing(false)}
           onSaved={() => {

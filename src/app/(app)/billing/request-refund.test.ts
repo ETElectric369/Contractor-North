@@ -59,11 +59,26 @@ beforeEach(() => {
 });
 
 describe("a refund by hand on a payment request", () => {
-  it("is refused above what no bill has used (the draft's hold counts too), naming the bill that took it off", async () => {
-    // INV-901 took 600; the open draft INV-902 holds 400: nothing is free.
+  /**
+   * RE-PINNED ON PURPOSE (cn-v1178, audit D3). This case used to say "the draft's hold counts too", and
+   * so a customer who cancelled after paying a deposit could not be refunded while a DRAFT bill on the
+   * job derived a credit from it, with no way through named. A draft's credit line is derived, not
+   * money used: only a bill that WENT OUT took anything, and the resync this door runs after the refund
+   * shrinks the draft's line to what the request has left.
+   */
+  it("is refused above what no SENT bill has used, naming only the bill that went out", async () => {
+    // INV-901 went out and took 600; the open draft INV-902's 400 is not money used.
     const res = await createCustomerCredit("inv-900", 500, "refund");
-    expect(res).toEqual({ ok: false, error: "Only $0.00 of INV-900 can still be given back, because INV-901 and INV-902 took $1,000.00 of it off." });
+    expect(res).toEqual({ ok: false, error: "Only $400.00 of INV-900 can still be given back, because INV-901 took $600.00 of it off." });
     expect(db.customer_credits).toEqual([]);
+  });
+
+  it("a paid deposit with a draft holding it can be refunded, and the draft's line then comes off (D3)", async () => {
+    expect(await createCustomerCredit("inv-900", 400, "refund")).toEqual({ ok: true });
+    expect(db.customer_credits.map((c) => [c.invoice_id, c.amount, c.disposition])).toEqual([["inv-900", 400, "refund"]]);
+    // The resync resolved INV-902 again: the request has nothing left to come off.
+    expect(credits("inv-902")).toEqual([]);
+    expect(db.invoices.find((i) => i.id === "inv-902")!.total).toBe(1000);
   });
 
   it("within what is left it is recorded, and the job's drafts are resolved again", async () => {
@@ -97,7 +112,8 @@ describe("a refund Stripe already made, on a payment request", () => {
     state.refundedCents = 100000;
     const res = await recordStripeRefund({ invoiceId: "inv-900", chargeId: "ch_900" });
     expect(res.ok).toBe(true);
-    expect(res.message).toContain("Warning: that is more than the $0.00 no bill had used; INV-901 and INV-902 still show $1,000.00 of INV-900 taken off.");
+    // Re-pinned (cn-v1178, D3): the draft's hold is not money used, so only INV-901, which went out, is named.
+    expect(res.message).toContain("Warning: that is more than the $400.00 no bill had used; INV-901 still shows $600.00 of INV-900 taken off.");
     expect(credits("inv-902")).toEqual([]);
     expect(db.invoices.find((i) => i.id === "inv-902")!.total).toBe(1000);
   });

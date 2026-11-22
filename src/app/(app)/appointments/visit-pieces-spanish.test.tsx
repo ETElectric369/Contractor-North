@@ -218,7 +218,7 @@ describe("Start the Job's server (start-job-actions): the mechanism on the sourc
     const refusals: [string, string, string][] = [
       ["vp_onlyOfficeStartsJob", "Only the office can start a job. Ask the office to start it, then clock in here.", "Solo la oficina puede empezar un trabajo. Pídele a la oficina que lo empiece, y luego marca entrada aquí."],
       ["vp_visitNotFound", "That visit could not be found.", "No se encontró esa visita."],
-      ["vp_visitCancelledNothingStarted", "This visit was cancelled. Nothing was started.", "Esta visita se canceló. No se empezó nada."],
+      ["vp_visitCancelledNothingStarted", "This visit was cancelled. Tap Put It Back on the Schedule in its ⋯ first. Nothing was started.", "Esta visita se canceló. Toca Devolverla a la Agenda en su ⋯ primero. No se empezó nada."],
       ["vp_nothingWasStarted", "Nothing was started.", "No se empezó nada."],
       ["vp_thisCustomerLower", "this customer", "este cliente"],
       ["vp_jobCouldNotBeStarted", "The job could not be started. Nothing was changed.", "No se pudo empezar el trabajo. No se cambió nada."],
@@ -454,6 +454,17 @@ describe("the visit page catalog (vp_), builder D's half", () => {
     ]);
   });
 
+  it("skeptic S9: a cancelled visit's refusal names the one door that page has for it (Put It Back on the Schedule, in its ⋯), in both languages", async () => {
+    const { words: vp } = await import("@/lib/words/visit-page");
+    for (const lang of ["en", "es"] as const) {
+      expect(vp[lang].vp_visitCancelledNothingStarted).toContain(vp[lang].vp_btn_putItBackOnTheSchedule);
+      expect(vp[lang].vp_visitCancelledNothingStarted).toContain("⋯");
+    }
+    // That door is there for a cancelled visit, on the same screen (the visit page's ⋯ menu).
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/appointments/[id]/page.tsx"), "utf8");
+    expect(page).toContain('{a.status === "cancelled" && <PutBackRow id={a.id} />}');
+  });
+
   it("every new vp_btn_ key is Title Case in both languages", () => {
     expect(D_BTN).toHaveLength(22);
     for (const k of D_BTN) {
@@ -559,7 +570,7 @@ describe("the visit page catalog (vp_), builder D's half", () => {
     vp_waitsUnderWaitingForADay: "It waits under Waiting for a Day on the schedule. Place it there when they call.",
     vp_onlyOfficeStartsJob: "Only the office can start a job. Ask the office to start it, then clock in here.",
     vp_visitNotFound: "That visit could not be found.",
-    vp_visitCancelledNothingStarted: "This visit was cancelled. Nothing was started.",
+    vp_visitCancelledNothingStarted: "This visit was cancelled. Tap Put It Back on the Schedule in its ⋯ first. Nothing was started.",
     vp_nothingWasStarted: "Nothing was started.",
     vp_onClockSwitchHere: "You're on the clock on {label} since {since}. Switch to This Job moves your clock here now. Nothing was started yet.",
     vp_onClockLinkInstead: "You're on the clock on {job}, the job {customer} already has from today. Link this visit to {job} instead. Nothing was started.",

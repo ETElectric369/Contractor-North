@@ -409,7 +409,10 @@ export async function approveVisitEstimate(input: ApproveInput): Promise<Approve
         if (!d.sheet.lines.length) return { ok: false, error: await say("qs_wonExistingEmpty", { quote: dec.quote.number ?? "" }), reread: false };
         if (d.sheet.lines.some((l) => l.hole)) return { ok: false, error: await say("qs_wonExistingHole", { quote: dec.quote.number ?? "" }), reread: false };
       }
-      return accept(sb, say, d, dec.quote.id, billingType, []);
+      // THE PAPER'S WORD DECIDES (cn-v1178, the owner's decision 2): an estimate that already stands
+      // makes a job that bills as its own word says (a Quote fixed, an Estimate time and material). The
+      // sheet shows that word and offers no choice; a different kind sent for it is not taken.
+      return accept(sb, say, d, dec.quote.id, billingKindOfDocType(d.quoteRows.get(dec.quote.id)?.doc_type), []);
     }
     case "visit": {
       if (!d.sheet.ok || d.sheet.state !== "estimate") return { ok: false, error: await say("qs_wonChanged"), reread: true };

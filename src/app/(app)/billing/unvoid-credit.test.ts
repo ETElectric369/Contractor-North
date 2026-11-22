@@ -120,3 +120,79 @@ describe("money ahead is not a legacy line, and a legacy line still is", () => {
     expect(db.invoices.find((i) => i.id === "inv-900")!.status).toBe("sent");
   });
 });
+
+/**
+ * A REQUEST WITH MONEY ON IT IS NOT VOIDED (cn-v1178, audit D4). Voided, no bill would take its money off
+ * and the next one would ask for it again; the one way through is to give it back first.
+ */
+describe("voiding a payment request with money paid on it", () => {
+  beforeEach(() => {
+    // Only the request: nothing took it off.
+    db.invoices = db.invoices.filter((i) => i.id === "inv-900");
+    db.invoice_items = db.invoice_items.filter((l) => l.invoice_id === "inv-900");
+  });
+
+  it("is refused while paid less refunded is above zero, naming the one action", async () => {
+    expect(await setInvoiceStatus("inv-900", "void")).toEqual({ ok: false, error: "INV-900 has $1,000.00 paid on it. Refund it first, then void it." });
+    expect(db.invoices[0].status).toBe("paid");
+    db.customer_credits.push({ id: "cc-1", org_id: ORG, invoice_id: "inv-900", amount: 400, disposition: "refund" });
+    expect(await setInvoiceStatus("inv-900", "void")).toEqual({ ok: false, error: "INV-900 has $600.00 paid on it. Refund it first, then void it." });
+  });
+
+  it("once the money is given back, it voids", async () => {
+    db.customer_credits.push({ id: "cc-1", org_id: ORG, invoice_id: "inv-900", amount: 1000, disposition: "refund" });
+    expect(await setInvoiceStatus("inv-900", "void")).toEqual({ ok: true });
+    expect(db.invoices[0].status).toBe("void");
+  });
+});
+
+/**
+ * ONE SALE, ONE DEPOSIT, AT THE UN-VOID DOOR (cn-v1178, carried C38): a voided deposit request does not
+ * come back beside the deposit request that now stands for its estimate or for any estimate of its sale,
+ * and the sentence names that request.
+ */
+describe("a voided deposit request coming back beside the sale's standing one", () => {
+  beforeEach(() => {
+    db.invoices = db.invoices.filter((i) => i.id === "inv-900");
+    db.invoice_items = db.invoice_items.filter((l) => l.invoice_id === "inv-900");
+    Object.assign(db.invoices[0], { status: "void", amount_paid: 0, quote_id: "q-900" });
+    db.quotes = [
+      { id: "q-900", org_id: ORG, revises_quote_id: null },
+      { id: "q-901", org_id: ORG, revises_quote_id: "q-900" },
+    ];
+  });
+
+  for (const [what, quote] of [["the same estimate", "q-900"], ["a revision of it", "q-901"]] as const) {
+    it(`is refused when ${what} has a live request, naming it`, async () => {
+      db.invoices.push(inv("inv-950", { invoice_kind: "prepayment", status: "sent", title: "Deposit", total: 500, quote_id: quote, created_at: "2026-10-05T00:00:00Z" }));
+      expect(await setInvoiceStatus("inv-900", "sent")).toEqual({
+        ok: false,
+        error: "INV-900 can't come back from void: INV-950 is this sale's deposit request now. Void INV-950 first, or leave INV-900 void.",
+      });
+      expect(db.invoices[0].status).toBe("void");
+    });
+  }
+
+  it("another sale's request (the pointer cleared by Keep Both) does not stand in its way", async () => {
+    db.quotes[1].revises_quote_id = null;
+    db.invoices.push(inv("inv-950", { invoice_kind: "prepayment", status: "sent", title: "Deposit", total: 500, quote_id: "q-901", created_at: "2026-10-05T00:00:00Z" }));
+    expect(await setInvoiceStatus("inv-900", "sent")).toEqual({ ok: true });
+  });
+});
+
+/**
+ * A DRAW'S "LESS PREVIOUS BILLINGS" LINE (cn-v1178, carried C37) still closes the way back from void
+ * beside a live bill, in words true of it: it bills no hours, and it was not built before claims.
+ */
+describe("a void draw whose only unclaimed line is its draw credit", () => {
+  it("is refused in its own words", async () => {
+    db.invoice_items = db.invoice_items.filter((l) => l.invoice_id !== "inv-901");
+    db.invoice_items.push(item("inv-901", 2000, { id: "inv-901-quote", description: "Progress billing" }));
+    db.invoice_items.push(item("inv-901", -500, { id: "inv-901-dc", import_source: "draw_credit", description: "Less previous billings" }));
+    const r = await setInvoiceStatus("inv-901", "draft");
+    const said = (r as { error?: string }).error ?? "";
+    expect(r.ok).toBe(false);
+    expect(said).toContain('INV-901 can\'t come back from void: its "Less previous billings" line takes earlier draws off');
+    expect(said).not.toContain("built before");
+  });
+});

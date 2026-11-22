@@ -677,7 +677,8 @@ describe("a job's tasks close with it (cn-v1174)", () => {
     const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/actions.ts"), "utf8");
     expect(src.match(/closeJobTasks\(/g)).toHaveLength(1);
     expect(src.match(/tasksClosedSaid\(supabase, /g)).toHaveLength(2);
-    expect(src).toContain('const said = status === "cancelled" ? await tasksClosedSaid(supabase, id, ctx.userId) : {};');
+    // cn-v1178: the cancel also says what its payment requests still hold (cancel-job-requests.test.ts).
+    expect(src).toContain('const tasksSaid = status === "cancelled" ? await tasksClosedSaid(supabase, id, ctx.userId) : {};');
     expect(src).toContain("REOPENING A JOB DOES NOT REOPEN ITS TASKS.");
     const button = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/finish-job-button.tsx"), "utf8");
     expect(button).toContain('t("jb_finishTasksUnread")');

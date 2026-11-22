@@ -149,6 +149,16 @@ describe("each answer the server gives, drawn, in both languages", () => {
     });
   }
 
+  it("cn-v1178 (decision 2): an estimate that stands, and finish, SAY the paper's kind and offer no choice; only the visit's own lines ask", () => {
+    const stands = draw(sheet(estimate({ source: "existing", quote: { id: "q-1", number: "E-900" }, lines: [priced], billingKind: "fixed" })));
+    expect(textOf(stands)).toContain("The job bills as Fixed Price, as the paper says.");
+    expect(stands).not.toContain('role="radiogroup"');
+    const fin = draw(sheet({ ok: true, state: "finish", quote: { id: "q-1", number: "E-900" }, total: 1000, billingKind: "tm" }), { lang: "es" });
+    expect(textOf(fin)).toContain("El trabajo se cobra como Tiempo y Material, como dice el documento.");
+    expect(fin).not.toContain('role="radiogroup"');
+    expect(draw(sheet(estimate()))).toContain('role="radiogroup"');
+  });
+
   it("the done step: with no deposit door, Open the Job is the boxed one and the estimate's door is quiet", () => {
     const html = draw({ k: "done", how: "approve", quote: { id: "q-1", number: "E-900" }, total: 1234.5, job: { id: "j-1", number: "J-900" } });
     expect(html).toContain('href="/jobs/j-1"');

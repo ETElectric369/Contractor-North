@@ -74,7 +74,7 @@ import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { fixedBillingsNotYetNetted, unbilledWorkForJob } from "@/lib/unbilled-work";
 import { depositCoversWords, paidAheadUnusedWords, paidLeftWorkOffBill, type NotBilled, type PaidAheadAtFinish } from "@/lib/finish-job-words";
 import { prepaymentsLeft, type PrepaymentState } from "@/lib/prepayments";
-import { readPrepaymentStates } from "@/lib/payment-request";
+import { readPrepaymentStates, readPrepaymentStatesInCompany } from "@/lib/payment-request";
 import { reportError } from "@/lib/observe";
 import { formatCurrency } from "@/lib/utils";
 
@@ -216,7 +216,9 @@ export async function finishBillingStep(
       drawBilled ? fixedBillingsNotYetNetted(supabase, jobId) : Promise.resolve(0),
       // MONEY ASKED FOR AHEAD (cn-v1177): the job's payment requests, read through their one reader
       // (it throws on a failed read, so a lost read is this step's error, never "no requests").
-      readPrepaymentStates(supabase, jobId).then(paidAheadAtFinish),
+      // cn-v1178 (D7): on the service client (a paid-in-full webhook) the read names the company, as
+      // every org-wide read in this step does; a signed-in person's read is narrowed by RLS already.
+      (access.kind === "service" ? readPrepaymentStatesInCompany(supabase, access.orgId, jobId) : readPrepaymentStates(supabase, jobId)).then(paidAheadAtFinish),
     ]);
   } catch (e) {
     reportError("finishBillingStep.read", e, { jobId });

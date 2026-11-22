@@ -5,8 +5,8 @@ import { readFileSync } from "node:fs";
  * HOW A SALE BECOMES A JOB WITH NO ESTIMATE (cn-v1176, lane ENDINGS), pinned against a stand-in client.
  *
  *   E1  every door through createJobFromAppointment stamps a sales visit Won (only where nothing is
- *       stamped, only on a visit with a win to record); the Start a Job card is otherwise as it was:
- *       the job takes the visit's slot and absorbs it.
+ *       stamped, only on a visit with a win to record); since cn-v1178 (C2) the Start a Job card on a
+ *       sales visit takes the sale's path (the job waits for a day, the visit is attached and Done).
  *   E2  startJobFromSale leaves the job the way an ACCEPTED ESTIMATE leaves it: waiting for a day, the
  *       inspection attached (never absorbed), Done, Won; the billing kind is the sheet's, else the
  *       company's; a visit with a job answers with it; the office only; a Not Sold, cancelled, work or
@@ -192,23 +192,24 @@ const visit = () => state.db.appointments.find((a) => a.id === "visit-1")!;
 const jobsMade = () => state.db.jobs;
 
 describe("E1: Start a Job marks a sales visit Won", () => {
-  it("an undecided inspection becomes Won on the claim, with its time; the card's job still takes the slot and absorbs the visit", async () => {
+  it("an undecided inspection becomes Won on the claim, with its time; since cn-v1178 (C2) the card's job takes the sale's path: it waits for a day and the inspection is attached and Done", async () => {
     const res = await createJobFromAppointment("visit-1");
     expect(res.ok).toBe(true);
     expect(visit().outcome).toBe("won");
     expect(typeof visit().outcome_at).toBe("string");
-    expect(visit().absorbed).toBe(true);
+    expect(visit().absorbed).toBe(false);
     const job = jobsMade()[0];
-    expect(job.status).toBe("scheduled");
-    expect(job.scheduled_start).toBe(VISIT.starts_at);
-    // The visit stays booked on the card's path (the card never marks it Done).
-    expect(visit().status).toBe("scheduled");
+    expect(job.status).toBe("to_be_scheduled");
+    expect(job.scheduled_start).toBeNull();
+    expect(visit().status).toBe("completed");
   });
 
-  it("an outcome already stamped is kept", async () => {
+  it("an outcome already stamped is kept: Not Sold is refused (cn-v1178) and nothing is made", async () => {
     visit().outcome = "lost";
     visit().outcome_at = "2026-11-01T00:00:00.000Z";
-    await createJobFromAppointment("visit-1");
+    const res = await createJobFromAppointment("visit-1");
+    expect(res.ok).toBe(false);
+    expect(jobsMade()).toEqual([]);
     expect(visit().outcome).toBe("lost");
     expect(visit().outcome_at).toBe("2026-11-01T00:00:00.000Z");
   });
@@ -324,7 +325,7 @@ describe("E2: startJobFromSale leaves the job the way an accepted estimate does"
       expect(jobsMade(), JSON.stringify(patch)).toHaveLength(0);
       return res.ok ? "" : res.error;
     };
-    expect(await refused({ status: "cancelled" })).toBe("This visit was cancelled. Nothing was started.");
+    expect(await refused({ status: "cancelled" })).toBe("This visit was cancelled. Tap Put It Back on the Schedule in its ⋯ first. Nothing was started.");
     expect(await refused({ outcome: "lost" })).toMatch(/^This inspection is marked Not Sold\. Tap Change on it and Clear the Answer first\./);
     expect(await refused({ type: "job" })).toBe("Only an inspection or an estimate visit is won. Nothing was started.");
     // A call is not a sale the Won sheet takes (won-sheet isWonVisitType, the door's own rule).

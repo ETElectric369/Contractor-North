@@ -22,11 +22,12 @@ import { ESTIMATE_FORMATS } from "@/lib/doc-style";
  */
 const FILE = "0408_one_materials_line_under_each_task.sql";
 const body = readFileSync(join(process.cwd(), "supabase/migrations", FILE), "utf8");
-/** WHERE public_quote's body lives NOW (cn-v1177): 0414 re-made it as 0408's body plus three deposit
+/** WHERE public_quote's body lives NOW (cn-v1178): 0414 re-made it as 0408's body plus three deposit
  *  keys on the quote object (tests/migration-0414.test.ts proves it differs by those additions only),
- *  so every check below reads the live body; task_parts_total, the column's check and the grant are
- *  still 0408's own. */
-const LIVE_FILE = "0414_money_ahead.sql";
+ *  and 0416 re-made 0414's with only its deposit block changed (the sale's family, deposit_due,
+ *  card_fee_percent; tests/migration-0416.test.ts proves it byte for byte), so every check below reads
+ *  the live body; task_parts_total, the column's check and the grant are still 0408's own. */
+const LIVE_FILE = "0416_one_sale_one_deposit.sql";
 const live = readFileSync(join(process.cwd(), "supabase/migrations", LIVE_FILE), "utf8");
 /** A function's text, from its header to the `$$;` that closes it (never the self-check after it). */
 const fnOf = (header: string, text: string = body) => {

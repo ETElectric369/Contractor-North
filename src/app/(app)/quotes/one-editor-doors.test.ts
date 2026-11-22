@@ -81,12 +81,12 @@ vi.mock("@/app/(app)/materials/actions", async (importOriginal) => ({ ...(await 
 const { setQuoteCustomer, appendQuoteLines, updateQuoteItem, deleteQuoteItem, saveQuote, readQuoteForEditor, readQuoteLineIds, createJobFromQuote } = await import("./actions");
 const { LINE_GONE } = await import("./use-quote-writes");
 
-const gate = (c: Call) => c.table === "quotes" && c.verb === "select" && c.select === "status, job_id, quote_number, doc_type";
+const gate = (c: Call) => c.table === "quotes" && c.verb === "select" && c.select === "status, job_id, quote_number, doc_type, org_id";
 const lastLine = (c: Call) => c.table === "quote_line_items" && c.verb === "select" && c.select === "sort_order";
 const lineInsert = (c: Call) => c.table === "quote_line_items" && c.verb === "insert";
 const lineUpdate = (c: Call) => c.table === "quote_line_items" && c.verb === "update";
 const quoteInsert = (c: Call) => c.table === "quotes" && c.verb === "insert";
-const standingRead = (c: Call) => c.table === "quotes" && c.verb === "select" && c.select === "id, status, inquiry_id";
+const standingRead = (c: Call) => c.table === "quotes" && c.verb === "select" && c.select === "id, status, inquiry_id, doc_type";
 const draftRpc = (c: Call) => c.verb === "rpc" && c.table === "save_quote_draft";
 const totalsWrite = (c: Call) => c.table === "quotes" && c.verb === "update" && "subtotal" in (c.payload as object);
 

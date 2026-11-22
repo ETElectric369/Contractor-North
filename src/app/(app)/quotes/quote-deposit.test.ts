@@ -59,15 +59,25 @@ const totalsWrite = (c: Call) => c.table === "quotes" && c.verb === "update" && 
 const depositWrite = (c: Call) => c.table === "quotes" && c.verb === "update" && "deposit_by_hand" in (c.payload as object);
 
 /** The world: one estimate, its stored deposit facts, its lines, and the company's settings. */
-type World = { status?: string; stored?: number | null; byHand?: boolean; lines?: number[]; settings?: unknown; ruleFails?: boolean; total?: number; zeroRows?: boolean };
+type World = { status?: string; stored?: number | null; byHand?: boolean; lines?: number[]; settings?: unknown; ruleFails?: boolean; total?: number; zeroRows?: boolean;
+  /** cn-v1178: the sale's family (quote_family_ids) and the live deposit request on one of its estimates. */
+  family?: string[]; request?: { quote_id: string; invoice_number: string; total: number; amount_paid: number; status: string } };
 function world(w: World) {
   return (c: Call): unknown => {
+    if (c.verb === "rpc" && c.table === "quote_family_ids") return { data: w.family ?? [], error: null };
+    if (c.table === "invoices" && c.verb === "select" && c.select === "id, invoice_number, public_token, title, total, amount_paid, status, job_id, quote_id") {
+      // An honest read: the request answers only when its estimate is IN the asked family and it is live.
+      const inList = c.filters.find((f) => f[0] === "in" && f[1] === "quote_id")?.[2] as string[] | undefined;
+      const r = w.request;
+      const hit = r && inList?.includes(r.quote_id) && r.status !== "void";
+      return { data: hit ? { id: "inv-900", public_token: "t-900", title: "Deposit", job_id: "job-1", ...r } : null, error: null };
+    }
     if (recalcRead(c)) return { data: { tax_rate: 0, status: w.status ?? "draft", org_id: "org-1", deposit_amount: w.stored ?? null, deposit_by_hand: w.byHand ?? false }, error: null };
     if (c.table === "quote_line_items" && c.verb === "select" && c.select === "line_total") return { data: (w.lines ?? [4800]).map((line_total) => ({ line_total })), error: null };
     if (ruleRead(c)) return w.ruleFails ? { data: null, error: { message: "the reader tripped" } } : { data: { settings: w.settings ?? {} }, error: null };
-    if (c.table === "quotes" && c.verb === "select" && c.select === "id, status, inquiry_id") return { data: { id: ID, status: w.status ?? "draft", inquiry_id: null }, error: null };
+    if (c.table === "quotes" && c.verb === "select" && c.select === "id, status, inquiry_id, doc_type") return { data: { id: ID, status: w.status ?? "draft", inquiry_id: null }, error: null };
     if (c.table === "quotes" && c.verb === "select" && c.select === "id, status, total, org_id") return { data: { id: ID, status: w.status ?? "draft", total: w.total ?? 4800, org_id: "org-1" }, error: null };
-    if (c.table === "quotes" && c.verb === "select" && c.select === "status, job_id, quote_number, doc_type") return { data: { status: w.status ?? "draft", job_id: null, quote_number: "E-900", doc_type: "estimate" }, error: null };
+    if (c.table === "quotes" && c.verb === "select" && c.select === "status, job_id, quote_number, doc_type, org_id") return { data: { status: w.status ?? "draft", job_id: null, quote_number: "E-900", doc_type: "estimate" }, error: null };
     if (c.table === "quotes" && c.verb === "update") return { data: w.zeroRows ? [] : [{ id: ID }], error: null };
     if (c.table === "quotes" && c.verb === "insert") return { data: { id: (c.payload as { id?: string }).id ?? "q-copy", quote_number: "E-901" }, error: null };
     if (c.table === "quote_line_items" && c.verb === "insert") return { data: null, error: null };
@@ -96,7 +106,7 @@ beforeEach(() => {
 describe("every save writes the deposit with the totals (recalcQuote)", () => {
   it("a new estimate: the company's default, 10% up to $1,000, in the same statement as the total", async () => {
     // No id standing: the insert path.
-    s.answer = ((w) => (c: Call) => (c.table === "quotes" && c.verb === "select" && c.select === "id, status, inquiry_id" ? { data: null, error: null } : w(c)))(world({}));
+    s.answer = ((w) => (c: Call) => (c.table === "quotes" && c.verb === "select" && c.select === "id, status, inquiry_id, doc_type" ? { data: null, error: null } : w(c)))(world({}));
     const res = await saveQuote(input());
     expect(res.ok).toBe(true);
     const writes = s.calls.filter(totalsWrite);
@@ -151,6 +161,17 @@ describe("every save writes the deposit with the totals (recalcQuote)", () => {
     expect(s.calls.some(ruleRead)).toBe(false);
   });
 
+  it("cn-v1178 (decision 3): a SENT estimate's header edit (Valid Until) leaves its deposit as it was, even after the company's rule changed; one saved before 0414 stays null", async () => {
+    s.answer = world({ status: "sent", stored: 480, settings: { deposit_percent: 50, deposit_cap_amount: 0 } });
+    await updateQuoteMeta(ID, { valid_until: "2026-12-31" });
+    expect(s.calls.filter(totalsWrite).at(-1)!.payload).toEqual({ subtotal: 4800, tax: 0, total: 4800 });
+    expect(s.calls.some(ruleRead)).toBe(false);
+    s.calls = [];
+    s.answer = world({ status: "sent", stored: null });
+    await updateQuoteMeta(ID, { valid_until: "2026-12-31" });
+    expect(s.calls.filter(totalsWrite).at(-1)!.payload).toEqual({ subtotal: 4800, tax: 0, total: 4800 });
+  });
+
   it("a company rule that could not be read writes no deposit (the totals still land)", async () => {
     s.answer = world({ ruleFails: true, stored: 300 });
     await saveQuote(input());
@@ -164,7 +185,8 @@ describe("setQuoteDeposit (the editor's Deposit field)", () => {
     expect(res).toEqual({ ok: true, deposit: 1250, byHand: true });
     const w = s.calls.find(depositWrite)!;
     expect(w.payload).toEqual({ deposit_by_hand: true, deposit_amount: 1250 });
-    expect(w.filters).toEqual([["eq", "id", ID], ["eq", "org_id", "org-1"], ["in", "status", ["draft", "sent"]]]);
+    // Only a draft since cn-v1178: a sent estimate is the customer's copy (Back to Draft first).
+    expect(w.filters).toEqual([["eq", "id", ID], ["eq", "org_id", "org-1"], ["eq", "status", "draft"]]);
     expect(w.select).toBe("id");
     expect(pdf.bust).toHaveBeenCalledWith("quote", ID);
   });
@@ -190,6 +212,29 @@ describe("setQuoteDeposit (the editor's Deposit field)", () => {
     expect(s.calls.find(depositWrite)!.payload).toEqual({ deposit_by_hand: false, deposit_amount: 1200 });
   });
 
+  it("cn-v1178 (decision 3): a SENT estimate is the customer's copy: its deposit is refused, naming Back to Draft; nothing written", async () => {
+    s.answer = world({ status: "sent" });
+    const res = await setQuoteDeposit(ID, 300);
+    expect(res).toEqual({ ok: false, error: "E-900 was sent: it is the customer's copy, so its lines, totals and deposit don't change while it is out. Tap Back to Draft to change it, then send it again." });
+    expect(s.calls.some(depositWrite)).toBe(false);
+  });
+
+  it("cn-v1178 (decision 1): a draft REVISION whose sale already has its deposit request is refused, naming that request; nothing written", async () => {
+    s.answer = world({ family: [ID, "q-original"], request: { quote_id: "q-original", invoice_number: "INV-900", total: 480, amount_paid: 480, status: "paid" } });
+    const res = await setQuoteDeposit(ID, 300);
+    // Paid in full: the void door refuses it until it is refunded (skeptic S6), so the action says so.
+    expect(res).toEqual({ ok: false, error: "This sale already has its deposit: INV-900, for $480.00, with $480.00 paid on it. That request is the deposit; to state a different one, refund what was paid, then void it on the job." });
+    expect(s.calls.some(depositWrite)).toBe(false);
+    // Nothing paid on it: void it is the action.
+    s.calls = [];
+    s.answer = world({ family: [ID, "q-original"], request: { quote_id: "q-original", invoice_number: "INV-900", total: 480, amount_paid: 0, status: "sent" } });
+    expect(await setQuoteDeposit(ID, 300)).toEqual({ ok: false, error: "This sale already has its deposit: INV-900, for $480.00. That request is the deposit; void it on the job first to state a different one." });
+    // An estimate of ANOTHER sale (not in the family) does not count: the figure is stored.
+    s.calls = [];
+    s.answer = world({ family: [ID], request: { quote_id: "q-other-sale", invoice_number: "INV-901", total: 480, amount_paid: 0, status: "sent" } });
+    expect(await setQuoteDeposit(ID, 300)).toEqual({ ok: true, deposit: 300, byHand: true });
+  });
+
   it("zero rows is not success", async () => {
     s.answer = world({ zeroRows: true });
     expect(await setQuoteDeposit(ID, 100)).toEqual({ ok: false, error: "That estimate isn't here to update." });
@@ -203,7 +248,7 @@ describe("duplicateQuote carries a typed deposit", () => {
     return (c: Call) => {
       if (c.table === "quotes" && c.verb === "select" && c.select?.includes("circuits")) return { data: row, error: null };
       if (c.table === "quote_line_items" && c.verb === "select" && c.select?.startsWith("description")) return { data: [{ description: "Deck", quantity: 1, unit: "ea", unit_price: 4800, category: null, detail: null }], error: null };
-      if (c.table === "quotes" && c.verb === "select" && c.select === "id, status, inquiry_id") return { data: null, error: null };
+      if (c.table === "quotes" && c.verb === "select" && c.select === "id, status, inquiry_id, doc_type") return { data: null, error: null };
       return w(c);
     };
   };
@@ -245,7 +290,9 @@ describe("no other door writes an estimate's totals", () => {
     expect(cols).toContain("deposit_amount, deposit_by_hand");
     const print = readFileSync(join(process.cwd(), "src/app/print/quote/[id]/page.tsx"), "utf8");
     expect(print).toMatch(/\.select\(`\*, customers/);
-    expect(print).toContain("depositDue={(q as { deposit_amount?: number | string | null }).deposit_amount ?? null}");
+    // cn-v1178: the stored figure, unless the sale's live request states the deposit (then its ask).
+    expect(print).toContain("let depositDue: number | string | null = (q as { deposit_amount?: number | string | null }).deposit_amount ?? null;");
+    expect(print).toContain("depositDue={depositDue}");
     const page = readFileSync(join(process.cwd(), "src/app/(app)/quotes/[id]/page.tsx"), "utf8");
     expect(page).toMatch(/\.select\("\*, customers/);
   });

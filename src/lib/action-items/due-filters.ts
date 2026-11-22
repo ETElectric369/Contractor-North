@@ -1,4 +1,5 @@
 import { jobWords } from "./words";
+import { isPrepaymentKind } from "@/lib/prepayments";
 
 /**
  * THE DAY A PERSON PICKED IS THE DAY IT COMES BACK (Wave 1 seam fixes on release/w1a).
@@ -100,4 +101,18 @@ export function finishedDraftRefusal(
 /** The job a PostgREST `jobs:job_id(...)` embed hands back (an object, or a one-row array). */
 export function embeddedJob<T>(rel: unknown): T | null {
   return ((Array.isArray(rel) ? rel[0] : rel) ?? null) as T | null;
+}
+
+/**
+ * A BILL THAT MEANS THE SALE HAPPENED (cn-v1178, E4). The "sale went away" rule (quote-settled
+ * saleWentAway) keeps a job asking for a day while any live bill is on it. A payment request (money
+ * asked for ahead of the work) counts only once something was paid on it: a deposit asked for and never
+ * paid, on a job whose every estimate was then declined, is not money on the job, and that job stops
+ * asking for a day like any other whose sale went away. Every other live bill counts as it always did.
+ */
+export function saleHasMoney(row: { invoice_kind?: string | null; amount_paid?: number | string | null } | null | undefined): boolean {
+  if (!row) return false;
+  if (!isPrepaymentKind(row.invoice_kind)) return true;
+  const paid = Number(row.amount_paid ?? 0);
+  return Number.isFinite(paid) && paid > 0.005;
 }

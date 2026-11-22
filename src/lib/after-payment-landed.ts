@@ -8,6 +8,9 @@ import { notifyPeople } from "@/lib/notifications";
 import { orgStaffIds } from "@/lib/push";
 import { formatCurrency } from "@/lib/utils";
 import { reportError } from "@/lib/observe";
+import { bustDocPdf } from "@/lib/pdf-cache";
+import { isPrepaymentKind } from "@/lib/prepayments";
+import { saleQuoteIds } from "@/lib/sale-quotes";
 
 /**
  * WHAT HAPPENS AFTER MONEY LANDS ON AN INVOICE — ONE PLACE, EVERY DOOR (M1, audit of cn-v1037).
@@ -101,6 +104,13 @@ export async function afterPaymentLanded(
     ? await completeJobWhenPaid(supabase, invoiceId, input.access)
     : { completed: false, why: "the invoice's figures didn't recompute, so nothing was finished" };
 
+  // 2b. A DEPOSIT REQUEST'S PAYMENT CHANGES WHAT ITS ESTIMATE'S PAPER SAYS (cn-v1178, skeptic S8): the
+  //     paper reads "Deposit received" once the sale's request is paid, but paying a request touches no
+  //     estimate row, so nothing dropped the estimate's stored PDF and the customer's Download kept
+  //     handing out "Deposit due on acceptance". So the stored PDF of the request's estimate and of every
+  //     other estimate of its sale is dropped here. Never fails the payment.
+  await bustSalePapers(supabase, invoiceId, orgId);
+
   let rang: string[] = [];
   if (input.bell) {
     try {
@@ -134,6 +144,31 @@ export async function afterPaymentLanded(
     reportError("afterPaymentLanded:revalidate", e, { invoiceId });
   }
   return { settled, job, rang };
+}
+
+/** Drop the stored PDFs of a deposit request's sale (2b above). Reports and swallows every failure. */
+async function bustSalePapers(supabase: any, invoiceId: string, orgId: string | null | undefined): Promise<void> {
+  try {
+    const { data: inv, error } = await supabase.from("invoices").select("id, org_id, invoice_kind, quote_id").eq("id", invoiceId).maybeSingle();
+    if (error) {
+      reportError("afterPaymentLanded:sale-papers", error, { invoiceId });
+      return;
+    }
+    const row = (inv ?? null) as { org_id?: string | null; invoice_kind?: string | null; quote_id?: string | null } | null;
+    if (!row || !isPrepaymentKind(row.invoice_kind) || !row.quote_id) return;
+    const org = orgId ?? row.org_id ?? null;
+    let ids: string[];
+    try {
+      ids = await saleQuoteIds(supabase, String(row.quote_id));
+    } catch (e) {
+      // The family could not be read: the request's own estimate is still dropped.
+      reportError("afterPaymentLanded:sale-papers", e, { invoiceId });
+      ids = [String(row.quote_id)];
+    }
+    for (const id of ids) await bustDocPdf("quote", id, org);
+  } catch (e) {
+    reportError("afterPaymentLanded:sale-papers", e, { invoiceId });
+  }
 }
 
 /**

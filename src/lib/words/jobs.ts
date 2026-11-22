@@ -427,6 +427,11 @@ export const words: WordCatalog = {
     jb_tasksClosedOne: "The job's open task is checked off.",
     jb_tasksClosedMany: "The job's {n} open tasks are checked off.",
     jb_tasksNotClosed: "The job's open tasks couldn't be checked off: check them off on its Tasks tab.",
+    // ── a cancelled job says what its payment requests still hold (cn-v1178); nothing is voided ──
+    jb_cancelRequestOpen: "{request} still asks for {amount} and its link still takes a card: void it on the job's Invoices tab if it is not owed.",
+    jb_cancelRequestOpenPaid: "{request} still asks for {amount} and its link still takes a card, and {paid} was paid on it: if it is not owed, refund what was paid, then void it on the job's Invoices tab.",
+    jb_cancelRequestPaidAhead: "{amount} paid ahead on {request} is on no bill: refund it, or bill the work that was done.",
+    jb_cancelRequestsUnread: "Couldn't read this job's payment requests just now: look at its Invoices tab for any still open.",
     jb_finishClosesTasksOne: "1 task is still open on this job. Finishing checks it off.",
     jb_finishClosesTasksMany: "{n} tasks are still open on this job. Finishing checks them off.",
     jb_finishTasksUnread: "Couldn't read this job's tasks just now. Finishing still checks off any left open.",
@@ -814,6 +819,11 @@ export const words: WordCatalog = {
     jb_tasksClosedOne: "La tarea abierta del trabajo quedó marcada como hecha.",
     jb_tasksClosedMany: "Las {n} tareas abiertas del trabajo quedaron marcadas como hechas.",
     jb_tasksNotClosed: "No se pudieron marcar como hechas las tareas abiertas del trabajo: márcalas en su pestaña Tareas.",
+    // ── un trabajo cancelado dice lo que aún tienen sus solicitudes de pago (cn-v1178) ──
+    jb_cancelRequestOpen: "{request} todavía pide {amount} y su enlace todavía acepta tarjeta: anúlala en la pestaña Facturas del trabajo si no se debe.",
+    jb_cancelRequestOpenPaid: "{request} todavía pide {amount} y su enlace todavía acepta tarjeta, y ya se pagaron {paid}: si no se debe, reembolsa lo pagado y luego anúlala en la pestaña Facturas del trabajo.",
+    jb_cancelRequestPaidAhead: "{amount} pagados por adelantado en {request} no están en ninguna factura: reembólsalos, o factura el trabajo que se hizo.",
+    jb_cancelRequestsUnread: "No se pudieron leer las solicitudes de pago de este trabajo ahora: revisa su pestaña Facturas por si alguna sigue abierta.",
     jb_finishClosesTasksOne: "1 tarea sigue abierta en este trabajo. Al terminarlo, queda marcada como hecha.",
     jb_finishClosesTasksMany: "{n} tareas siguen abiertas en este trabajo. Al terminarlo, quedan marcadas como hechas.",
     jb_finishTasksUnread: "No se pudieron leer las tareas de este trabajo ahora. Al terminarlo, igual se marcan como hechas las que sigan abiertas.",

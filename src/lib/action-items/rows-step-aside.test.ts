@@ -56,7 +56,9 @@ describe("the reads", () => {
 
   it("a job whose sale went away stops asking for a day; a failed read settles nothing (R3)", () => {
     expect(q).toContain('supabase.from("quotes").select("job_id, status").in("job_id", ids)');
-    expect(q).toContain('supabase.from("invoices").select("job_id").in("job_id", ids).neq("status", "void")');
+    // cn-v1178 (E4): the kind and what was paid ride along, so an unpaid request is not money on the job.
+    expect(q).toContain('supabase.from("invoices").select("job_id, invoice_kind, amount_paid").in("job_id", ids).neq("status", "void")');
+    expect(q).toContain("((saleInvR.data ?? []) as any[]).filter(saleHasMoney)");
     expect(q).toContain("if (saleQuotesR.error || saleInvR.error) reportError(");
     expect(q).toContain("jobs: needDayPre.map((f) => f.job).filter((j) => !wentAway.has(String(j.id))),");
   });

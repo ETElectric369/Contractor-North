@@ -31,7 +31,8 @@ import { readNoJobHours, type NoJobHours } from "@/lib/no-job-hours";
 import { isOpenToBuy, newestListPerJob } from "@/lib/materials-checklist";
 import { INQUIRY_ROW_COLUMNS, feederOn, inquiryActionItem, type InquiryRow } from "./switches";
 import { NEW_INTAKE_COUNT_CAP, loadNewIntake } from "@/lib/leads/new-intake";
-import { draftInvoiceState, heldJobState, lateInvoiceFilter, quoteNoAnswerFilter } from "./due-filters";
+import { draftInvoiceState, heldJobState, lateInvoiceFilter, quoteNoAnswerFilter, saleHasMoney } from "./due-filters";
+import { PREPAYMENT_KIND } from "@/lib/prepayments";
 import { CLOSING_QUIET_DAYS } from "@/lib/estimate/closing";
 import { noAnswerYetItem } from "./no-answer-yet";
 import { isMissingColumn } from "@/lib/job-tasks";
@@ -686,6 +687,10 @@ async function buildActionItems(ctx: {
           .from("invoices")
           .select("id, invoice_number, total, amount_paid, due_date, status, created_at, customers(name)", { count: "exact" })
           .in("status", ["sent", "partial", "overdue"])
+          // A PAYMENT REQUEST IS NEVER LATE (cn-v1178, E3; the owner's decision 5): money asked for ahead
+          // of the work has no due date on purpose and is never chased by age. Left out IN the read, so
+          // the pile's count is still the count of its rows.
+          .neq("invoice_kind", PREPAYMENT_KIND)
           .or(lateInvoiceFilter(todayStr, INVOICE_STALE_DAYS))
           .order("created_at", { ascending: true })
           .limit(50)
@@ -1452,7 +1457,8 @@ async function buildActionItems(ctx: {
     })(),
     // A JOB WHOSE SALE WENT AWAY (cn-v1175, R3): its estimates and whether any bill was ever written on it.
     needDayIds.length ? inChunks(needDayIds, (ids) => supabase.from("quotes").select("job_id, status").in("job_id", ids).limit(1000)) : empty,
-    needDayIds.length ? inChunks(needDayIds, (ids) => supabase.from("invoices").select("job_id").in("job_id", ids).neq("status", "void").limit(1000)) : empty,
+    // A payment request counts only once money was paid on it (cn-v1178, E4): saleHasMoney.
+    needDayIds.length ? inChunks(needDayIds, (ids) => supabase.from("invoices").select("job_id, invoice_kind, amount_paid").in("job_id", ids).neq("status", "void").limit(1000)) : empty,
   ]);
   const nameOf = new Map(((peopleR.data ?? []) as any[]).map((p) => [String(p.id), String(p.full_name ?? "").trim()]));
 
@@ -1773,7 +1779,7 @@ async function buildActionItems(ctx: {
         const k = q?.job_id ? String(q.job_id) : "";
         if (k) quotesOn.set(k, [...(quotesOn.get(k) ?? []), { status: q.status ?? null }]);
       }
-      const invoiced = new Set(((saleInvR.data ?? []) as any[]).map((i) => String(i?.job_id ?? "")).filter(Boolean));
+      const invoiced = new Set(((saleInvR.data ?? []) as any[]).filter(saleHasMoney).map((i) => String(i?.job_id ?? "")).filter(Boolean));
       for (const f of needDayPre) {
         const id = String(f.job.id);
         const hasTime = (((f.job as any).time_entries ?? []) as unknown[]).length > 0;

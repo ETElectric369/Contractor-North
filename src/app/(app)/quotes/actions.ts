@@ -21,6 +21,9 @@ import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { depositFor, type DepositRule } from "@/lib/deposit-rule";
 import { formatCurrency } from "@/lib/utils";
 import { depositFollowsTotal, storedDepositAfterSave } from "@/lib/estimate/estimate-deposit";
+import { liveRequestForQuote, readPrepaymentStates, type RequestRef } from "@/lib/payment-request";
+import { PREPAYMENT_KIND, requestsAtAnEnding } from "@/lib/prepayments";
+import { billingKindOfDocType, docTypeOfBillingKind } from "@/lib/appointments/won-sheet";
 import { QUOTE_STATUSES } from "@/lib/statuses";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
@@ -467,8 +470,8 @@ export interface SaveQuoteInput {
   notes: string;
   tax_rate: number;
   valid_until: string | null;
-  /** The customer-facing document word (builder toggle) — omitted = 'estimate',
-   *  matching the app's estimate-first default (migration 0086). */
+  /** The customer-facing document word (builder toggle). Omitted (cn-v1178): a new estimate takes the
+   *  company's usual billing kind's word (a Quote at a fixed-price company), a standing one keeps its own. */
   doc_type?: QuoteDocType;
   /** HOW THIS ESTIMATE'S TASK LINES READ ON PAPER (cn-v1131, 0395; a third word since 0408): one of
    *  lib/doc-style ESTIMATE_FORMATS for its own word, null for the company's Doc Studio choice.
@@ -499,10 +502,55 @@ async function requireEditableQuote(
   const ws = wordsOf(supabase);
   const { data: quote } = await supabase
     .from("quotes")
-    .select("status, job_id, quote_number, doc_type")
+    .select("status, job_id, quote_number, doc_type, org_id")
     .eq("id", quoteId)
     .maybeSingle();
   if (!quote) return { ok: false, error: await ws.say("qs_quoteNotFound") };
+  const named0 = async () =>
+    (quote as any).quote_number || (await ws.say(docLabel(quote as { doc_type?: string | null }) === "Estimate" ? "qs_thisEstimate" : "qs_thisQuote"));
+  // A SENT ESTIMATE IS THE CUSTOMER'S COPY (cn-v1178, the owner's decision 3; audit B2). Its lines, its
+  // totals and its deposit are what the customer's link shows and what their Accept takes, so none of
+  // them changes while it is out: the one action is Back to Draft (the status door), after which the
+  // link is not served until it is sent again. The builder's own save already refused a sent estimate
+  // (qs_draftWasSent) and its word (qs_typeLocked); every line door, the tax rate and the deposit now
+  // say the same, through this one rule.
+  if ((quote as any).status === "sent") return { ok: false, error: await ws.say("qs_sentIsTheCopy", { quote: await named0() }) };
+  // A PAID DEPOSIT LOCKS THE ESTIMATE IT WAS PAID AGAINST (cn-v1178, decision 4; audit B5). The draw lock
+  // below could not see a deposit since cn-v1177 made it a payment request (invoice_kind 'prepayment').
+  // The SALE's request is read (lib/payment-request liveRequestForQuote: this estimate or any estimate in
+  // its revision family), and money on it, less what was refunded, locks the price the customer paid
+  // against. The one action is Revise: the deposit carries to the revision (decision 1). A read that
+  // fails is said, never read as "no deposit".
+  const paidDepositLock = async (key: "qs_lockDepositPaid" | "qs_lockDepositPaidSuperseded"): Promise<{ ok: false; error: string } | null> => {
+    let deposit: RequestRef | null;
+    try {
+      deposit = await liveRequestForQuote(supabase, String((quote as any).org_id ?? ""), quoteId);
+    } catch (e) {
+      return { ok: false, error: await ws.say("qs_depositCheckFailed", { why: e instanceof Error ? e.message : dbError(e) }) };
+    }
+    if (deposit && deposit.amount - deposit.balance > 0.005) {
+      let held = deposit.amount - deposit.balance;
+      if (deposit.jobId) {
+        try {
+          const st = (await readPrepaymentStates(supabase, deposit.jobId)).find((s) => s.id === deposit!.id);
+          if (st) held = st.paid - st.refunded;
+        } catch (e) {
+          return { ok: false, error: await ws.say("qs_depositCheckFailed", { why: e instanceof Error ? e.message : dbError(e) }) };
+        }
+      }
+      if (held > 0.005) {
+        return {
+          ok: false,
+          error: await ws.say(key, {
+            quote: await named0(),
+            request: deposit.number ?? (await ws.say("qs_theDepositRequest")),
+            amount: formatCurrency(Math.round(held * 100) / 100, await ws.lang()),
+          }),
+        };
+      }
+    }
+    return null;
+  };
   // SUPERSEDED (0391): replaced by its revision — the revision is the paper to edit now. With no
   // revision standing (deleted, or walked back) the estimate is his again: editable, and its status
   // may be set back by hand (updateQuoteStatus applies the same test).
@@ -514,9 +562,15 @@ async function requireEditableQuote(
       return { ok: false, error: await ws.say("qs_revisionCheckFailed", { why: e instanceof Error ? e.message : String(e) }) }; // fail closed, said
     }
     if (rev) return { ok: false, error: await ws.say("qs_supersededBy", { quote: (quote as any).quote_number || (await ws.say("qs_thisEstimate")), revision: rev.quote_number ?? (await ws.say("qs_itsRevision")) }) };
+    // ...but the paid-deposit lock still holds (skeptic S9): the original that holds the sale's paid
+    // request is not editable just because its revision was deleted.
+    const supersededLocked = await paidDepositLock("qs_lockDepositPaidSuperseded");
+    if (supersededLocked) return supersededLocked;
     return { ok: true };
   }
   if ((quote as any).status !== "accepted") return { ok: true };
+  const depositLocked = await paidDepositLock("qs_lockDepositPaid");
+  if (depositLocked) return depositLocked;
   const jobId = (quote as any).job_id as string | null;
   if (!jobId) return { ok: true }; // accepted but no job yet → no schedule to shift
 
@@ -776,7 +830,7 @@ async function recalcQuote(supabase: any, quoteId: string) {
   // `(items ?? [])` turned one transient timeout into subtotal/tax/total = 0 written straight
   // over a real estimate — with the PDF busted so the customer's copy showed $0 too.
   const [quoteRes, itemsRes] = await Promise.all([
-    // The deposit's facts (0414) ride the one read: the status (an offer still open follows its total),
+    // The deposit's facts (0414) ride the one read: the status (a draft follows its total),
     // the company (its rule), and the two columns as they stand.
     supabase.from("quotes").select("tax_rate, status, org_id, deposit_amount, deposit_by_hand").eq("id", quoteId).maybeSingle(),
     supabase.from("quote_line_items").select("line_total").eq("quote_id", quoteId),
@@ -797,9 +851,9 @@ async function recalcQuote(supabase: any, quoteId: string) {
   );
   // THE DEPOSIT IS WRITTEN WITH THE TOTAL IT IS A PART OF (cn-v1177), in the same statement: every
   // writer of an estimate's totals funnels through here (saveQuote, the line doors, updateQuoteMeta),
-  // so no total lands without its deposit. The rule is lib/estimate/estimate-deposit: an offer still
-  // open follows the company's rule or the typed figure (never above the total); one no longer on
-  // offer keeps what it stated. The company's rule is read only when it is needed; a failed read
+  // so no total lands without its deposit. The rule is lib/estimate/estimate-deposit: a draft follows
+  // the company's rule or the typed figure (never above the total); every other estimate keeps what it
+  // stated (a sent one is the customer's copy, cn-v1178: a header edit never re-derives it). The company's rule is read only when it is needed; a failed read
   // leaves the stored figure as it is (said to the error sink), never a guessed one.
   const q = (quoteRes.data ?? null) as { status?: string | null; org_id?: string | null; deposit_amount?: unknown; deposit_by_hand?: unknown } | null;
   let rule: DepositRule | null = null;
@@ -1260,7 +1314,8 @@ export async function updateQuoteMeta(
  * Deposit field). `typed` a figure: it is stored as typed (deposit_by_hand), so later saves leave it,
  * and it is refused above the estimate's total. `typed` null: Use the Default, the company's rule
  * (lib/deposit-rule depositFor) over the stored total, written with the flag off in one statement.
- * Only while the offer is open (draft or sent): an accepted estimate's deposit is what the customer
+ * Only on a draft since cn-v1178 (a sent one is the customer's copy: Back to Draft first; a sale whose
+ * deposit request stands has that request as its deposit). An accepted estimate's deposit is what the customer
  * said yes to, so a different one is a revision. Every write is read back (silent-write law) and drops
  * the stored PDF, which prints the deposit line.
  */
@@ -1283,7 +1338,37 @@ export async function setQuoteDeposit(
     .maybeSingle();
   if (readErr) return { ok: false, error: dbError(readErr) };
   if (!q) return { ok: false, error: await ws.say("qs_quoteNotFound") };
+  // A SENT ESTIMATE IS THE CUSTOMER'S COPY (cn-v1178, decision 3): its deposit changes only after Back
+  // to Draft, the one rule every line door asks (requireEditableQuote). Asked before the closed-offer
+  // refusal, since a sent estimate's deposit no longer follows its total either.
+  if (q.status === "sent") {
+    const editable = await requireEditableQuote(supabase, quoteId);
+    if (!editable.ok) return editable;
+  }
   if (!depositFollowsTotal(q.status)) return { ok: false, error: await ws.say("qs_depositOfferClosed") };
+  // ONE SALE, ONE DEPOSIT (cn-v1178, decision 1; audit B1): when the sale already has its deposit request
+  // (this estimate's, or one in its revision family), THAT request is the deposit. A figure typed here
+  // would be offered beside it on the paper, so it is refused and the request is named.
+  let standing: RequestRef | null;
+  try {
+    standing = await liveRequestForQuote(supabase, String(ctx.orgId ?? ""), quoteId);
+  } catch (e) {
+    return { ok: false, error: await ws.say("qs_depositCheckFailed", { why: e instanceof Error ? e.message : dbError(e) }) };
+  }
+  if (standing) {
+    return {
+      ok: false,
+      // Money on it: the void door refuses it until that is refunded (skeptic S6), so the action says so.
+      error:
+        standing.amount - standing.balance > 0.005
+          ? await ws.say("qs_depositIsTheRequestPaid", {
+              request: standing.number ?? (await ws.say("qs_theDepositRequest")),
+              amount: formatCurrency(standing.amount, await ws.lang()),
+              paid: formatCurrency(standing.amount - standing.balance, await ws.lang()),
+            })
+          : await ws.say("qs_depositIsTheRequest", { request: standing.number ?? (await ws.say("qs_theDepositRequest")), amount: formatCurrency(standing.amount, await ws.lang()) }),
+    };
+  }
   const total = Math.max(0, Math.round(Number(q.total ?? 0) * 100) / 100);
   let patch: { deposit_by_hand: boolean; deposit_amount: number };
   if (typed !== null) {
@@ -1304,7 +1389,8 @@ export async function setQuoteDeposit(
     .update(patch)
     .eq("id", quoteId)
     .eq("org_id", ctx.orgId)
-    .in("status", ["draft", "sent"])
+    // Only a draft (cn-v1178): sent in the same moment, it is the customer's copy and is not written.
+    .eq("status", "draft")
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!landed?.length) return { ok: false, error: await ws.say("qs_estimateNotHere") };
@@ -1443,15 +1529,65 @@ export async function setQuoteJob(
   const supabase = ctx.supabase;
   const ws = wordsOf(supabase, ctx.userId);
 
+  type Target = { id: string; name: string | null; job_number: string | null; customer_id: string | null };
+  let target: Target | null = null;
   if (jobId) {
-    const { data } = await supabase.from("jobs").select("id").eq("id", jobId).maybeSingle();
+    const { data, error: jobErr } = await supabase.from("jobs").select("id, name, job_number, customer_id").eq("id", jobId).maybeSingle();
+    if (jobErr) return { ok: false, error: dbError(jobErr) };
     if (!data) return { ok: false, error: await ws.say("qs_jobUnavailable") };
+    target = data as Target;
   }
 
   // THE JOB FOLLOWS (item 1, 2026-10-10): an ACCEPTED estimate pinned to a job puts its task lines on
   // that job's list. The job's figure is read BEFORE the pin counts this estimate's lines, so a job
   // that already has its own length keeps it.
-  const { data: qs } = await supabase.from("quotes").select("status, job_id").eq("id", quoteId).maybeSingle();
+  const { data: qs, error: qsErr } = await supabase.from("quotes").select("status, job_id, customer_id, quote_number").eq("id", quoteId).maybeSingle();
+  if (qsErr) return { ok: false, error: dbError(qsErr) };
+  if (!qs) return { ok: false, error: await ws.say("qs_estimateNotFound") };
+
+  // NOTHING MOVES UNTIL BOTH CHECKS PASS (cn-v1178, audit B4 and carried C23). The assistant's
+  // quote.attachJob is the usual cure for a doubled job, and this door moved the work order and the buy
+  // list while the deposit request stayed where it was made: the new job's bills never took the paid
+  // deposit off, the old job's would. (1) The sale's live deposit request (lib/payment-request
+  // liveRequestForQuote: this estimate or its revision family) on ANOTHER job refuses the move, naming
+  // the request and that job: keep the estimate there, or void the request first. (2) An estimate and a
+  // job that each name a customer, and not the same one, refuse it naming both: one sale is one
+  // customer's. Read before anything is written; a failed read is said.
+  let request: RequestRef | null;
+  try {
+    request = await liveRequestForQuote(supabase, String(ctx.orgId ?? ""), quoteId);
+  } catch (e) {
+    return { ok: false, error: await ws.say("qs_depositCheckFailed", { why: e instanceof Error ? e.message : dbError(e) }) };
+  }
+  if (request?.jobId && request.jobId !== (jobId ?? null)) {
+    const { data: held } = await supabase.from("jobs").select("name, job_number").eq("id", request.jobId).maybeSingle();
+    const h = (held ?? null) as { name?: string | null; job_number?: string | null } | null;
+    return {
+      ok: false,
+      error: await ws.say("qs_attachDepositElsewhere", {
+        quote: (qs as { quote_number?: string | null }).quote_number || (await ws.say("qs_thisEstimate")),
+        request: request.number ?? (await ws.say("qs_theDepositRequest")),
+        job: h && (h.name || h.job_number) ? jobLabel(h) : await ws.say("qs_anotherJob"),
+      }),
+    };
+  }
+  const estCustomer = (qs as { customer_id?: string | null }).customer_id ?? null;
+  if (target && estCustomer && target.customer_id && estCustomer !== target.customer_id) {
+    const { data: names } = await supabase.from("customers").select("id, name, company_name").in("id", [estCustomer, target.customer_id]);
+    const nameOf = (id: string) => {
+      const c = ((names ?? []) as { id: string; name?: string | null; company_name?: string | null }[]).find((r) => r.id === id);
+      return (c?.name || c?.company_name || "").trim();
+    };
+    return {
+      ok: false,
+      error: await ws.say("qs_attachOtherCustomer", {
+        quote: (qs as { quote_number?: string | null }).quote_number || (await ws.say("qs_thisEstimate")),
+        estimateCustomer: nameOf(estCustomer) || (await ws.say("qs_oneCustomer")),
+        job: target.name || target.job_number ? jobLabel(target) : await ws.say("qs_thatJob"),
+        jobCustomer: nameOf(target.customer_id) || (await ws.say("qs_anotherCustomer")),
+      }),
+    };
+  }
   const accepted = (qs as { status?: string } | null)?.status === "accepted";
   let pinned: FigureBefore | null = null;
   if (jobId && accepted) {
@@ -1557,6 +1693,49 @@ export async function deleteQuote(id: string): Promise<{ ok: boolean; error?: st
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const ws = wordsOf(supabase, ctx.userId);
+  // ONE SALE, ONE DEPOSIT SURVIVES A DELETE (cn-v1178, skeptic S3). invoices.quote_id and
+  // quotes.revises_quote_id are both ON DELETE SET NULL, so deleting an estimate would leave its
+  // payment request naming no estimate, or cut a revision off the family whose deposit request stands;
+  // either way the sale no longer sees its deposit, the customer's link offers it again, and a second
+  // request can be made beside the first. So, before anything is deleted, refuse (one sentence, one
+  // action): (a) a live payment request names this estimate: void it first; (b) another estimate
+  // revises this one and the sale has a live deposit request: delete the revision first, or keep this
+  // one. Other invoices are not this door's question. A read that fails refuses and says so.
+  const orgId = String(ctx.orgId ?? "");
+  const [ownRes, revRes] = await Promise.all([
+    supabase.from("invoices").select("id, invoice_number, status, invoice_kind, quote_id").eq("org_id", orgId).eq("quote_id", id).eq("invoice_kind", PREPAYMENT_KIND).neq("status", "void"),
+    supabase.from("quotes").select("id, quote_number, revises_quote_id").eq("org_id", orgId).eq("revises_quote_id", id),
+  ]);
+  if (ownRes.error || revRes.error) {
+    reportError("deleteQuote:sale", ownRes.error ?? revRes.error, { quoteId: id });
+    return { ok: false, error: await ws.say("qs_deleteSaleUnread") };
+  }
+  const ownRequest = ((Array.isArray(ownRes.data) ? ownRes.data : []) as { invoice_number?: string | null; status?: string | null; invoice_kind?: string | null; quote_id?: string | null }[]).find(
+    (r) => r.quote_id === id && r.invoice_kind === PREPAYMENT_KIND && r.status !== "void",
+  );
+  if (ownRequest) {
+    return { ok: false, error: await ws.say("qs_deleteRequestOnIt", { request: ownRequest.invoice_number ?? (await ws.say("qs_theDepositRequest")) }) };
+  }
+  const revision = ((Array.isArray(revRes.data) ? revRes.data : []) as { id: string; quote_number?: string | null; revises_quote_id?: string | null }[]).find((r) => r.revises_quote_id === id && r.id !== id);
+  if (revision) {
+    let standing: RequestRef | null;
+    try {
+      standing = await liveRequestForQuote(supabase, orgId, id);
+    } catch (e) {
+      reportError("deleteQuote:liveRequestForQuote", e, { quoteId: id });
+      return { ok: false, error: await ws.say("qs_deleteSaleUnread") };
+    }
+    if (standing) {
+      return {
+        ok: false,
+        error: await ws.say("qs_deleteRevisionStands", {
+          revision: revision.quote_number ?? (await ws.say("qs_theRevision")),
+          request: standing.number ?? (await ws.say("qs_theDepositRequest")),
+        }),
+      };
+    }
+  }
   // THE STAMP FOLLOWS THE DEED, IN REVERSE (review of cn-v796): autosave stamps a lead
   // 'quoted' the moment a draft exists — so deleting that draft must un-stamp it when no
   // other quote remains, or the lead leaves the inbox pointing at nothing (the exact
@@ -1701,9 +1880,9 @@ export async function saveQuote(input: SaveQuoteInput) {
   // answer and a retry under the same id land on ONE row: an id standing here in this company is an
   // update, an id nobody has is the insert, WITH that id. The one read serves both: the status (the
   // draft lock is decided on it before the RPC is asked) and the lead pointer the estimate may be leaving.
-  type Standing = { id: string; status: string | null; inquiry_id: string | null };
+  type Standing = { id: string; status: string | null; inquiry_id: string | null; doc_type?: string | null };
   const standingOf = async (id: string): Promise<Standing | null | { error: string }> => {
-    const { data, error } = await supabase.from("quotes").select("id, status, inquiry_id").eq("id", id).maybeSingle();
+    const { data, error } = await supabase.from("quotes").select("id, status, inquiry_id, doc_type").eq("id", id).maybeSingle();
     if (error) return { error: dbError(error) };
     return (data as Standing | null) ?? null;
   };
@@ -1714,6 +1893,17 @@ export async function saveQuote(input: SaveQuoteInput) {
     standing = s;
   }
   let prevInquiryId: string | null = standing?.inquiry_id ?? null;
+
+  // THE PAPER'S WORD (cn-v1178, the owner's decision 2; audit C1). Estimate or Quote is how the job will
+  // bill (an Estimate is time and material, a Quote a fixed price), so a door that states no word does
+  // not get "estimate" by default any more: a NEW estimate starts as the company's usual kind says
+  // (readUsualBillingKind -> docTypeOfBillingKind, a Quote at a fixed-price company), and a save of one
+  // that stands keeps the word it has. Every door that stated a word (the editor's toggle, the Won
+  // sheet's pick, Revise and Duplicate, which copy their original's) is taken as said.
+  const statedDocType: "estimate" | "quote" | null = input.doc_type === "quote" || input.doc_type === "estimate" ? input.doc_type : null;
+  const docType: "estimate" | "quote" =
+    statedDocType ??
+    (standing ? (standing.doc_type === "quote" ? "quote" : "estimate") : docTypeOfBillingKind(await readUsualBillingKind(supabase)));
 
   const fields = {
     customer_id: input.customer_id,
@@ -1727,8 +1917,8 @@ export async function saveQuote(input: SaveQuoteInput) {
     tax,
     total,
     valid_until: input.valid_until,
-    // The builder's Estimate|Quote toggle; absent (Nort, duplicates of old rows) = Estimate (T&M).
-    doc_type: input.doc_type === "quote" ? "quote" : "estimate",
+    // The builder's Estimate|Quote toggle; absent = the word the estimate has, or the company's usual one.
+    doc_type: docType,
   };
   // THE ESTIMATE'S OWN PAPER FORMAT (0395): its word, null for the company's, undefined = untouched.
   // Kept out of `fields` — save_quote_draft (0211) takes the header as it always has and is not edited.
@@ -2213,6 +2403,59 @@ async function materializeQuoteCustomer(
   return customerId;
 }
 
+/**
+ * THE CATCH-UP BRANCH'S CUSTOMER AND LEAD (cn-v1178, audit C3). An accepted estimate already on a job:
+ *   its customer: none on the estimate and one on the job: the job's, written compare-and-set (only while
+ *     the estimate still has none) and read back; none on either: made from its lead, the fresh branch's
+ *     way (materializeQuoteCustomer), and the job takes the same one, compare-and-set, read back
+ *     (skeptic S7). One already there is never changed.
+ *   its lead: stamped won (converted_at kept where it was set; the customer attached where it has none).
+ * Best-effort, never silent: a write that fails is reported with the ids and nothing about the person.
+ */
+async function catchUpCustomerAndLead(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  q: { id: string; customer_id: string | null; inquiry_id: string | null; job_id: string },
+  userId: string,
+): Promise<void> {
+  const ids = { quoteId: q.id, jobId: q.job_id };
+  try {
+    let customerId = q.customer_id;
+    if (!customerId) {
+      const { data: job, error: jobErr } = await supabase.from("jobs").select("customer_id").eq("id", q.job_id).maybeSingle();
+      if (jobErr) reportError("createJobFromQuote:catchUpCustomer", jobErr, ids);
+      const jobCustomer = (job as { customer_id?: string | null } | null)?.customer_id ?? null;
+      if (jobCustomer) {
+        const { data: wrote, error } = await supabase.from("quotes").update({ customer_id: jobCustomer }).eq("id", q.id).is("customer_id", null).select("id");
+        if (error) reportError("createJobFromQuote:catchUpCustomer", error, ids);
+        else if (wrote?.length) customerId = jobCustomer;
+      } else {
+        customerId = await materializeQuoteCustomer(supabase, q, userId);
+        // THE JOB TAKES THE SAME CUSTOMER (skeptic S7): it had none (read above), and a job with no
+        // customer bears customerless invoices and cannot take a payment request. Compare-and-set (only
+        // while it still has none), read back; a write that does not land is reported, never guessed.
+        if (customerId && !jobErr && job) {
+          const { data: jobWrote, error: jobWriteErr } = await supabase
+            .from("jobs")
+            .update({ customer_id: customerId })
+            .eq("id", q.job_id)
+            .is("customer_id", null)
+            .select("id");
+          if (jobWriteErr || !jobWrote?.length) reportError("createJobFromQuote:catchUpJobCustomer", jobWriteErr ?? new Error("zero rows: the job has a customer now, or is not here"), ids);
+        }
+      }
+    }
+    if (q.inquiry_id) {
+      const now = new Date().toISOString();
+      const { error: wonErr } = await supabase.from("inquiries").update({ status: "won", updated_at: now }).eq("id", q.inquiry_id).neq("status", "won").select("id");
+      if (wonErr) reportError("createJobFromQuote:catchUpLead", wonErr, ids);
+      await supabase.from("inquiries").update({ converted_at: now }).eq("id", q.inquiry_id).is("converted_at", null).select("id");
+      if (customerId) await supabase.from("inquiries").update({ customer_id: customerId }).eq("id", q.inquiry_id).is("customer_id", null).select("id");
+    }
+  } catch (e) {
+    reportError("createJobFromQuote:catchUp", e, ids);
+  }
+}
+
 /** A work order or a materials list the acceptance could not make — or a list that is there with a word
  *  about itself — said, never dropped (audit v1085, carried: both Accept branches used to throw the two
  *  results away, so a failed take-off was neither said nor reported). */
@@ -2299,7 +2542,8 @@ export async function createJobFromQuote(
     // dying at every stage, and it is a `select` list every time, never a missing column.
     // description (cn-v1160), for the same reason: it is the scope the job takes (lib/estimate/job-scope),
     // and this list never named it, so the job's Description was born empty every time.
-    .select("id, job_id, status, customer_id, title, quote_number, inquiry_id, address, unit, city, state, zip, revises_quote_id, description")
+    // doc_type (cn-v1178): the paper's word is how a job made here bills (decision 2).
+    .select("id, job_id, status, customer_id, title, quote_number, inquiry_id, address, unit, city, state, zip, revises_quote_id, description, doc_type")
     .eq("id", quoteId)
     .maybeSingle();
   if (!q) return { ok: false, error: await ws.say("qs_quoteNotFound") };
@@ -2347,6 +2591,13 @@ export async function createJobFromQuote(
     // one, a walk-back) has no tasks on the job yet, and the sync on its job would read its lines as
     // gone. The old answer stands for it.
     if ((q as { status?: string }).status !== "accepted") return { ok: true, id: q.job_id };
+    // THE ESTIMATE TAKES ITS JOB'S CUSTOMER, AND ITS LEAD IS WON (cn-v1178, audit C3). An estimate the older
+    // door tied to the job it made (Start a Job from This Visit), written for a lead that had no customer,
+    // reached this branch with none: the fresh branch below makes the customer (materializeQuoteCustomer)
+    // and this one never did, so the invoice it became was born with no customer and the lead stayed
+    // Quoted. Now: the job's customer is written onto the estimate while it still has none (compare-and-
+    // set, read back), else one is made from its lead the fresh branch's way; and the lead is stamped won.
+    await catchUpCustomerAndLead(supabase, { id: quoteId, customer_id: (q as { customer_id?: string | null }).customer_id ?? null, inquiry_id: q.inquiry_id ?? null, job_id: q.job_id }, ctx.userId);
     // A REVISION SUPERSEDES THE ESTIMATE IT REVISES (0391) — before the follow, so the job's accepted
     // estimates are already one price for the work when its tasks and list are brought in step.
     const sup = await supersedeRevised(supabase, { revisionId: quoteId, orgId: ctx.orgId });
@@ -2476,8 +2727,10 @@ export async function createJobFromQuote(
       // guard that exists BECAUSE hours once went unbilled. A job wrongly born 'fixed' therefore
       // completes silently on a customer's payment with its unbilled work invisible on every surface
       // at once. readUsualBillingKind is the company's own answer and a failed read falls to "tm".
-      // The Won sheet names the kind it asked for (cn-v1176); every other door, the company's usual one.
-      billing_type: billingType === "tm" || billingType === "fixed" ? billingType : await readUsualBillingKind(supabase),
+      // The Won sheet names the kind it asked for (cn-v1176). Every other door (cn-v1178, the owner's
+      // decision 2; audit C1): THE PAPER'S WORD, never the company's habit. A Quote says "This is a fixed
+      // price" and makes a Fixed Price job; an Estimate makes a Time and Material one.
+      billing_type: billingType === "tm" || billingType === "fixed" ? billingType : billingKindOfDocType((q as { doc_type?: string | null }).doc_type),
       ...(inheritedAddress
         ? {
             address: inheritedAddress.address,
@@ -2619,7 +2872,7 @@ export async function updateQuoteStatus(
   // ACCEPTED AGAIN ON AN ESTIMATE ALREADY ACCEPTED (cn-v1133): the day it was won stands (no
   // accepted_at bump — the customer's own Accept and the finishing window read it) and the office is
   // not rung twice for one acceptance; the job still catches up below (idempotent).
-  const alreadyAccepted = status === "accepted" && (was as { status?: string } | null)?.status === "accepted";
+  let alreadyAccepted = status === "accepted" && (was as { status?: string } | null)?.status === "accepted";
   // WHO SAID YES, AND HOW (cn-v1176, 0413): on a FRESH acceptance only, the way it was given ("in_person"
   // from the Won sheet, else "office") and the signed-in person who recorded it (never an input). A
   // re-select of an accepted estimate and a walk-back write neither, so what was recorded stands.
@@ -2646,9 +2899,29 @@ export async function updateQuoteStatus(
   // .select("id") so a zero-row write is caught (silent-write law). quotes_write is org-scoped,
   // so a foreign-org quote id matches nothing here — without the row check the function sailed
   // on to read the quote and ring THAT org's bell (audit v921 high). No rows = not ours = stop.
-  const { data: updated, error } = await supabase.from("quotes").update(patch).eq("id", id).select("id");
+  // A FRESH ACCEPTANCE IS COMPARE-AND-SET (cn-v1178, audit B8): the read above was taken before this
+  // write, so the customer's own Accept on their link could land in between. The write lands only while
+  // the estimate is still not accepted; zero rows is read back, and an estimate accepted meanwhile is
+  // treated as already accepted: who said yes, and when, is never rewritten, and nobody is rung twice.
+  const fresh = status === "accepted" && !alreadyAccepted;
+  const write = supabase.from("quotes").update(patch).eq("id", id);
+  const { data: updated, error } = await (fresh ? write.neq("status", "accepted") : write).select("id");
   if (error) return { ok: false as const, error: dbError(error) };
-  if (!updated?.length) return { ok: false as const, error: await ws.say("qs_estimateNotFound") };
+  if (!updated?.length) {
+    if (!fresh) return { ok: false as const, error: await ws.say("qs_estimateNotFound") };
+    const { data: nowRow, error: nowErr } = await supabase.from("quotes").select("status").eq("id", id).maybeSingle();
+    if (nowErr) return { ok: false as const, error: dbError(nowErr) };
+    if ((nowRow as { status?: string } | null)?.status !== "accepted") return { ok: false as const, error: await ws.say("qs_estimateNotFound") };
+    alreadyAccepted = true;
+  }
+  // A WON SALE MARKED LOST (cn-v1178, decision 6; audit E4): the job's payment requests are not voided or
+  // refunded by this door. What they still hold is SAID, each with its one action: a request still
+  // asking for money (its link still takes a card), and money paid ahead that no bill has used.
+  let ending: string | undefined;
+  const wasJob = (was as { job_id?: string | null } | null)?.job_id ?? null;
+  if (status === "declined" && (was as { status?: string } | null)?.status === "accepted" && wasJob) {
+    ending = await saleEndingWords(supabase, wasJob, ws);
+  }
   /** What the job's list did when a linked estimate was accepted (shown under the status, not as a warning). */
   let said: string | undefined;
   // WALKING BACK AN ACCEPTED REVISION (audit v1085, carried): the estimate it replaced stays superseded
@@ -2722,7 +2995,34 @@ export async function updateQuoteStatus(
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
   revalidatePath("/closing");
-  return { ok: true as const, ...(said ? { said } : {}) };
+  return { ok: true as const, ...(said ? { said } : {}), ...(ending ? { warning: ending } : {}) };
+}
+
+/**
+ * WHAT A JOB'S PAYMENT REQUESTS STILL HOLD WHEN ITS SALE ENDS (cn-v1178, audit E4): the one sentence per
+ * request, from lib/prepayments requestsAtAnEnding over the job's states. Nothing is voided or refunded
+ * here (decision 6). A read that fails is said, never read as "nothing held".
+ */
+async function saleEndingWords(supabase: any, jobId: string, ws: Said): Promise<string | undefined> {
+  let held: ReturnType<typeof requestsAtAnEnding>;
+  try {
+    held = requestsAtAnEnding(await readPrepaymentStates(supabase, jobId));
+  } catch (e) {
+    reportError("updateQuoteStatus:requestsAtAnEnding", e, { jobId });
+    return await ws.say("qs_lostRequestsUnread");
+  }
+  const lang = await ws.lang();
+  const name = async (r: { number: string | null }) => r.number ?? (await ws.say("qs_aPaymentRequest"));
+  const parts: string[] = [];
+  // A request with money on it cannot be voided until that is refunded (skeptic S6): its one action says so.
+  for (const r of held.open)
+    parts.push(
+      r.paid > 0.005
+        ? await ws.say("qs_lostRequestOpenPaid", { request: await name(r), amount: formatCurrency(r.amount, lang), paid: formatCurrency(r.paid, lang) })
+        : await ws.say("qs_lostRequestOpen", { request: await name(r), amount: formatCurrency(r.amount, lang) }),
+    );
+  for (const r of held.paidAhead) parts.push(await ws.say("qs_lostRequestPaidAhead", { request: await name(r), amount: formatCurrency(r.amount, lang) }));
+  return parts.length ? parts.join(" ") : undefined;
 }
 
 /**

@@ -16,7 +16,7 @@ import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { customerUnbilled, unbilledWorkForJob } from "@/lib/unbilled-work";
 import { prepaymentsLeft } from "@/lib/prepayments";
 import { reportError } from "@/lib/observe";
-import { PAY_DOOR_ORG_COLUMNS, createPaymentRequest, payDoorFacts, readPrepaymentStates, requestRefOf, type PayDoorFacts, type RequestRef, type RequestRefusal } from "@/lib/payment-request";
+import { PAY_DOOR_ORG_COLUMNS, createPaymentRequest, liveRequestForQuote, payDoorFacts, readPrepaymentStates, requestRefOf, type PayDoorFacts, type RequestRef, type RequestRefusal } from "@/lib/payment-request";
 import type { PrepaymentPurpose } from "@/lib/prepayments";
 
 export type PrepaymentView = RequestRef & {
@@ -151,12 +151,10 @@ export async function readPaymentRequestSeed(jobId: string): Promise<PaymentRequ
         },
       ];
     });
-    const quoteRequest = quote
-      ? (() => {
-          const row = refRows.find((r) => String(r.quote_id ?? "") === quote.id && String(r.status ?? "") !== "void");
-          return row ? requestRefOf(row) : null;
-        })()
-      : null;
+    // THE SALE'S DEPOSIT (cn-v1178, audit B1): the live deposit request of this estimate or of any
+    // estimate in its revision family. A revision of an estimate whose deposit was requested or paid
+    // HAS that request: the form draws its doors and never offers a second.
+    const quoteRequest = quote ? await liveRequestForQuote(supabase, orgId, quote.id) : null;
 
     const leftToNet = prepaymentsLeft(states);
     const unbilled = cents(customerUnbilled(work).materials);

@@ -18,6 +18,7 @@ vi.mock("@/lib/payment-request", () => ({
     return state.made;
   }),
   readPrepaymentStates: vi.fn(async () => []),
+  liveRequestForQuote: vi.fn(async () => null),
   requestRefOf: vi.fn(),
   payDoorFacts: vi.fn(),
   PAY_DOOR_ORG_COLUMNS: "settings, stripe_account_id, stripe_account_status, stripe_charges_enabled",

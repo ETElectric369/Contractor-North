@@ -247,10 +247,17 @@ export function leftToBill(
  * company's choice of no deposit (lib/org-settings), so it answers no deposit row: progress and final.
  * With no contract to take a capped figure of, the rule's own percent stands.
  */
-export function defaultSchedule(contractTotal: number, rule: DepositRule): Milestone[] {
+export function defaultSchedule(
+  contractTotal: number,
+  rule: DepositRule,
+  /** cn-v1178 (audit D6): the job already has a live deposit request (paid or not). Its deposit was
+   *  asked for by that request, which comes off the job's next bill; a Deposit row here would ask for it
+   *  again as a draw the request then nets to $0.00. So no Deposit row: progress and final only. */
+  opts?: { depositRequested?: boolean },
+): Milestone[] {
   const total = Math.max(0, fin(contractTotal));
   const pct = Math.min(Math.max(fin(rule?.percent), 0), 100);
-  const raw = total > 0.005 ? (depositFor(total, rule) / total) * 100 : pct;
+  const raw = opts?.depositRequested ? 0 : total > 0.005 ? (depositFor(total, rule) / total) * 100 : pct;
   // In millionths of a percent (a capped deposit's percent is rarely round: $1,000 of $30,000 is
   // 3.333333%, which bills $1,000.00 to the cent, where 3.33% would bill $999); the deposit never
   // takes more than 90 so two rows always follow it.
@@ -265,4 +272,13 @@ export function defaultSchedule(contractTotal: number, rule: DepositRule): Miles
     { label: "Final payment", percent: final / U },
   ];
   return rows.map((r, i) => ({ sort_order: i, ...r }));
+}
+
+/**
+ * DOES THE JOB HAVE A LIVE DEPOSIT REQUEST (cn-v1178, audit D6), from the job's live requests as the
+ * Request a Payment seed lists them (void and draft ones are not listed): one that is an estimate's
+ * deposit, or one made as a deposit (its built-in name, lib/prepayments prepaymentLabel).
+ */
+export function depositIsRequested(requests: readonly { quoteId?: string | null; label?: string | null; status?: string | null }[] | null | undefined): boolean {
+  return (requests ?? []).some((r) => r && r.status !== "void" && r.status !== "draft" && (!!r.quoteId || (r.label ?? "").trim() === "Deposit"));
 }

@@ -39,7 +39,7 @@ import { depositCoversWords, finalFinishWords, finishedWithWorkOffBill, finishWo
 // reach it: that door wrote the finish without ever asking what the job had worked.
 import { finishBillingStep, paidAheadAtFinish, type FinishBillingStep } from "@/lib/finish-bills-first";
 import { readPrepaymentStates } from "@/lib/payment-request";
-import { PREPAYMENT_KIND } from "@/lib/prepayments";
+import { PREPAYMENT_KIND, requestsAtAnEnding } from "@/lib/prepayments";
 import { guardedFieldsMoved, planBillEdit, type BillClaimHolder } from "./bill-claims";
 import { bucketOf } from "@/lib/business-cost-buckets";
 import { jobCostRefusal } from "@/lib/job-cost-guard";
@@ -752,7 +752,15 @@ export async function setJobStatus(
   // says the job closed it (tasks.status is open or done, 0018), so a reopen cannot tell the tasks the
   // finish closed from the ones a person checked off by hand, and none is added. Whatever is still to
   // do is reopened by hand on the job's Tasks tab (its Done fold), or added again.
-  const said = status === "cancelled" ? await tasksClosedSaid(supabase, id, ctx.userId) : {};
+  const tasksSaid = status === "cancelled" ? await tasksClosedSaid(supabase, id, ctx.userId) : {};
+  // A JOB CALLED OFF SAYS WHAT ITS PAYMENT REQUESTS STILL HOLD (cn-v1178, C4/E4). The cancel stands and
+  // nothing is voided or refunded by the app (the owner's decision 6): the answer names each request
+  // still asking for money, whose link still takes a card, and the money paid ahead that no bill used,
+  // each with its one action.
+  const requestsSaid = status === "cancelled" ? await requestsAtCancelSaid(supabase, id, ctx.userId) : null;
+  const said = requestsSaid
+    ? { ...tasksSaid, warning: [tasksSaid.warning, requestsSaid].filter(Boolean).join(" ") }
+    : tasksSaid;
   // Google reconcile (fire-safe): leaving the active set deletes the event,
   // re-activating a scheduled job re-pushes it.
   await pushCalendarItem("job", id);
@@ -777,6 +785,38 @@ async function tasksClosedSaid(supabase: SupabaseClient, jobId: string, by: stri
     return { warning: t("jb_tasksNotClosed") };
   }
   return { speak: res.closed === 1 ? t("jb_tasksClosedOne") : fillText(t("jb_tasksClosedMany"), { n: String(res.closed) }) };
+}
+
+/**
+ * WHAT A CANCELLED JOB'S PAYMENT REQUESTS STILL HOLD (cn-v1178, C4/E4), in the person's language, or null
+ * when they hold nothing. The pure rule is lib/prepayments requestsAtAnEnding over the job's request
+ * states (lib/payment-request readPrepaymentStates, on the caller's own session): a request still owed
+ * is named with what it asks and its one action (void it on the job's Invoices tab; with money on it,
+ * refund what was paid, then void it, since the void door refuses a request with money on it); money paid ahead
+ * that no bill used is named with its one action (refund it, or bill the work that was done). A read
+ * that fails is said, never read as "no requests".
+ */
+async function requestsAtCancelSaid(supabase: SupabaseClient, jobId: string, by: string | null | undefined): Promise<string | null> {
+  const t = async () => translator(await callerLang(supabase, by ?? undefined));
+  let ending: ReturnType<typeof requestsAtAnEnding>;
+  try {
+    ending = requestsAtAnEnding(await readPrepaymentStates(supabase, jobId));
+  } catch (e) {
+    reportError("setJobStatus.cancelRequests", e, { jobId });
+    return (await t())("jb_cancelRequestsUnread");
+  }
+  if (!ending.open.length && !ending.paidAhead.length) return null;
+  const words = await t();
+  const name = (r: { number: string | null; label: string }) => (r.number ? `${r.number} (${r.label})` : r.label);
+  const bits = [
+    ...ending.open.map((r) =>
+      r.paid > 0.005
+        ? fillText(words("jb_cancelRequestOpenPaid"), { request: name(r), amount: formatCurrency(r.amount), paid: formatCurrency(r.paid) })
+        : fillText(words("jb_cancelRequestOpen"), { request: name(r), amount: formatCurrency(r.amount) }),
+    ),
+    ...ending.paidAhead.map((r) => fillText(words("jb_cancelRequestPaidAhead"), { request: name(r), amount: formatCurrency(r.amount) })),
+  ];
+  return bits.join(" ");
 }
 
 /** A finish's answer with the deed's sentence put after it: the count on `speak`, a failure on `warning`. */

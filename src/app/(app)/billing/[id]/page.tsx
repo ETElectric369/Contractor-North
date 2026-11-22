@@ -575,6 +575,7 @@ export default async function InvoicePage({
               sentAt={(inv as { sent_at?: string | null }).sent_at ?? null}
               amountPaid={Number(inv.amount_paid ?? 0)}
               changedSinceSent={changedSince}
+              invoiceKind={(inv as { invoice_kind?: string | null }).invoice_kind ?? null}
             />
           </SectionActionsMenu>
         </div>

@@ -420,3 +420,95 @@ describe("a job paid in full closes its tasks (cn-v1174)", () => {
     expect(db.log.some((l) => l.table === "tasks")).toBe(false);
   });
 });
+
+/**
+ * A REQUEST PAID LAST ENDS THE JOB (cn-v1178, audit D2 = E2). A deposit request still owed when the bill
+ * that took it off is paid keeps the job open, correctly ("1 other open bill"); when the request is then
+ * paid, the same gate is asked for the paid standard bill that took it off (its "prepaid_credit" line names
+ * the request; no other bill, skeptic S2), and the job completes and its tasks close exactly as if that
+ * bill had just been paid. Stand-ins only: J-900, INV-900, INV-901.
+ */
+describe("a payment request paid after the bill that took it off (cn-v1178, D2)", () => {
+  const ORG = "org-larkspur";
+  beforeEach(() => {
+    calls.pushed.length = 0;
+    calls.revalidated.length = 0;
+    calls.reported.length = 0;
+    work.rows = null;
+    work.throws = false;
+    work.lump = 0;
+  });
+  const books = () => ({
+    invoices: [
+      { id: "inv-900", org_id: ORG, job_id: JOB, invoice_kind: "prepayment", status: "sent", created_at: "2026-11-01T00:00:00Z" },
+      { id: "inv-901", org_id: ORG, job_id: JOB, invoice_kind: "standard", status: "paid", created_at: "2026-11-05T00:00:00Z" },
+      { id: "inv-899", org_id: ORG, job_id: JOB, invoice_kind: "standard", status: "void", created_at: "2026-11-06T00:00:00Z" },
+    ],
+    jobs: [{ id: JOB, org_id: ORG, status: "in_progress", job_number: "J-900", name: "Larkspur Rewire" }],
+    tasks: [{ id: "t1", job_id: JOB, status: "open" }],
+    // The final (INV-901) took the request off: its "prepaid_credit" line names INV-900.
+    invoice_items: [
+      { id: "li-1", org_id: ORG, invoice_id: "inv-901", line_total: 2000, import_source: null, prepaid_invoice_id: null },
+      { id: "li-2", org_id: ORG, invoice_id: "inv-901", line_total: -480, import_source: "prepaid_credit", prepaid_invoice_id: "inv-900" },
+    ],
+  });
+
+  it("the final paid first keeps the job open; the request paid then completes it and closes its tasks", async () => {
+    const db = fakeDb(books());
+    expect(await completeJobWhenPaid(db, "inv-901", { kind: "staff" })).toEqual({ completed: false, why: "the job has 1 other open bill" });
+    expect(db.tables.jobs[0].status).toBe("in_progress");
+
+    db.tables.invoices[0].status = "paid";
+    const r = await completeJobWhenPaid(db, "inv-900", { kind: "service", orgId: ORG });
+    expect(r.completed).toBe(true);
+    expect(db.tables.jobs[0].status).toBe("complete");
+    expect(db.tables.tasks[0].status).toBe("done");
+    expect(calls.pushed).toEqual([JOB]);
+  });
+
+  it("a paid request with no paid standard bill on the job ends nothing, as before", async () => {
+    const t = books();
+    t.invoices[0].status = "paid";
+    t.invoices[1].status = "sent";
+    const db = fakeDb(t);
+    expect(await completeJobWhenPaid(db, "inv-900", { kind: "staff" })).toEqual({ completed: false, why: "a paid payment request is money ahead of the work, not its end" });
+    expect(db.tables.jobs[0].status).toBe("in_progress");
+  });
+
+  it("skeptic S2: an EARLIER paid bill that never took the request off (a trip charge), the request paid, nothing unbilled: the job STAYS open", async () => {
+    const t = books();
+    t.invoices[0].status = "paid";
+    // INV-901 is a trip charge paid before the request existed: no credit line names the request.
+    t.invoices[1].created_at = "2026-10-20T00:00:00Z";
+    t.invoice_items = [{ id: "li-1", org_id: ORG, invoice_id: "inv-901", line_total: 150, import_source: null, prepaid_invoice_id: null }];
+    const db = fakeDb(t);
+    expect(await completeJobWhenPaid(db, "inv-900", { kind: "service", orgId: ORG })).toEqual({ completed: false, why: "a paid payment request is money ahead of the work, not its end" });
+    expect(db.tables.jobs[0].status).toBe("in_progress");
+    expect(db.tables.tasks[0].status).toBe("open");
+    expect(calls.pushed).toEqual([]);
+    // A credit line naming ANOTHER request does not count either.
+    t.invoice_items = [{ id: "li-3", org_id: ORG, invoice_id: "inv-901", line_total: -100, import_source: "prepaid_credit", prepaid_invoice_id: "inv-other" }];
+    const db2 = fakeDb(t);
+    expect((await completeJobWhenPaid(db2, "inv-900", { kind: "staff" })).completed).toBe(false);
+    expect(db2.tables.jobs[0].status).toBe("in_progress");
+  });
+
+  it("the bill that took the request off belongs to ANOTHER company: it is not read (the company pin)", async () => {
+    const t = books();
+    t.invoices[0].status = "paid";
+    t.invoice_items = t.invoice_items.map((l) => ({ ...l, org_id: "org-other" }));
+    const db = fakeDb(t);
+    expect((await completeJobWhenPaid(db, "inv-900", { kind: "service", orgId: ORG })).completed).toBe(false);
+    expect(db.tables.jobs[0].status).toBe("in_progress");
+  });
+
+  it("the standard bill's own gate still decides: a job not started is not ended by a paid request", async () => {
+    const t = books();
+    t.invoices[0].status = "paid";
+    t.jobs[0].status = "scheduled";
+    const db = fakeDb(t);
+    const r = await completeJobWhenPaid(db, "inv-900", { kind: "staff" });
+    expect(r.completed).toBe(false);
+    expect(db.tables.jobs[0].status).toBe("scheduled");
+  });
+});

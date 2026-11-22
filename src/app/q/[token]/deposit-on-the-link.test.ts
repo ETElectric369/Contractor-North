@@ -20,6 +20,13 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc: asyn
 vi.mock("@/lib/supabase/client", () => ({ createClient: () => ({}) }));
 vi.mock("@/lib/pdf-cache", () => ({ sharePdfReady: async () => false }));
 vi.mock("./actions", () => ({ acceptPublicQuote: vi.fn() }));
+// THE CARD FEE (cn-v1178): the real cardFeeDecision, asked as if the fee were open, so the page's words for a
+// fee can be seen (CARD_FEE_READY holds it shut in production today; the rule itself is not replaced).
+const fee = vi.hoisted(() => ({ open: false }));
+vi.mock("@/lib/org-settings", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/org-settings")>();
+  return { ...real, cardFeeDecision: (b: number, p: number) => real.cardFeeDecision(b, p, fee.open) };
+});
 
 import PublicQuotePage from "./page";
 import { PublicQuoteAccept } from "./accept";
@@ -106,7 +113,7 @@ describe("the four states after the yes", () => {
   it("before the yes: the paper states the deposit, the page offers only Accept (paying is never required to accept)", async () => {
     const { html, raw } = await page({ status: "sent", deposit_amount: 480, deposit_state: "due", can_take_card: true });
     expect(html).toContain("Deposit due on acceptance: $480.00");
-    expect(html).toContain("Accept this estimate");
+    expect(html).toContain("Accept This Estimate");
     expect(raw).not.toContain("/api/pay/deposit/");
   });
 
@@ -119,10 +126,52 @@ describe("the four states after the yes", () => {
   });
 });
 
+describe("cn-v1178: the button names what the card door charges; the paper says when it was received", () => {
+  it("partly paid (0416's deposit_due): says what was received and what is left, and the button names what is left", async () => {
+    const { html } = await page({ deposit_amount: 480, deposit_state: "requested", deposit_due: 280, can_take_card: true });
+    expect(html).toContain("We received $200.00 of your $480.00 deposit. $280.00 is left.");
+    expect(html).toContain("Pay the Deposit · $280.00 by Card");
+    expect(html).not.toContain(BUTTON);
+  });
+
+  it("an unpaid request: the whole ask; a projection from before 0416 (no deposit_due): the ask, as before", async () => {
+    expect((await page({ deposit_amount: 480, deposit_state: "requested", deposit_due: 480, can_take_card: true })).html).toContain(BUTTON);
+    expect((await page({ deposit_amount: 480, deposit_state: "requested", can_take_card: true })).html).toContain(BUTTON);
+  });
+
+  it("a company that charges a card fee: the button names the total with the fee and says the fee, the invoice page's way", async () => {
+    fee.open = true;
+    try {
+      const { html } = await page({ deposit_amount: 480, deposit_state: "requested", deposit_due: 280, can_take_card: true, card_fee_percent: 3 });
+      expect(html).toContain("Pay the Deposit · $288.40 by Card");
+      expect(html).toContain("Includes a 3% card processing fee of $8.40.");
+      const none = await page({ deposit_amount: 480, deposit_state: "requested", deposit_due: 280, can_take_card: true, card_fee_percent: 0 });
+      expect(none.html).toContain("Pay the Deposit · $280.00 by Card");
+      expect(none.html).not.toContain("processing fee");
+    } finally {
+      fee.open = false;
+    }
+  });
+
+  it("paid: the paper says Deposit received with the amount, never Deposit due on acceptance", async () => {
+    const { html } = await page({ deposit_amount: 480, deposit_state: "paid", can_take_card: true });
+    expect(html).toContain("Deposit received: $480.00");
+    expect(html).not.toContain("Deposit due on acceptance");
+  });
+
+  it("an estimate taken back to draft (public_quote answers nothing): one plain, true sentence, not a dead 404", async () => {
+    state.data = null;
+    const raw = renderToStaticMarkup(await PublicQuotePage({ params: Promise.resolve({ token: "tok-e900" }), searchParams: Promise.resolve({}) }));
+    expect(text(raw)).toContain("This page isn't available right now.");
+    expect(text(raw)).toContain("If the company is updating it, they'll send it to you again when it's ready.");
+  });
+});
+
 describe("the widget on its own", () => {
   it("open: Accept and Decline only, whatever the deposit says", () => {
     const html = text(renderToStaticMarkup(createElement(PublicQuoteAccept, { token: "t", accepted: false, brand: "#123456", docLabel: "Quote", deposit: { amount: 480, state: "due", canTakeCard: true } })));
-    expect(html).toContain("Accept this quote");
+    expect(html).toContain("Accept This Quote");
+    expect(html).toContain("Decline This Quote");
     expect(html).not.toContain("Deposit");
   });
 });

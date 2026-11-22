@@ -199,6 +199,29 @@ export function prepaymentStates(
     });
 }
 
+/**
+ * WHAT A JOB'S REQUESTS STILL HOLD WHEN THE SALE ENDS (cn-v1178): the job is cancelled, or its won
+ * estimate is marked Lost. `open` are the requests still asking for money, each with what is still owed
+ * on it (its link still takes a card until someone voids it) and `paid`, the money on it now (paid less
+ * refunded): a request with money on it cannot be voided until that is refunded (billing's
+ * requestStatusRefusal), so its one action is "refund what was paid, then void it", never "void it".
+ * `paidAhead` are the requests no longer owed that hold money no bill has used. ONE REQUEST, ONE ENTRY
+ * (skeptic S6): a partly paid request is in `open` only, so it is never handed two actions. Pure: each
+ * door says it in its own catalog.
+ */
+export type RequestEnding = { number: string | null; label: string; amount: number; /** Paid less refunded: the money on it now (open only; 0 on paidAhead). */ paid: number };
+export function requestsAtAnEnding(states: readonly PrepaymentState[]): { open: RequestEnding[]; paidAhead: RequestEnding[] } {
+  const open: RequestEnding[] = [];
+  const paidAhead: RequestEnding[] = [];
+  for (const s of states ?? []) {
+    const owed = cents(Math.max(0, s.amount - s.paid));
+    const held = cents(Math.max(0, s.paid - s.refunded));
+    if (owed > 0.005) open.push({ number: s.number, label: s.label, amount: owed, paid: held });
+    else if (s.moneyLeft > 0.005) paidAhead.push({ number: s.number, label: s.label, amount: s.moneyLeft, paid: 0 });
+  }
+  return { open, paidAhead };
+}
+
 /** What the job's requests still have to come off a bill, all together. */
 export function prepaymentsLeft(states: readonly PrepaymentState[]): number {
   return cents((states ?? []).reduce((s, x) => s + x.left, 0));

@@ -26,7 +26,11 @@ import { doneRowItems, legacyDoneItems, type DoneRow, type DoneSeen } from "@/li
  *   · total_count is the whole count whatever the limit, and the limit keeps the oldest;
  *   · 0403 (applied after 0371, the same way): a finished job whose estimate a real invoice on
  *     ANOTHER job names is billed, a visit on a job billed that way is billed, a visit on a job of
- *     the retired status invoiced is billed; a VOID invoice naming the estimate settles nothing.
+ *     the retired status invoiced is billed; a VOID invoice naming the estimate settles nothing;
+ *   · 0416 (its function applied after 0403, the same way): A PAYMENT REQUEST IS NOT A BILL FOR THE
+ *     WORK. A finished job whose only bill is a deposit request (naming its estimate) IS listed, and
+ *     so is a finished visit on a job billed only by a request, and a visit whose anchored bill is a
+ *     paid request; a finished job with a real sent bill beside its request is not.
  *
  * Two TEST companies minted inside the transaction (throwaway-org.db-fixture.ts), every fixture named
  * TEST and dated 2001. It speaks as each person exactly as PostgREST does (the shim).
@@ -34,6 +38,15 @@ import { doneRowItems, legacyDoneItems, type DoneRow, type DoneSeen } from "@/li
  */
 const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER } = process.env;
 const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER ? describe : describe.skip;
+
+/** One create-or-replace statement out of 0416, from its header to the `$;` that closes its body. */
+const functionOf0416 = (header: string) => {
+  const sql = readFileSync(fileURLToPath(new URL("../../supabase/migrations/0416_one_sale_one_deposit.sql", import.meta.url)), "utf8");
+  const at = sql.indexOf(header);
+  if (at < 0) throw new Error(`0416 has no ${header}`);
+  const open = sql.indexOf("as $", at) + "as $".length;
+  return sql.slice(at, sql.indexOf("$;", open) + 3);
+};
 
 /** The org's midnight (Pacific) of a day in 2001: what query.ts hands the function (dayStartIso). */
 const PACIFIC_MIDNIGHT_2001_01_01 = "2001-01-01T08:00:00.000Z";
@@ -161,6 +174,9 @@ d("Done, Not Billed read whole (0371): every unbilled row, oldest first, never t
     await c.query(readFileSync(fileURLToPath(new URL("../../supabase/migrations/0371_done_work_is_read_whole.sql", import.meta.url)), "utf8"));
     // 0403 on top (create or replace): an invoice naming the estimate, and the invoiced status.
     await c.query(readFileSync(fileURLToPath(new URL("../../supabase/migrations/0403_a_bill_that_names_the_estimate_settles_the_work.sql", import.meta.url)), "utf8"));
+    // 0416 on top: ONLY its create-or-replace of this function (no table is locked; the rest of 0416
+    // is proven by src/lib/one-sale-one-deposit.integration.test.ts). The grants stay 0403's.
+    await c.query(functionOf0416("create or replace function public.needs_you_done_not_billed("));
     const fx = await mintOrgAndStranger(c, "done-not-billed");
     orgId = fx.orgId;
     staffId = fx.staffId;
@@ -322,6 +338,47 @@ d("Done, Not Billed read whole (0371): every unbilled row, oldest first, never t
     const first = await call(staffId, PACIFIC_MIDNIGHT_2001_01_01, jobFloor, 2);
     expect(first.map((r) => r.id)).toEqual(all.slice(0, 2).map((r) => r.id));
     expect(first.every((r) => Number(r.total_count) === all.length)).toBe(true);
+  });
+
+  it("0416: a payment request is not a bill for the work (a request is not billing, on any of the reads)", async () => {
+    await c.query("savepoint requests");
+    try {
+      const request = async (o: { jobId?: string | null; quoteId?: string | null; appointmentId?: string | null; status: string; paid?: number }) =>
+        (
+          await one(
+            `insert into public.invoices (org_id, job_id, appointment_id, quote_id, invoice_number, status, invoice_kind, total, amount_paid)
+             values ($1, $2, $3, $4, $5, $6, 'prepayment', 100, $7) returning id::text as id`,
+            [orgId, o.jobId ?? null, o.appointmentId ?? null, o.quoteId ?? null, `TEST-DNB-REQ-${++invSeq}`, o.status, o.paid ?? 0],
+          )
+        ).id as string;
+      // A finished job billed only by its deposit request, sent and paid, naming its estimate: LISTED.
+      const onlyRequest = await job(orgId, "done job, only a request");
+      await request({ status: "paid", paid: 100, jobId: onlyRequest, quoteId: await estimate(orgId, onlyRequest) });
+      // The same with a real sent bill beside it: not listed.
+      const billedToo = await job(orgId, "done job, a request and a real bill");
+      await request({ status: "paid", paid: 100, jobId: billedToo, quoteId: await estimate(orgId, billedToo) });
+      await invoice(orgId, { status: "sent", jobId: billedToo });
+      // A finished visit on a job still going, billed only by a request: LISTED.
+      const going = await job(orgId, "job going, only a request", "in_progress");
+      await request({ status: "sent", jobId: going, quoteId: await estimate(orgId, going) });
+      await visit(orgId, "visit on a job billed only by a request", { startsAt: "2001-03-01T18:00:00Z", jobId: going });
+      // A finished visit whose anchored bill is a paid request: LISTED, and no open bill is named for it.
+      const anchored = await visit(orgId, "visit anchored to a paid request", { startsAt: "2001-03-02T18:00:00Z" });
+      await request({ status: "paid", paid: 100, appointmentId: anchored });
+      // And one anchored to an unpaid request: listed, with no open bill named either.
+      const anchoredOpen = await visit(orgId, "visit anchored to an unpaid request", { startsAt: "2001-03-03T18:00:00Z" });
+      await request({ status: "sent", appointmentId: anchoredOpen });
+
+      const rows = await call(staffId);
+      const row = (key: string) => rows.find((r) => r.id === ids[key]);
+      expect(row("done job, only a request"), "a finished job billed only by a request").toBeTruthy();
+      expect(row("done job, a request and a real bill"), "a finished job with a real bill").toBeUndefined();
+      expect(row("visit on a job billed only by a request"), "a visit on a job billed only by a request").toBeTruthy();
+      expect(row("visit anchored to a paid request")?.open_invoice_id, "a visit anchored to a paid request").toBeNull();
+      expect(row("visit anchored to an unpaid request")?.open_invoice_id, "a visit anchored to an unpaid request").toBeNull();
+    } finally {
+      await c.query("rollback to savepoint requests");
+    }
   });
 
   it("the signed-in role alone may call it", async () => {

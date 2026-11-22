@@ -7,6 +7,7 @@ import { assertTestDatabase } from "@/lib/db-guard";
 import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
 import { sureCustomerMatch, type DupCustomer } from "@/lib/crm/duplicates";
 import { usualBillingKind } from "@/lib/schedule-options";
+import { billingKindOfDocType } from "@/lib/appointments/won-sheet";
 
 /**
  * WHO SAID YES (0413; cn-v1176), proven on the database it lives on, inside ONE transaction that is
@@ -21,8 +22,9 @@ import { usualBillingKind } from "@/lib/schedule-options";
  *                 answers must be one;
  *   who said yes  the accepted row says customer_link and names nobody, even when the office had
  *                 marked it accepted and walked it back; the two checks refuse what they forbid;
- *   the job       is born with the company's usual billing kind (usualBillingKind's arithmetic), in
- *                 both directions, and time and material for a company with no jobs;
+ *   the job       is born billing by the paper's word since 0416 (a Quote fixed, an Estimate time and
+ *                 material: billingKindOfDocType), whatever the company's usual kind (0413 had it
+ *                 born with that usual kind; 0416 re-made the one expression, and this case with it);
  *   twice         a second tap answers ok and writes nothing.
  *
  * 0413 is applied here ONLY when it is not on the database yet. The owner applies it on the test
@@ -189,13 +191,13 @@ d("0413: the customer's own Accept finds the right customer, and says who said y
     return id;
   };
   /** An estimate sent for the lead, with no customer yet. */
-  const addEstimate = async (orgId: string, ownerId: string, leadId: string | null, o: { customerId?: string | null; how?: string | null; by?: string | null } = {}) => {
+  const addEstimate = async (orgId: string, ownerId: string, leadId: string | null, o: { customerId?: string | null; how?: string | null; by?: string | null; docType?: "quote" | "estimate" } = {}) => {
     const id = randomUUID();
     const token = `test-0413-${tag}-${randomUUID()}`;
     const res = await c.query(
-      `insert into public.quotes (id, org_id, inquiry_id, customer_id, title, status, public_token, accepted_how, accepted_by, created_by)
-       values ($1, $2, $3, $4, $5, 'sent'::quote_status, $6, $7, $8, $9)`,
-      [id, orgId, leadId, o.customerId ?? null, `TEST 0413 estimate ${tag}`, token, o.how ?? null, o.by ?? null, ownerId],
+      `insert into public.quotes (id, org_id, inquiry_id, customer_id, title, status, public_token, accepted_how, accepted_by, created_by, doc_type)
+       values ($1, $2, $3, $4, $5, 'sent'::quote_status, $6, $7, $8, $9, $10)`,
+      [id, orgId, leadId, o.customerId ?? null, `TEST 0413 estimate ${tag}`, token, o.how ?? null, o.by ?? null, ownerId, o.docType ?? "quote"],
     );
     expect(res.rowCount).toBe(1);
     return { id, token };
@@ -365,7 +367,7 @@ d("0413: the customer's own Accept finds the right customer, and says who said y
     expect(await refused("update public.quotes set accepted_how = 'office', accepted_by = $2 where id = $1", [q.id, randomUUID()])).toBe("23503");
   });
 
-  it("the job is born with the company's usual billing kind, in both directions, and time and material with no jobs", async () => {
+  it("the job is born billing by the paper's word (0416), whatever the company's usual kind, in both directions and with no jobs", async () => {
     const shapes: { label: string; tm: number; fixed: number }[] = [
       { label: "mostly fixed", tm: 1, fixed: 2 },
       { label: "mostly time and material", tm: 2, fixed: 1 },
@@ -381,11 +383,16 @@ d("0413: the customer's own Accept finds the right customer, and says who said y
         }
       }
       const dana = await addCustomer(orgId, ownerId, { key: "dana", name: "Dana Rook", created_at: OLD });
-      const q = await addEstimate(orgId, ownerId, null, { customerId: dana });
-      expect(await tap(q.token)).toEqual({ ok: true });
-      const now = await after(q.id);
-      expect(now.job_id).not.toBeNull();
-      expect({ company: s.label, kind: now.billing_type }).toEqual({ company: s.label, kind: usualBillingKind({ tm: s.tm, fixed: s.fixed }) });
+      // The paper that is NOT the company's usual kind first, so the usual kind could never pass for it.
+      const usual = usualBillingKind({ tm: s.tm, fixed: s.fixed });
+      const papers: ("quote" | "estimate")[] = usual === "fixed" ? ["estimate", "quote"] : ["quote", "estimate"];
+      for (const docType of papers) {
+        const q = await addEstimate(orgId, ownerId, null, { customerId: dana, docType });
+        expect(await tap(q.token)).toEqual({ ok: true });
+        const now = await after(q.id);
+        expect(now.job_id).not.toBeNull();
+        expect({ company: s.label, paper: docType, kind: now.billing_type }).toEqual({ company: s.label, paper: docType, kind: billingKindOfDocType(docType) });
+      }
     }
   });
 
