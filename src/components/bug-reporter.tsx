@@ -9,15 +9,38 @@ import { Textarea } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { installErrorCapture, getLogs } from "@/lib/bug-buffer";
 import { createBugReport, listBugReports, setBugReportStatus, type BugReport } from "@/app/(app)/bug-report-actions";
+import { captureScale, pickCopy } from "@/lib/bug-shot-copy";
+
+/** THE PICTURE IN THE ROW (0412): the same canvas as a JPEG data URL the row itself keeps, so a
+ *  plain read of the report shows the picture. At the capture's own width first; the size loop is
+ *  pickCopy's, this only draws. Best-effort: null on any failure, and the report goes on. */
+function copyOf(canvas: HTMLCanvasElement): string | null {
+  try {
+    return pickCopy(canvas.width, (width, quality) => {
+      if (width >= canvas.width) return canvas.toDataURL("image/jpeg", quality);
+      const small = document.createElement("canvas");
+      small.width = width;
+      small.height = Math.max(1, Math.round((canvas.height * width) / canvas.width));
+      const ctx = small.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(canvas, 0, 0, small.width, small.height);
+      return small.toDataURL("image/jpeg", quality);
+    });
+  } catch {
+    return null;
+  }
+}
 
 /** Grab a screenshot of what's on screen right now (oklch-safe via html2canvas-pro), as a
- *  compact JPEG. Best-effort — returns null on any failure so a report never blocks on it. */
-async function captureScreen(): Promise<Blob | null> {
+ *  compact JPEG, and the same picture for the row (copyOf). Best-effort — returns nulls on any
+ *  failure so a report never blocks on it. */
+async function captureScreen(): Promise<{ blob: Blob | null; copy: string | null }> {
   try {
     const html2canvas = (await import("html2canvas-pro")).default;
     const canvas = await html2canvas(document.body, {
       backgroundColor: "#ffffff",
-      scale: 0.6,
+      // Readable on a phone: a 390-px screen at 0.6 came out 234 px wide (lib/bug-shot-copy).
+      scale: captureScale(window.innerWidth),
       useCORS: true,
       logging: false,
       // Skip the report button itself (and anything else flagged) so it's not in the shot.
@@ -29,9 +52,10 @@ async function captureScreen(): Promise<Blob | null> {
       windowWidth: window.innerWidth,
       windowHeight: window.innerHeight,
     });
-    return await new Promise((res) => canvas.toBlob((b) => res(b), "image/jpeg", 0.6));
+    const blob = await new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), "image/jpeg", 0.6));
+    return { blob, copy: copyOf(canvas) };
   } catch {
-    return null;
+    return { blob: null, copy: null };
   }
 }
 
@@ -63,6 +87,7 @@ export function BugReporter({
   const [reports, setReports] = useState<BugReport[]>([]);
   const [errCount, setErrCount] = useState(0);
   const shotRef = useRef<Blob | null>(null);
+  const copyRef = useRef<string | null>(null);
 
   useEffect(() => {
     installErrorCapture();
@@ -72,7 +97,9 @@ export function BugReporter({
     if (!collaborator) {
       // Grab the screen they're looking at FIRST (before the dialog covers it), then open.
       setCapturing(true);
-      shotRef.current = await captureScreen();
+      const shot = await captureScreen();
+      shotRef.current = shot.blob;
+      copyRef.current = shot.copy;
       setCapturing(false);
     }
     setOpen(true);
@@ -120,6 +147,9 @@ export function BugReporter({
         userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
         viewport: typeof window !== "undefined" ? `${window.innerWidth}x${window.innerHeight}` : "",
         screenshotPath,
+        // The row's copy rides with the report even when the file's upload failed: it is what a
+        // plain read of the row can show (0412). None on the /content path.
+        screenshotCopy: collaborator ? null : copyRef.current,
         orgId: collaborator ? orgId : undefined,
         });
       } catch {
@@ -129,6 +159,7 @@ export function BugReporter({
       }
       if (!res.ok) return setError(res.error ?? "Could not send.");
       shotRef.current = null;
+      copyRef.current = null;
       setSent(true);
       setNote("");
       // "Klose bug report box when report is sent" — every other send path in the app

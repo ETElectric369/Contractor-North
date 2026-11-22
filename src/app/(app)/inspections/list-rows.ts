@@ -10,8 +10,9 @@ import type { InspectionListState } from "@/lib/inspections";
 /** One move a row's ⋯ can hold, in the order the sheet draws them. Open and Pick a Day are links. */
 export type MenuDoor = "open" | "pickDay" | "move" | "happened" | "lost" | "del";
 
-/** The row's one boxed button: Start Inspection, Create Estimate, or Open Inspection. */
-export type PrimaryKind = "start" | "estimate" | "open";
+/** The row's one boxed button: Start Inspection, Create Estimate, or Open Inspection; and for a visit
+ *  marked Won with no job picked (cn-v1175, R8), Won · Pick the Job. */
+export type PrimaryKind = "start" | "estimate" | "open" | "pickJob";
 
 /** One inspection on the list. */
 export type ListRow = {
@@ -38,9 +39,13 @@ export type ListRow = {
   endsAt: string | null;
   /** It Happened's toast, finished on the server by the estimates switch (happenedSaidKey). */
   happenedSaid: string;
+  /** THE OFFER (cn-v1175, R5): a job made for this visit's customer record after it. When there is one it
+   *  is the row's boxed button ("Done as <job>?", asked in place); the others are behind the ⋯. */
+  offer?: { id: string; label: string } | null;
+  offerOthers?: { id: string; label: string }[];
 };
 
-/** One filed inspection that hangs on nobody, in the fold under the list. */
+/** One inspection that ended without becoming work and hangs on nobody, in the Not Sold fold. */
 export type FoldRow = { id: string; who: string; what: string; day: string | null; ending: string; href: string };
 
 /**
@@ -49,7 +54,9 @@ export type FoldRow = { id: string; who: string; what: string; day: string | nul
  * Start Inspection, except the city's Final Inspection: nobody here starts the city's inspection, so
  * it says Open Inspection.
  */
-export function primaryOf(state: InspectionListState, o: { decidable: boolean; estimatesOn: boolean }): PrimaryKind {
+export function primaryOf(state: InspectionListState, o: { decidable: boolean; estimatesOn: boolean; wonNoJob?: boolean }): PrimaryKind {
+  // A WIN WITH NO JOB IS NOT AN ENDING (cn-v1175, R8): it stays on the list and asks for its job.
+  if (o.wonNoJob) return "pickJob";
   if (state === "write_up") return o.estimatesOn ? "estimate" : "open";
   return o.decidable ? "start" : "open";
 }
@@ -58,8 +65,14 @@ export function primaryOf(state: InspectionListState, o: { decidable: boolean; e
  * THE ⋯ BY STATE, in the sheet's order. Open Inspection only where the boxed button is not already
  * the visit's own link. Pick a Day for a visit with no day (the Schedule's Waiting for a Day rail is
  * the one door that gives it a day and a time). Move only where there is a time of day to keep. It
- * Happened for a visit whose day went by. Not Sold where the visit happened or its day went by, and
- * only for a kind that has a win or a loss (never the city's). Dismiss for anything not yet done.
+ * Happened for a visit whose day went by.
+ *
+ * ONE WORD FOR AN ENDING, ONE BOX (cn-v1175, R8). The owner: "i thought we got rid of the Didn't Happen
+ * terminology and now could we safely say that it could go in the Not Sold box to simplify everything".
+ * A SALES visit (a kind with a win or a loss: an inspection, an estimate visit) ends one way, Not Sold,
+ * in every state, whether or not it took place; it keeps the record, and one answered before its day
+ * comes off the schedule (setAppointmentOutcome). Dismiss is never offered on one. A WORK visit (the
+ * city's final inspection) is never "not sold": it keeps Dismiss while it is not done.
  */
 export function rowDoors(state: InspectionListState, o: { primary: PrimaryKind; decidable: boolean; hasStart: boolean }): MenuDoor[] {
   const doors: MenuDoor[] = [];
@@ -67,8 +80,8 @@ export function rowDoors(state: InspectionListState, o: { primary: PrimaryKind; 
   if (state === "needs_day") doors.push("pickDay");
   if ((state === "coming_up" || state === "missed") && o.hasStart) doors.push("move");
   if (state === "missed") doors.push("happened");
-  if ((state === "write_up" || state === "missed") && o.decidable) doors.push("lost");
-  if (state === "coming_up" || state === "needs_day" || state === "missed") doors.push("del");
+  if (o.decidable) doors.push("lost");
+  else if (state === "coming_up" || state === "needs_day" || state === "missed") doors.push("del");
   return doors;
 }
 

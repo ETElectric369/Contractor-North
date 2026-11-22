@@ -189,8 +189,9 @@ export function aheadVisitJobIds(visits: readonly CarryVisit[] | null | undefine
  * still to buy stays: that phrase rides this row and no other (lib/action-items/query: "one job,
  * one row"), so dropping the row would drop the fact.
  *
- * It is applied to the list My Day draws and to nothing else. The read behind the shell's badge is
- * not touched, so the badge still counts the job: it is open, and it is on the page the badge opens.
+ * The Needs You build applies it (lib/action-items/query, cn-v1175), with this person's own carried
+ * jobs, BEFORE the piles roll up: a carried job is then neither hidden inside a pile of Jobs Needing a
+ * Day nor counted by the shell's badge, which reads the same build, while the board does not show it.
  */
 export const NEEDS_A_DAY_KIND = "job_to_schedule";
 export const TO_BUY_PHRASE = "ny_w_nToBuy";

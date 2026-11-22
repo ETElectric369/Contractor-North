@@ -16,6 +16,8 @@ import { RowMoreSheet, SHEET_ROW, SheetLink } from "@/components/row-more-sheet"
 import { moveVisitToDay } from "../planner/agenda-move";
 import { rescheduleAppointment, setAppointmentOutcome, setAppointmentStatus, wontHappenAppointment } from "../appointments/actions";
 import type { ListRow, MenuDoor } from "./list-rows";
+import { VisitOfferAsk, tieVisitToJob } from "./visit-offer-button";
+import { fillText } from "@/lib/i18n";
 
 /**
  * AN INSPECTION ROW'S ⋯ (Sales › Inspections). The row's moves sit behind the app's one row sheet
@@ -54,7 +56,7 @@ import type { ListRow, MenuDoor } from "./list-rows";
  * endings are proven without a server.
  */
 
-type Row = Pick<ListRow, "id" | "who" | "what" | "doors" | "visitHref" | "startsAt" | "endsAt" | "happenedSaid">;
+type Row = Pick<ListRow, "id" | "who" | "what" | "doors" | "visitHref" | "startsAt" | "endsAt" | "happenedSaid" | "offerOthers">;
 type ToastFn = ReturnType<typeof useToast>;
 type Words = ReturnType<typeof translator>;
 
@@ -145,11 +147,11 @@ export async function markItHappened(
 export async function markItLost(
   id: string,
   io: DoorIo,
-  deps: { setOutcome: typeof setAppointmentOutcome } = { setOutcome: setAppointmentOutcome },
+  deps: { setOutcome: typeof setAppointmentOutcome; setStatus?: typeof setAppointmentStatus } = { setOutcome: setAppointmentOutcome, setStatus: setAppointmentStatus },
 ): Promise<void> {
   let res: Awaited<ReturnType<typeof setAppointmentOutcome>>;
   try {
-    res = await deps.setOutcome(id, "lost");
+    res = await deps.setOutcome(id, "lost", { offSchedule: true });
   } catch {
     io.toast(io.t("vp_thatDidntSave"), "error");
     return;
@@ -157,10 +159,22 @@ export async function markItLost(
   if (!res.ok) return refused(io, res.error ?? io.t("vp_thatDidntSave"));
   io.close();
   const a = notSoldAnswer(res);
+  // A visit answered Not Sold before its day came off the schedule (cn-v1175, R8): the Undo puts it back
+  // by the visit page's one rule (wontHappenUndo: a pick-a-time link withdrawn stays withdrawn).
+  const off = res.offSchedule ?? null;
   const undo = {
     label: io.t("ag_btn_undo"),
     onClick: () => {
-      void deps.setOutcome(id, null).then(
+      void deps
+        .setOutcome(id, null)
+        .then(async (r) => {
+          if (r.ok && off && deps.setStatus) {
+            const back = await deps.setStatus(id, wontHappenUndo(off.previousStatus, io.lang, io.t).status);
+            if (!back.ok) return { ...r, warning: back.error ?? io.t("vp_thatDidntSave") };
+          }
+          return r;
+        })
+        .then(
         (r) => {
           if (!r.ok) io.toast(r.error ?? io.t("vp_thatDidntSave"), "error");
           else {
@@ -176,6 +190,7 @@ export async function markItLost(
   };
   io.toast(io.t(a.said), "success", undo);
   if (a.warning) io.toast(a.warning, "error");
+  if (off?.note) io.toast(off.note, "info", undefined, { sticky: true });
   io.refresh();
 }
 
@@ -245,9 +260,10 @@ export async function moveTheVisit(
 /** The row's ⋯. Nothing at all when the row has no moves. */
 export function InspectionRowMenu({ row, tz }: { row: Row; tz: string }) {
   const doors = row.doors;
-  if (doors.length === 0) return null;
+  const others = row.offerOthers ?? [];
+  if (doors.length + others.length === 0) return null;
   // One move: its own button in the row, no sheet to close (a lone Dismiss… asks in the row itself).
-  if (doors.length === 1) return <InspectionRowDoors row={row} tz={tz} doors={doors} close={() => {}} rowClass={LONE_DOOR} />;
+  if (doors.length === 1 && others.length === 0) return <InspectionRowDoors row={row} tz={tz} doors={doors} close={() => {}} rowClass={LONE_DOOR} />;
   return (
     <RowMoreSheet title={row.who} subline={row.what || null}>
       {({ close }) => <InspectionRowDoors row={row} tz={tz} doors={doors} close={close} />}
@@ -277,10 +293,35 @@ function InspectionRowDoors({
   const lang = useLang();
   const t = translator(lang);
   const [asking, setAsking] = useState(false);
+  const [offerAsked, setOfferAsked] = useState<{ id: string; label: string } | null>(null);
   const [pending, start] = useTransition();
   const io: DoorIo = { toast, refresh: () => router.refresh(), close, lang, t };
 
+  // THE OFFER'S OTHER CANDIDATES (cn-v1175, R5): each asks in the sheet, the same question as the button.
+  if (offerAsked) {
+    return (
+      <VisitOfferAsk
+        job={offerAsked}
+        pending={pending}
+        onKeep={() => setOfferAsked(null)}
+        onYes={() =>
+          start(async () => {
+            const landed = await tieVisitToJob(row.id, offerAsked, { toast, refresh: io.refresh, t });
+            if (landed) close();
+            else setOfferAsked(null);
+          })
+        }
+      />
+    );
+  }
+
   return (
+    <>
+    {(row.offerOthers ?? []).map((o) => (
+      <button key={`offer-${o.id}`} type="button" disabled={pending} onClick={() => setOfferAsked(o)} className={rowClass ?? SHEET_ROW} data-offer={o.id}>
+        {fillText(t("ip_btn_doneAs"), { job: o.label })}
+      </button>
+    ))}
     <InspectionRowMenuView
       doors={doors}
       visitHref={row.visitHref}
@@ -294,6 +335,7 @@ function InspectionRowDoors({
       onDelete={() => start(() => deleteTheVisit(row.id, io))}
       onKeep={() => setAsking(false)}
     />
+    </>
   );
 }
 

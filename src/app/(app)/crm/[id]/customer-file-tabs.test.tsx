@@ -278,7 +278,7 @@ describe("the reads' columns", () => {
   const MONEY = /total|amount|price|subtotal|cost|rate|deposit|balance/i;
   it("name their columns and carry no money", () => {
     expect(CUSTOMER_REQUEST_COLUMNS).toBe("id, name, message, source, status, converted_to, converted_at, created_at");
-    expect(CUSTOMER_VISIT_COLUMNS).toBe("id, type, status, outcome, starts_at, title, inquiry_id");
+    expect(CUSTOMER_VISIT_COLUMNS).toBe("id, type, status, outcome, starts_at, title, inquiry_id, job_id") // cn-v1175: the one visit rule reads its job (a win with no job is open);
     for (const c of [CUSTOMER_REQUEST_COLUMNS, CUSTOMER_VISIT_COLUMNS]) expect(c).not.toMatch(MONEY);
   });
   it("the page asks for them, staff-only, the visits by the estimate visit types", async () => {

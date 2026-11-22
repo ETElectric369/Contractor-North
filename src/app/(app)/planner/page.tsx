@@ -31,7 +31,7 @@ import { SupplierPaperDoneTrail, SUPPLIER_PAPERS_SCOPE } from "@/components/supp
 import type { ApptValue } from "../appointments/appointment-button";
 import { AgendaRowMenu } from "./agenda-move";
 import { DoTodayButton } from "./do-today-button";
-import { loadCarriedOver, needsYouWithoutCarried } from "@/lib/schedule/carried-over";
+import { loadCarriedOver } from "@/lib/schedule/carried-over";
 import { shortDay } from "@/lib/come-back-days";
 import { NowTasks } from "./now-tasks";
 import { QuickCostButton } from "@/components/quick-cost-button";
@@ -62,6 +62,9 @@ const QUOTE_COUNT = 34;
 
 /** A job as an agenda row reads it: its block (start, end, size), its crew, where it is. */
 const AGENDA_JOB_COLS = "id, job_number, name, status, address, city, scheduled_start, scheduled_end, planned_minutes, assigned_to";
+
+/** The bound on the one read of a job's open tasks (Tasks & Reminders' job rows, cn-v1175). */
+const MY_DAY_JOB_TASKS_LIMIT = 500;
 
 /** A daily report as the Daily Reports card draws it (who, which day, the two answers, the day story). */
 const REPORT_COLS = "id, profile_id, report_date, did_today, materials_tomorrow, gps_summary, status, profiles:profile_id(full_name)";
@@ -237,10 +240,14 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const uid = user?.id ?? "";
   // MY REMINDERS (0358): a task with no job, that is for me, or that I made for nobody else. The
   // same cut for every role now (a tech's own "remind me" lands in his six, not only what the office
-  // assigned him), and job tasks never ride it: they are the JOB's list, worked from the job and from
-  // the Now card above, never a person's six (Erik, 2026-09-26: My Day is "stockpiled with things i
-  // cant act on"). 0358's RLS makes a Reminder private to its maker and its person; this cut says the
-  // same on a database without it.
+  // assigned him), and job tasks never ride it: they are the JOB's list, never a person's six and
+  // never in the card's counts (Erik, 2026-09-26: My Day was "stockpiled with things i cant act on").
+  // SINCE cn-v1175 a job's tasks ARE on the card, under the Reminders, one row per job with its own
+  // badge and a drop-down (Erik, 2026-11-21: "a job's full list of tasks shouldnt be all counted in the
+  // top badge but subdivided with a drop down in the list and stated as that job's tasks with its own
+  // mini badge"). They come from their own read (jobTasksR below), so this cut and every count it
+  // feeds (the six, DoneMarks, More For You) stay Reminders only. 0358's RLS makes a Reminder private
+  // to its maker and its person; this cut says the same on a database without it.
   const mineCut = <T,>(q: T): T =>
     (q as any).is("job_id", null).or(`assigned_to.eq.${uid},and(created_by.eq.${uid},assigned_to.is.null)`) as T;
   // THE POOL CUT LIVES IN ONE PLACE NOW (lib/six-rank rankPoolQuery): the arms, the order the bound
@@ -260,7 +267,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // (An open punch with NO job reads no job list here: the Now card's Pick the Job opens the
   // clock's own "Which Job Are You On?" sheet, which loads its list when it opens: the job he
   // punched last, today's schedule, the jobs in progress. One list at every door.)
-  const [crewR, curJobRes, poolR, restCountR, doneTodayR, dailyReportsR, leadR] = await Promise.all([
+  const [crewR, curJobRes, poolR, restCountR, doneTodayR, dailyReportsR, leadR, jobTasksR] = await Promise.all([
     crewP,
     openEntry?.job_id
       ? supabase.from("jobs").select("id, job_number, name, status, address, customers(name, address, city, state, zip)").eq("id", openEntry.job_id).maybeSingle()
@@ -314,7 +321,31 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     // Is this person asked for the end-of-day report when he clocks out on the Now card? Read on its
     // own, as the Time Clock page does, so a database without 0128's column never fails the profile read.
     supabase.from("profiles").select("crew_lead").eq("id", user?.id ?? "").maybeSingle(),
+    // A JOB'S OPEN TASKS for Tasks & Reminders' job rows (cn-v1175): ONE read for every job, never one
+    // per job. Open is THE ONE RULE (lib/job-tasks whereJobTaskOpen over the OPEN_TASK_JOB embed, which
+    // also carries the job's name and number for its label and its crew for a tech's cut). The office
+    // reads every job not over; a tech only the jobs whose crew names him (the read's cut, and the
+    // section's own again). Ordered by job so a bound that cuts can only shorten the last job read,
+    // whose badge then says "N+", and the jobs after the cut are said in one grey line under the rows
+    // (md_jobTasksMore, a link to Jobs). No money column. A failed read is said in the card.
+    (() => {
+      const q = whereJobTaskOpen(
+        supabase
+          .from("tasks")
+          .select(`id, title, status, job_id, sort_order, created_at, ${OPEN_TASK_JOB.replace(/\)$/, ", job_number, name, assigned_to)")}`, { count: "exact" }),
+      );
+      return (isStaff ? q : (q as any).contains("jobs.assigned_to", [uid]))
+        .order("job_id", { ascending: true })
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true })
+        .limit(MY_DAY_JOB_TASKS_LIMIT);
+    })(),
   ]);
+  if ((jobTasksR as any)?.error) reportError("planner-job-tasks", (jobTasksR as any).error);
+  const jobTasksRows = ((jobTasksR as any)?.data ?? []) as any[];
+  const jobTasksRead = (jobTasksR as any)?.error
+    ? null
+    : { rows: jobTasksRows, truncated: (((jobTasksR as any)?.count as number | null) ?? 0) > jobTasksRows.length };
   const asksReport = asksForDailyReport((leadR as any)?.data?.crew_lead, features);
   // THE BELL'S LINK NEVER LANDS ON NOTHING. A report the address names that is not on the card (it was
   // reviewed) is read by id: one with a job goes to its job's file (the Time tab's Daily Reports), one
@@ -651,10 +682,11 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     }));
 
   /* ONE ROW PER JOB (lib/schedule/carried-over needsYouWithoutCarried has the rule and why): a job
-     drawn under Carried Over is left off the Needs You board below, unless its row there also says
-     lines to buy. The list as drawn, on this page only: the shell's badge reads the same fan-out
-     untouched and still counts it. */
-  const needsNow = needsYouWithoutCarried(needsYou.now, new Set(carriedAgenda.map((c) => c.jobId).filter((id): id is string => !!id)));
+     drawn under Carried Over is left off the Needs You board, unless its row there also says lines to
+     buy. Since cn-v1175 the BUILD does it (lib/action-items/query), before the piles roll up, so the
+     job is not hidden inside Jobs Needing a Day either, and the shell's badge, which reads the same
+     build, no longer counts a job the board does not show. Nothing to cut here. */
+  const needsNow = needsYou.now;
 
   /* RUNNING LATE? TEXT THEM — Andrew's co-pilot idea, the honest v1. When the NEXT visit is
      inside twenty minutes (or already started) and the person waiting has a phone, the row grows
@@ -1276,8 +1308,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           (Erik, 2026-09-26: "fold that into Today's 6 with an add reminder/task up top as that will
           be the most useful"): the Add line leads it — type the words; pick a job and it goes on that
           job's Tasks, leave it and it's my own Reminder. The rows below are my Reminders, uncapped and
-          in rank order (Erik, 2026-09-30: "lets not limit it"); job tasks live on their job and in the
-          Now card above. */}
+          in rank order (Erik, 2026-09-30: "lets not limit it"). Under them, since cn-v1175, a job's
+          open tasks, one row per job with its own badge and a drop-down (Erik, 2026-11-21: "subdivided
+          with a drop down in the list and stated as that job's tasks with its own mini badge"): today's
+          and carried-over jobs first; the clocked-in job's tasks stay on the Now card above. */}
       <YourList
         rows={six as any}
         subtasks={sixKids as any}
@@ -1285,6 +1319,12 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         doneToday={doneToday}
         restCount={restCount}
         jobs={addJobs}
+        jobTasks={{
+          read: jobTasksRead,
+          firstIds: [...todayJobs.map((j: any) => String(j.id)), ...carriedAgenda.map((c) => c.jobId).filter((id): id is string => !!id)],
+          currentJobId: currentJob?.id ?? null,
+          techId: isStaff ? null : uid,
+        }}
       />
 
       {/* The office/else DOOR LINES that sat here were removed (Erik's declutter):
@@ -1298,12 +1338,13 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       {/* A supplier paper filed from the LAST card leaves no "Supplier Bills" line to hold its
           sentence and Undo; they land here instead, until he leaves the page. */}
       <SupplierPaperDoneTrail scope={SUPPLIER_PAPERS_SCOPE} />
-      {(needsNow.length > 0 || needsYou.waiting.length > 0) && (
+      {(needsNow.length > 0 || needsYou.waiting.length > 0 || needsYou.older.length > 0) && (
         <Card className="mb-4 overflow-hidden" data-tour="needs-you">
           {/* THE BOARD (cn-v1161): the title and its counts, Act Today, the four tiles and the open
               tile's rows are all the list's own; the page hands it the title and its words. */}
           <ActionList
             items={needsNow}
+            older={needsYou.older}
             people={people}
             todayStr={todayStr}
             tz={tz}

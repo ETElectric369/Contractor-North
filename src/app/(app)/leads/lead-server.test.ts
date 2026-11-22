@@ -77,7 +77,7 @@ describe("setInquiryStatus: Not Sold waits for a standing visit", () => {
     db.visits = [{ inquiry_id: "l1", status: "scheduled", outcome: null }];
     expect(await setInquiryStatus("l1", "lost")).toEqual({
       ok: false,
-      error: "A visit from this lead is still on the books. Open the visit and mark it Not Sold or Dismiss it there.",
+      error: "A visit from this lead is still on the books. Open the visit and mark it Not Sold there.",
     });
     expect(writes("inquiries")).toEqual([]);
   });

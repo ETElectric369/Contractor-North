@@ -249,18 +249,18 @@ export function rowButtons(item: ActionItem, ctx: RowButtonsCtx): RowButtons {
       };
     case "inspection_writeup":
       return {
-        // OPEN THE INSPECTION, never an estimate: a tap reads or changes the report first; the estimate
-        // and the job are chosen from the visit page itself. item.href is /appointments/<id>.
-        primary: open(L("ld_btn_openTheInspection"), item.href),
+        // WRITE IT UP, BOXED (cn-v1175, R7): the row's one button opens the inspection, where the report
+        // is read or written and the estimate or the job is chosen (never made by a tap on a row). A visit
+        // marked Won with no job picked asks for its job instead (R8: a win with no job is not an ending).
+        primary: item.wonNoJob ? open(L("vp_btn_wonPickTheJob"), item.href) : open(L("ny_btn_writeItUp"), item.href),
         also: null,
-        // NO "Open the Visit" UNDER ⋯ (zero duplicate doors). cn-v1071 put it here when every door on
-        // this row led to a NEW estimate, so a visit that had already become a job by another road
-        // (written up without the backlink) could reach its own page, where the attach door (won) is.
-        // Since cn-v1157 the row's one button IS that page (item.href is /appointments/<id>, and the
-        // row's id is the visit), so the ⋯ row was the same door twice under a second name.
+        // ONE WORD FOR AN ENDING (cn-v1175, R8): behind ⋯, Move to Another Day (while the visit has a day
+        // and was not marked done) and Not Sold. NO DISMISS ON A SALES VISIT: Not Sold is the one ending
+        // for a visit that did not become work, whether or not it took place; it keeps the record.
+        // (No "Open the Visit" under ⋯ either: the row's one button IS that page, cn-v1157.)
         more: [
-          ...(has(item, "wontHappen")
-            ? [ending("wontHappen", L("ny_btn_didntHappen"), "Dismiss This Visit?", `Takes ${what} off the schedule. It is deleted if nothing is on it, otherwise cancelled and kept on file.`, "Dismiss")]
+          ...(has(item, "snooze")
+            ? [{ label: L("ip_btn_moveToAnotherDay"), act: { type: "comeBack", verb: "snooze", askWhy: false, button: L("ip_btn_moveToAnotherDay").replace(/…$/, "") } } as RowDoor]
             : []),
           ...(has(item, "dismiss")
             ? // cn-v1170: a visit's Not Sold marks its lead Not Sold too (setAppointmentOutcome), and says so.

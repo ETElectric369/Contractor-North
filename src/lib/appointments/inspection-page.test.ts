@@ -163,6 +163,13 @@ describe("2. the header's one boxed step, the office's, on an inspection", () =>
         hasJob: !!c.job_id,
         leadHasEstimate: !!c.leadQuoted,
       });
+      // cn-v1175 (R8): a win with NO job picked is open on the list, asking for its JOB; the page's header
+      // offers no estimate for it (the ending card hands the office the job picker at once).
+      if (c.id === "won") {
+        expect(writeUp.has(c.id), c.id).toBe(true);
+        expect(step, c.id).toBeNull();
+        continue;
+      }
       if (differs.has(c.id)) {
         expect(writeUp.has(c.id), c.id).toBe(false);
         expect(step, c.id).toBe("start_estimate");

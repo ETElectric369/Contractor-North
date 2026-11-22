@@ -23,7 +23,8 @@ import { describe, it, expect, vi } from "vitest";
  * literal, so there is nothing here to "update" the next time the owner names a different word.
  */
 
-import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
+import { appointmentTypeLabel } from "@/lib/statuses";
+import { SALES_VISIT_TYPES } from "@/lib/appointments/visit-settled";
 
 /** The word that must never come back on a screen (Erik, 2026-10-03). */
 const OLD_WORD = /walk.?through/i;
@@ -40,10 +41,13 @@ const state = vi.hoisted(() => ({ visits: [] as any[] }));
  * ("already surfaced as a write-up") gets its real chance to fire instead of being assumed away.
  */
 function fakeClient() {
-  const isEstimateVisit = (t: string) => (ESTIMATE_VISIT_TYPES as readonly string[]).includes(t);
+  // cn-v1175 (R7): the write-up read names the SALES visits only (an inspection, an estimate visit), and the
+  // close-out read everything else that is not a sales visit (query.ts CLOSE_OUT_FILTER); a visit is in
+  // one of the two, as the queries put it.
+  const isEstimateVisit = (t: string) => (SALES_VISIT_TYPES as readonly string[]).includes(t);
   const answer = (table: string, cols: string): any => {
     if (table === "appointments" && cols.includes("capture")) return state.visits.filter((v) => isEstimateVisit(v.type));
-    if (table === "appointments" && cols.includes("assigned_to")) return state.visits;
+    if (table === "appointments" && cols.includes("assigned_to")) return state.visits.filter((v) => !isEstimateVisit(v.type));
     if (table === "profiles") return { org_id: "org-1", role: "owner" };
     return [];
   };
@@ -115,12 +119,14 @@ const closeOutRows = () => rowsInPile("visits_to_close_out");
 
 describe("Needs You's Not Closed Out row says Inspection", () => {
   it("the subtitle and the untitled row's title both read the type by its label", async () => {
-    state.visits = [visit("ap1", "inspection", null, "Marla Finch"), visit("ap2", "inspection", "Kitchen hood outlet", "Tess Zane")];
+    // cn-v1175 (R7): an inspection whose day passed is Sales' (Inspections to Write Up), so the close-out
+    // row's word is pinned on the city's Final Inspection, the inspection-named type still read here.
+    state.visits = [visit("ap1", "final_inspection", null, "Marla Finch"), visit("ap2", "final_inspection", "Kitchen hood outlet", "Tess Zane")];
     const rows = await closeOutRows();
 
     // An untitled visit falls back to the type — and to the ONE function that words it.
-    const word = appointmentTypeLabel("inspection");
-    expect(word).toBe("Inspection");
+    const word = appointmentTypeLabel("final_inspection");
+    expect(word).toBe("Final Inspection");
     expect(rows["ap1"].title).toBe(word);
     expect(rows["ap1"].subtitle).toBe(`Marla Finch · ${word}`);
     // A titled visit keeps its title; the type still rides the subtitle.
@@ -138,7 +144,7 @@ describe("Needs You's Not Closed Out row says Inspection", () => {
       visit("sc", "service_call", null, "Marla Finch"),
       visit("ca", "call", null, "Tess Zane"),
       visit("fi", "final_inspection", null, "Marla Finch"),
-      visit("qu", "quote", null, "Tess Zane"),
+      // A quote visit is Sales' since cn-v1175 (R7): its label is pinned on the write-up row below.
       visit("me", "meeting", null, "Marla Finch"),
     ];
     const rows = await closeOutRows();
@@ -147,10 +153,9 @@ describe("Needs You's Not Closed Out row says Inspection", () => {
     expect(rows["sc"].title).toBe("Service Call");
     expect(rows["ca"].title).toBe("Phone Call");
     expect(rows["fi"].title).toBe("Final Inspection"); // the CITY'S, its own type, its own name
-    expect(rows["qu"].title).toBe("Quote / Estimate");
     expect(rows["me"].title).toBe("Client Meeting");
     // Said once more against the one rule, so a renamed label cannot leave this row behind.
-    for (const [id, type] of [["sc", "service_call"], ["ca", "call"], ["fi", "final_inspection"], ["qu", "quote"], ["me", "meeting"]] as const) {
+    for (const [id, type] of [["sc", "service_call"], ["ca", "call"], ["fi", "final_inspection"], ["me", "meeting"]] as const) {
       expect(rows[id].title, id).toBe(appointmentTypeLabel(type));
     }
   });
@@ -177,26 +182,24 @@ describe("Needs You's To Write Up row reads the type by its label too", () => {
     const done = (id: string, type: string, title: string | null) => ({ ...visit(id, type, title, "Marla Finch"), status: "completed" });
     // The same shape with nobody on it: no customer, no lead, no street.
     const nobody = (id: string, type: string) => ({ ...done(id, type, null), customers: null });
+    // cn-v1175 (R7): the city's Final Inspection is a visit to close out, never a write-up: w3 and w6 left.
     state.visits = [
       done("w1", "inspection", null),
       done("w2", "quote", null),
-      done("w3", "final_inspection", null),
       done("w4", "inspection", "Kitchen hood outlet"),
       nobody("w5", "quote"),
-      nobody("w6", "final_inspection"),
       // A STOCK title is no title: the bare word, typed in or stamped by the booking form.
       done("w7", "quote", "Site Inspection"),
     ];
     const rows = await rowsInPile("inspections_to_write_up");
 
     // WHO is the title now, and the KIND rides under it, read from the one function that words it.
-    for (const [id, type] of [["w1", "inspection"], ["w2", "quote"], ["w3", "final_inspection"], ["w7", "quote"]] as const) {
+    for (const [id, type] of [["w1", "inspection"], ["w2", "quote"], ["w7", "quote"]] as const) {
       expect(rows[id].title, id).toBe("Marla Finch");
       expect(rows[id].subtitle, id).toBe(appointmentTypeLabel(type));
     }
     expect(rows["w1"].subtitle).toBe("Inspection");
     expect(rows["w2"].subtitle).toBe("Quote / Estimate");
-    expect(rows["w3"].subtitle).toBe("Final Inspection"); // the CITY'S, its own type, its own name
     // A title a person typed is his; who it is for rides under it, as before this wave.
     expect(rows["w4"].title).toBe("Kitchen hood outlet");
     expect(rows["w4"].subtitle).toBe("Marla Finch");
@@ -204,11 +207,9 @@ describe("Needs You's To Write Up row reads the type by its label too", () => {
     expect(rows["w5"].title).toBe(appointmentTypeLabel("quote"));
     expect(rows["w5"].title).toBe("Quote / Estimate");
     expect(rows["w5"].subtitle ?? null).toBeNull();
-    expect(rows["w6"].title).toBe("Final Inspection");
-    expect(rows["w6"].subtitle ?? null).toBeNull();
 
     // THE RULE, for every row: an untitled visit says its kind somewhere a person reads, exactly once.
-    for (const id of ["w1", "w2", "w3", "w5", "w6", "w7"]) {
+    for (const id of ["w1", "w2", "w5", "w7"]) {
       const type = state.visits.find((v) => v.id === id)!.type;
       const said = [rows[id].title, rows[id].subtitle ?? ""].filter((line) => line === appointmentTypeLabel(type));
       expect(said, id).toHaveLength(1);
@@ -237,7 +238,7 @@ describe("Needs You's To Write Up row carries its type in what it says", () => {
     state.visits = [
       done("t1", "inspection", null),
       done("t2", "quote", "Site Inspection"),
-      done("t3", "final_inspection", "Kitchen hood outlet"),
+      done("t3", "quote", "Kitchen hood outlet"),
       done("t4", "quote", null, null),
       done("t5", "inspection", "Kitchen hood outlet", null),
     ];
@@ -253,7 +254,8 @@ describe("Needs You's To Write Up row carries its type in what it says", () => {
     expect(rows["t1"]).toMatchObject({ who: "Marla Finch", what: { key: "ny_w_toWriteUp", tail: "12 Larkspur Ln" } });
     // A stock title is no title: the phrase is the kind alone.
     expect(rows["t2"].what?.key).toBe("ny_w_toWriteUp");
-    expect(rows["t3"].what).toEqual({ key: "ny_w_toWriteUpTitled", vars: { text: "Kitchen hood outlet", type: "final_inspection" }, tail: "12 Larkspur Ln" });
+    // cn-v1175 (R7): t3 is a quote visit now (the city's Final Inspection is not a write-up).
+    expect(rows["t3"].what).toEqual({ key: "ny_w_toWriteUpTitled", vars: { text: "Kitchen hood outlet", type: "quote" }, tail: "12 Larkspur Ln" });
     // Nobody named: the bold line is the street (inspectionLabel), so the street is not the tail too.
     expect(rows["t4"]).toMatchObject({ who: null, what: { key: "ny_w_toWriteUp", tail: null } });
     // Nobody named and a typed title: the bold line is the title, so the phrase is the kind alone.

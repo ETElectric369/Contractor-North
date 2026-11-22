@@ -4,6 +4,7 @@ import { dbError } from "@/lib/db-error";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { requirePlatformAdmin } from "@/lib/platform-admin";
 import { resolveSiteContext } from "@/lib/site-editor-guard";
+import { cleanCopy, isCopyColumnMissing, isCopyRefused } from "@/lib/bug-shot-copy";
 
 export type BugReport = {
   id: string;
@@ -33,6 +34,9 @@ export async function createBugReport(input: {
   userAgent: string;
   viewport: string;
   screenshotPath?: string;
+  /** The same screenshot as a JPEG data URL, kept in the row (0412). Checked here: a bad one is
+   *  dropped, never a reason to refuse the report. */
+  screenshotCopy?: string | null;
   orgId?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   const supabase = await createClient();
@@ -50,7 +54,11 @@ export async function createBugReport(input: {
     collabOrgId = ctx.orgId;
   }
 
-  const { error } = await supabase.from("bug_reports").insert({
+  // THE PICTURE IN THE ROW (0412; the owner: "if you cant open screenshots from the bug reports then
+  // that needs to be fixed right?"): kept only when it is a JPEG data URL under the cap
+  // (lib/bug-shot-copy), and never on the /content path, which carries no screenshot either.
+  const copy = collabOrgId ? null : cleanCopy(input.screenshotCopy);
+  const row: Record<string, unknown> = {
     // Explicit org only on the /content path; otherwise the trigger stamps it as before.
     ...(collabOrgId ? { org_id: collabOrgId } : {}),
     reported_by: user.id,
@@ -62,7 +70,13 @@ export async function createBugReport(input: {
     // The documents bucket denies collaborators (storage RLS keys on auth_org_id), so the
     // /content path never carries a screenshot — drop any client-sent path there.
     screenshot_path: collabOrgId ? null : input.screenshotPath || null,
-  });
+  };
+  let { error } = await supabase.from("bug_reports").insert(copy ? { ...row, screenshot_copy: copy } : row);
+  // The report always files: a database without 0412's column yet (the deploy and the migration are
+  // two steps), or its check refusing the copy, files the report without the copy.
+  if (error && copy && (isCopyColumnMissing(error) || isCopyRefused(error))) {
+    ({ error } = await supabase.from("bug_reports").insert(row));
+  }
   if (error) return { ok: false, error: dbError(error) };
   return { ok: true };
 }
@@ -142,7 +156,8 @@ export async function listBugReports(): Promise<{ rows: BugReport[]; error: stri
   };
 }
 
-const BUG_STATUSES = new Set(["open", "fixed", "wontfix"]);
+// "later" (cn-v1175, 0412): an idea or request nobody is building now. Not open, not closed.
+const BUG_STATUSES = new Set(["open", "later", "fixed", "wontfix"]);
 
 export async function setBugReportStatus(id: string, status: string): Promise<{ ok: boolean; error?: string }> {
   // North's own team only (Wave 0), in the app layer AND in the function below.

@@ -46,6 +46,8 @@ export const words: WordCatalog = {
     "src/app/(app)/inspections/inspection-row-menu.tsx",
     // cn-v1172 (EST): the one row builder, used by this page and the Estimates page's top list
     "src/app/(app)/inspections/row-words.ts",
+    // cn-v1175 (ROWS): the offer's button and its ask
+    "src/app/(app)/inspections/visit-offer-button.tsx",
   ],
   sameInBoth: [],
   en: {
@@ -79,8 +81,15 @@ export const words: WordCatalog = {
     ip_needsADay: "Needs a Day",
     ip_needsAnEstimate: "Needs an Estimate",
     ip_dayPassed: "Day Passed",
-    ip_btn_notFiledFold: "Not Filed Under Anyone ({n})",
-    ip_notFiledLine: "Finished, Not Sold or cancelled inspections with no lead, customer or job to file them under.",
+    // cn-v1175 (ROWS): the fold is Not Sold, its line in plain words; a win with no job says so on its row
+    ip_btn_notSoldFold: "Not Sold ({n})",
+    ip_notSoldLine: "Inspections that ended without becoming work and have no lead, customer or job to keep them. Each one says how it ended.",
+    ip_wonNoJob: "Won, No Job Picked",
+    // cn-v1175 (ROWS): the offer, asked in place and never assumed (lib/appointments/visit-offer)
+    ip_btn_doneAs: "Done as {job}?",
+    ip_offerAsk: "Tie this inspection to {job}? It is marked Won with that job and leaves this list.",
+    ip_btn_doneAsYes: "Yes, Done as {job}",
+    ip_offerTied: "Tied to {job}.",
     ip_endedCompleted: "Completed",
     ip_endedNotSold: "Not Sold",
     ip_endedCancelled: "Cancelled",
@@ -123,8 +132,15 @@ export const words: WordCatalog = {
     ip_needsADay: "Falta el Día",
     ip_needsAnEstimate: "Falta el Presupuesto",
     ip_dayPassed: "Ya Pasó el Día",
-    ip_btn_notFiledFold: "No Están a Nombre de Nadie ({n})",
-    ip_notFiledLine: "Inspecciones terminadas, no vendidas o canceladas sin prospecto, cliente ni trabajo donde archivarlas.",
+    // cn-v1175 (ROWS): the fold is Not Sold, its line in plain words; a win with no job says so on its row
+    ip_btn_notSoldFold: "No Vendidas ({n})",
+    ip_notSoldLine: "Inspecciones que terminaron sin convertirse en trabajo y no tienen prospecto, cliente ni trabajo donde guardarlas. Cada una dice cómo terminó.",
+    ip_wonNoJob: "Ganada, Sin Trabajo Elegido",
+    // cn-v1175 (ROWS): the offer, asked in place and never assumed (lib/appointments/visit-offer)
+    ip_btn_doneAs: "¿Terminada como {job}?",
+    ip_offerAsk: "¿Unir esta inspección a {job}? Se marca como Ganada con ese trabajo y sale de esta lista.",
+    ip_btn_doneAsYes: "Sí, Terminada como {job}",
+    ip_offerTied: "Unida a {job}.",
     ip_endedCompleted: "Terminada",
     ip_endedNotSold: "No Vendida",
     ip_endedCancelled: "Cancelada",

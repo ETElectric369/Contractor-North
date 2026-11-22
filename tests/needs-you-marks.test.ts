@@ -28,7 +28,7 @@ vi.mock("@/components/send-sheet", () => ({ SendSheet: () => null }));
 import { ActionList } from "@/components/action-items/action-list";
 import { LangProvider } from "@/components/lang-provider";
 import { AFFORDANCES, KIND_GROUP, sortActionItems, type ActionItem, type ActionKind, type Group } from "@/lib/action-items/types";
-import { GROUP_ORDER, levelOf } from "@/lib/action-items/needs-you-rule";
+import { GROUP_ORDER, levelOf, thingsOf } from "@/lib/action-items/needs-you-rule";
 import { rollUpPiles } from "@/lib/action-items/piles";
 import { translator } from "@/lib/i18n";
 import { fillSlots } from "@/lib/lang-words";
@@ -352,11 +352,24 @@ describe("the header", () => {
     for (const c of [now, soon]) expect(textOf(one(c, (e) => e.attrs["aria-hidden"] === "true" && classes(e).includes("tabular-nums"))!)).toMatch(/^\d+$/);
     // A screen reader hears the number said whole, never a bare digit.
     expect(textOf(one(now, (e) => classes(e).includes("sr-only"))!)).toBe(fillSlots(en("ny_countNow"), { n: headerCounts(root).now }));
-    expect(headerCounts(root).now).toBe(3);
+    // RE-PINNED ON PURPOSE (cn-v1175, every number counts THINGS): the strip is a pile of three late
+    // invoices, a won estimate and a clock left running: five things (it said 3 rows before).
+    expect(headerCounts(root).now).toBe(5);
   });
 
-  it("the three count invariants hold on what is DRAWN, for three lists: now + soon + more = the rows drawn; the tiles' numbers add to soon + more; their triangles add to soon", () => {
+  // RE-PINNED ON PURPOSE (cn-v1175): the owner's pick is that every number counts THINGS, so the
+  // invariants are said over the things drawn (a pile is its count, its SOON children its soon), not rows.
+  it("the three count invariants hold on what is DRAWN, for three lists: now + soon + more = the things drawn; the tiles' numbers add to soon + more; their triangles add to soon", () => {
     for (const [name, items] of Object.entries(LISTS)) {
+      // A drawn pile names itself by its pile (data-pile), its NOW half too: key the list the same way.
+      const byId = new Map(items.map((i) => [i.pile ? `pile:${i.pile.name}` : i.id, i]));
+      const itemOf = (r: El) => byId.get(idOf(r))!;
+      const things = (rows: El[]) => rows.reduce((n, r) => n + thingsOf(itemOf(r)).n, 0);
+      const soonOf = (rows: El[]) =>
+        rows.reduce((n, r) => {
+          const it = itemOf(r);
+          return n + (it.pile ? (it.children ?? []).filter((c) => c.level === "soon").length : it.level === "soon" ? 1 : 0);
+        }, 0);
       const renders = GROUP_ORDER.map((g) => parse(draw(items, { open: g })));
       const h = headerCounts(renders[0]);
       // Each list keeps a Due row of a clock kind (cn-v1162), so the triangle sums below still bite.
@@ -369,17 +382,17 @@ describe("the header", () => {
       }
       const tiles = tilesOf(renders[0]);
       const inTiles = renders.map((r) => topRows(regionOf(r)));
-      // Each tile's number is the rows that open under it, and its triangle the SOON ones among them.
+      // Each tile's number is the things that open under it, and its triangle the SOON ones among them.
       GROUP_ORDER.forEach((g, i) => {
-        expect(tiles[i].count, `${name} ${g}`).toBe(inTiles[i].length);
-        expect(tiles[i].soon, `${name} ${g}`).toBe(inTiles[i].filter((r) => r.attrs["data-level"] === "soon").length);
+        expect(tiles[i].count, `${name} ${g}`).toBe(things(inTiles[i]));
+        expect(tiles[i].soon, `${name} ${g}`).toBe(soonOf(inTiles[i]));
       });
       const drawn = [...strip, ...inTiles.flat()];
-      expect(h.now, name).toBe(strip.length);
-      expect(h.now + h.soon + h.more, name).toBe(drawn.length);
+      expect(h.now, name).toBe(things(strip));
+      expect(h.now + h.soon + h.more, name).toBe(things(drawn));
       expect(tiles.reduce((s, x) => s + x.count, 0), name).toBe(h.soon + h.more);
       expect(tiles.reduce((s, x) => s + x.soon, 0), name).toBe(h.soon);
-      expect(drawn.filter((r) => r.attrs["data-level"] === "soon").length, name).toBe(h.soon);
+      expect(soonOf(inTiles.flat()), name).toBe(h.soon);
       // Every row the server sent is drawn exactly once across the four renders (none lost, none twice).
       expect(new Set(drawn.map(idOf)).size, name).toBe(drawn.length);
       expect(drawn.length, name).toBe(items.length);
@@ -388,7 +401,8 @@ describe("the header", () => {
     const tech = parse(draw(TECH, { isStaff: false }));
     const h = headerCounts(tech);
     const flat = elements(tech).filter((e) => ("data-row" in e.attrs || "data-pile" in e.attrs) && !ancestors(e).some((a) => "data-pile" in a.attrs));
-    expect(h.now + h.soon + h.more).toBe(flat.length);
+    const techById = new Map(TECH.map((i) => [i.pile ? `pile:${i.pile.name}` : i.id, i]));
+    expect(h.now + h.soon + h.more).toBe(flat.reduce((n, r) => n + thingsOf(techById.get(idOf(r))!).n, 0));
   });
 });
 

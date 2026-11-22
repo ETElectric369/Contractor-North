@@ -96,7 +96,7 @@ export default async function QuotesPage({
     if (read.error) reportError(`quotes:toEstimate:${read.error.where}`, read.error.cause);
     const { rowOf } = inspectionRowBuilder({ t, lang, tz: read.tz, now, estimatesOn });
     toEstimate = {
-      rows: read.error ? [] : inspectionsToEstimate(read.buckets).map((a) => rowOf(a, "write_up")),
+      rows: read.error ? [] : inspectionsToEstimate(read.buckets).map((a) => rowOf(a, "write_up", read.offers.get(a.id) ?? null)),
       tz: read.tz,
       failed: !!read.error,
     };

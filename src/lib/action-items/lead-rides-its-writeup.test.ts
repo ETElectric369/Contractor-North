@@ -28,6 +28,8 @@ describe("a lead whose visit is waiting to be written up rides the write-up row"
     expect(src.slice(nowLoop, nowLoop + 200)).toContain("leadRidesItsWriteUp(q.id, writeUpLeadIds)");
     expect(src).not.toContain("inqLaterR");
     expect(src).toContain("counts.leads_to_call = lessRidden(leadCount, leadsRidden)");
-    expect(src).toContain('if (a.inquiry_id) writeUpLeadIds.add(String(a.inquiry_id));');
+    // RE-PINNED ON PURPOSE (cn-v1175): a lead never ages out, so only a write-up still on the board
+    // (not in the Older fold) keeps its lead's row off it.
+    expect(src).toContain('if (a.inquiry_id && !old) writeUpLeadIds.add(String(a.inquiry_id));');
   });
 });

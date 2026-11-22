@@ -7,10 +7,17 @@ export { isUnreadLine };
 /**
  * SAME-KIND PILES ROLL UP (Wave 1, W1-14).
  *
- * Seven estimates started and never sent were seven rows and +7 on the badge, and they pushed the
- * one lead that needed a call off the bottom of the card. Now two or more open rows of one pile are
- * ONE row, "Estimates Not Sent · 7", counting 1 on the badge (the badge invariant: a rollup, never
- * the length of an unbounded set). A lone row stays a plain row: never "· 1".
+ * Seven estimates started and never sent were seven rows, and they pushed the one lead that needed a
+ * call off the bottom of the card. Now two or more open rows of one pile are ONE row, "Estimates Not
+ * Sent · 7". A lone row stays a plain row: never "· 1".
+ *
+ * A PILE IS ONE ROW, NOT ONE THING (cn-v1175). Until this release a pile also counted one on the badge
+ * and on its tile, and the owner found the arithmetic: "it says 3 above and there are a bunch down
+ * there so how is this number getting calculated?" (a tile of three rows over eight things). His pick:
+ * every Needs You number counts THINGS. So a pile is drawn as one row and counted as its `count`
+ * (needs-you-rule thingsOf): the badge, the header and its tile add it whole, and a capped pile ("50+")
+ * makes them a floor with a "+". The badge invariant still holds: every pile's count is a real count
+ * of a bounded read, said "N+" when the read was cut.
  *
  * A pile row is an ActionItem with the synthetic id `pile:<name>`. It only opens: no verb is ever
  * sent against it (the list unfolds it, and each child keeps its own button and ⋯). It takes the
@@ -37,6 +44,10 @@ export { isUnreadLine };
  *
  * Never piled: supplier_paper and time_stray (already one rolled-up line each) and supplier_pay (each
  * deadline is its own line), and a "Couldn't Check" line (it is about a read, not a thing).
+ *
+ * AN OLDER ROW PILES APART (cn-v1175, older.ts): its key carries `older`, so the rows that waited thirty
+ * days roll into `pile:<name>:older` for the Older fold, with that half's own read facts (`olderCounts`),
+ * and never sit inside a pile on the board.
  */
 
 type PileDef = {
@@ -212,15 +223,24 @@ const whenMs = (w: string | null | undefined, todayStr: string) => {
  */
 export function rollUpPiles(
   items: ActionItem[],
-  opts: { todayStr: string; isStaff: boolean; leadsOn?: boolean; counts?: Partial<Record<PileName, PileCount>> },
+  opts: {
+    todayStr: string;
+    isStaff: boolean;
+    leadsOn?: boolean;
+    counts?: Partial<Record<PileName, PileCount>>;
+    /** The read facts of the rows that waited thirty days (the Older fold's half of a kind). */
+    olderCounts?: Partial<Record<PileName, PileCount>>;
+  },
 ): ActionItem[] {
   const leadsOn = opts.leadsOn !== false;
-  // Keyed on (pile, is NOW): a NOW child never shares a pile with the rest of its kind.
-  const keyOf = (it: ActionItem): { name: PileName; now: boolean; key: string } | null => {
+  // Keyed on (pile, is NOW, is OLDER): a NOW child never shares a pile with the rest of its kind, and
+  // an older one never sits inside a pile on the board (cn-v1175).
+  const keyOf = (it: ActionItem): { name: PileName; now: boolean; older: boolean; key: string } | null => {
     const p = it.done ? null : pileOf(it);
     if (!p) return null;
     const now = it.level === "now";
-    return { name: p, now, key: now ? `${p}:now` : p };
+    const older = !!it.older;
+    return { name: p, now, older, key: `${p}${now ? ":now" : ""}${older ? ":older" : ""}` };
   };
   const groups = new Map<string, ActionItem[]>();
   for (const it of items) {
@@ -232,7 +252,7 @@ export function rollUpPiles(
   for (const it of items) {
     const k = keyOf(it);
     const children = k ? (groups.get(k.key) ?? []) : [];
-    const fact = k ? (opts.counts?.[k.name] ?? {}) : {};
+    const fact = k ? ((k.older ? opts.olderCounts : opts.counts)?.[k.name] ?? {}) : {};
     // `capped` holds for both halves (the read was short for the whole kind). An exact `total` is the
     // read's count of the rows that are not NOW: no pile with an exact SQL count holds a NOW-able kind.
     const capped = !!fact.capped;
@@ -274,7 +294,7 @@ export function rollUpPiles(
     const whole = opts.isStaff && !capped && count === children.length && amounts.length === children.length && amounts.length > 0;
     const sum = whole ? amounts.reduce((s, a) => s + a, 0) : null;
     out.push({
-      id: k.now ? `pile:${p}:now` : `pile:${p}`,
+      id: `pile:${k.key}`,
       kind: children[0].kind,
       group: children[0].group ?? KIND_GROUP[children[0].kind],
       level: maxLevel(children.map((c) => c.level)),
@@ -291,6 +311,7 @@ export function rollUpPiles(
       pile,
       children,
       amount: sum,
+      ...(k.older ? { older: true } : {}),
     });
   }
   return sortActionItems(out, opts.todayStr);

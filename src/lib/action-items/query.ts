@@ -3,8 +3,11 @@ import { viewerSortsBank } from "@/lib/bank-viewer";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, NeedsYou, PileName, WaitingItem } from "./types";
 import { AFFORDANCES, KIND_GROUP, appointmentAffordances, sortActionItems, waitingForViewer, waitingRow } from "./types";
-import { QUOTE_EXPIRY_SOON_DAYS, dueClock, levelOf, withoutMoneyForTech } from "./needs-you-rule";
+import { QUOTE_EXPIRY_SOON_DAYS, dueClock, levelOf, summarize, withoutMoneyForTech } from "./needs-you-rule";
+import { isOlder, splitKeptCount } from "./older";
+import { loadCarriedOver, needsYouWithoutCarried } from "@/lib/schedule/carried-over";
 import { bucketInspections, inspectionLabel } from "@/lib/inspections";
+import { SALES_VISIT_TYPES, VISIT_CLOSED_JOB_STATUSES, leadClosedAtFrom, visitSettled } from "@/lib/appointments/visit-settled";
 import { leadRidesItsWriteUp, lessRidden } from "./lead-rides-its-writeup";
 import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES, visitTitle } from "@/lib/statuses";
 import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
@@ -34,7 +37,7 @@ import { isMissingColumn } from "@/lib/job-tasks";
 import { featureOn, featuresFromOffKey } from "@/lib/features";
 import { COSTED_INVOICE_COLUMNS, NEEDS_RETURN_DAYS, costedJobIds, daysAgoStr, detectStrayTime, detectUnbilledWork, rollupWorkedJobs } from "./leak-detectors";
 import { NEEDS_A_DAY_STATUSES, companyDay, jobsNeedingADay, type NeedDayJob } from "./jobs-needing-a-day";
-import { quoteSettled, type SettledInvoice } from "./quote-settled";
+import { quoteSettled, saleWentAway, type SettledInvoice } from "./quote-settled";
 import {
   RECEIPT_CATEGORIES,
   RECEIPT_TIE_COLUMNS,
@@ -72,10 +75,12 @@ import { isStockBookingTitle } from "@/lib/schedule/work-shape";
 import type { Say } from "./types";
 
 /**
- * Count for the dock Home badge: the length of NOW, from the SAME build as the list, so the badge
- * can never disagree with the list it summarizes (a parallel set of count-only queries inevitably
- * drifts from the list's per-row filters and leaves a "phantom badge" that never clears). A pile
- * counts one; the Waiting fold never counts.
+ * Count for the dock's Today badge: the THINGS on the board (cn-v1175: a pile is its count, any other
+ * row one, the NOW rows included), from the SAME build as the list and through the SAME function as
+ * the board's header and tiles (needs-you-rule summarize), so the badge can never disagree with the
+ * list it summarizes (a parallel set of count-only queries inevitably drifts from the list's per-row
+ * filters and leaves a "phantom badge" that never clears). The Waiting fold and the Older fold never
+ * count. The rail draws it capped at 9+.
  */
 export async function getActionItemsCount(ctx: {
   todayStr: string;
@@ -86,7 +91,7 @@ export async function getActionItemsCount(ctx: {
   /** The switched-off features — see getActionItems. */
   off?: string;
 }): Promise<number> {
-  return (await getActionItems(ctx)).now.length;
+  return summarize((await getActionItems(ctx)).now, { isStaff: ctx.isStaff }).total;
 }
 
 const ORGANIZE_LABEL: Record<string, string> = {
@@ -108,6 +113,49 @@ const INVOICE_STALE_DAYS = 30;
 const JOBS_DAY_READ_CAP = 200;
 /** Ids per request when a read names many records: no request's address grows too long. */
 const ID_CHUNK = 80;
+
+/**
+ * VISITS TO CLOSE OUT, WHAT IS READ (cn-v1175, R7): the work visits (a job day, a service call, the
+ * city's final inspection) whatever they hang on, and any other visit that is not an inspection or an
+ * estimate visit and belongs to no lead. An inspection or an estimate visit is Sales' (Inspections to
+ * Write Up); a call or a meeting for a lead stands for nothing once its day passes, and its lead is on
+ * the Leads list. A PostgREST `or`: the job_id/type columns are the visit's own.
+ */
+export const CLOSE_OUT_FILTER = "type.in.(job,service_call,final_inspection),and(inquiry_id.is.null,type.not.in.(inspection,quote))";
+/** How many visits to close out are read, and how many are drawn: the one visit rule drops in code
+ *  what the query cannot, so the read is wider than the list (R6). */
+export const CLOSE_OUT_READ = 200;
+export const CLOSE_OUT_DRAWN = 50;
+/** The same for Estimates Not Sent: read wider than drawn (R6). Both reads are NEWEST first (skeptic #78):
+ *  read oldest first, a company with a backlog past the cap never read this month's rows, and the board's
+ *  half was empty with nothing said. Newest first, only the Older fold's half can be short ("N+"). */
+export const DRAFTS_READ = 150;
+export const DRAFTS_DRAWN = 50;
+
+/**
+ * A FEEDER THAT DROPS IN CODE, COUNTED BY WHAT IT DRAWS (cn-v1175, R6). `kept` is how many rows the
+ * rule kept out of everything read; `drawn` how many the list shows. Capped ("N+") only when the read
+ * itself did not bring every candidate; otherwise a pile of more than it draws says its true number.
+ */
+export function keptCount(r: { data: unknown[] | null; count?: number | null }, kept: number, drawn: number): PileCount {
+  const read = (r.data ?? []).length;
+  if (typeof r.count === "number" && r.count > read) return { capped: true };
+  return kept > drawn ? { total: kept } : {};
+}
+
+/** A visit's time of day in the company's zone, "HH:mm": Move to Another Day keeps it (cn-v1175). */
+export function localTimeOfDay(iso: string | null | undefined, tz: string | undefined): string | null {
+  const at = iso ? new Date(iso) : null;
+  if (!at || Number.isNaN(at.getTime())) return null;
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz || "UTC", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(at);
+    const h = parts.find((p) => p.type === "hour")?.value ?? "";
+    const m = parts.find((p) => p.type === "minute")?.value ?? "";
+    return /^\d{2}$/.test(h) && /^\d{2}$/.test(m) ? `${h}:${m}` : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * THE single union behind Needs You — DECISIONS ONLY: money (overdue/quiet/draft), leads, the rest
@@ -286,6 +334,24 @@ async function buildActionItems(ctx: {
     : Promise.resolve(null);
   const supplierPapersP: Promise<SupplierPaperFeed | null> = supplierDeskP.then((d) => d?.papers ?? null);
 
+  // CARRIED OVER (cn-v1175, C2): the jobs My Day draws under Carried Over for this person (the same
+  // loader, the same rule: lib/schedule/carried-over), started beside the fan-out and applied before
+  // the piles roll up. Staff only (Jobs Needing a Day is the office's). The loader never throws; a read
+  // that failed is filed and cuts nothing.
+  const carriedP: Promise<Set<string>> =
+    isStaff && userId && tz
+      ? loadCarriedOver(supabase, {
+          userId,
+          todayStr,
+          tz,
+          dayStartIso: tzDayStartUtc(todayStr, tz).toISOString(),
+          columns: "id, status, scheduled_start, scheduled_end, assigned_to, blocked_on, blocked_since",
+        }).then((r) => {
+          if (r.error) reportError("action-items.carriedOver", new Error(r.error));
+          return new Set(r.rows.map((c) => String(c.job.id)));
+        })
+      : Promise.resolve(new Set<string>());
+
   // HOURS ON NO JOB (the duplicate punches, 2026-09-26): every past-day shift nobody put on a job,
   // with no age limit, as ONE rolled-up line. Its own read, beside the fan-out; `failed` when the
   // read broke, which the line says rather than showing nothing.
@@ -392,34 +458,64 @@ async function buildActionItems(ctx: {
   // loop below: the read is the oldest 50 with their exact count, so an answered visit dropped in
   // code would still take a place in the 50 and still be counted, and the pile would say "N+" for
   // visits nobody is asked about.
+  //
+  // ONE THING, ONE PILE (cn-v1175, R7). The owner, the same evening: "im curious about the tasks on there
+  // saying visits to close out on the operations page and inspections to write up on the sales page,
+  // isnt that the same thing?" For an inspection it was: the same visit at two stages, split by whether
+  // anybody had marked it done. So an inspection or an estimate visit whose day has passed is Sales'
+  // Inspections to Write Up whether or not it was marked done, and is NOT read here (closeOutFilter).
+  // A call or a meeting made for a LEAD is not read here either: once its day passes it stands for
+  // nothing (lib/leads/new-intake visitStands), so its lead is back on the Leads list, which is the
+  // reminder. What stays: job days, service calls, the city's final inspections, and a call, a meeting
+  // or an Other visit that belongs to no lead. A tech's own build is unchanged (his visits only open).
+  // Read wider than drawn (CLOSE_OUT_READ), because the one visit rule drops in code what the query
+  // cannot (a job that is over): the pile counts what is drawn, never rows nobody will see (R6).
   const apptP: Promise<Read> = (isStaff ? floor(14) : Promise.resolve(daysAgoStr(todayStr, 14))).then((from) => {
     let q = supabase
       .from("appointments")
-      .select("id, type, title, starts_at, status, job_id, inquiry_id, assigned_to, customers(name)", { count: "exact" })
+      .select("id, type, title, starts_at, status, job_id, inquiry_id, assigned_to, customers(name), jobs:job_id(status)", { count: "exact" })
       .eq("status", "scheduled")
       .eq("absorbed", false)
       .is("outcome", null)
       .gte("starts_at", dayStartIso(from))
       .lt("starts_at", dayStartIso(todayStr));
+    if (isStaff) q = q.or(CLOSE_OUT_FILTER);
     if (!isStaff) q = q.eq("assigned_to", userId);
-    return q.order("starts_at", { ascending: true }).limit(50);
+    // NEWEST first: a backlog past the cap leaves out the oldest visits (the Older fold's), never this month's.
+    return q.order("starts_at", { ascending: false }).limit(isStaff ? CLOSE_OUT_READ : CLOSE_OUT_DRAWN);
   });
   // ── Inspections that HAPPENED and have no estimate — staff only ───────────
   // The visit is the expensive part and it is already spent; until it becomes an estimate it earns
   // nothing.
+  // cn-v1175: the SALES visits only (an inspection, an estimate visit): the city's final inspection is
+  // the job's business and is a visit to close out (R7). What the one visit rule settles in the query
+  // is left out in the query (R6): a cancelled visit, a visit tied to a job, an answered one (a win with
+  // no job picked still asks for its job, R8). The lead rides along with the day it closed, and the jobs
+  // made from those leads are read right after (inspLeadJobsP): the rule's lead-closed arm.
   const inspP: Promise<Read> = isStaff && feederOn("inspection_writeup", features)
     ? floor(60).then((from) =>
         supabase
           .from("appointments")
-          .select("id, type, title, status, starts_at, location, capture, inquiry_id, job_id, outcome, customers(name), inquiries(name)", { count: "exact" })
+          .select("id, type, title, status, starts_at, location, capture, inquiry_id, job_id, customer_id, outcome, customers(name), inquiries(name, converted_at)", { count: "exact" })
           .eq("absorbed", false) // a booking absorbed into its job stopped being a visit (0237)
-          .in("type", [...ESTIMATE_VISIT_TYPES])
+          .in("type", [...SALES_VISIT_TYPES])
+          .neq("status", "cancelled")
+          .is("job_id", null)
+          .or("outcome.is.null,outcome.eq.won")
           .gte("starts_at", dayStartIso(from))
           .lte("starts_at", endOfToday)
           .order("starts_at", { ascending: false })
           .limit(100),
       )
     : empty;
+  // The jobs made from those visits' leads (jobs.inquiry_id): when each lead closed. A failed read is
+  // said and closes no lead (a visit is offered, never hidden on a guess).
+  const inspLeadJobsP: Promise<Read> = inspP.then((r) => {
+    const ids = [...new Set(((r.data ?? []) as any[]).map((a) => (a?.inquiry_id ? String(a.inquiry_id) : "")).filter(Boolean))];
+    return ids.length
+      ? inChunks(ids, (chunk) => supabase.from("jobs").select("inquiry_id, created_at").in("inquiry_id", chunk).limit(1000) as PromiseLike<Read>)
+      : { data: [], error: null };
+  });
   // ── Service calls / job-days that HAPPENED and have no bill — THE NORA HOLE — and THE JOB-SHAPED
   // NORA HOLE (a job flipped to complete through the status dropdown earned money the visits never
   // show). READ WHOLE (0371, done-not-billed.ts): public.needs_you_done_not_billed tests billed-or-not
@@ -602,7 +698,7 @@ async function buildActionItems(ctx: {
     isStaff
       ? supabase
           .from("quotes")
-          .select("id, quote_number, doc_type, status, total, valid_until, created_at, job_id, customer_id, customers(name), jobs:job_id(status)", { count: "exact" })
+          .select("id, quote_number, doc_type, status, total, valid_until, created_at, job_id, customer_id, inquiry_id, customers(name), jobs:job_id(status), inquiries(status)", { count: "exact" })
           .eq("status", "sent")
           .or(quoteNoAnswerFilter(todayStr, CLOSING_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS))
           .order("created_at", { ascending: true })
@@ -711,11 +807,14 @@ async function buildActionItems(ctx: {
     isStaff && feederOn("quote_draft", features)
       ? supabase
           .from("quotes")
-          .select("id, quote_number, title, status, total, created_at, job_id, jobs:job_id(status), quote_line_items(count), customer_name_snapshot:customers(name), inquiries(name)", { count: "exact" })
+          .select("id, quote_number, title, status, total, created_at, job_id, inquiry_id, jobs:job_id(status), quote_line_items(count), customer_name_snapshot:customers(name), inquiries(name, status)", { count: "exact" })
           .eq("status", "draft")
           .lt("created_at", new Date(Date.now() - 2 * 86_400_000).toISOString())
-          .order("created_at", { ascending: true })
-          .limit(50)
+          // NEWEST first: a backlog past the cap leaves out the oldest drafts (the Older fold's), never this month's.
+          .order("created_at", { ascending: false })
+          // Read wider than drawn: the one settled rule drops in code what the query cannot (R6), and
+          // the pile counts the drafts it keeps, never the settled ones nobody will see.
+          .limit(DRAFTS_READ)
       : empty,
     heldP,
     receiptsP,
@@ -730,6 +829,9 @@ async function buildActionItems(ctx: {
   const items: Omit<ActionItem, "group">[] = [];
   const waiting: WaitingItem[] = [];
   const counts: Partial<Record<PileName, PileCount>> = {};
+  // The read facts of the rows that waited thirty days (older.ts): the Older fold's half of a pile.
+  const olderCounts: Partial<Record<PileName, PileCount>> = {};
+  const older = (kind: "appointment" | "inspection_writeup" | "quote_draft", day: string | null | undefined) => isOlder(kind, day, { todayStr, tz });
   const todayMs = Date.parse(todayStr);
   const billedRows = (billedJobR.data ?? []) as { id?: string; job_id: string; invoice_kind?: string | null; status?: string | null; created_at?: string | null }[];
   const billedJobs = new Set(billedRows.map((r) => r.job_id).filter(Boolean));
@@ -812,14 +914,25 @@ async function buildActionItems(ctx: {
       }
     }
   }
-  const settledOf = (q: any) => {
+  // `asQuote` false for a contract (it borrows the rule for its job's bills): a lead's answer never signs a
+  // contract. (No sibling rule: another estimate accepted on the job or lead answers nothing for this one;
+  // see quote-settled.ts.)
+  const settledOf = (q: any, asQuote = true) => {
     const job = one(q.jobs as any) as { status?: string | null } | null;
     const id = String(q.id);
+    const lead = asQuote && q.inquiry_id ? (one(q.inquiries as any) as { status?: string | null } | null) : null;
     return quoteSettled({
-      quote: { id, status: q.status ?? null, accepted_at: q.accepted_at ?? null, created_at: q.created_at ?? null, revisions: revisionsOf.get(id) ?? [] },
+      quote: {
+        id,
+        status: q.status ?? null,
+        accepted_at: q.accepted_at ?? null,
+        created_at: q.created_at ?? null,
+        revisions: revisionsOf.get(id) ?? [],
+      },
       job: q.job_id && job ? { id: String(q.job_id), status: job.status ?? null } : null,
       jobInvoices: q.job_id ? (jobInvoicesOf.get(String(q.job_id)) ?? []) : [],
       quoteInvoices: namingInvoices.get(id) ?? [],
+      lead,
     });
   };
 
@@ -878,16 +991,35 @@ async function buildActionItems(ctx: {
   const writeUpLeadIds = new Set<string>();
   {
     const qs = (inspQuoteR.data ?? []) as any[];
-    const { toWriteUp } = bucketInspections(
-      (inspR.data ?? []) as any[],
+    const inspRows = (inspR.data ?? []) as any[];
+    // WHEN EACH LEAD CLOSED (cn-v1175, the one visit rule's lead-closed arm): its own converted_at, or the
+    // first job made from it. A failed jobs read is said and closes no lead.
+    const leadJobsR = await inspLeadJobsP.catch((e): Read => ({ data: null, error: e }));
+    if (leadJobsR.error) reportError("action-items.writeUp.leadJobs", leadJobsR.error);
+    const leadClosedAt = leadClosedAtFrom(
+      inspRows.map((a) => ({ id: a.inquiry_id ?? null, converted_at: one(a.inquiries as any)?.converted_at ?? null })),
+      (leadJobsR.data ?? []) as { inquiry_id?: string | null; created_at?: string | null }[],
+    );
+    const buckets = bucketInspections(
+      inspRows,
       new Set(qs.map((q) => q.inquiry_id).filter(Boolean)),
       new Set(qs.map((q) => q.job_id).filter(Boolean)),
       new Date(),
       new Set(qs.map((q) => q.id).filter(Boolean)),
       billedJobs, // jobs with real (non-draft, non-void) billing — the visit already turned into money
       tz ?? "UTC",
+      { leadClosedAt },
     );
+    // ONE THING, ONE PILE (cn-v1175, R7): a sales visit that happened and one whose day passed with
+    // nothing captured (the Inspections page's Day Passed) are both this pile, oldest first.
+    const at = (a: any) => (a.starts_at ? Date.parse(a.starts_at) : 0);
+    const toWriteUp = [...buckets.toWriteUp, ...buckets.missed].sort((a, b) => at(a) - at(b));
+    // OLDER (cn-v1175, older.ts): a write-up whose visit's day is thirty days gone is drawn in the Older
+    // fold and counted by no number. The read is newest first, so a short read leaves the older half short.
+    const writeUpKept = { fresh: 0, older: 0 };
     for (const a of toWriteUp) {
+      const old = older("inspection_writeup", a.starts_at);
+      writeUpKept[old ? "older" : "fresh"]++;
       const who = (a as any).customers?.name ?? (a as any).inquiries?.name ?? null;
       const label = inspectionLabel({
         title: visitTitle(a.title),
@@ -923,13 +1055,24 @@ async function buildActionItems(ctx: {
         // A TAP OPENS THE INSPECTION (the owner, 11-10): reading or changing the report comes first;
         // the estimate and the job are chosen from the visit page, never made by a tap on a row.
         href: `/appointments/${a.id}`,
-        // Dismiss (the visit page's own door, appointment.wontHappen) is offered while the visit is not completed.
-        affordances: a.status === "completed" ? AFFORDANCES.inspection_writeup : [...AFFORDANCES.inspection_writeup, "wontHappen"],
+        // ONE WORD FOR AN ENDING (cn-v1175, R8): Write It Up (the row's button), Move to Another Day (while it
+        // has a day to move and was not marked done) and Not Sold. No Dismiss on a sales visit: Not Sold is
+        // the one ending for a visit that did not become work, whether or not it took place; it keeps the record.
+        affordances: a.starts_at && a.status !== "completed" ? ["snooze", ...AFFORDANCES.inspection_writeup] : AFFORDANCES.inspection_writeup,
+        // Move to Another Day keeps the visit's time of day: the day picked, at this time (dispatch-map).
+        targetId: localTimeOfDay(a.starts_at, tz),
+        // A visit marked Won with no job picked is not an ending (R8): its one button asks for the job.
+        wonNoJob: a.outcome === "won" && !a.job_id,
+        ...(old ? { older: true } : {}),
       });
       writeUpApptIds.add(a.id);
-      if (a.inquiry_id) writeUpLeadIds.add(String(a.inquiry_id));
+      // A lead never ages out (cn-v1175): an older write-up does not keep its lead off the board.
+      if (a.inquiry_id && !old) writeUpLeadIds.add(String(a.inquiry_id));
     }
-    counts.inspections_to_write_up = codeCount(inspR);
+    const lastRead = ((inspR.data ?? []) as any[]).at(-1); // the oldest visit read
+    const split = splitKeptCount(inspR, writeUpKept, null, "newestFirst", older("inspection_writeup", lastRead?.starts_at));
+    counts.inspections_to_write_up = split.fresh;
+    olderCounts.inspections_to_write_up = split.older;
   }
 
   // ── LEADS. One projection (action-items/switches): with Leads off the same request reads "New
@@ -971,10 +1114,29 @@ async function buildActionItems(ctx: {
 
 
   // ── VISITS NOBODY CLOSED OUT.
+  // THE ONE VISIT RULE (cn-v1175, R1; lib/appointments/visit-settled): a visit whose job is over (complete,
+  // cancelled, invoiced, or carrying a bill that finishes the work) has nothing left to close out. The
+  // read is wider than the list; the rows the rule keeps are cut to CLOSE_OUT_DRAWN after it (R6).
+  const closeOutLinks = {
+    closedJobIds: new Set(
+      ((apptR.data ?? []) as any[])
+        .filter((a) => a.job_id && (VISIT_CLOSED_JOB_STATUSES as readonly string[]).includes(String(one(a.jobs as any)?.status ?? "")))
+        .map((a) => String(a.job_id)),
+    ),
+    finishedJobIds: finishedBilledJobs,
+    billedJobIds: billedJobs,
+  };
+  // OLDER (cn-v1175, older.ts): a visit whose day is thirty days gone is drawn in the Older fold and
+  // counted by no number; each half draws CLOSE_OUT_DRAWN, so an old backlog never crowds out this
+  // month's visits (the read is newest first; the board's order is sortActionItems', not the read's).
+  const closeOutKept = { fresh: 0, older: 0 };
   for (const a of (apptR.data ?? []) as any[]) {
     if (!isStaff && a.assigned_to !== userId) continue;
     if (writeUpApptIds.has(a.id)) continue; // already surfaced as a write-up
     if (a.inquiry_id && leadIds.has(String(a.inquiry_id))) continue; // rides its lead's row
+    if (isStaff && visitSettled(a, closeOutLinks)) continue;
+    const old = older("appointment", a.starts_at);
+    if (++closeOutKept[old ? "older" : "fresh"] > CLOSE_OUT_DRAWN) continue;
     // ONE WORD FOR THE SITE VISIT: read the type by the SAME label as every other surface.
     // Capitalising the stored value by hand made this front-screen row say "Inspection" while
     // W2-10 (cn-v1034, 2026-09-30) had the planner, the calendar, the job page, the crew board and Google
@@ -1001,9 +1163,15 @@ async function buildActionItems(ctx: {
       // "When I click on something I wanted to open that thing not the calendar."
       href: `/appointments/${a.id}`,
       affordances: appointmentAffordances(isStaff),
+      ...(old ? { older: true } : {}),
     });
   }
-  counts.visits_to_close_out = codeCount(apptR);
+  {
+    const lastRead = ((apptR.data ?? []) as any[]).at(-1); // the oldest visit read
+    const split = splitKeptCount(apptR, closeOutKept, CLOSE_OUT_DRAWN, "newestFirst", older("appointment", lastRead?.starts_at));
+    counts.visits_to_close_out = split.fresh;
+    olderCounts.visits_to_close_out = split.older;
+  }
 
   // ── PAPERS AND NOTES. A paper the /bills tray sorts (isTrayPaper) is Sort It on /bills; a note, or
   // a paper Organize files (a plan read as not a cost, a picture asking "What is this?"), is File It
@@ -1209,7 +1377,7 @@ async function buildActionItems(ctx: {
   const previewIds = [...new Set([...matCandidates.keys(), ...workedIds])];
   const countIds = [...new Set([...needDayIds, ...heldRows.map((j) => String(j.id))])].filter((id) => !previewIds.includes(id));
 
-  const [settledR, futureApptR, previewListsR, countListsR, wBillsR, wPosR, wInvR, wJobsR, tiesR, peopleR] = await Promise.all([
+  const [settledR, futureApptR, previewListsR, countListsR, wBillsR, wPosR, wInvR, wJobsR, tiesR, peopleR, saleQuotesR, saleInvR] = await Promise.all([
     // The settled signal for done visits, BEFORE 0371 ONLY (the function asks it in SQL): an invoice
     // anchored to the visit (0233). amount_paid rides along because ANCHORED IS NOT PAID ("collect
     // later" anchors a bill with zero collected).
@@ -1278,6 +1446,9 @@ async function buildActionItems(ctx: {
       const ids = [...new Set([...receiptDocs.map((d) => d.uploaded_by), ...shortRows.map((r) => r.created_by)].filter(Boolean) as string[])];
       return ids.length ? inChunks(ids, (chunk) => supabase.from("profiles").select("id, full_name").in("id", chunk)) : empty;
     })(),
+    // A JOB WHOSE SALE WENT AWAY (cn-v1175, R3): its estimates and whether any bill was ever written on it.
+    needDayIds.length ? inChunks(needDayIds, (ids) => supabase.from("quotes").select("job_id, status").in("job_id", ids).limit(1000)) : empty,
+    needDayIds.length ? inChunks(needDayIds, (ids) => supabase.from("invoices").select("job_id").in("job_id", ids).neq("status", "void").limit(1000)) : empty,
   ]);
   const nameOf = new Map(((peopleR.data ?? []) as any[]).map((p) => [String(p.id), String(p.full_name ?? "").trim()]));
 
@@ -1327,10 +1498,17 @@ async function buildActionItems(ctx: {
   //    it reads as handled and is in fact abandoned. Its Send It sends it after one confirm naming
   //    the customer, the total and the number of lines (lane 4's Send sheet). Dropped only when its
   //    job is finished, cancelled or billed: then there is nothing left to estimate.
+  // OLDER (cn-v1175, older.ts): a draft written thirty days ago or more is drawn in the Older fold and
+  // counted by no number; each half draws DRAFTS_DRAWN (the read is newest first, so this month's drafts
+  // are always read; the board's order is sortActionItems', not the read's).
+  const draftsKept = { fresh: 0, older: 0 };
   for (const q of (draftQuoteR.data ?? []) as any[]) {
     // Its job finished, cancelled, invoiced or billed since it was started, an invoice naming it, a
-    // revision replacing it: nothing left to estimate (quoteSettled, the one rule).
+    // revision replacing it, its lead Not Sold: nothing left to estimate (quoteSettled, the one rule).
+    // Another estimate accepted on its job is NOT that (a draft for extra work is still to send).
     if (settledOf(q).settled) continue;
+    const old = older("quote_draft", q.created_at);
+    if (++draftsKept[old ? "older" : "fresh"] > DRAFTS_DRAWN) continue;
     const who = one((q as any).customer_name_snapshot)?.name ?? one((q as any).inquiries)?.name ?? null;
     const lines = one(q.quote_line_items as any) as { count?: number } | null;
     items.push({
@@ -1358,9 +1536,15 @@ async function buildActionItems(ctx: {
         lineCount: typeof lines?.count === "number" ? lines.count : null,
         openHref: `/quotes/${q.id}`,
       },
+      ...(old ? { older: true } : {}),
     });
   }
-  counts.estimates_not_sent = codeCount(draftQuoteR);
+  {
+    const lastRead = ((draftQuoteR.data ?? []) as any[]).at(-1); // the oldest draft read
+    const split = splitKeptCount(draftQuoteR, draftsKept, DRAFTS_DRAWN, "newestFirst", older("quote_draft", lastRead?.created_at));
+    counts.estimates_not_sent = split.fresh;
+    olderCounts.estimates_not_sent = split.older;
+  }
 
   // ── Contracts sent but not yet signed — chase the signature to lock the deal. A hold never quiets
   // it (a legal clock).
@@ -1369,7 +1553,7 @@ async function buildActionItems(ctx: {
     // A job that is over, or billed for the work since the contract went out, has nothing left to
     // sign for (the same one rule as the estimates: quoteSettled, read from the contract's own day).
     if (
-      settledOf({ id: `contract-${cont.id}`, status: "sent", created_at: cont.created_at ?? null, job_id: cont.job_id, jobs: cont.jobs }).settled
+      settledOf({ id: `contract-${cont.id}`, status: "sent", created_at: cont.created_at ?? null, job_id: cont.job_id, jobs: cont.jobs }, false).settled
     ) continue;
     items.push({
       id: cont.id,
@@ -1574,8 +1758,26 @@ async function buildActionItems(ctx: {
     });
   } else {
     const futureAppt = new Set(((futureApptR.data ?? []) as any[]).map((a) => String(a.job_id)));
+    // A JOB WHOSE SALE WENT AWAY (cn-v1175, R3): every estimate on it declined or expired, no time and no
+    // bill on it, so it stops asking for a day (quote-settled saleWentAway). Either read failing settles
+    // nothing: the job keeps asking, and the failure is said to the ops sink.
+    const wentAway = new Set<string>();
+    if (saleQuotesR.error || saleInvR.error) reportError("action-items.saleWentAway", saleQuotesR.error ?? saleInvR.error);
+    else {
+      const quotesOn = new Map<string, { status?: string | null }[]>();
+      for (const q of (saleQuotesR.data ?? []) as any[]) {
+        const k = q?.job_id ? String(q.job_id) : "";
+        if (k) quotesOn.set(k, [...(quotesOn.get(k) ?? []), { status: q.status ?? null }]);
+      }
+      const invoiced = new Set(((saleInvR.data ?? []) as any[]).map((i) => String(i?.job_id ?? "")).filter(Boolean));
+      for (const f of needDayPre) {
+        const id = String(f.job.id);
+        const hasTime = (((f.job as any).time_entries ?? []) as unknown[]).length > 0;
+        if (saleWentAway({ quotes: quotesOn.get(id) ?? [], hasTime, hasInvoice: invoiced.has(id) })) wentAway.add(id);
+      }
+    }
     const findings = jobsNeedingADay({
-      jobs: needDayPre.map((f) => f.job),
+      jobs: needDayPre.map((f) => f.job).filter((j) => !wentAway.has(String(j.id))),
       todayStr,
       tz,
       futureApptJobIds: futureAppt,
@@ -1818,25 +2020,36 @@ async function buildActionItems(ctx: {
     if (row) waiting.push(row);
   }
 
+  // ONE ROW PER JOB (cn-v1175, C2; lib/schedule/carried-over needsYouWithoutCarried): a job My Day draws
+  // under Carried Over is left off the board HERE, before the piles roll up, so it is neither listed
+  // twice (it could hide inside Jobs Needing a Day) nor counted by the badge where it is not shown. A
+  // carried read that failed leaves every job on the board (offered, never hidden on a guess).
+  const carried = await carriedP;
+  const onBoard = carried.size ? needsYouWithoutCarried(items, carried) : items;
+
   // THE ENDLESS ROWS SOMEONE SNOOZED wait in the fold with their day (0367); on the day, back.
-  const folded = foldWaitingRows(items, waitsR.waits);
+  const folded = foldWaitingRows(onBoard, waitsR.waits);
 
   // STAMPED AND SORTED ONCE, HERE: each row's tile and its mark (needs-you-rule.ts, in the company's
   // days), then NOW first, the tiles in order, a Couldn't Check line leading its tile, SOON before no
   // mark, the Supplier Bills card first among its tile's unmarked rows, then oldest first with an
   // undated row counting as today; ties keep the order built above (types.ts sortActionItems). Then the
   // same-kind piles roll up (piles.ts): a pile sits by its mark, its tile, then its OLDEST child's own
-  // day, its NOW children in a pile of their own, and each counts one on the badge.
+  // day, its NOW children in a pile of their own, its older children in a pile of their own, and each
+  // counts its things on the badge (needs-you-rule summarize).
   const sorted = sortActionItems(
     folded.now.map((it) => ({ ...it, group: KIND_GROUP[it.kind], level: levelOf(it, { todayStr, tz }) })),
     todayStr,
   );
   // THE TECH'S BELT (needs-you-rule withoutMoneyForTech): every row, pile and child passes here on
   // its way out, so a money slot a feeder let through still never reaches a tech. Staff: untouched.
-  const now = rollUpPiles(sorted, { todayStr, isStaff, leadsOn, counts }).map((it) => withoutMoneyForTech(it, isStaff));
+  const rolled = rollUpPiles(sorted, { todayStr, isStaff, leadsOn, counts, olderCounts }).map((it) => withoutMoneyForTech(it, isStaff));
+  // THE OLDER FOLD (cn-v1175, older.ts): the rows that waited thirty days leave the board and its numbers.
+  const now = rolled.filter((it) => !it.older);
+  const olderRows = rolled.filter((it) => !!it.older);
   // The fold, soonest back first. A tech's holds no money kind and no dollar figure, ever.
   const fold = waitingForViewer([...waiting, ...folded.waiting], isStaff).sort((a, b) => a.backOn.localeCompare(b.backOn) || a.title.localeCompare(b.title));
-  return { now, waiting: fold };
+  return { now, waiting: fold, older: olderRows };
 }
 
 /** An untitled paper's bold line, by what kind of paper it is (cn-v1161). */

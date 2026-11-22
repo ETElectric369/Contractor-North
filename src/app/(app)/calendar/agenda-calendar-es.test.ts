@@ -106,7 +106,8 @@ describe("the tile's sheet in Spanish", () => {
       createElement(TileSheetBody, { target: { ...bayberry({ scheduled_end: at("2026-11-07", "12:00") }), dayHours: { start: "12:00", end: "17:00" } } as TileTarget, tz: LA, workDay: WORK_DAY, team, canEdit: true, perDayHours: true, onClose: () => {} }),
     );
     expect(text(per)).toMatch(/Este Día, jue, 5 (de )?nov: sus propias horas\. Los otros días del trabajo mantienen las suyas\./);
-    expect(text(per)).toContain("Usar las Horas del Trabajo");
+    // Use the Job's Usual Hours was removed (cn-v1175): the owner, "get rid of the usual hours altogether".
+    expect(text(per)).not.toContain("Usar las Horas del Trabajo");
     expect(text(html)).toMatch(/cada día hasta sáb, 7 (de )?nov/);
   });
 

@@ -201,10 +201,31 @@ export function maxLevel(levels: readonly (Level | null | undefined)[]): Level {
   return best;
 }
 
+/**
+ * HOW MANY THINGS A ROW IS (cn-v1175, the owner's pick: every Needs You number counts THINGS). He looked
+ * at a tile that said 3 over eight rows ("it says 3 above and there are a bunch down there so how is
+ * this number getting calculated?"): a pile counted one. Now a pile is its count (piles.ts: the read's
+ * exact count, or the rows that passed) and `plus` when its read was cut short ("50+": at least that
+ * many); any other row is one, a rolled-up card (the Supplier Bills card, Hours on No Job) and a
+ * "Couldn't Check" line included, because each is one row with one door.
+ */
+export function thingsOf(row: Pick<ActionItem, "pile">): { n: number; plus: boolean } {
+  if (row.pile) return { n: Math.max(0, row.pile.count), plus: !!row.pile.capped };
+  return { n: 1, plus: false };
+}
+
+/** Of a row's things, how many are SOON: a pile's SOON children (the ones here), else the row itself. */
+function soonThingsOf(row: Pick<ActionItem, "pile" | "children" | "level">): number {
+  if (row.pile) return (row.children ?? []).filter((c) => !c.done && c.level === "soon").length;
+  return row.level === "soon" ? 1 : 0;
+}
+
 export type TileSummary = {
   group: Group;
-  /** Open rows in this tile that are not NOW (a pile counts one). */
+  /** The THINGS open in this tile that are not NOW (a pile counts its count, cn-v1175). */
   count: number;
+  /** A pile in this tile hit its read's cap: the count is "at least" (drawn "N+"). */
+  capped: boolean;
   /** Of those, the SOON ones. */
   soon: number;
   /** Staff only: the sum of `amount` over this tile's money rows. Null: nothing to say, or a tech. */
@@ -216,48 +237,75 @@ export type TileSummary = {
 };
 
 export type NeedsYouSummary = {
-  /** Open rows marked NOW (the strip). */
+  /** THINGS marked NOW (the strip). */
   now: number;
-  /** Open rows marked SOON. */
+  /** THINGS marked SOON. */
   soon: number;
-  /** Every other open row. now + soon + more = the open rows. */
+  /** Every other open thing. now + soon + more = total. */
   more: number;
+  /** EVERY open thing on the board, the NOW ones included: the header's whole and the dock's Today
+   *  badge (getActionItemsCount). The tiles' counts plus `now` add up to it. */
+  total: number;
+  /** A capped pile is in it: the total is "at least" (drawn "N+"). */
+  capped: boolean;
+  /** A capped pile is among the NOW rows (the octagon's number is "at least"). */
+  nowCapped: boolean;
+  /** A capped pile is among the rest (the plain "N more" / "N open" is "at least"). */
+  moreCapped: boolean;
   /** The four tiles in GROUP_ORDER. Their counts add up to soon + more, their soon to soon. */
   tiles: TileSummary[];
   /** The tile that opens first (openFirst). */
   open: Group | null;
 };
 
-type Countable = Pick<ActionItem, "id" | "kind" | "done" | "group" | "level" | "amount" | "pile">;
+type Countable = Pick<ActionItem, "id" | "kind" | "done" | "group" | "level" | "amount" | "pile" | "children">;
 
 /**
- * THE COUNTS: the header's three and each tile's. It counts the open rows (not ticked done) as
- * they are, a pile as one row with its own mark. A filter, never a sort: the order is the server's.
+ * THE COUNTS, ONE FUNCTION FOR EVERY NUMBER: the header's, each tile's and the dock's Today badge
+ * (query.ts getActionItemsCount reads `total`). It counts the THINGS of the open rows (not ticked done),
+ * a pile as its count (thingsOf); a NOW row counts in the header's octagon and the total, never in a
+ * tile. A filter, never a sort: the order is the server's. Rows in the Older fold are never handed in.
  */
 export function summarize(rows: readonly Countable[], opts: { isStaff: boolean }): NeedsYouSummary {
   const open = rows.filter((r) => !r.done);
-  const tiles: TileSummary[] = GROUP_ORDER.map((group) => ({ group, count: 0, soon: 0, money: null, moneyCapped: false, unread: 0 }));
+  const tiles: TileSummary[] = GROUP_ORDER.map((group) => ({ group, count: 0, capped: false, soon: 0, money: null, moneyCapped: false, unread: 0 }));
   const byGroup = new Map(tiles.map((t) => [t.group, t]));
   let now = 0;
   let soon = 0;
+  let total = 0;
+  let capped = false;
+  let nowCapped = false;
+  let moreCapped = false;
   for (const r of open) {
     const level = r.level ?? "none";
+    const things = thingsOf(r);
+    total += things.n;
+    if (things.plus) capped = true;
     if (level === "now") {
-      now++;
+      now += things.n;
+      if (things.plus) nowCapped = true;
       continue;
     }
-    if (level === "soon") soon++;
+    const soonHere = Math.min(things.n, soonThingsOf(r));
+    soon += soonHere;
+    if (things.plus) moreCapped = true;
     const tile = byGroup.get(r.group ?? KIND_GROUP[r.kind]);
     if (!tile) continue;
-    tile.count++;
-    if (level === "soon") tile.soon++;
+    tile.count += things.n;
+    if (things.plus) tile.capped = moreCapped = true;
+    tile.soon += soonHere;
     if (isUnreadLine(r)) tile.unread++;
     if (opts.isStaff && GROUP_MONEY_KINDS[tile.group].includes(r.kind)) {
       if (r.pile?.capped) tile.moneyCapped = true;
       if (typeof r.amount === "number" && Number.isFinite(r.amount)) tile.money = (tile.money ?? 0) + r.amount;
     }
   }
-  return { now, soon, more: open.length - now - soon, tiles, open: openFirst(tiles) };
+  return { now, soon, more: total - now - soon, total, capped, nowCapped, moreCapped, tiles, open: openFirst(tiles) };
+}
+
+/** A number said with its floor: "50+" when a capped pile is in it, else the number. */
+export function withPlus(n: number, plus: boolean): string {
+  return `${n}${plus ? "+" : ""}`;
 }
 
 /** THE TILE THAT OPENS FIRST: the first in the fixed order with a SOON row, else the first with any row. */

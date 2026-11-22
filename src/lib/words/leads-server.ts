@@ -57,7 +57,7 @@ export const words: WordCatalog = {
     ld_srv_rideAlongNear: "These ride along with visits already booked near them.",
     ld_srv_rideAlongDays: "These ride along with days that already have visits booked.",
     // CORE (cn-v1170): Not Sold waits for its visit; Reopen.
-    ld_srv_visitStands: "A visit from this lead is still on the books. Open the visit and mark it Not Sold or Dismiss it there.",
+    ld_srv_visitStands: "A visit from this lead is still on the books. Open the visit and mark it Not Sold there.",
     ld_srv_notNotSold: "This lead isn't Not Sold any more. Reload to see where it is.",
   },
   es: {
@@ -97,7 +97,7 @@ export const words: WordCatalog = {
     ld_srv_rideAlongNear: "Estos van junto con visitas ya agendadas cerca de ellos.",
     ld_srv_rideAlongDays: "Estos van junto con días que ya tienen visitas agendadas.",
     // CORE (cn-v1170).
-    ld_srv_visitStands: "Una visita de este prospecto sigue en la agenda. Abre la visita y márcala como no vendida o descártala ahí.",
+    ld_srv_visitStands: "Una visita de este prospecto sigue en la agenda. Abre la visita y márcala como no vendida ahí.",
     ld_srv_notNotSold: "Este prospecto ya no está como no vendido. Recarga para ver dónde está.",
   },
 };

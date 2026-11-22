@@ -116,7 +116,8 @@ describe("My Day (pinned at the page's source)", () => {
   const page = src("src/app/(app)/planner/page.tsx");
 
   it("reads the caller's own carried-over jobs with the page's first reads, in the day view only, and files a read that failed", () => {
-    expect(page).toContain('import { loadCarriedOver, needsYouWithoutCarried } from "@/lib/schedule/carried-over";');
+    // RE-PINNED ON PURPOSE (cn-v1175): the page reads the group; the build makes the board's cut.
+    expect(page).toContain('import { loadCarriedOver } from "@/lib/schedule/carried-over";');
     expect(page).toContain(
       'view === "day"\n      ? loadCarriedOver<any>(supabase, { userId: user?.id ?? null, todayStr, tz, dayStartIso: dayStart.toISOString() })\n      : Promise.resolve({ rows: [], error: null }),',
     );
@@ -172,15 +173,18 @@ describe("My Day (pinned at the page's source)", () => {
     expect(page.split("basis-full sm:basis-auto").length - 1).toBe(1);
   });
 
-  it("ONE ROW PER JOB: a job under Carried Over is left off the Needs You board on this page, through the one rule", () => {
-    expect(page).toContain("const needsNow = needsYouWithoutCarried(needsYou.now, new Set(carriedAgenda.map((c) => c.jobId).filter((id): id is string => !!id)));");
-    expect(page).toContain("{(needsNow.length > 0 || needsYou.waiting.length > 0) && (");
+  // RE-PINNED ON PURPOSE (cn-v1175, C2): the cut moved from this page into the build, before the piles
+  // roll up, so a carried job is neither hidden inside a pile of Jobs Needing a Day nor counted by the
+  // shell's badge where the board does not show it (the badge reads the same build).
+  it("ONE ROW PER JOB: a job under Carried Over is left off the Needs You board by the build, through the one rule", () => {
+    expect(page).toContain("const needsNow = needsYou.now;");
+    expect(page).not.toContain("needsYouWithoutCarried(");
     expect(page).toMatch(/<ActionList\s+items=\{needsNow\}/);
-    // Nothing else on the page draws the unfiltered list, and the shared read is not handed anything new:
-    // the shell's badge reads the same fan-out and still counts the job.
-    expect(page).not.toContain("items={needsYou.now}");
     expect(page.split("needsYou.now").length - 1).toBe(1);
     expect(page).toContain('getActionItems({ todayStr, isStaff, userId: user?.id ?? "", tz, off: offFeatureKey(features) })');
+    const query = readFileSync(join(process.cwd(), "src/lib/action-items/query.ts"), "utf8");
+    expect(query).toContain("const onBoard = carried.size ? needsYouWithoutCarried(items, carried) : items;");
+    expect(query.indexOf("needsYouWithoutCarried(items, carried)")).toBeLessThan(query.indexOf("rollUpPiles(sorted"));
   });
 
   it("the group is LAST in the Today card, under today's own rows or under the line that says today is empty", () => {

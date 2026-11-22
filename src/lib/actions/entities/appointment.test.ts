@@ -5,8 +5,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Nort said "Booked, tomorrow at 10 AM". These drive the REAL handlers with the server action and
 // the database stubbed, and check both halves: what is stored, and what Nort is told was stored.
 
-const { createAppointment, rescheduleAppointment, setAppointmentPlace, linkAppointmentTo, db } = vi.hoisted(() => ({
+const { createAppointment, rescheduleAppointment, setAppointmentPlace, linkAppointmentTo, setAppointmentOutcome, db } = vi.hoisted(() => ({
   createAppointment: vi.fn(),
+  setAppointmentOutcome: vi.fn(),
   rescheduleAppointment: vi.fn(),
   setAppointmentPlace: vi.fn(),
   linkAppointmentTo: vi.fn(),
@@ -18,7 +19,7 @@ vi.mock("@/app/(app)/appointments/actions", () => ({
   rescheduleAppointment,
   setAppointmentPlace,
   linkAppointmentTo,
-  setAppointmentOutcome: vi.fn(),
+  setAppointmentOutcome,
   setAppointmentStatus: vi.fn(),
 }));
 
@@ -272,5 +273,22 @@ describe("appointment.linkCustomer — the yes has a verb now", () => {
     const r = await def.handler(def.input.parse({ id: "a1", customer_id: cid }), ctx);
     expect(linkAppointmentTo).toHaveBeenCalledWith("a1", "customer", cid);
     expect(r.recorded).toBe('Linked: "Inspection: Tom Goodman", Fri Sep 25 at 10:00 AM PDT, customer "Tom Goodman".');
+  });
+});
+
+/**
+ * THE ASSISTANT'S NOT SOLD CANCELS NOTHING (skeptic #78, cn-v1175). setAppointmentOutcome takes a visit
+ * that is still ahead off the schedule only when the caller asks (opts.offSchedule), and only the two
+ * person-tapped doors that carry an Undo ask. This route has no confirm and no Undo: it records the
+ * outcome, as it did before this release.
+ */
+describe("appointment.setOutcome: the outcome is recorded and nothing is cancelled", () => {
+  it("hands setAppointmentOutcome the id and the outcome only, never the off-schedule option", async () => {
+    setAppointmentOutcome.mockResolvedValue({ ok: true });
+    const def = appointmentActions["appointment.setOutcome"];
+    await def.handler(def.input.parse({ id: "a1", outcome: "lost" }), ctx);
+    expect(setAppointmentOutcome).toHaveBeenCalledTimes(1);
+    expect(setAppointmentOutcome.mock.calls[0]).toEqual(["a1", "lost"]);
+    expect((def as { confirm?: unknown }).confirm).toBeUndefined();
   });
 });

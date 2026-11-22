@@ -123,9 +123,10 @@ describe("The row: what is mounted on the shell's root beside the column draws f
     const row = layout.slice(columnEnd, rootEnd).replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
     const mounted = [...new Set([...row.matchAll(/<([A-Z][A-Za-z]+)/g)].map((m) => m[1]))].sort();
     // Each was read on 2026-11-18: a sheet fixed to the screen, a Modal, a fixed button or panel, or null.
-    // Suspense is the wrapper of OrgPlaceBiasSlot, which draws nothing.
+    // Suspense is the wrapper of OrgPlaceBiasSlot, which draws nothing. FenceReportHost (cn-v1175)
+    // draws nothing until the fence asks, then the daily report's Modal, in a portal.
     expect(mounted).toEqual(
-      ["BugReporter", "CommandBar", "FenceStandDown", "NativePushBridge", "OfflineDrain", "OrgPlaceBiasSlot", "SetupHost", "ShellNavigationWatch", "Suspense", "TapToPayAwareness", "TapToPayWarmup"].sort(),
+      ["BugReporter", "CommandBar", "FenceReportHost", "FenceStandDown", "NativePushBridge", "OfflineDrain", "OrgPlaceBiasSlot", "SetupHost", "ShellNavigationWatch", "Suspense", "TapToPayAwareness", "TapToPayWarmup"].sort(),
     );
   });
 });

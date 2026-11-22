@@ -18,6 +18,7 @@ import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
 import { trace } from "@/lib/nort/trace";
 import type { GeoPoint } from "@/lib/types";
+import { FENCE_REPORT_EVENT } from "@/lib/fence-report-event";
 
 /**
  * May the fence read the phone's location without a tap? Off the shell, the web rule (geo.ts: a live
@@ -589,6 +590,7 @@ export function GeofenceMonitor({
         doneRef.current = true;
         setClosedAt(atIso);
         setPhase("confirmed");
+        if (!auto && !res.undone) window.dispatchEvent(new Event(FENCE_REPORT_EVENT)); // the person's own tap: the daily report (cn-v1175), never an unattended close
         try {
           navigator.vibrate?.([60, 40, 60]);
         } catch {}

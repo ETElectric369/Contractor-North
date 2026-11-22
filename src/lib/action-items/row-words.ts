@@ -215,6 +215,7 @@ export const NY_EN: Readonly<Record<string, string>> = {
   ny_btn_wonIt: "Won It",
   ny_btn_lost: "Not Sold",
   ny_btn_lostVisit: "Not Sold",
+  ny_btn_writeItUp: "Write It Up",
   ny_btn_markItNotSold: "Mark It Not Sold",
   ny_btn_assign: "Assign",
   ny_btn_finish: "Finish",
@@ -227,6 +228,9 @@ export const NY_EN: Readonly<Record<string, string>> = {
   ld_btn_openTheInspection: "Open the Inspection",
   // A lead's Schedule (cn-v1170): the Leads list's own door word.
   ld_btn_schedule: "Schedule",
+  // A write-up row's ⋯ (cn-v1175): the Inspections row's own Move, and the visit page's ask for a won job.
+  ip_btn_moveToAnotherDay: "Move to Another Day…",
+  vp_btn_wonPickTheJob: "Won · Pick the Job",
 };
 
 const spanish = (c: Pick<SayCtx, "lang" | "words">): c is { lang: "es"; words: Words } => c.lang === "es" && !!c.words;

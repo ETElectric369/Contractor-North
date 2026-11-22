@@ -49,17 +49,26 @@ describe("one name for the visit's Dismiss", () => {
 
   it("every visit Dismiss in Needs You runs the one deed, appointment.wontHappen", () => {
     expect(resolveRowVerb("appointment", "dismiss", "appt-1")).toEqual({ name: "appointment.wontHappen", input: { id: "appt-1" } });
-    expect(resolveRowVerb("inspection_writeup", "wontHappen", "appt-1")).toEqual({ name: "appointment.wontHappen", input: { id: "appt-1" } });
+    // cn-v1175 (R8): no Dismiss on a sales visit; the verb the write-up row's Dismiss sent is gone from
+    // the grammar (types.ts Affordance), so no row can send it at all.
     // Lost stays Lost: the inspection row's other ending records the outcome, it never ends the visit.
     expect(resolveRowVerb("inspection_writeup", "dismiss", "appt-1")).toEqual({ name: "appointment.setOutcome", input: { id: "appt-1", outcome: "lost" } });
     // And every row door labelled Dismiss sends one of those two verbs.
     const row = (kind: ActionItem["kind"], affordances: ActionItem["affordances"]) =>
       ({ id: "appt-1", kind, title: "Inspection", subtitle: null, when: null, urgency: 0, done: false, href: "/appointments/appt-1", affordances }) as unknown as ActionItem;
-    for (const item of [row("appointment", ["do", "dismiss", "open"]), row("inspection_writeup", ["dismiss", "wontHappen", "open"])]) {
+    for (const item of [row("appointment", ["do", "dismiss", "open"])]) {
       const door = rowButtons(item, { isStaff: true }).more.find((d) => d.label === "Dismiss");
       expect(door, item.kind).toBeTruthy();
       if (door?.act.type !== "confirm") throw new Error("Dismiss asks first");
       expect(resolveRowVerb(item.kind, door.act.verb, item.id)?.name).toBe("appointment.wontHappen");
     }
+  });
+
+  it("a SALES visit's write-up row offers no Dismiss at all (cn-v1175, R8): Not Sold is its one ending", () => {
+    const item = { id: "appt-1", kind: "inspection_writeup", title: "Inspection", subtitle: null, when: null, urgency: 0, done: false, href: "/appointments/appt-1", affordances: ["snooze", "dismiss", "open"] } as unknown as ActionItem;
+    const b = rowButtons(item, { isStaff: true });
+    const all = [b.primary, ...b.more].filter(Boolean).map((d) => d!.label);
+    expect(all).not.toContain("Dismiss");
+    expect(all).toContain("Not Sold");
   });
 });

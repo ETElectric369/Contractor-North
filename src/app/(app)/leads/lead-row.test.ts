@@ -234,7 +234,7 @@ describe("C. Not Sold and Reopen", () => {
   it("a refusal shows the server's own sentence, and nothing else happens", async () => {
     const toast = vi.fn();
     const refresh = vi.fn();
-    const said = "A visit from this lead is still on the books. Open the visit and mark it Not Sold or Dismiss it there.";
+    const said = "A visit from this lead is still on the books. Open the visit and mark it Not Sold there.";
     await markLeadNotSold({ id: "lead-1", name: "Rita Moss", status: "new" }, { setStatus: async () => ({ ok: false, error: said }), toast, refresh });
     expect(toast).toHaveBeenCalledWith(said, "error");
     expect(refresh).not.toHaveBeenCalled();

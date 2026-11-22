@@ -28,3 +28,23 @@ describe("the privacy page's Your choices", () => {
     expect(words).toContain('export const YOUR_DATA_TITLE = "Your Data";');
   });
 });
+
+/**
+ * HOW LONG WE KEEP IT SAYS ONLY WHAT THE SWEEP DOES (skeptic #78, cn-v1175). The page said "an uploaded
+ * file nothing in North points to any more, after two days", and lib/storage-sweep.ts reaps orphans in
+ * three places only (beside the bug screenshots, said in their own clause). The sentence names those
+ * three, and the sweep lists exactly those prefixes.
+ */
+describe("the privacy page's retention paragraph", () => {
+  it("names the three places the two-day sweep reaps, and no wider claim", () => {
+    expect(src).toContain(
+      "and, after two days, a file left behind that nothing in North points to any more: a file sent with a request form that no lead holds, the photos of a visit that was deleted, or a file given to the estimate editor to read.",
+    );
+    expect(src).not.toContain("an uploaded file nothing in North points to any more");
+    expect(src).toContain("signatures and every other file you upload.");
+    const sweep = readFileSync(join(process.cwd(), "src/lib/storage-sweep.ts"), "utf8");
+    const prefixes = [...sweep.matchAll(/listAll\(svc, [^,]+, `\$\{org\.name\}\/([\w-]+)/g)].map((m) => m[1]);
+    expect([...new Set(prefixes)].sort()).toEqual(["ai-uploads", "appointments", "bug-screenshots", "intake"]);
+    expect(sweep).toContain("const AGE_MS = 48 * 60 * 60 * 1000;");
+  });
+});

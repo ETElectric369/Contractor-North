@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { quoteSettled, type SettledInvoice } from "./quote-settled";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { quoteSettled, saleWentAway, type SettledInvoice } from "./quote-settled";
 
 /** ONE RULE FOR "IS THIS ESTIMATE SETTLED?" (2026-11-04): each why, and what never settles. */
 const Q = { id: "q1", status: "accepted", accepted_at: "2026-06-12T17:00:00Z", created_at: "2026-06-01T17:00:00Z" };
@@ -51,5 +53,57 @@ describe("the settled piles count what is open", () => {
     const src = readFileSync(join(__dirname, "query.ts"), "utf8");
     expect(src).toMatch(/counts\.contracts_not_signed = codeCount\(conR\)/);
     expect(src).not.toMatch(/sqlCount\(conR\)/);
+  });
+});
+
+/**
+ * ONE ANSWER RECORDED ELSEWHERE (cn-v1175, R3), for a draft or a sent estimate only: its lead is Not Sold.
+ * And NO SIBLING RULE (skeptic #78): another estimate accepted on the same job or lead answers nothing for
+ * this one (Keep Both's restored offer; a second estimate for extra work).
+ */
+describe("quoteSettled: the lead's answer, and no sibling rule (cn-v1175)", () => {
+  const DRAFT = { id: "q1", status: "draft", created_at: "2026-11-01T17:00:00Z" };
+  const cases: [string, Parameters<typeof quoteSettled>[0], boolean, string | null][] = [
+    ["a draft whose lead is Not Sold", { quote: DRAFT, lead: { status: "lost" } }, true, "lead-not-sold"],
+    ["a sent one whose lead is Not Sold", { quote: { ...DRAFT, status: "sent" }, lead: { status: "lost" } }, true, "lead-not-sold"],
+    ["a lead still open does not", { quote: DRAFT, lead: { status: "contacted" } }, false, null],
+    ["an accepted estimate's lead going Not Sold does not touch it", { quote: { ...DRAFT, status: "accepted" }, lead: { status: "lost" } }, false, null],
+    // Keep Both (cn-v1168): the earlier estimate is back to sent as an open offer, on the lead the accepted
+    // one converted and on its scheduled job, with no revision of it accepted.
+    [
+      "Keep Both's restored sent estimate on a live job, its lead converted: NOT settled",
+      { quote: { ...DRAFT, status: "sent", revisions: [] }, job: { id: "j1", status: "scheduled" }, jobInvoices: [], quoteInvoices: [], lead: { status: "converted" } },
+      false,
+      null,
+    ],
+    // A second estimate written for extra work on a job that already has an accepted one: still to send.
+    [
+      "a draft for extra work on a job with an accepted estimate: NOT settled",
+      { quote: DRAFT, job: { id: "j1", status: "in_progress" }, jobInvoices: [{ id: "i1", job_id: "j1", status: "sent", invoice_kind: "deposit", created_at: "2026-11-02T17:00:00Z" }], lead: null },
+      false,
+      null,
+    ],
+    ["a revision of it accepted still settles it (the superseded arm)", { quote: { ...DRAFT, status: "sent", revisions: [{ status: "accepted" }] } }, true, "superseded"],
+  ];
+  for (const [name, input, settled, why] of cases) it(name, () => expect(quoteSettled(input)).toEqual({ settled, why }));
+
+  it("the rule takes no siblings and names no sibling why", () => {
+    const src = readFileSync(join(process.cwd(), "src/lib/action-items/quote-settled.ts"), "utf8");
+    expect(src).not.toContain("siblings?:");
+    expect(src).not.toContain('"sibling-accepted"');
+    expect(src).toContain("NO SIBLING RULE");
+  });
+});
+
+describe("saleWentAway: a job whose every estimate ended unsold, with nothing done or billed (cn-v1175, R3)", () => {
+  it.each([
+    ["every estimate declined or expired, no time, no bill", [{ status: "declined" }, { status: "expired" }], false, false, true],
+    ["one still sent", [{ status: "declined" }, { status: "sent" }], false, false, false],
+    ["time on it", [{ status: "declined" }], true, false, false],
+    ["a bill on it", [{ status: "declined" }], false, true, false],
+    ["no estimate at all (a job made directly)", [], false, false, false],
+    ["an accepted one", [{ status: "accepted" }], false, false, false],
+  ] as const)("%s -> %s", (_name, quotes, hasTime, hasInvoice, expected) => {
+    expect(saleWentAway({ quotes: [...quotes], hasTime, hasInvoice })).toBe(expected);
   });
 });

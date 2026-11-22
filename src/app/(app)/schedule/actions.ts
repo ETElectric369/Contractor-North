@@ -1170,8 +1170,9 @@ function planSpan(
  * day without its own, setJobTimes); this sets one day's.
  *
  * `start` "HH:MM" (the length stays, the writer's keep rule: lib/schedule/day-hours nextDayHours, the
- * same the Start box predicts), `length` minutes or "full", or `usual` to hand the day back to the
- * job's usual hours. The job's one day (a one-day plan) IS the job's time, so there the job's hours
+ * same the Start box predicts) or `length` minutes or "full". A day that keeps its own hours is
+ * changed by those two; there is no way back to the job's usual hours (cn-v1175, the owner: "get rid of
+ * the usual hours altogether i really dont think we need it"). The job's one day (a one-day plan) IS the job's time, so there the job's hours
  * move (setJobTimes' writer), and the Google event, the Jobs list and My Day read the same.
  *
  * Through writeScheduleRanges, the one writer: the day's hours land in its segment, every other day
@@ -1181,7 +1182,7 @@ function planSpan(
 export async function setJobDayTimes(
   jobId: string,
   day: string,
-  patch: { start?: string; length?: JobLength; usual?: boolean },
+  patch: { start?: string; length?: JobLength },
 ): Promise<Result & { defaulted?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -1190,11 +1191,10 @@ export async function setJobDayTimes(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day ?? "")) return { ok: false, error: await ws.say("ag_pickADay") };
   const start = patch?.start;
   const length = patch?.length;
-  const usual = patch?.usual === true;
   if (start !== undefined && readHm(start) == null) return { ok: false, error: await ws.say("ag_srv_pickStartTime") };
   const bad = lengthProblem(length);
   if (bad) return { ok: false, error: await ws.say(bad) };
-  if (start === undefined && length === undefined && !usual) return { ok: true };
+  if (start === undefined && length === undefined) return { ok: true };
 
   const { segments, perDayHours, error: segErr } = await loadJobDaySegments(supabase, jobId);
   if (segErr) return { ok: false, error: segErr };
@@ -1207,33 +1207,30 @@ export async function setJobDayTimes(
   const plan = planSpan(j, tz);
 
   // THE JOB'S ONE DAY: its time is the job's.
-  if (!usual && plan && plan.start === day && plan.end === day) {
+  if (plan && plan.start === day && plan.end === day) {
     return writeScheduleRanges(supabase, jobId, segments, start === undefined ? undefined : start.slice(0, 5), plan, length);
   }
   if (!perDayHours) return { ok: false, error: await ws.say("ag_srv_needs0370") };
 
-  let hours: DayHours | null = null;
-  if (!usual) {
-    const wd = workDayMinutes({ start: dayStartHm, end: dayEndHm });
-    const own = hoursOnDay(segments, day) ?? null;
-    const before = jobDayBlock({
-      day,
-      scheduledStart: j.scheduled_start,
-      scheduledEnd: j.scheduled_end,
-      plannedMinutes: j.planned_minutes,
-      tz,
-      wd,
-      dayHours: own,
-    });
-    hours = nextDayHours({
-      before,
-      own: !!own,
-      plannedMinutes: j.planned_minutes ?? null,
-      patch: start !== undefined ? { start: start.slice(0, 5) } : { length: length as JobLength },
-      wd,
-    });
-    if (!hours) return { ok: false, error: await ws.say("ag_srv_timeNoWork") };
-  }
+  const wd = workDayMinutes({ start: dayStartHm, end: dayEndHm });
+  const own = hoursOnDay(segments, day) ?? null;
+  const before = jobDayBlock({
+    day,
+    scheduledStart: j.scheduled_start,
+    scheduledEnd: j.scheduled_end,
+    plannedMinutes: j.planned_minutes,
+    tz,
+    wd,
+    dayHours: own,
+  });
+  const hours = nextDayHours({
+    before,
+    own: !!own,
+    plannedMinutes: j.planned_minutes ?? null,
+    patch: start !== undefined ? { start: start.slice(0, 5) } : { length: length as JobLength },
+    wd,
+  });
+  if (!hours) return { ok: false, error: await ws.say("ag_srv_timeNoWork") };
   // The job's span stays as it is (none stays none): only this day's hours change.
   return writeScheduleRanges(supabase, jobId, setDayHours(segments, day, hours), undefined, plan ?? "none");
 }

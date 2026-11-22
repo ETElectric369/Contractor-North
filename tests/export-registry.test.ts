@@ -275,7 +275,11 @@ describe("the export registry is the whole census of what a company owns", () =>
       if (l.why.length < 10) problems.push(`lookalike ${l.table}.${l.column}: say why`);
     }
     // The omitted ones are the secrets: every token column the migrations made on an exported table is omitted.
-    for (const o of OMITTED_COLUMNS) if (!SECRET_COLUMN_PATTERN.test(o.column)) problems.push(`OMITTED ${o.table}.${o.column} does not look like a secret; is it really one?`);
+    // ONE omission that is not a secret, named here on purpose (cn-v1175, 0412): a bug report's
+    // screenshot kept in the row, a copy of the file the zip already carries, left out so the sheet stays readable.
+    const OMITTED_NOT_A_SECRET = new Set(["bug_reports.screenshot_copy"]);
+    for (const k of OMITTED_NOT_A_SECRET) if (!OMITTED_COLUMNS.some((o) => `${o.table}.${o.column}` === k)) problems.push(`${k} is named as omitted and is not`);
+    for (const o of OMITTED_COLUMNS) if (!SECRET_COLUMN_PATTERN.test(o.column) && !OMITTED_NOT_A_SECRET.has(`${o.table}.${o.column}`)) problems.push(`OMITTED ${o.table}.${o.column} does not look like a secret; is it really one?`);
     expect(problems).toEqual([]);
     expect(SECRET_COLUMN_PATTERN.test("public_token")).toBe(true);
     expect(SECRET_COLUMN_PATTERN.test("must_reset_password")).toBe(true);

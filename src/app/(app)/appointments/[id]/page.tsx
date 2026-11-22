@@ -27,7 +27,8 @@ import { tolerateMissingColumns } from "@/lib/inspection/schema";
 import { kitsReadWords, kitsWithoutMoney, readTaskKits, type TaskKitsRead } from "@/lib/estimate/task-kits";
 import { reportError } from "@/lib/observe";
 import { MarkCompleteButton } from "./mark-complete-button";
-import { MarkDoneRow, PutBackRow, StartAJobRow, WontHappenRow } from "./visit-header-actions";
+import { MarkDoneRow, NotSoldRow, PutBackRow, StartAJobRow, WontHappenRow } from "./visit-header-actions";
+import { isSalesVisit } from "@/lib/appointments/visit-settled";
 import { ACTIONS_ROW_CLS, SectionActionsMenu } from "@/components/section-actions-menu";
 import type { NavTree } from "@/lib/nav-tree";
 import { wontHappenVerdict } from "@/lib/appointments/wont-happen";
@@ -568,7 +569,10 @@ export default async function AppointmentCapturePage({
                   everything else kept. Only while a date exists to clear. */}
               {booked && a.starts_at && <UnscheduleButton id={a.id} menuItem />}
               {a.status === "cancelled" && <PutBackRow id={a.id} />}
-              {booked && <WontHappenRow id={a.id} deletes={wontHappenDeletes} afterHref={home.href} />}
+              {/* ONE WORD FOR AN ENDING (cn-v1175, R8): a sales visit's ending is Not Sold (the record kept);
+                  a work visit (a job day, a service call, the city's inspection) keeps Dismiss. */}
+              {booked && !isSalesVisit(a.type) && <WontHappenRow id={a.id} deletes={wontHappenDeletes} afterHref={home.href} />}
+              {booked && isSalesVisit(a.type) && !a.outcome && <NotSoldRow id={a.id} />}
             </SectionActionsMenu>
           )}
         </div>

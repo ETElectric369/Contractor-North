@@ -155,7 +155,9 @@ describe("the build sorts once, at its return", () => {
       /const sorted = sortActionItems\(\s*folded\.now\.map\(\(it\) => \(\{ \.\.\.it, group: KIND_GROUP\[it\.kind\], level: levelOf\(it, \{ todayStr, tz \}\) \}\)\),\s*todayStr,\s*\);/,
     );
     // Every row, pile and child leaves through the tech's belt (needs-you-rule withoutMoneyForTech).
-    expect(query).toContain("const now = rollUpPiles(sorted, { todayStr, isStaff, leadsOn, counts }).map((it) => withoutMoneyForTech(it, isStaff));");
+    // RE-PINNED ON PURPOSE (cn-v1175): the roll-up takes the Older half's facts too, and the Older fold is split off after it.
+    expect(query).toContain("const rolled = rollUpPiles(sorted, { todayStr, isStaff, leadsOn, counts, olderCounts }).map((it) => withoutMoneyForTech(it, isStaff));");
+    expect(query).toContain("const now = rolled.filter((it) => !it.older);");
     expect(query.match(/sortActionItems\(/g)).toHaveLength(1);
     expect(query.match(/levelOf\(/g)).toHaveLength(1);
   });

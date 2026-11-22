@@ -29,9 +29,9 @@ describe("migration 0411: a daily report belongs to one job", () => {
   const code = noComments(sql);
   const flat = squash(code);
 
-  it("is the next migration, named for what it does, and takes its locks with a timeout", () => {
+  it("is the one 0411, named for what it does, and takes its locks with a timeout", () => {
     expect(names.filter((n) => n.startsWith("0411_"))).toEqual(["0411_a_daily_report_belongs_to_one_job.sql"]);
-    expect(names[names.length - 1]).toBe("0411_a_daily_report_belongs_to_one_job.sql");
+    // The newest-migration line moved to migration-0412.test.ts the day 0412 was written.
     expect(code).toContain("set local lock_timeout = '3s';");
     expect(code).toContain("set local statement_timeout = '15s';");
     expect(code).not.toMatch(/^\s*(begin|commit)\s*;/im);

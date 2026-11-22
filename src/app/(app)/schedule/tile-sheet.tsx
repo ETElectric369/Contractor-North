@@ -392,16 +392,6 @@ function JobSheet({
     return res;
   }
 
-  const usual = useSheetWrite(voice);
-  function backToUsual() {
-    usual.run(async () => {
-      const res = await setJobDayTimes(job.id, day, { usual: true });
-      if (!res.ok) return res.error ?? t("ag_cal_dayHoursDidntChange");
-      router.refresh();
-      return null;
-    }, t("ag_cal_dayHoursDidntChangeOffline"));
-  }
-
   async function move(to: string) {
     const from = onPlan ? day : null;
     let res = await moveJobDay(job.id, from, to);
@@ -480,14 +470,6 @@ function JobSheet({
               onPending={voice?.pending}
               onRefusal={voice?.refusal}
             />
-            {thisDay && dayHours && canEdit && (
-              <div className="mt-2">
-                <Button type="button" variant="outline" disabled={usual.pending} onClick={backToUsual}>
-                  {usual.pending ? t("ag_btn_saving") : t("ag_cal_btn_useUsualHours")}
-                </Button>
-                {usual.error && <p className="mt-1 text-xs text-red-600">{usual.error}</p>}
-              </div>
-            )}
           </>
         ) : (
           // A day kept as history (worked, its plan cleared): the time belongs to a planned day.

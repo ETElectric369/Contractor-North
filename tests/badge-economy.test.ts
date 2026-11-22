@@ -6,6 +6,7 @@ import { supplierPaperActionItem } from "@/lib/action-items/supplier-paper-item"
 import { supplierPayActionItems } from "@/lib/action-items/supplier-pay-item";
 import { PAY_CARD_WINDOW_DAYS } from "@/app/(app)/bills/supplier-pay-due";
 import { PILE_DEFS, codeCount, rollUpPiles, sqlCount } from "@/lib/action-items/piles";
+import { summarize } from "@/lib/action-items/needs-you-rule";
 
 // THE BADGE INVARIANT (src/lib/action-items/types.ts): a number on chrome =
 // distinct items needing a HUMAN DECISION TODAY that the app cannot defer,
@@ -32,12 +33,15 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(querySrc).not.toContain("due_date.is.null");
   });
 
-  it("the badge count stays derived from the list (the never-disagree doctrine): it is Now's length, never the fold's", () => {
-    expect(querySrc).toContain("(await getActionItems(ctx)).now.length");
+  // RE-PINNED ON PURPOSE (cn-v1175, the owner's pick: every number counts THINGS): the badge is the
+  // board's own total, summarize() over Now, never the length of Now and never either fold.
+  it("the badge count stays derived from the list (the never-disagree doctrine): it is the things on Now, never a fold's", () => {
+    expect(querySrc).toContain("return summarize((await getActionItems(ctx)).now, { isStaff: ctx.isStaff }).total;");
+    expect(querySrc).not.toContain("older.length");
     expect(querySrc).not.toContain("waiting.length");
     // One build hands back both lists (one cache() fan-out for the badge and the page).
     expect(querySrc).toMatch(/const actionItemsForRequest = cache\(\s*\(todayStr: string, isStaff: boolean, userId: string, tz: string, off: string\): Promise<NeedsYou> =>/);
-    expect(querySrc).toContain("return { now, waiting: fold };");
+    expect(querySrc).toContain("return { now, waiting: fold, older: olderRows };");
   });
 
   it("tasks are gone from Needs You's grammar entirely, and so is the Convert verb (Wave 1, W1-16)", () => {
@@ -105,7 +109,9 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(AFFORDANCES.time_stray).toEqual(["open"]);
   });
 
-  it("a pile counts ONE on the badge: seven estimates not sent add 1, a lone one stays a plain row", () => {
+  // RE-PINNED ON PURPOSE (cn-v1175): a pile is ONE ROW and counts its THINGS: seven estimates not sent
+  // are one row that adds 7 (the owner: "it says 3 above and there are a bunch down there").
+  it("a pile is one row that counts its things: seven estimates not sent are one row and add 7, a lone one stays a plain row", () => {
     const draft = (i: number): ActionItem => ({
       id: `qdraft-q${i}`,
       kind: "quote_draft",
@@ -121,6 +127,7 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(seven).toHaveLength(1);
     expect(seven[0].title).toBe("Estimates Not Sent · 7");
     expect(seven[0].affordances).toEqual(["open"]);
+    expect(summarize(seven, { isStaff: true }).total).toBe(7);
     const one = rollUpPiles([draft(1)], { todayStr: "2026-09-27", isStaff: true });
     expect(one).toHaveLength(1);
     expect(one[0].id).toBe("qdraft-q1");

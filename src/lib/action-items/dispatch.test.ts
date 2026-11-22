@@ -43,7 +43,7 @@ const PAYLOAD = { date: "2026-10-03", assignee: "person-1", reason: "Waiting on 
 describe("every (kind, verb) the row table can send maps to a registry action", () => {
   const rows: ActionItem[] = (Object.keys(AFFORDANCES) as ActionKind[]).flatMap((k) => [
     built(k, { phone: "555-0100", holdReason: null, targetId: "job-9", openToBuy: 3, payee: "Metro Supply" }),
-    built(k, { affordances: [...new Set([...AFFORDANCES[k], "snooze", "schedule", ...(k === "inspection_writeup" ? ["wontHappen"] : [])])] as Affordance[], waitKey: `${k}:job-1`, targetId: "job-9" }),
+    built(k, { affordances: [...new Set([...AFFORDANCES[k], "snooze", "schedule"])] as Affordance[], waitKey: `${k}:job-1`, targetId: "job-9" }),
   ]);
   const sent: [ActionKind, Affordance, string][] = [];
   for (const item of rows)
@@ -63,7 +63,8 @@ describe("every (kind, verb) the row table can send maps to a registry action", 
       "appointment:do",
       "appointment:dismiss",
       "inspection_writeup:dismiss",
-      "inspection_writeup:wontHappen",
+      // cn-v1175 (R7): Move to Another Day on a write-up row (wontHappen left the row with Dismiss, R8)
+      "inspection_writeup:snooze",
       "organize:dismiss",
       "quote_awaiting:dismiss",
       "quote_accepted:schedule",
@@ -114,11 +115,15 @@ describe("the mappings that matter", () => {
   });
 
   it("Dismiss on an inspection row and on a visit nobody closed out is the visit page's own door, by its registry action, and Nort cannot reach it", () => {
-    expect(map("inspection_writeup", "wontHappen", "appt-1")).toEqual({ name: "appointment.wontHappen", input: { id: "appt-1" } });
+    // cn-v1175 (R8): no Dismiss on a sales visit, and the verb it sent is gone from the grammar
+    // ("wontHappen" is no longer an Affordance: tsc refuses it), so dispatch-map has no branch for it.
+    expect(readFileSync(join(process.cwd(), "src/lib/action-items/types.ts"), "utf8")).not.toMatch(/\|\s*"wontHappen"/);
+    // Its Move to Another Day is the visit's own move, on the day picked at the time it had.
+    expect(resolveRowVerb("inspection_writeup", "snooze", "appt-1", { date: "2026-12-01" }, "14:30")).toEqual({ name: "appointment.update", input: { id: "appt-1", starts_at: "2026-12-01T14:30" } });
+    expect(resolveRowVerb("inspection_writeup", "snooze", "appt-1", { date: "2026-12-01" }, null)).toEqual({ name: "appointment.update", input: { id: "appt-1", starts_at: "2026-12-01T09:00" } });
     // ONE DEED (cn-v1166): the plain visit row's Dismiss is the same door, never a bare cancel.
     expect(map("appointment", "dismiss", "appt-1")).toEqual({ name: "appointment.wontHappen", input: { id: "appt-1" } });
     expect(map("inspection_writeup", "dismiss", "appt-1")).toEqual({ name: "appointment.setOutcome", input: { id: "appt-1", outcome: "lost" } });
-    expect(map("inquiry", "wontHappen", "lead-1")).toBeNull();
     const agent = readFileSync(join(process.cwd(), "src/lib/actions/agent-tools.ts"), "utf8");
     expect(agent).not.toContain("appointment.wontHappen");
   });
@@ -177,7 +182,7 @@ describe("the mappings that matter", () => {
     // The Couldn't Check line, a bare id and an empty one map to nothing (never a guess at the record).
     for (const id of ["receipts-unread", "doc-1", "receipt-"]) expect(map("receipt_unbilled", "notACost", id), id).toBeNull();
     // It is the row's ONLY verb: nothing else a receipt row could be sent maps anywhere.
-    for (const verb of ["do", "dismiss", "assign", "snooze", "schedule", "wontHappen"] as Affordance[]) expect(map("receipt_unbilled", verb, "receipt-doc-1"), verb).toBeNull();
+    for (const verb of ["do", "dismiss", "assign", "snooze", "schedule"] as Affordance[]) expect(map("receipt_unbilled", verb, "receipt-doc-1"), verb).toBeNull();
     // And no other kind of row reaches the door, whatever its id looks like.
     for (const kind of (Object.keys(AFFORDANCES) as ActionKind[]).filter((k) => k !== "receipt_unbilled")) expect(map(kind, "notACost", "receipt-doc-1"), kind).toBeNull();
     // A staff write the registry has, taking the paper's id and nothing else.

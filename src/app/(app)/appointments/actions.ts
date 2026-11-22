@@ -1503,7 +1503,11 @@ export async function setAppointmentTitle(id: string, title: string): Promise<Re
 export async function setAppointmentOutcome(
   id: string,
   outcome: "won" | "lost" | "no_bid" | null,
-): Promise<Result & { leadMarked?: boolean; leadReopened?: boolean }> {
+  /** `offSchedule: true` ONLY from the person-tapped Not Sold doors that offer its Undo (the visit page's
+   *  Not Sold row, the Inspections row's Not Sold). Every other caller, the assistant's appointment.setOutcome
+   *  among them, records the outcome and cancels nothing (skeptic #78: that route has no confirm and no Undo). */
+  opts?: { offSchedule?: boolean },
+): Promise<Result & { leadMarked?: boolean; leadReopened?: boolean; offSchedule?: { previousStatus: string; note?: string } }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const ws = wordsOf(ctx.supabase, ctx.userId);
@@ -1513,7 +1517,7 @@ export async function setAppointmentOutcome(
     // as last touched months before the day its answer was given.
     .update({ outcome, outcome_at: outcome ? new Date().toISOString() : null, updated_at: new Date().toISOString() })
     .eq("id", id)
-    .select("id, inquiry_id");
+    .select("id, inquiry_id, status, starts_at");
   if (error) return { ok: false, error: dbError(error) };
   // Silent-write law: a zero-row update is a 204, and "saved" without a row is the failure
   // this whole fix exists to end.
@@ -1543,6 +1547,27 @@ export async function setAppointmentOutcome(
       warning = await ws.say("ag_srv_leadNotReopened");
     }
   }
+  /* NOT SOLD BEFORE IT HAPPENED COMES OFF THE SCHEDULE (cn-v1175, R8). Not Sold is a sales visit's one
+     ending now, whether or not it took place (Dismiss is no longer offered on one). A visit still booked
+     ahead, or waiting for a day, that is answered Not Sold is taken off the calendar by the status door
+     (cancelled and kept, its pick-a-time link withdrawn), so nobody drives out to it; the record stays.
+     What it was is handed back, so the Undo can put it back on the schedule. A visit whose day has come
+     or gone keeps its status: it may have happened, and the answer says how it ended. Only when the
+     caller asks (opts.offSchedule): the two person-tapped doors that carry the Undo; never the assistant. */
+  let offSchedule: { previousStatus: string; note?: string } | undefined;
+  const row = data[0] as { status?: string | null; starts_at?: string | null };
+  if (opts?.offSchedule === true && (outcome === "lost" || outcome === "no_bid")) {
+    const at = row.starts_at ? Date.parse(row.starts_at) : NaN;
+    const ahead = !row.starts_at || (Number.isFinite(at) && at > Date.now());
+    if ((row.status === "scheduled" || row.status === "proposed") && ahead) {
+      const off = await setAppointmentStatus(id, "cancelled");
+      if (off.ok) offSchedule = { previousStatus: off.previousStatus ?? String(row.status), ...(off.note ? { note: off.note } : {}) };
+      else {
+        reportError("appointments:outcome:offSchedule", off.error, { appointmentId: id });
+        warning = warning ?? (await ws.say("ag_srv_apptDidntChange"));
+      }
+    }
+  }
   if (inquiryId) revalidatePath("/leads");
   revalidatePath("/planner");
   revalidatePath("/inspections");
@@ -1551,6 +1576,7 @@ export async function setAppointmentOutcome(
     ok: true,
     ...(leadMarked ? { leadMarked: true } : {}),
     ...(leadReopened ? { leadReopened: true } : {}),
+    ...(offSchedule ? { offSchedule } : {}),
     ...(warning ? { warning } : {}),
   };
 }

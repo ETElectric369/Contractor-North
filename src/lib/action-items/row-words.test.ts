@@ -115,7 +115,9 @@ describe("one door, one name", () => {
     const visit = read("src/app/(app)/appointments/[id]/visit-header-actions.tsx");
     expect(visit).toContain('t("vp_btn_wontHappen")');
     expect(visit).toContain("await wontHappenAppointment(id)");
-    expect(read("src/lib/action-items/row-buttons.ts")).toContain('ending("wontHappen", L("ny_btn_didntHappen")');
+    // cn-v1175 (R8): a WORK visit's row keeps Dismiss (the plain visit row); a sales visit's is Not Sold.
+    expect(read("src/lib/action-items/row-buttons.ts")).toContain('ending("dismiss", L("ny_btn_didntHappen")');
+    expect(read("src/lib/action-items/row-buttons.ts")).not.toContain('ending("wontHappen"');
   });
 });
 

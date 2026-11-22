@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   BILLED_JOB_COLUMNS,
   ESTIMATE_LINK_COLUMNS,
+  LEAD_JOB_COLUMNS,
+  OFFER_JOB_COLUMNS,
   ORG_COLUMNS,
   VISIT_COLUMNS,
   VISIT_READ_CAP,
@@ -80,8 +82,10 @@ describe("readInspectionBuckets", () => {
       ["order", ["starts_at", { ascending: false, nullsFirst: true }]],
       ["limit", [VISIT_READ_CAP]],
     ]);
+    // cn-v1175: the lead rides with the day it closed (the one visit rule's lead-closed arm) and its customer
+    // record (the offer's, R5: a link, never a name).
     expect(VISIT_COLUMNS).toBe(
-      "id, type, title, status, starts_at, ends_at, created_at, location, capture, inquiry_id, job_id, customer_id, outcome, customers(name), inquiries(name)",
+      "id, type, title, status, starts_at, ends_at, created_at, location, capture, inquiry_id, job_id, customer_id, outcome, customers(name), inquiries(name, converted_at, customer_id)",
     );
     expect(byTable.quotes).toEqual([
       ["select", [ESTIMATE_LINK_COLUMNS]],
@@ -155,4 +159,55 @@ describe("readInspectionBuckets", () => {
       expect(r.buckets).toEqual({ toWriteUp: [], upcoming: [], missed: [], filed: [] });
     });
   }
+});
+
+/**
+ * cn-v1175: THE TWO READS BEHIND THE ONE VISIT RULE AND THE OFFER. The jobs made from the visits' leads
+ * (when each lead closed) and the jobs of the open visits' customer records (the offer, R5). Made-up
+ * people and streets.
+ */
+describe("readInspectionBuckets: when a lead closed, and the offer", () => {
+  it("a visit before its lead became a job files; the jobs read names the leads and no money column", async () => {
+    const { client, calls } = standIn(
+      {
+        appointments: [visit("v-before", { inquiry_id: "inq-9", starts_at: "2026-11-01T18:00:00Z" }), visit("v-after", { inquiry_id: "inq-9", starts_at: "2026-11-08T18:00:00Z" })],
+        jobs: [{ inquiry_id: "inq-9", created_at: "2026-11-05T18:00:00Z" }],
+      },
+      { org: ORG },
+    );
+    const r = await readInspectionBuckets(client, { now: NOW });
+    expect(r.error).toBeNull();
+    expect(r.buckets.filed.map((v) => v.id)).toEqual(["v-before"]);
+    expect(r.buckets.toWriteUp.map((v) => v.id)).toEqual(["v-after"]);
+    const leadRead = calls.find((c) => c.table === "jobs" && c.ops.some(([op, a]) => op === "in" && a[0] === "inquiry_id"))!;
+    expect(leadRead.ops[0]).toEqual(["select", [LEAD_JOB_COLUMNS]]);
+    for (const cols of [LEAD_JOB_COLUMNS, OFFER_JOB_COLUMNS]) expect(cols).not.toMatch(/\*|amount|total|price|rate/);
+  });
+
+  it("a failed lead-jobs read is the page's failure, never a lead closed on a guess", async () => {
+    const { client } = standIn({ appointments: [visit("v-1", { inquiry_id: "inq-1" })] }, { org: ORG, fail: "jobs" });
+    const r = await readInspectionBuckets(client, { now: NOW });
+    expect(r.error?.where).toBe("leadJobs");
+  });
+
+  it("THE OFFER: a job made for the visit's own customer record after it is offered; by its lead's record too; never by a name", async () => {
+    const { client } = standIn(
+      {
+        appointments: [
+          visit("v-own", { customer_id: "cust-1" }),
+          visit("v-lead", { inquiry_id: "inq-2", inquiries: { name: "Dana Rook", converted_at: null, customer_id: "cust-2" } }),
+          visit("v-name", { customers: { name: "Sam Tillery" } }),
+        ],
+        jobs: [
+          { id: "job-1", customer_id: "cust-1", created_at: "2026-11-06T18:00:00Z", job_number: "J-900", name: "Larkspur panel" },
+          { id: "job-2", customer_id: "cust-2", created_at: "2026-11-07T18:00:00Z", job_number: "J-901", name: "Snowbell deck" },
+        ],
+      },
+      { org: ORG },
+    );
+    const r = await readInspectionBuckets(client, { now: NOW });
+    expect(r.offers.get("v-own")).toMatchObject({ kind: "job", id: "job-1", label: "J-900 Larkspur panel" });
+    expect(r.offers.get("v-lead")).toMatchObject({ kind: "job", id: "job-2" });
+    expect(r.offers.has("v-name")).toBe(false);
+  });
 });

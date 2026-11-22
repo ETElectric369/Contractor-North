@@ -43,7 +43,9 @@ describe("the table", () => {
       [row("quote_accepted", { affordances: ["schedule", "open"], targetId: "job-1" }), "Pick a Day"],
       [row("inquiry"), "Schedule"],
       [row("appointment"), "Close Out"],
-      [row("inspection_writeup"), "Open the Inspection"],
+      // cn-v1175 (R7): Write It Up, boxed; it still opens the inspection (never an estimate).
+      [row("inspection_writeup"), "Write It Up"],
+      [row("inspection_writeup", { wonNoJob: true }), "Won · Pick the Job"],
       [row("job_to_schedule"), "Pick a Day"],
       [row("materials_needed", { openToBuy: 6 }), "Buy Materials · 6 Open"],
       [row("materials_needed", { openToBuy: 1 }), "Buy Materials · 1 Open"],
@@ -199,7 +201,7 @@ describe("the laws", () => {
   // one name on every screen, and its confirm says plainly that an empty visit is deleted. Every
   // other row still says what its ending records (Lost, Not Needed, Cancel, Set Aside…).
   const visitDismiss = (item: ActionItem, d: RowDoor) =>
-    d.act.type === "confirm" && ((item.kind === "appointment" && d.act.verb === "dismiss") || d.act.verb === "wontHappen");
+    d.act.type === "confirm" && item.kind === "appointment" && d.act.verb === "dismiss";
   it("the words Dismiss and Delete never appear but on a visit's Dismiss; every label is Title Case", () => {
     for (const item of every())
       for (const d of allDoors(rowButtons(item, staff))) {
@@ -234,8 +236,9 @@ describe("an inspection to write up can be OPENED, not only written up or called
     // cn-v1071 put "Open the Visit" under ⋯ when every door on this row led to a NEW estimate. Since
     // cn-v1157 the row's one button is that same page (the feeder's href is /appointments/<id>), so
     // the ⋯ row was the same door twice under a second name (skeptic #60): it is gone.
+    // cn-v1175 (R7): the button says Write It Up, and it is still that page.
     const b = rowButtons(row("inspection_writeup", { id: "appt-9", href: "/appointments/appt-9" }), { leadsOn: true, isStaff: true });
-    expect(b.primary).toEqual({ label: "Open the Inspection", act: { type: "open", href: "/appointments/appt-9" } });
+    expect(b.primary).toEqual({ label: "Write It Up", act: { type: "open", href: "/appointments/appt-9" } });
     expect(b.more.map((d) => d.label)).toEqual(["Not Sold"]);
     // No second door, under any name, opens a page: exactly one "open" on the whole row.
     const opens = allDoors(b).filter((d) => d.act.type === "open");
@@ -247,32 +250,27 @@ describe("an inspection to write up can be OPENED, not only written up or called
     expect(q.slice(at, q.indexOf("writeUpApptIds.add", at))).toContain("href: `/appointments/${a.id}`");
   });
 
-  it("Write It Up is gone from the row; the primary button goes to the row's own href (the visit)", () => {
+  it("Write It Up is the row's one button (cn-v1175, R7), and it opens the visit, never an estimate", () => {
     const item = row("inspection_writeup", { id: "appt-9", href: "/appointments/appt-9" });
     const b = rowButtons(item, staff);
-    expect(b.primary).toEqual({ label: "Open the Inspection", act: { type: "open", href: "/appointments/appt-9" } });
-    expect(allDoors(b).map((d) => d.label)).not.toContain("Write It Up");
+    expect(b.primary).toEqual({ label: "Write It Up", act: { type: "open", href: "/appointments/appt-9" } });
   });
 
-  it("⋯ gains Dismiss only when the row carries the wontHappen verb (a visit not yet completed)", () => {
-    const withIt = rowButtons(row("inspection_writeup", { affordances: ["dismiss", "wontHappen", "open"] }), staff);
-    expect(withIt.more.map((d) => d.label)).toEqual(["Dismiss", "Not Sold"]);
-    const door = withIt.more.find((d) => d.label === "Dismiss")!;
-    expect(door.act).toMatchObject({ type: "confirm", verb: "wontHappen", title: "Dismiss This Visit?", button: "Dismiss" });
-    const without = rowButtons(row("inspection_writeup", { affordances: ["dismiss", "open"] }), staff);
-    expect(without.more.map((d) => d.label)).not.toContain("Dismiss");
+  it("NO DISMISS ON A SALES VISIT (cn-v1175, R8): ⋯ is Move to Another Day (while it has a day) and Not Sold", () => {
+    const booked = rowButtons(row("inspection_writeup", { affordances: ["snooze", "dismiss", "open"], targetId: "14:30" }), staff);
+    expect(booked.more.map((d) => d.label)).toEqual(["Move to Another Day…", "Not Sold"]);
+    expect(booked.more[0].act).toMatchObject({ type: "comeBack", verb: "snooze", askWhy: false, button: "Move to Another Day" });
+    const done = rowButtons(row("inspection_writeup", { affordances: ["dismiss", "open"] }), staff);
+    expect(done.more.map((d) => d.label)).toEqual(["Not Sold"]);
+    // The old verb is gone from the grammar (cn-v1175: no row sends it); no write-up row says Dismiss.
+    expect(allDoors(done).map((d) => d.label)).not.toContain("Dismiss");
   });
 
-  it("both visit endings are one Dismiss: the same title, button and body (cn-v1166)", () => {
+  it("a WORK visit nobody closed out keeps Dismiss: the visit page's one door (cn-v1166)", () => {
     const plain = rowButtons(row("appointment"), staff).more[0];
-    const writeUp = rowButtons(row("inspection_writeup", { affordances: ["dismiss", "wontHappen", "open"] }), staff).more[0];
-    for (const d of [plain, writeUp]) {
-      expect(d.label).toBe("Dismiss");
-      expect(d.act).toMatchObject({ type: "confirm", title: "Dismiss This Visit?", button: "Dismiss" });
-      if (d.act.type === "confirm") expect(d.act.body).toMatch(/off the schedule\. It is deleted if nothing is on it, otherwise cancelled and kept on file\.$/);
-    }
-    expect(plain.act).toMatchObject({ verb: "dismiss" });
-    expect(writeUp.act).toMatchObject({ verb: "wontHappen" });
+    expect(plain.label).toBe("Dismiss");
+    expect(plain.act).toMatchObject({ type: "confirm", verb: "dismiss", title: "Dismiss This Visit?", button: "Dismiss" });
+    if (plain.act.type === "confirm") expect(plain.act.body).toMatch(/off the schedule\. It is deleted if nothing is on it, otherwise cancelled and kept on file\.$/);
   });
 });
 
@@ -391,7 +389,7 @@ describe("the doors in Spanish", () => {
   const every = (): ActionItem[] =>
     (Object.keys(AFFORDANCES) as ActionKind[]).flatMap((k) => [
       row(k, { phone: "555-0100", waitKey: `${k}:x`, holdReason: "Why", payee: "Bayberry Supply", openToBuy: 2, targetId: "job-1", alreadyInvoiced: { kind: "job", id: "j1" } }),
-      row(k, { affordances: [...AFFORDANCES[k], "snooze", "schedule", "wontHappen"] as ActionItem["affordances"], waitKey: `${k}:y`, chip: "Billed, Not Paid" }),
+      row(k, { affordances: [...AFFORDANCES[k], "snooze", "schedule"] as ActionItem["affordances"], waitKey: `${k}:y`, chip: "Billed, Not Paid" }),
       row(k, { chip: "Clock Left Running", paper: "organize", send: { kind: "quote", id: "q1", number: "E-012", customerName: "Dana", amount: 1200, lineCount: 4, openHref: "/quotes/q1" } }),
     ]);
 
@@ -430,7 +428,7 @@ describe("the doors in Spanish", () => {
       [row("quote_awaiting"), "Enviar de Nuevo"],
       [row("inquiry"), "Agendar"],
       [row("appointment"), "Cerrar la Visita"],
-      [row("inspection_writeup"), "Abrir la Inspección"],
+      [row("inspection_writeup"), "Redactarla"],
       [row("job_to_schedule"), "Elegir un Día"],
       [row("materials_needed", { openToBuy: 6 }), "Comprar Materiales · 6 Pendientes"],
       // One is singular (the paired …One key).
@@ -455,7 +453,8 @@ describe("the doors in Spanish", () => {
     expect(labels(rowButtons(row("inquiry", { phone: "555-0100" }), es).more)).toEqual(["Llamar", "No Vendido"]);
     expect(rowButtons(row("inquiry", { phone: "555-0100" }), es).more[1].act).toMatchObject({ title: "¿No Vendido?", button: "Marcar como No Vendido" });
     expect(rowButtons(row("inquiry", { phone: "555-0100" }), esOff).primary?.label).toBe("Devolver la Llamada");
-    expect(labels(rowButtons(row("inspection_writeup", { affordances: ["dismiss", "wontHappen", "open"] }), es).more)).toEqual(["Descartar", "No Vendida"]);
+    // cn-v1175 (R8): no Dismiss on a sales visit; Move to Another Day and Not Sold.
+    expect(labels(rowButtons(row("inspection_writeup", { affordances: ["snooze", "dismiss", "open"] }), es).more)).toEqual(["Mover a Otro Día…", "No Vendida"]);
     expect(labels(rowButtons(row("job_to_schedule"), es).more)).toEqual(["Asignar", "Terminar", "Cancelar"]);
     expect(rowButtons(row("invoice_draft"), es).more[0]).toMatchObject({ label: "Apartar hasta…", act: { type: "comeBack", button: "Apartar" } });
   });

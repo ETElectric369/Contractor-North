@@ -27,6 +27,8 @@ import { PullToRefresh } from "@/components/pull-to-refresh";
 import { ShellNavigationWatch } from "@/components/shell-navigation-watch";
 import { PageOpenCounter } from "@/components/page-open-counter";
 import { BugReporter } from "@/components/bug-reporter";
+import { FenceReportHost } from "@/app/(app)/timeclock/fence-report-host";
+import { asksForDailyReport } from "@/lib/daily-report-rule";
 import { OrgPlaceBias } from "@/components/org-place-bias";
 import { orgPlaceBias } from "@/lib/geocode-server";
 import { isPlatformAdmin } from "@/lib/platform-admin";
@@ -396,6 +398,8 @@ export default async function AppLayout({
 
   const badges: Promise<Record<string, number>> = (async () => {
     try {
+      // THE THINGS ON THE BOARD (cn-v1175): a pile is its count, the NOW rows are in it, the Waiting and
+      // Older folds are not; the one function the board's header and tiles read (needs-you-rule summarize).
       const needsAction = await getActionItemsCount({
         todayStr: todayStrInTz(tz),
         // Pass the tz (audit v921 review blocker): /planner passes it, and without it here the
@@ -569,6 +573,10 @@ export default async function AppLayout({
       <TapToPayAwareness />
       {/* Report a Problem is everyone's (Wave 0): a tech hits the bugs first. */}
       <BugReporter orgId={profile.org_id} platformAdmin={platformAdmin} />
+      {/* THE FENCE'S DAILY REPORT (cn-v1175): the sheet the fence's own clock-out asks for through one
+          window event. Here, never keyed and outside the open-shift branch, because the refresh after
+          a clock-out unmounts the monitor. Who is asked is the one rule, over what this layout read. */}
+      <FenceReportHost asks={asksForDailyReport(profile.crew_lead, features)} />
       {/* WHERE THE COMPANY IS, for every address box (lib/place-bias). Streamed behind the shell:
           on a cache miss this waits on Google up to 2.5 s, and a page is never held for that —
           a box that opens before it arrives searches unbiased, as every box did before today. */}

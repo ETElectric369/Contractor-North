@@ -1,15 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { Image as ImageIcon, AlertTriangle, Check, X, RotateCcw } from "lucide-react";
+import { Image as ImageIcon, AlertTriangle, Check, X, RotateCcw, Clock } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { EmptyState } from "@/components/page-header";
 import { formatDate } from "@/lib/utils";
 import { useToast } from "@/components/toast";
 import { setBugReportStatus, type BugReport } from "@/app/(app)/bug-report-actions";
 
-const TABS = [
+/** LATER (cn-v1175): an idea or a request nobody is building now. It is not open (no count on the
+ *  door, no line in the digest) and not closed (its screenshot stays). The owner: "the bug report can
+ *  always stay current with the newest report only to remove all clutter"; "go for the later list". */
+export const TABS = [
   { key: "open", label: "Open" },
+  { key: "later", label: "Later" },
   { key: "fixed", label: "Fixed" },
   { key: "wontfix", label: "Won't Fix" },
   { key: "all", label: "All" },
@@ -19,9 +23,18 @@ const statusOf = (r: BugReport) => r.status || "open";
 
 /** `readError`: the list read failed (cn-v1130). The page says so instead of "All clear" — a
  *  failed read is never an empty run — and the Open tab shows no count it does not know. */
-export function BugList({ initial, readError = null }: { initial: BugReport[]; readError?: string | null }) {
+export function BugList({
+  initial,
+  readError = null,
+  initialTab = "open",
+}: {
+  initial: BugReport[];
+  readError?: string | null;
+  /** The tab it opens on (Open unless a test or a link says otherwise). */
+  initialTab?: (typeof TABS)[number]["key"];
+}) {
   const [reports, setReports] = useState<BugReport[]>(initial);
-  const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("open");
+  const [tab, setTab] = useState<(typeof TABS)[number]["key"]>(initialTab);
   const toast = useToast();
 
   async function setStatus(id: string, status: string) {
@@ -77,6 +90,7 @@ export function BugList({ initial, readError = null }: { initial: BugReport[]; r
     .filter((r) => tab === "all" || statusOf(r) === tab)
     .filter((r) => !orgFilter || r.org === orgFilter);
   const openCount = reports.filter((r) => statusOf(r) === "open").length;
+  const laterCount = reports.filter((r) => statusOf(r) === "later").length;
 
   return (
     <div>
@@ -127,6 +141,7 @@ export function BugList({ initial, readError = null }: { initial: BugReport[]; r
             <span className="relative z-10">
               {t.label}
               {t.key === "open" && !readError && openCount > 0 ? ` (${openCount})` : ""}
+              {t.key === "later" && !readError && laterCount > 0 ? ` (${laterCount})` : ""}
             </span>
           </button>
         ))}
@@ -137,7 +152,7 @@ export function BugList({ initial, readError = null }: { initial: BugReport[]; r
       ) : shown.length === 0 ? (
         <EmptyState
           icon={Check}
-          title={tab === "open" ? "Nothing open" : "Nothing here"}
+          title={tab === "open" ? "Nothing open" : tab === "later" ? "Nothing for later" : "Nothing here"}
           description={tab === "open" ? "All clear — no open bug reports to triage." : undefined}
         />
       ) : (
@@ -147,7 +162,7 @@ export function BugList({ initial, readError = null }: { initial: BugReport[]; r
             return (
               <li key={r.id} className="flex items-start justify-between gap-3 px-4 py-3">
                 <div className="min-w-0">
-                  <div className={`text-sm ${st !== "open" ? "text-slate-400 line-through" : "text-slate-800"}`}>{r.note}</div>
+                  <div className={`text-sm ${st === "open" ? "text-slate-800" : st === "later" ? "text-slate-500" : "text-slate-400 line-through"}`}>{r.note}</div>
                   <div className="mt-0.5 truncate text-xs text-slate-400">
                     {r.org ? `${r.org} · ` : ""}
                     {r.page ?? ""}
@@ -168,6 +183,23 @@ export function BugList({ initial, readError = null }: { initial: BugReport[]; r
                       </button>
                       <button onClick={() => setStatus(r.id, "wontfix")} title="Won't fix" className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-700">
                         <X className="h-3.5 w-3.5" /> Won&apos;t
+                      </button>
+                      <button onClick={() => setStatus(r.id, "later")} title="Later" className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-700">
+                        <Clock className="h-3.5 w-3.5" /> Later
+                      </button>
+                    </>
+                  ) : st === "later" ? (
+                    // A Later report closes in ONE tap (skeptic #78): Fixed and Won't, the open row's own
+                    // doors, beside Re-open, through the same setBugReportStatus.
+                    <>
+                      <button onClick={() => setStatus(r.id, "fixed")} title="Mark fixed" className="flex items-center gap-1 text-xs text-slate-400 hover:text-green-600">
+                        <Check className="h-3.5 w-3.5" /> Fixed
+                      </button>
+                      <button onClick={() => setStatus(r.id, "wontfix")} title="Won't fix" className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-700">
+                        <X className="h-3.5 w-3.5" /> Won&apos;t
+                      </button>
+                      <button onClick={() => setStatus(r.id, "open")} title="Re-open" className="flex items-center gap-1 text-xs text-slate-400 hover:text-amber-600">
+                        <RotateCcw className="h-3.5 w-3.5" /> Re-open
                       </button>
                     </>
                   ) : (

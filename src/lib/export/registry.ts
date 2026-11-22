@@ -487,6 +487,11 @@ export const OMITTED_COLUMNS: readonly OmittedColumn[] = [
   { table: "invoices", column: "public_token", why: "the invoice's pay link; it opens the invoice to anyone holding it" },
   { table: "customer_portal_access", column: "token", why: "the portal link itself; the row's flags say whether the door is open" },
   { table: "voice_invites", column: "token", why: "the recording door's link" },
+  {
+    table: "bug_reports",
+    column: "screenshot_copy",
+    why: "the report's screenshot as one long line of text (0412); the screenshot file itself is already in the zip, and a cell that long would make the sheet unreadable",
+  },
 ];
 
 /**

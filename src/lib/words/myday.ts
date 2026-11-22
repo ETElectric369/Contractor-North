@@ -13,7 +13,7 @@ import type { WordCatalog } from "./types";
  */
 export const words: WordCatalog = {
   prefix: "md_",
-  files: ["src/app/(app)/planner/page.tsx", "src/app/(app)/planner/now-card.tsx", "src/app/(app)/planner/now-tasks.tsx", "src/app/(app)/planner/your-list.tsx", "src/app/(app)/planner/do-today-button.tsx"],
+  files: ["src/app/(app)/planner/page.tsx", "src/app/(app)/planner/now-card.tsx", "src/app/(app)/planner/now-tasks.tsx", "src/app/(app)/planner/your-list.tsx", "src/app/(app)/planner/do-today-button.tsx", "src/app/(app)/planner/job-task-rows.tsx"],
   sameInBoth: [],
   en: {
     // ── the page ──
@@ -93,6 +93,12 @@ export const words: WordCatalog = {
     md_undo: "Undo",
     md_tasksLeft: "Tasks: {n} left",
     md_allTasks: "All Tasks",
+    // ── a job's tasks under the Reminders, one row per job (job-task-rows.tsx, cn-v1175) ──
+    md_jobTasks: "Job Tasks",
+    md_jobTasksOpen: "{job}: {n} open tasks",
+    md_jobTasksFailed: "Couldn't load the jobs' tasks. Try again in a moment.",
+    // The read's bound cut the jobs (skeptic #78): one plain grey line, {jobs} is the Jobs link (jb_jobsTitle).
+    md_jobTasksMore: "More jobs have open tasks. Open {jobs} to see them all.",
     md_reopenTask: "Reopen {title}",
     md_checkOffTask: "Check off {title}",
     // ── Tasks & Reminders ──
@@ -249,6 +255,10 @@ export const words: WordCatalog = {
     md_undo: "Deshacer",
     md_tasksLeft: "Tareas: faltan {n}",
     md_allTasks: "Todas las Tareas",
+    md_jobTasks: "Tareas de Trabajos",
+    md_jobTasksOpen: "{job}: {n} tareas abiertas",
+    md_jobTasksFailed: "No se pudieron cargar las tareas de los trabajos. Inténtalo de nuevo en un momento.",
+    md_jobTasksMore: "Hay más trabajos con tareas abiertas. Abre {jobs} para verlas todas.",
     md_reopenTask: "Reabrir {title}",
     md_checkOffTask: "Marcar {title}",
     // ── Tasks & Reminders ──

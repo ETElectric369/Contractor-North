@@ -22,7 +22,8 @@ describe("an inspection_writeup row never points at /quotes/new", () => {
     expect(block).not.toContain("/quotes/new");
   });
 
-  it("no door of the row, primary or ⋯, opens a /quotes/new page; the primary is Open the Inspection", () => {
+  // cn-v1175 (R7): the primary says Write It Up, and it is still the visit's own page.
+  it("no door of the row, primary or ⋯, opens a /quotes/new page; the primary is Write It Up, to the inspection", () => {
     const item: ActionItem = {
       id: "appt-1",
       kind: "inspection_writeup",
@@ -32,10 +33,10 @@ describe("an inspection_writeup row never points at /quotes/new", () => {
       urgency: 1,
       done: false,
       href: "/appointments/appt-1",
-      affordances: [...AFFORDANCES.inspection_writeup, "wontHappen"],
+      affordances: ["snooze", ...AFFORDANCES.inspection_writeup],
     };
     const b = rowButtons(item, { leadsOn: true, isStaff: true });
-    expect(b.primary?.label).toBe("Open the Inspection");
+    expect(b.primary).toEqual({ label: "Write It Up", act: { type: "open", href: "/appointments/appt-1" } });
     for (const d of allDoors(b)) if (d.act.type === "open") expect(d.act.href, d.label).not.toContain("/quotes/new");
   });
 

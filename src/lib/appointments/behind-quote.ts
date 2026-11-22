@@ -119,3 +119,52 @@ export async function closeVisitsBehindQuote(
   }
   return { attached, stamped, ...(errors.length ? { error: errors.join("; ") } : {}) };
 }
+
+/**
+ * THE LEAD'S EARLIER VISITS CLOSE WHEN THE LEAD IS WON (cn-v1175, R2; one door opens, the last one closes).
+ *
+ * Marking a lead Won, or turning it into a job, never touched the visits booked from it, so an inspection
+ * done for that lead kept asking to be written up or closed out after the work was already sold. The
+ * read rule (lib/appointments/visit-settled, lead-closed) already stops the asking; this closes the
+ * RECORD going forward, through the same pure split as an estimate's deed (closingsFor): the job is
+ * attached where a visit has none, and Won is stamped on every visit with a win to record that is still
+ * undecided. ONLY THE VISITS DATED BEFORE THE DEED (`before`), booked or done, never cancelled and never
+ * one still waiting on the customer's pick: a visit booked after the win is an add-on bid and keeps its
+ * own answer. Twice-safe (every write is guarded by the column still being null); best-effort, said and
+ * never thrown (the lead's own deed already landed). No data patch: old rows are the read rule's.
+ */
+export async function closeVisitsBehindLead(
+  supabase: SupabaseClient,
+  lead: { inquiryId: string; before: string },
+  w: Closing,
+): Promise<ClosedBehind> {
+  if (!w.jobId && !w.outcome) return { attached: 0, stamped: 0 };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const scoped = (q: any): any => (w.orgId ? q.eq("org_id", w.orgId) : q);
+  const { data, error } = await scoped(
+    supabase
+      .from("appointments")
+      .select("id, job_id, outcome, type")
+      .eq("inquiry_id", lead.inquiryId)
+      .in("status", ["scheduled", "completed"])
+      .eq("absorbed", false)
+      .lt("starts_at", lead.before),
+  ).limit(50);
+  if (error) return { attached: 0, stamped: 0, error: error.message };
+  const { attach, stamp } = closingsFor((data ?? []) as VisitBehind[], w);
+  const nowIso = new Date().toISOString();
+  let attached = 0;
+  let stamped = 0;
+  const errors: string[] = [];
+  if (attach.length) {
+    const { data: rows, error: e } = await scoped(supabase.from("appointments").update({ job_id: w.jobId, updated_at: nowIso }).in("id", attach).is("job_id", null)).select("id");
+    if (e) errors.push(e.message);
+    else attached = rows?.length ?? 0;
+  }
+  if (stamp.length) {
+    const { data: rows, error: e } = await scoped(supabase.from("appointments").update({ outcome: w.outcome, outcome_at: nowIso, updated_at: nowIso }).in("id", stamp).is("outcome", null)).select("id");
+    if (e) errors.push(e.message);
+    else stamped = rows?.length ?? 0;
+  }
+  return { attached, stamped, ...(errors.length ? { error: errors.join("; ") } : {}) };
+}

@@ -271,7 +271,8 @@ describe("filedUnder: which heading a filed row is drawn under", () => {
   it("every filed row is under exactly one heading, and the three together hold the whole pile", () => {
     const rows = [
       row({ status: "completed", starts_at: past, job_id: "job1" }), // became work
-      row({ status: "completed", starts_at: past, outcome: "won" }),
+      // cn-v1175 (R8): a win is filed only with its job; a win with NO job picked is not an ending (below).
+      row({ status: "completed", starts_at: past, outcome: "won", job_id: "job2" }),
       row({ status: "completed", starts_at: past, outcome: "lost" }), // happened, and the bid was lost
       row({ starts_at: past, outcome: "lost" }), // never happened, answered Lost
       row({ starts_at: past, capture: cap, outcome: "no_bid" }), // the old word for the same ending
@@ -510,5 +511,32 @@ describe("a row's words: who in bold, then what, and no pill", () => {
     expect(inspectionRowWords(es).what).toBe("Final Inspection · 9 Snowbell Ct · Inspección Final"); // without the English label it reads as typed
     expect(inspectionRowWords({ ...es, stampLabels: ["Final Inspection"] })).toEqual({ who: "Dana Rook", what: "9 Snowbell Ct · Inspección Final" });
     expect(inspectionRowWords({ title: "Final Inspection", typeLabel: "Inspección Final", stampLabels: ["Final Inspection"], tags: ["Inspección Final"], lang: "es" })).toEqual({ who: "Inspección Final", what: "" });
+  });
+});
+
+/**
+ * ONE VISIT RULE (cn-v1175, R1/R8): the write-up rule's settled test is the one Visits to Close Out and
+ * the Leads list read (lib/appointments/visit-settled), so these are the buckets' side of its table.
+ */
+describe("the buckets read the one visit rule", () => {
+  it("a win with no job picked is not an ending: it stays open, asking for its job", () => {
+    const r = row({ status: "completed", starts_at: past, outcome: "won" });
+    const b = bucketInspections([r], none, none, NOW);
+    expect(b.toWriteUp).toEqual([r]);
+    expect(b.filed).toEqual([]);
+  });
+
+  it("its lead closed AFTER it (won, converted, or a job made from it) files it; a visit booked after stays open", () => {
+    const before = row({ status: "completed", starts_at: past, inquiry_id: "lead-1" });
+    const after = row({ status: "completed", starts_at: new Date(NOW.getTime() - 3600_000).toISOString(), inquiry_id: "lead-1" });
+    const closedAt = new Date(NOW.getTime() - 2 * 3600_000).toISOString();
+    const b = bucketInspections([before, after], none, none, NOW, none, none, "UTC", { leadClosedAt: new Map([["lead-1", closedAt]]) });
+    expect(b.filed).toEqual([before]);
+    expect(b.toWriteUp).toEqual([after]);
+  });
+
+  it("the city's final inspection on a job is never a write-up, as before", () => {
+    const r = row({ type: "final_inspection", status: "completed", starts_at: past, job_id: "job-7" });
+    expect(bucketInspections([r], none, none, NOW).filed).toEqual([r]);
   });
 });

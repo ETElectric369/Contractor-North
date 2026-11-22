@@ -104,7 +104,8 @@ describe("how a row's moves are drawn (which moves a row gets is list-rows rowDo
     // A lone Dismiss… asks in the row itself (its first tap); nothing is written until the second.
     expect(buttons(draw(["del"]))).toEqual(["Dismiss…"]);
     // The rule lives in one place: the row's ⋯ component, by the count of its moves.
-    expect(code).toContain("if (doors.length === 1) return <InspectionRowDoors");
+    // cn-v1175 (R5): the offer's other candidates count as moves too (a lone door is drawn only when alone).
+    expect(code).toContain("if (doors.length === 1 && others.length === 0) return <InspectionRowDoors");
     expect(code.match(/doors\.length === 1/g)).toHaveLength(1);
   });
 
@@ -253,11 +254,26 @@ describe("It Happened: Write It Up", () => {
 });
 
 describe("Not Sold (cn-v1170, was Lost)", () => {
+  it("cn-v1175 (R8): a visit answered Not Sold before its day came off the schedule; the Undo clears the answer AND puts it back", async () => {
+    const setOutcome = vi.fn(async (_id: string, o: string | null) => (o ? { ok: true, offSchedule: { previousStatus: "scheduled" } } : { ok: true }));
+    const setStatus = vi.fn(async () => ({ ok: true }));
+    const io = rig();
+    await markItLost("a1", io, { setOutcome: setOutcome as any, setStatus: setStatus as any });
+    // The person's tap asks for the off-schedule step (skeptic #78): the assistant's route never does.
+    expect(setOutcome).toHaveBeenCalledWith("a1", "lost", { offSchedule: true });
+    expect(io.log).toEqual(["close", "toast:success:Marked Not Sold.", "refresh"]);
+    undoOf(io.toast)();
+    await settle();
+    expect(setOutcome.mock.lastCall).toEqual(["a1", null]);
+    expect(setStatus).toHaveBeenCalledWith("a1", "scheduled");
+    expect(io.toast).toHaveBeenLastCalledWith("Back where it was.", "success");
+  });
+
   it("writes lost, closes, re-reads; the Undo clears the outcome with no option and says the plain sentence", async () => {
     const setOutcome = vi.fn(async () => ({ ok: true }));
     const io = rig();
     await markItLost("a1", io, { setOutcome: setOutcome as any });
-    expect(setOutcome).toHaveBeenCalledWith("a1", "lost");
+    expect(setOutcome).toHaveBeenCalledWith("a1", "lost", { offSchedule: true });
     expect(io.log).toEqual(["close", "toast:success:Marked Not Sold.", "refresh"]);
     undoOf(io.toast)();
     await settle();

@@ -14,6 +14,7 @@ import { spreadTimes } from "@/lib/schedule/place-by-town";
 import { appointmentTypeFor, bookingTitle, workKind } from "@/lib/schedule/work-shape";
 import { standingFor } from "@/lib/leads/new-intake";
 import { reopenNotSold } from "@/lib/leads/not-sold";
+import { closeVisitsBehindLead } from "@/lib/appointments/behind-quote";
 import { carryFromCustomer, matchKnownCustomer, type CustomerMatch, type KnownCustomer } from "@/lib/inquiries/known-customer";
 import { createServiceClient } from "@/lib/supabase/server";
 import { customerForInquiry } from "@/lib/actions/win-customer";
@@ -402,6 +403,12 @@ export async function setInquiryStatus(id: string, status: string): Promise<Resu
     const customerId = await customerForInquiry(supabase, id, ctx.userId);
     if (!customerId)
       return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_wonFailed") };
+    // ONE DOOR OPENS, THE LAST ONE CLOSES (cn-v1175, R2): the lead's earlier visits are won with it, so
+    // none keeps asking to be written up or closed out. Best-effort: the win landed; a miss is said to
+    // the ops sink (the visits are already quiet by the read rule, lib/appointments/visit-settled).
+    const closed = await closeVisitsBehindLead(supabase, { inquiryId: id, before: new Date().toISOString() }, { outcome: "won" });
+    if (closed.error) reportError("leads:won:closeVisits", new Error(closed.error), { leadId: id });
+    revalidatePath("/inspections");
     revalidatePath("/leads");
     revalidatePath("/crm");
     revalidatePath("/planner");
@@ -924,6 +931,15 @@ export async function convertInquiry(
     return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_alreadyConverted") };
   }
 
+  // ONE DOOR OPENS, THE LAST ONE CLOSES (cn-v1175, R2): a lead turned into a job takes its earlier visits
+  // with it (the job attached where they have none, Won stamped where nothing is). Best-effort, said to
+  // the ops sink; the visits are already quiet by the read rule (lib/appointments/visit-settled).
+  if (target === "job" && mintedJobId) {
+    const closed = await closeVisitsBehindLead(supabase, { inquiryId: id, before: new Date().toISOString() }, { jobId: mintedJobId, outcome: "won" });
+    if (closed.error) reportError("leads:convert:closeVisits", new Error(closed.error), { leadId: id, jobId: mintedJobId });
+    revalidatePath("/inspections");
+    revalidatePath("/planner");
+  }
   revalidatePath("/leads");
   revalidatePath("/crm");
   return {

@@ -1,6 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { INTAKE_BUCKET, intakePaths } from "@/lib/playbook/uploads";
 import { reportError } from "@/lib/observe";
+import { isCopyColumnMissing } from "@/lib/bug-shot-copy";
 
 /**
  * THE JANITOR (Erik: "we shouldnt hold onto old orphaned data anyway right?").
@@ -20,14 +21,21 @@ import { reportError } from "@/lib/observe";
  *
  * SQL cannot touch storage ("Direct deletion from storage tables is not allowed") — this runs on
  * the service client through the Storage API, from the daily cron. Everything gets an age guard
- * (48 hours; 30 days for bug screenshots, which are a debug trail people come back to): nothing
+ * (48 hours; 7 days for bug screenshots, which are a debug trail people come back to): nothing
  * mid-flight is ever reaped, and a file must be BOTH old and unreferenced to go.
  */
 
 const AGE_MS = 48 * 60 * 60 * 1000;
 /** A bug screenshot is a debug transport, not a record: once the report it belongs to is closed
- *  (or gone), the capture of that staff screen goes at this age (audit v921). */
-const BUG_SHOT_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+ *  (or gone), the capture of that staff screen goes at this age (audit v921), the file and the row's
+ *  copy alike. Seven days (cn-v1175; it was thirty), the owner: "the schedule to delete all the
+ *  excess data could be a shorter window, your call on that one". */
+const BUG_SHOT_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/** CLOSED, for a bug report's picture: fixed or won't fix, and nothing else. A report filed for LATER
+ *  (cn-v1175, 0412) is not closed: nobody has looked at it for the last time, so it keeps its picture,
+ *  as an open one does. Both of the sweep's bug writes read this one list. */
+export const BUG_CLOSED_STATUSES = ["fixed", "wontfix"] as const;
+const NOT_CLOSED = `(${BUG_CLOSED_STATUSES.join(",")})`;
 /** Refuse an intake sweep that would wipe this many files against an EMPTY reference set —
  *  that shape is a broken read, not an empty inbox (audit v800). */
 const MASS_DELETE_FLOOR = 5;
@@ -189,7 +197,8 @@ export async function sweepOrphanedUploads(): Promise<Record<string, number>> {
     //    in production and only ever growing; the reporter writes, no code path removes). A shot
     //    is a capture of a staff SCREEN that every member of the org can read for as long as it
     //    sits there, and it stops being evidence the moment the report is closed. Keep every shot
-    //    an OPEN report still points at, whatever its age; reap the rest after a month. Fail
+    //    a report that is not closed (open, or filed for later) still points at, whatever its age;
+    //    reap the rest after a week. Fail
     //    closed like the sweeps above: no provable reference set, no deletions.
     const shots = (await listAll(svc, "documents", `${org.name}/bug-screenshots`)).filter(
       (e) => e.id !== null && oldEnough(e, now, BUG_SHOT_AGE_MS),
@@ -201,7 +210,7 @@ export async function sweepOrphanedUploads(): Promise<Record<string, number>> {
             .from("bug_reports")
             .select("screenshot_path")
             .eq("org_id", org.name)
-            .eq("status", "open")
+            .not("status", "in", NOT_CLOSED)
             .not("screenshot_path", "is", null)
             .order("id")
             .range(from, to),
@@ -218,17 +227,39 @@ export async function sweepOrphanedUploads(): Promise<Record<string, number>> {
         // NOTHING (bug-list.tsx:29). Clearing the column is what removes the dead one-tap.
         // A zero-row match is normal here — a shot uploaded by a report that never sent has no
         // row at all — so only a real error is worth reporting.
+        // The row's copy goes in the SAME write (0412): a report whose file is gone keeps no
+        // picture of that screen in its row either. A database without 0412's column yet clears
+        // the path alone, as before.
         for (let i = 0; removed && i < gone.length; i += 100) {
-          const { error: clearErr } = await svc
-            .from("bug_reports")
-            .update({ screenshot_path: null })
-            .eq("org_id", org.name)
-            .in("screenshot_path", gone.slice(i, i + 100))
-            .select("id");
+          const clear = (patch: Record<string, null>) =>
+            svc
+              .from("bug_reports")
+              .update(patch)
+              .eq("org_id", org.name)
+              .in("screenshot_path", gone.slice(i, i + 100))
+              .select("id");
+          let { error: clearErr } = await clear({ screenshot_path: null, screenshot_copy: null });
+          if (clearErr && isCopyColumnMissing(clearErr)) ({ error: clearErr } = await clear({ screenshot_path: null }));
           if (clearErr) reportError("storage-sweep:bug-shot-clear", clearErr, { org: org.name });
         }
       }
     }
+  }
+
+  // ── bug_reports.screenshot_copy (0412): the row's copy of a CLOSED report's screenshot goes at
+  //    the file's age too, whether or not a file was ever uploaded beside it (a copy rides with the
+  //    report even when the upload failed, so the write above cannot be the only one). An open
+  //    report, or one filed for later, keeps its picture, whatever its age. A database without the
+  //    column yet: nothing to do.
+  {
+    const { error: copyErr } = await svc
+      .from("bug_reports")
+      .update({ screenshot_copy: null })
+      .in("status", [...BUG_CLOSED_STATUSES])
+      .lt("created_at", new Date(now - BUG_SHOT_AGE_MS).toISOString())
+      .not("screenshot_copy", "is", null)
+      .select("id");
+    if (copyErr && !isCopyColumnMissing(copyErr)) reportError("storage-sweep:bug-copy-clear", copyErr);
   }
 
   return result;

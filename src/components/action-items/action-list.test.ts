@@ -382,13 +382,15 @@ describe("ActionList — a verb's refusal is always said, and the server's list 
     const src = list();
     const banners = src.match(/<div role="alert" className=\{.*?\}>/g) ?? [];
     expect(banners.filter((b) => b.includes("BANNER"))).toEqual(['<div role="alert" className={BANNER}>']);
-    expect(banners.filter((b) => b.includes("SHEET_REFUSAL"))).toHaveLength(3);
-    expect(banners).toHaveLength(4);
+    // RE-PINNED ON PURPOSE (cn-v1175): four inside sheets now, the fourth being Pick a Day behind ⋯
+    // (DoorForm draws its day picker, where it once drew nothing).
+    expect(banners.filter((b) => b.includes("SHEET_REFUSAL"))).toHaveLength(4);
+    expect(banners).toHaveLength(5);
     expect(src).toContain('import { SHEET_REFUSAL } from "@/components/ui/refusal";');
-    // The list's banner is the one drawn on the list (outside every sheet): MoreSheetBody and DoorForm hold the other three.
+    // The list's banner is the one drawn on the list (outside every sheet): MoreSheetBody and DoorForm hold the other four.
     const sheets = src.slice(src.indexOf("function MoreSheetBody"));
     expect(sheets).not.toContain("className={BANNER}");
-    expect((sheets.match(/SHEET_REFUSAL/g) ?? []).length).toBe(3);
+    expect((sheets.match(/SHEET_REFUSAL/g) ?? []).length).toBe(4);
   });
 
   it("a bare button's verb is optimistic, and its refusal is said on the list by run() itself", () => {
@@ -409,7 +411,8 @@ describe("ActionList — a verb's refusal is always said, and the server's list 
     expect([...keepInFlight(new Set(["a", "b", "c"]), new Set(["b"]))]).toEqual(["b"]);
     expect(keepInFlight(new Set(["a"]), new Set()).size).toBe(0);
     const src = list();
-    expect(src).toMatch(/if \(seenItems !== items\) \{\s*setSeenItems\(items\);\s*setRemovedIds\(\(s\) => keepInFlight\(s, inFlight\)\);\s*setDoneIds\(\(s\) => keepInFlight\(s, inFlight\)\);/);
+    // RE-PINNED ON PURPOSE (cn-v1175): the Older fold's rows are a second list from the server, under the same rule.
+    expect(src).toMatch(/if \(seenItems !== items \|\| seenOlder !== older\) \{\s*setSeenItems\(items\);\s*setSeenOlder\(older\);\s*setRemovedIds\(\(s\) => keepInFlight\(s, inFlight\)\);\s*setDoneIds\(\(s\) => keepInFlight\(s, inFlight\)\);/);
   });
 });
 

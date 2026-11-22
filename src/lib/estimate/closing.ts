@@ -132,7 +132,7 @@ export function closingFileHref(r: { customer_id?: string | null; inquiry_id?: s
 
 /** What the reader asks of `quotes`. `total` is here: Closing is an office page (never a tech's). */
 export const CLOSING_COLUMNS =
-  "id, quote_number, doc_type, title, status, total, valid_until, created_at, job_id, customer_id, inquiry_id, customers(name, company_name), inquiry:inquiry_id(name, company_name), jobs:job_id(status)";
+  "id, quote_number, doc_type, title, status, total, valid_until, created_at, job_id, customer_id, inquiry_id, customers(name, company_name), inquiry:inquiry_id(name, company_name, status), jobs:job_id(status)";
 /** What quoteSettled reads of an invoice. */
 export const CLOSING_INVOICE_COLUMNS = "id, quote_id, job_id, status, created_at, invoice_kind";
 /** The most sent estimates the list holds; past it the page says it was cut (the ones WRITTEN FIRST are
@@ -251,11 +251,15 @@ export async function loadClosing(supabase: SupabaseClient, opts: { todayStr: st
     const created_at = (q.created_at as string | null) ?? null;
     const valid_until = (q.valid_until as string | null) ?? null;
     const status = (q.status as string | null) ?? null;
+    const leadId = q.inquiry_id ? String(q.inquiry_id) : null;
     const settled = quoteSettled({
       quote: { id, status, created_at, revisions: revisionsOf.get(id) ?? [] },
       job: jobId && job ? { id: jobId, status: job.status ?? null } : null,
       jobInvoices: jobId ? (jobInvoicesOf.get(jobId) ?? []) : [],
       quoteInvoices: namingOf.get(id) ?? [],
+      // Its lead's answer (cn-v1175): a lead marked Not Sold settles the estimate still out for it. No
+      // sibling rule: an estimate Keep Both put back to sent, or one for extra work, stays on Closing.
+      lead: leadId ? one<{ status?: string | null }>(q.inquiry) : null,
     }).settled;
     const state = closingState({ id, status, created_at, valid_until }, { settled, lastSentAt: lastSentOf.get(id) ?? null, todayStr: opts.todayStr });
     if (!state.closing) continue;

@@ -20,12 +20,24 @@ import { isDrawKind } from "@/lib/invoice-math";
  *   job-closed           the job is complete, cancelled, or invoiced (the retired status).
  *   superseded           the estimate is superseded (0391), or a revision of it (revises_quote_id)
  *                        stands accepted.
+ * And for a DRAFT or a SENT estimate only (cn-v1175: the owner's "ones that close out with the job should
+ * already be closed out right?"), one answer recorded elsewhere:
+ *   lead-not-sold        the lead it was written for is Not Sold (inquiries.status 'lost'): the person
+ *                        said no, and the estimate still out for them is not a thing to send or chase.
+ * NO SIBLING RULE (skeptic #78, cn-v1175): "another estimate on the same job or the same lead was accepted"
+ * is NOT an answer about this one, so it settles nothing. Keep Both (cn-v1168, planKeepBoth) puts the
+ * earlier estimate back to sent as an open offer beside the accepted one, on the same lead and job: a
+ * sibling rule would drop that live offer off Closing and Needs You. And a second estimate written for
+ * extra work on a job that already has an accepted one is real work to send: it would never show as
+ * unsent. A revision that replaced this estimate is the superseded arm; that is the only "another
+ * estimate" that answers for this one.
  * A draft never settles (work in progress), a void never does, a deposit or progress draw never does
- * (money for work still ahead). An estimate with no job and no invoice naming it is NOT settled: no
- * rule can know, so the row stays, says its date, and offers its doors (Already Invoiced, Lost).
+ * (money for work still ahead). An estimate with no job and no invoice naming it, whose lead is open, is
+ * NOT settled: no rule can know, so the row stays, says its date, and offers its doors (Already Invoiced,
+ * Lost).
  */
 
-export type SettledWhy = "invoice-names-quote" | "job-billed" | "job-closed" | "superseded";
+export type SettledWhy = "invoice-names-quote" | "job-billed" | "job-closed" | "superseded" | "lead-not-sold";
 
 export type SettledQuote = {
   id: string;
@@ -48,6 +60,24 @@ export type SettledInvoice = {
 };
 
 export const CLOSED_JOB_STATUSES = ["complete", "cancelled", "invoiced"] as const;
+/** The stored word for a Not Sold lead (lib/leads/new-intake NOT_SOLD_STATUS; the value never changed). */
+const LEAD_NOT_SOLD = "lost";
+
+/**
+ * A JOB WHOSE SALE WENT AWAY (cn-v1175, R3): every estimate on it was declined or expired, and nothing
+ * was ever done or billed on it (no time on it, no invoice of any kind but a void one). Such a job is
+ * not asked for a day: a win that went away after all leaves its job as it is (Needs You's Not Sold on
+ * a won estimate), and the job sat asking for a day for good. A job with no estimate, or with any
+ * estimate still in play, or with time or a bill, is not this. Pure; the caller reads the three facts.
+ */
+export function saleWentAway(input: {
+  quotes: readonly { status?: string | null }[];
+  hasTime: boolean;
+  hasInvoice: boolean;
+}): boolean {
+  if (input.hasTime || input.hasInvoice || input.quotes.length === 0) return false;
+  return input.quotes.every((q) => q.status === "declined" || q.status === "expired");
+}
 
 const real = (i: SettledInvoice) => i.status !== "draft" && i.status !== "void";
 /** A standard invoice or the final draw: the bill that says the work is over. */
@@ -60,6 +90,8 @@ export function quoteSettled(input: {
   jobInvoices?: readonly SettledInvoice[] | null;
   /** Invoices whose quote_id is this estimate (any status; this function picks). */
   quoteInvoices?: readonly SettledInvoice[] | null;
+  /** The lead it was written for, when read (its status). Left out: the arm is never read. */
+  lead?: { status?: string | null } | null;
 }): { settled: boolean; why: SettledWhy | null } {
   const { quote, job } = input;
   if ((input.quoteInvoices ?? []).some((i) => (i.quote_id == null || String(i.quote_id) === String(quote.id)) && real(i) && finishes(i))) {
@@ -81,6 +113,9 @@ export function quoteSettled(input: {
   }
   if (quote.status === "superseded" || (quote.revisions ?? []).some((r) => r.status === "accepted")) {
     return { settled: true, why: "superseded" };
+  }
+  if (quote.status === "draft" || quote.status === "sent") {
+    if (input.lead?.status === LEAD_NOT_SOLD) return { settled: true, why: "lead-not-sold" };
   }
   return { settled: false, why: null };
 }

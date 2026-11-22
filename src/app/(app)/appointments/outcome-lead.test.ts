@@ -151,3 +151,37 @@ describe("taking the ending back: the lead follows (no option; the visit's answe
     expect(src).not.toContain("reopenLead?: boolean");
   });
 });
+
+/**
+ * NOT SOLD BEFORE ITS DAY COMES OFF THE SCHEDULE ONLY WHEN THE DOOR ASKS (skeptic #78, cn-v1175). The two
+ * person-tapped doors (the visit page's Not Sold row, the Inspections row's Not Sold) pass offSchedule and
+ * carry the Undo; every other caller (the assistant's appointment.setOutcome) records the outcome and
+ * cancels nothing, as before this release.
+ */
+describe("setAppointmentOutcome: off the schedule only when asked", () => {
+  const ahead = () => new Date(Date.now() + 3 * 86_400_000).toISOString();
+  const statusWrites = () => db.calls.filter((c) => c.table === "appointments" && c.op === "update" && c.patch && "status" in c.patch);
+
+  it("no option (the assistant's route): a visit still ahead answered Not Sold keeps its status", async () => {
+    db.visit = { id: "a1", inquiry_id: null, status: "scheduled", starts_at: ahead() };
+    expect(await setAppointmentOutcome("a1", "lost")).toEqual({ ok: true });
+    expect(statusWrites()).toEqual([]);
+    expect(db.calls.some((c) => c.table === "schedule_proposals")).toBe(false);
+  });
+
+  it("offSchedule (the two doors): the same visit is cancelled, and what it was is handed back for the Undo", async () => {
+    db.visit = { id: "a1", inquiry_id: null, status: "scheduled", starts_at: ahead() };
+    const r = await setAppointmentOutcome("a1", "lost", { offSchedule: true });
+    expect(r.ok).toBe(true);
+    expect(r.offSchedule?.previousStatus).toBe("scheduled");
+    expect(statusWrites().map((c) => c.patch!.status)).toEqual(["cancelled"]);
+  });
+
+  it("offSchedule never moves a visit whose day has passed, nor a win", async () => {
+    db.visit = { id: "a1", inquiry_id: null, status: "scheduled", starts_at: "2026-01-05T17:00:00Z" };
+    expect(await setAppointmentOutcome("a1", "lost", { offSchedule: true })).toEqual({ ok: true });
+    db.visit = { id: "a1", inquiry_id: null, status: "scheduled", starts_at: ahead() };
+    expect(await setAppointmentOutcome("a1", "won", { offSchedule: true })).toEqual({ ok: true });
+    expect(statusWrites()).toEqual([]);
+  });
+});

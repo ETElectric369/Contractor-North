@@ -27,9 +27,16 @@ import { say, type Words } from "@/lib/lang-words";
 import { isStockBookingTitle } from "@/lib/schedule/work-shape";
 import { pickWentUnanswered } from "@/lib/leads/new-intake";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
+import { visitSettled, type VisitLinks } from "@/lib/appointments/visit-settled";
+
+/** THE ONE VISIT RULE (cn-v1175), said from here too: the write-up rule's settled test is the one
+ *  Visits to Close Out and the Leads list read (lib/appointments/visit-settled). */
+export { visitSettled, isSalesVisit, isWorkVisit, type VisitLinks, type VisitSettledWhy } from "@/lib/appointments/visit-settled";
 
 export interface InspectionBucketRow {
   id: string;
+  /** The visit's kind, when read: a city's final inspection is the job's business (visitSettled). */
+  type?: string | null;
   status: string; // APPOINTMENT_STATUSES value
   starts_at: string | null;
   inquiry_id: string | null;
@@ -204,33 +211,28 @@ export function bucketInspections<T extends InspectionBucketRow>(
   billedJobIds: ReadonlySet<string> = new Set(),
   /** The company's timezone: "before today" is the company's midnight, not UTC's. */
   tz: string = "UTC",
+  /** The links only some readers read (cn-v1175): the jobs that are over, and when each lead closed.
+   *  Left out, a visit is never settled by them (offered, never hidden). */
+  more: Pick<VisitLinks, "closedJobIds" | "leadClosedAt" | "finishedJobIds"> = {},
 ): InspectionBuckets<T> {
   const out: InspectionBuckets<T> = { toWriteUp: [], upcoming: [], missed: [], filed: [] };
   const todayStart = tzDayStartUtc(todayStrInTz(tz, now), tz).getTime();
   const time = (r: T) => (r.starts_at ? new Date(r.starts_at).getTime() : 0);
+  const links: VisitLinks = { estimateInquiryIds, estimateJobIds, estimateQuoteIds, billedJobIds, ...more };
 
   for (const r of rows) {
-    const capQuote = captureQuoteId(r.capture);
     /**
-     * FOUR WAYS A VISIT ENDS, not one (0205).
+     * FOUR WAYS A VISIT ENDS, not one (0205), and since cn-v1175 ONE RULE for every reader
+     * (lib/appointments/visit-settled visitSettled): an answer, a job that is over, an estimate written
+     * from it or for its lead or its job, its lead closed after it, or a job it is tied to. Money is an
+     * outcome; so is a decision. (Mallow Springs: job complete, invoice paid, no estimate ever written,
+     * and the visit still nagged; Donner Pass, a lost bid with nothing to hang it on, could never leave.)
      *
-     * This asked only "does an estimate exist?", so an inspection that turned into billed,
-     * paid work still nagged (Mallow Springs: job complete, invoice paid, no estimate ever
-     * written) and a lost bid could never leave at all (Donner Pass, which has no customer,
-     * inquiry, job or estimate to hang anything on). Money is an outcome; so is a decision.
+     * THE CITY'S FINAL INSPECTION ON A JOB is never written up into an estimate: it files once it has
+     * its job, as it always did here. That is a write-up fact, not a settled one (Visits to Close Out
+     * still asks about it until its job is over).
      */
-    const settled =
-      (!!r.inquiry_id && estimateInquiryIds.has(r.inquiry_id)) ||
-      (!!r.job_id && estimateJobIds.has(r.job_id)) ||
-      (!!capQuote && estimateQuoteIds.has(capQuote)) ||
-      (!!r.job_id && billedJobIds.has(r.job_id)) ||
-      /* A LINKED JOB IS ITSELF SETTLEMENT. The write-up nag asks "did the visit become an
-         estimate?" — but a visit whose work went straight to a JOB was answered better than any
-         estimate could: the work is sold (Erik's Karen: job on the calendar, and this bucket
-         still demanding "Create estimate"). Billing-only was too narrow — it kept nagging
-         through the whole gap between winning the work and invoicing it. */
-      !!r.job_id ||
-      !!r.outcome;
+    const settled = visitSettled(r, links) !== null || (r.type === "final_inspection" && !!r.job_id);
     const writtenUp = settled;
     const past = !!r.starts_at && new Date(r.starts_at).getTime() < now.getTime();
 
@@ -355,8 +357,10 @@ export function inspectionList<T extends InspectionBucketRow & { created_at?: st
   const nowMs = now.getTime();
   const out: { row: T; state: InspectionListState }[] = [];
   for (const state of INSPECTION_LIST_ORDER) {
-    if (state === "write_up" && opts.estimatesOn) continue; // the Estimates page's top list
     for (const row of piles[state]) {
+      // The Estimates page's top list holds what waits on a price; a win with no job picked waits on its
+      // JOB (cn-v1175, R8), so it stays here whatever the switch says.
+      if (state === "write_up" && opts.estimatesOn && !wonWithNoJob(row)) continue;
       const ranOut = pickWentUnanswered({ status: row.status, outcome: row.outcome ?? null, starts_at: row.starts_at }, nowMs);
       if (ranOut && row.inquiry_id) continue;
       out.push({ row, state });
@@ -372,7 +376,12 @@ export function inspectionList<T extends InspectionBucketRow & { created_at?: st
  * inspected visit is on exactly one of the two pages.
  */
 export function inspectionsToEstimate<T extends InspectionBucketRow>(b: InspectionBuckets<T>): T[] {
-  return [...b.toWriteUp];
+  return b.toWriteUp.filter((r) => !wonWithNoJob(r));
+}
+
+/** A visit marked Won with no job picked (cn-v1175, R8): open, asking for its job, on the Inspections list. */
+export function wonWithNoJob(r: Pick<InspectionBucketRow, "outcome" | "job_id">): boolean {
+  return r.outcome === "won" && !r.job_id;
 }
 
 /**
@@ -386,6 +395,19 @@ export function inspectionsToEstimate<T extends InspectionBucketRow>(b: Inspecti
  */
 export function filedWithNobody<T extends InspectionBucketRow & { customer_id: string | null }>(filed: readonly T[]): T[] {
   return filed.filter((r) => !r.inquiry_id && !r.job_id && !r.customer_id);
+}
+
+/**
+ * THE NOT SOLD FOLD (cn-v1175, R8). The owner: "could we safely say that it could go in the Not Sold
+ * box to simplify everything including the Not FIled under anyone group with is confusing in itself?"
+ * The fold under the list holds every inspection that ENDED WITHOUT BECOMING WORK and has no person's
+ * file to live in: its record says Not Sold, or it was cancelled (filedUnder's lost and cancelled).
+ * One that was written up or became work is found from its estimate or its job, so it is not here; a
+ * visit marked Won with no job picked is not an ending at all (visitSettled) and is on the open list,
+ * asking for its job. No data is patched: a read and a label.
+ */
+export function notSoldWithNobody<T extends InspectionBucketRow & { customer_id: string | null }>(filed: readonly T[]): T[] {
+  return filedWithNobody(filed).filter((r) => filedUnder(r) !== "completed");
 }
 
 /**

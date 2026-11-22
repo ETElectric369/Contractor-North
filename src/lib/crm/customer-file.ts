@@ -13,7 +13,7 @@ export const CUSTOMER_REQUEST_COLUMNS = "id, name, message, source, status, conv
 
 /** A customer's inspections: theirs by `customer_id`, or made from one of their leads by `inquiry_id`
  *  (a won lead's visit often carries no customer). */
-export const CUSTOMER_VISIT_COLUMNS = "id, type, status, outcome, starts_at, title, inquiry_id";
+export const CUSTOMER_VISIT_COLUMNS = "id, type, status, outcome, starts_at, title, inquiry_id, job_id";
 
 export type CustomerRequest = {
   id: string;

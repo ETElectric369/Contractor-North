@@ -3,12 +3,13 @@
 import { useId, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Phone } from "lucide-react";
+import { ChevronDown, Phone } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Label, Select } from "@/components/ui/input";
 import { SHEET_REFUSAL } from "@/components/ui/refusal";
 import { MoveToDay } from "@/components/move-to-day";
+import { DayField } from "@/components/day-field";
 import { RowMoreSheet, SHEET_ROW } from "@/components/row-more-sheet";
 import { ComeBackPicker } from "@/components/come-back-picker";
 import { SendSheet } from "@/components/send-sheet";
@@ -19,7 +20,7 @@ import type { DispatchPayload } from "@/lib/action-items/dispatch-map";
 import { KIND_GROUP, type ActionItem, type Affordance, type Group, type PileName } from "@/lib/action-items/types";
 import { rowButtons, type RowDoor } from "@/lib/action-items/row-buttons";
 import { pileUnfoldsHere } from "@/lib/action-items/piles";
-import { isUnreadLine, maxLevel, summarize } from "@/lib/action-items/needs-you-rule";
+import { isUnreadLine, maxLevel, summarize, thingsOf, withPlus } from "@/lib/action-items/needs-you-rule";
 import { pileTitleWords, rowWords } from "@/lib/action-items/row-words";
 import { relativeWhen } from "@/lib/action-items/dated-when";
 import { translator } from "@/lib/i18n";
@@ -125,12 +126,17 @@ export function keepInFlight(hidden: Set<string>, inFlight: Set<string>): Set<st
  *   3. Four tiles (staff only): Get Paid, Sales, Operations, Bookkeeping. One is open at a
  *      time; a second tap on the open one closes it.
  *   4. The open tile's rows: that group's rows that are not NOW.
- *   (5. The Waiting fold, drawn by the page under this.)
+ *   5. OLDER (N), grey and shut (cn-v1175, lib/action-items/older): the visits, write-ups and unsent
+ *      drafts that have waited thirty days, each with the buttons it had, counted by no number. Drawn
+ *      even when nothing else is open.
+ *   (6. The Waiting fold, drawn by the page under this.)
  *
  * THE SERVER'S ORDER (the build sorts once, types.ts sortActionItems), with only the rows ticked done
  * HERE sunk to the bottom. Everything this board shows is a FILTER of that order; it never sorts.
  * The counts are lib/action-items/needs-you-rule summarize() over the LIVE rows (after a row left
- * here, before the server's next list), so the header and the tiles never disagree mid-flight. The
+ * here, before the server's next list), so the header and the tiles never disagree mid-flight. They
+ * count THINGS (cn-v1175: a pile is its count), so a pile counted down in place writes its new count
+ * back onto the row that is counted, and no number lags the rows. The
  * tile that opens first comes from the server's rows alone (no clock, no storage, no address), so
  * the server's render and the phone's are the same.
  *
@@ -146,6 +152,7 @@ export function keepInFlight(hidden: Set<string>, inFlight: Set<string>): Set<st
  */
 export function ActionList({
   items,
+  older = [],
   people = [],
   emptyLabel,
   todayStr,
@@ -157,6 +164,8 @@ export function ActionList({
   defaultOpen,
 }: {
   items: ActionItem[];
+  /** The rows that waited thirty days (the build's NeedsYou.older): the grey Older fold, counted by no number. */
+  older?: ActionItem[];
   people?: { id: string; full_name: string | null }[];
   emptyLabel?: string;
   /** The business-tz "today" (YYYY-MM-DD), computed ONCE on the server — the only clock this
@@ -187,6 +196,8 @@ export function ActionList({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openPiles, setOpenPiles] = useState<Set<string>>(new Set());
+  // The Older fold, shut until tapped. Plain state, never a key: a row's action inside it never shuts it.
+  const [olderOpen, setOlderOpen] = useState(false);
   // The one tile that is open. Picked once from the server's rows; a refresh keeps the person's pick.
   const [openTile, setOpenTile] = useState<Group | null>(() => (defaultOpen !== undefined ? defaultOpen : summarize(items, { isStaff }).open));
   // Rows whose verb is still on its way to the server (keepInFlight).
@@ -194,8 +205,10 @@ export function ActionList({
   // A FRESH LIST FROM THE SERVER shows every row it holds, except those whose verb is still on its
   // way (keepInFlight): state adjusted while rendering, so no frame draws the stale hidden set.
   const [seenItems, setSeenItems] = useState(items);
-  if (seenItems !== items) {
+  const [seenOlder, setSeenOlder] = useState(older);
+  if (seenItems !== items || seenOlder !== older) {
     setSeenItems(items);
+    setSeenOlder(older);
     setRemovedIds((s) => keepInFlight(s, inFlight));
     setDoneIds((s) => keepInFlight(s, inFlight));
   }
@@ -289,10 +302,21 @@ export function ActionList({
     if (kids.length === 1 && !item.pile.capped && count <= 1) return kids[0];
     if (!gone) return item;
     const sum = item.amount == null ? null : kids.reduce((s, k) => s + (k.amount ?? 0), 0);
-    return { ...item, level: maxLevel(kids.map((k) => k.level)), amount: sum };
+    // THE RECOUNTED PILE IS WRITTEN BACK (cn-v1175): the numbers count a pile's things, so the row they
+    // count carries the count `draw` shows and only the children still here.
+    return { ...item, level: maxLevel(kids.map((k) => k.level)), amount: sum, pile: { ...item.pile, count }, children: kids };
   };
 
   const rows = visible.map((item) => ({ item, now: live(item) })).filter((r): r is { item: ActionItem; now: ActionItem } => r.now !== null);
+  // THE OLDER FOLD's rows, through the same live rules (a row acted on here leaves it the same way).
+  // A row ticked done here sinks to the fold's bottom, struck, and is no longer counted (as on the board).
+  const olderShown = older.filter((i) => !removedIds.has(i.id)).map((i) => ({ ...i, done: i.done || doneIds.has(i.id) }));
+  const olderRows = [...olderShown.filter((i) => !i.done), ...olderShown.filter((i) => i.done)]
+    .map((item) => ({ item, now: live(item) }))
+    .filter((r): r is { item: ActionItem; now: ActionItem } => r.now !== null);
+  const olderOpenRows = olderRows.filter((r) => !r.now.done);
+  const olderThings = olderOpenRows.reduce((n, r) => n + thingsOf(r.now).n, 0);
+  const olderPlus = olderOpenRows.some((r) => thingsOf(r.now).plus);
   const summary = summarize(
     rows.map((r) => r.now),
     { isStaff },
@@ -309,12 +333,46 @@ export function ActionList({
     </div>
   );
 
-  // NOTHING OPEN HERE: the title and one plain sentence (the Waiting fold, if any, is the page's).
+  // The list's own refusal line, drawn wherever the list is (a row in the Older fold can be refused too).
+  const banner = error ? (
+    <div role="alert" className={BANNER}>
+      {error}
+    </div>
+  ) : null;
+
+  // OLDER (N): grey, shut, at the bottom of the board. Its count is never amber and never a badge.
+  const olderFold =
+    olderRows.length > 0 ? (
+      <div className="border-t border-slate-100" data-older="">
+        <button
+          type="button"
+          onClick={() => setOlderOpen((o) => !o)}
+          aria-expanded={olderOpen}
+          className="flex min-h-11 w-full items-center justify-between px-5 text-left text-sm font-medium text-slate-500 hover:bg-slate-50"
+        >
+          <span>
+            {t("ny_older")} <span className="text-slate-500" data-older-count={withPlus(olderThings, olderPlus)}>({withPlus(olderThings, olderPlus)})</span>
+          </span>
+          <ChevronDown className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${olderOpen ? "rotate-180" : ""}`} />
+        </button>
+        {olderOpen && (
+          <div className="space-y-1.5 px-3 pb-3">
+            <p className="px-1 text-xs text-slate-500">{t("ny_olderWhy")}</p>
+            {olderRows.map((r) => draw(r.item))}
+          </div>
+        )}
+      </div>
+    ) : null;
+
+  // NOTHING OPEN HERE: the title and one plain sentence (the Waiting fold, if any, is the page's), and
+  // the Older fold when old rows are all there is.
   if (rows.length === 0) {
     return (
       <div>
         {header}
+        {banner && <div className="px-3 pt-3">{banner}</div>}
         <p className="px-5 py-3 text-sm text-slate-600">{emptyLabel ?? t("md_nothingNeedsYou")}</p>
+        {olderFold}
       </div>
     );
   }
@@ -323,11 +381,7 @@ export function ActionList({
     <div>
       {header}
       <div className="space-y-3 p-3">
-        {error && (
-          <div role="alert" className={BANNER}>
-            {error}
-          </div>
-        )}
+        {banner}
         {isStaff ? (
           <>
             {strip.length > 0 && (
@@ -351,6 +405,7 @@ export function ActionList({
           <div className="space-y-1.5">{rows.map((r) => draw(r.item))}</div>
         )}
       </div>
+      {olderFold}
     </div>
   );
 }
@@ -750,13 +805,19 @@ function AlreadyInvoicedDoor(p: RowProps & { door: RowDoor; className: string; a
   );
 }
 
-/** A door's question: when it comes back, who, or "are you sure?". Its refusal is said right here. */
+/**
+ * A door's question: when it comes back, which day, who, or "are you sure?". Its refusal is said right
+ * here. EVERY DOOR THAT CAN SIT BEHIND ⋯ DRAWS SOMETHING (cn-v1175): a Pick a Day put in the dots once
+ * opened a blank sheet, because only the button form drew its day picker; it asks for its day here
+ * with the one DayField (the phone's own picker), as MoveToDay does on a button.
+ */
 function DoorForm(p: RowProps & { door: RowDoor; onBack: () => void; onDone: () => void }) {
   const { door, item } = p;
   const a = door.act;
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [person, setPerson] = useState("");
+  const [day, setDay] = useState("");
   const send = async (verb: Affordance, payload?: DispatchPayload) => {
     setErr(null);
     setPending(true);
@@ -777,6 +838,26 @@ function DoorForm(p: RowProps & { door: RowDoor; onBack: () => void; onDone: () 
         onCancel={p.onBack}
         onSubmit={({ why, when }) => send(a.verb, { date: "date" in when ? when.date : undefined, reason: why || undefined })}
       />
+    );
+  }
+  if (a.type === "pickDay") {
+    return (
+      <div className="space-y-3">
+        {err && (
+          <div role="alert" className={SHEET_REFUSAL}>
+            {err}
+          </div>
+        )}
+        <div className="flex items-end gap-2">
+          <DayField autoFocus value={day} onChange={(iso) => setDay(iso)} aria-label={door.label} disabled={pending} className="flex-1" />
+          <Button type="button" onClick={() => send(a.verb, { date: day })} disabled={pending || !/^\d{4}-\d{2}-\d{2}$/.test(day)}>
+            {pending ? p.t("ag_cal_btn_moving") : p.t("ag_btn_move")}
+          </Button>
+        </div>
+        <Button type="button" variant="ghost" onClick={p.onBack} disabled={pending}>
+          {p.t("ny_btn_back")}
+        </Button>
+      </div>
     );
   }
   if (a.type === "assign") {

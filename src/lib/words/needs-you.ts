@@ -167,6 +167,9 @@ export const words: WordCatalog = {
     ny_datedStarted: "Started {day}",
     // The box's own form and lines.
     ny_waiting: "Waiting",
+    // cn-v1175: the grey fold of rows that waited thirty days (a button: Title Case), and its one line.
+    ny_older: "Older",
+    ny_olderWhy: "Waiting 30 days or more. Not counted in the numbers above.",
     ny_couldntDoThat: "Couldn't do that. Try again.",
     ny_person: "Person",
     ny_pickAPerson: "— Pick a person —",
@@ -248,6 +251,8 @@ export const words: WordCatalog = {
     ny_btn_wonIt: "Won It",
     ny_btn_lost: "Not Sold",
     ny_btn_lostVisit: "Not Sold",
+    // cn-v1175 (ROWS): a write-up row's one button (one pile for a sales visit whose day passed)
+    ny_btn_writeItUp: "Write It Up",
     ny_btn_markItNotSold: "Mark It Not Sold",
     ny_btn_assign: "Assign",
     ny_btn_finish: "Finish",
@@ -389,6 +394,8 @@ export const words: WordCatalog = {
     ny_datedSent: "Se envió el {day}",
     ny_datedStarted: "Empezó el {day}",
     ny_waiting: "En Espera",
+    ny_older: "Más Antiguos",
+    ny_olderWhy: "Esperando 30 días o más. No se cuentan en los números de arriba.",
     ny_couldntDoThat: "No se pudo. Inténtalo de nuevo.",
     ny_person: "Persona",
     ny_pickAPerson: "— Elige a una persona —",
@@ -467,6 +474,8 @@ export const words: WordCatalog = {
     ny_btn_wonIt: "Lo Gané",
     ny_btn_lost: "No Vendido",
     ny_btn_lostVisit: "No Vendida",
+    // cn-v1175 (ROWS): a write-up row's one button (one pile for a sales visit whose day passed)
+    ny_btn_writeItUp: "Redactarla",
     ny_btn_markItNotSold: "Marcar como No Vendido",
     ny_btn_assign: "Asignar",
     ny_btn_finish: "Terminar",

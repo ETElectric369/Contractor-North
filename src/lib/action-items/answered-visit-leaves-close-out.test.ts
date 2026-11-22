@@ -29,9 +29,43 @@ const state = vi.hoisted(() => ({ visits: [] as any[], reads: [] as { table: str
 
 const when = (v: unknown) => Date.parse(String(v));
 
+/** Split a PostgREST list at its top-level commas (never inside the parentheses of and(...) / in.(...)). */
+function topLevel(list: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of list) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (ch === "," && depth === 0) {
+      out.push(cur);
+      cur = "";
+    } else cur += ch;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+/** One arm of an `or` (cn-v1175: the close-out read's CLOSE_OUT_FILTER, the write-up read's outcome arm). */
+function arm(row: Record<string, unknown>, a: string): boolean {
+  if (a.startsWith("and(")) return topLevel(a.slice(4, -1)).every((x) => arm(row, x));
+  if (a.startsWith("or(")) return topLevel(a.slice(3, -1)).some((x) => arm(row, x));
+  const [col, ...rest] = a.split(".");
+  const op = rest.join(".");
+  const v = row[col] ?? null;
+  const list = (s: string) => s.slice(s.indexOf("(") + 1, -1).split(",");
+  if (op.startsWith("not.in.")) return v !== null && !list(op).includes(String(v));
+  if (op.startsWith("in.")) return list(op).includes(String(v));
+  if (op === "is.null") return v === null;
+  if (op.startsWith("eq.")) return String(v) === op.slice(3);
+  throw new Error(`the fake was never taught ${a}`);
+}
+
 /** One filter on one row, the way the database would decide it. Anything else (order, limit) keeps. */
 function keeps(row: Record<string, unknown>, [method, col, val]: Call): boolean {
+  if (method === "or") return topLevel(String(col)).some((a) => arm(row, a));
   const v = row[String(col)];
+  if (method === "neq") return v !== val;
   if (method === "eq") return v === val;
   if (method === "is") return val === null ? v === null || v === undefined : v === val;
   if (method === "in") return (val as unknown[]).includes(v);
@@ -120,6 +154,9 @@ const visit = (id: string, over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+/** A work visit (a service call): what Visits to Close Out asks about since cn-v1175 (R7). */
+const work = (id: string, over: Record<string, unknown> = {}) => visit(id, { type: "service_call", ...over });
+
 beforeEach(() => {
   state.visits = [];
   state.reads = [];
@@ -131,8 +168,10 @@ const rows = (r: Awaited<ReturnType<typeof office>>) => r.now.flatMap((i) => i.c
 const idsOf = (r: Awaited<ReturnType<typeof office>>, kind: string) => rows(r).filter((i) => i.kind === kind).map((i) => i.id).sort();
 
 describe("Visits to Close Out asks only about a visit nobody has answered", () => {
+  // cn-v1175 (R7): an inspection whose day passed is Sales' (Inspections to Write Up), so the close-out
+  // rows here are work visits (a service call), the pile's own kind now.
   it("the Didn't Happen? row answered Lost is gone from the pile; the unanswered one beside it still asks", async () => {
-    state.visits = [visit("open-1"), visit("answered-lost", { outcome: "lost", customers: { name: "Dana Rook" } })];
+    state.visits = [work("open-1"), work("answered-lost", { outcome: "lost", customers: { name: "Dana Rook" } })];
     const r = await office();
     expect(idsOf(r, "appointment")).toEqual(["open-1"]);
     // Nowhere else on Now either: it is filed, not moved.
@@ -140,7 +179,7 @@ describe("Visits to Close Out asks only about a visit nobody has answered", () =
   });
 
   it("before the answer it WAS asked (the control: this fixture is the pile's own row)", async () => {
-    state.visits = [visit("open-1"), visit("answered-lost", { outcome: null })];
+    state.visits = [work("open-1"), work("answered-lost", { outcome: null })];
     expect(idsOf(await office(), "appointment")).toEqual(["answered-lost", "open-1"]);
   });
 
@@ -159,10 +198,10 @@ describe("Visits to Close Out asks only about a visit nobody has answered", () =
 
   it("any answer ends the asking: lost, the old no_bid, and won; on every kind of visit", async () => {
     state.visits = [
-      visit("open-1"),
-      visit("lost", { outcome: "lost" }),
-      visit("no-bid", { outcome: "no_bid" }),
-      visit("won", { outcome: "won", job_id: "job-1" }),
+      work("open-1"),
+      work("lost", { outcome: "lost" }),
+      work("no-bid", { outcome: "no_bid" }),
+      work("won", { outcome: "won", job_id: "job-1" }),
       // Not an estimate visit: the write-up feeder never reads it, so this pile was its only reader.
       visit("meeting-lost", { type: "meeting", outcome: "lost" }),
       visit("open-call", { type: "call" }),
@@ -179,7 +218,7 @@ describe("Visits to Close Out asks only about a visit nobody has answered", () =
 
 describe("the outcome is tested IN THE QUERY, so the pile's count is the read's own count", () => {
   it("the read is sent the filter: status scheduled, not absorbed, outcome null", async () => {
-    state.visits = [visit("open-1")];
+    state.visits = [work("open-1")];
     await office();
     // The close-out read is the appointments read that names assigned_to (the write-up read names capture).
     const read = state.reads.find((x) => x.table === "appointments" && x.cols.includes("assigned_to"));
@@ -193,8 +232,8 @@ describe("the outcome is tested IN THE QUERY, so the pile's count is the read's 
     // The read is the OLDEST 50 with an exact count. Were the outcome tested in code after the read,
     // the sixty answered ones (older, so first) would fill all 50 places: the two visits still asking
     // would never be read at all, and the count would be 62.
-    const answered = Array.from({ length: 60 }, (_, i) => visit(`old-${i}`, { starts_at: daysAgo(10), outcome: "lost" }));
-    state.visits = [...answered, visit("open-1", { starts_at: daysAgo(2) }), visit("open-2", { starts_at: daysAgo(1) })];
+    const answered = Array.from({ length: 60 }, (_, i) => work(`old-${i}`, { starts_at: daysAgo(10), outcome: "lost" }));
+    state.visits = [...answered, work("open-1", { starts_at: daysAgo(2) }), work("open-2", { starts_at: daysAgo(1) })];
     const r = await office();
     const pile = r.now.find((i) => i.id === "pile:visits_to_close_out");
     expect(pile, "two open visits roll into the pile").toBeTruthy();
@@ -208,7 +247,7 @@ describe("the outcome is tested IN THE QUERY, so the pile's count is the read's 
     expect(read).toMatch(/\.eq\("status", "scheduled"\)\s*\.eq\("absorbed", false\)\s*\.is\("outcome", null\)\s*\.gte\("starts_at", dayStartIso\(from\)\)\s*\.lt\("starts_at", dayStartIso\(todayStr\)\);/);
     // Sent before the tech's own filter, the order and the limit: one read, for the office and a tech alike.
     expect(read.indexOf('.is("outcome", null)')).toBeLessThan(read.indexOf('q.eq("assigned_to", userId)'));
-    const loop = q.slice(q.indexOf("// ── VISITS NOBODY CLOSED OUT."), q.indexOf("counts.visits_to_close_out = codeCount(apptR);"));
+    const loop = q.slice(q.indexOf("// ── VISITS NOBODY CLOSED OUT."), q.indexOf("counts.visits_to_close_out ="));
     expect(loop.length).toBeGreaterThan(200);
     expect(loop).not.toContain("outcome");
   });
@@ -231,7 +270,9 @@ describe("the write-up feeder and the Inspections page read the outcome column",
     const q = readFileSync(join(process.cwd(), "src/lib/action-items/query.ts"), "utf8");
     const cols = selected(q.slice(q.indexOf("const inspP"), q.indexOf("const doneP")));
     for (const c of BUCKET_READS) expect(cols, c).toContain(c);
-    expect(q).toMatch(/const \{ toWriteUp \} = bucketInspections\(\s*\(inspR\.data \?\? \[\]\) as any\[\],/);
+    // cn-v1175: the rows are named once (inspRows, the read's own rows) and handed whole.
+    expect(q).toContain("const inspRows = (inspR.data ?? []) as any[];");
+    expect(q).toMatch(/const buckets = bucketInspections\(\s*inspRows,/);
   });
 
   // cn-v1171: the page is one list now (lib/inspections inspectionList over the buckets); the two facts
@@ -263,5 +304,50 @@ describe("the write-up feeder and the Inspections page read the outcome column",
       visit("nobid-done", { status: "completed", outcome: "no_bid" }),
     ];
     expect(idsOf(await office(), "inspection_writeup")).toEqual(["open-notes"]);
+  });
+});
+
+/**
+ * ONE THING, ONE PILE (cn-v1175, R7). The owner: "im curious about the tasks on there saying visits to
+ * close out on the operations page and inspections to write up on the sales page, isnt that the same
+ * thing?" For an inspection it was. The fake applies the `or` the reads send, so a row is where it is
+ * only because the QUERY and the one visit rule put it there.
+ */
+describe("an inspection is one row in one pile; Visits to Close Out keeps the work", () => {
+  it("a booked inspection whose day passed with nothing on it is ONE write-up row and no close-out row", async () => {
+    state.visits = [visit("insp-passed"), visit("quote-passed", { type: "quote" })];
+    const r = await office();
+    expect(idsOf(r, "inspection_writeup")).toEqual(["insp-passed", "quote-passed"]);
+    expect(idsOf(r, "appointment")).toEqual([]);
+  });
+
+  it("its doors: Write It Up boxed, Move to Another Day and Not Sold behind ⋯, never Dismiss", async () => {
+    state.visits = [visit("insp-passed")];
+    const row = rows(await office()).find((i) => i.id === "insp-passed")!;
+    expect(row.affordances).toEqual(["snooze", "dismiss", "open"]);
+    expect(row.targetId).toMatch(/^\d{2}:\d{2}$/);
+  });
+
+  it("a call for a lead is no row once its day passes (its lead is the reminder); a call with no lead still asks", async () => {
+    state.visits = [work("call-lead", { type: "call", inquiry_id: "lead-1" }), work("call-alone", { type: "call" })];
+    const r = await office();
+    expect(idsOf(r, "appointment")).toEqual(["call-alone"]);
+    expect(rows(r).map((i) => i.id)).not.toContain("call-lead");
+  });
+
+  it("a job day on a job that is over leaves (the one visit rule); one on a job still going asks", async () => {
+    state.visits = [
+      work("day-done", { type: "job", job_id: "job-done", jobs: { status: "complete" } }),
+      work("day-cancelled", { type: "job", job_id: "job-off", jobs: { status: "cancelled" } }),
+      work("day-going", { type: "job", job_id: "job-on", jobs: { status: "in_progress" } }),
+    ];
+    expect(idsOf(await office(), "appointment")).toEqual(["day-going"]);
+  });
+
+  it("the city's final inspection is a visit to close out, not a write-up", async () => {
+    state.visits = [visit("final", { type: "final_inspection", job_id: "job-on", jobs: { status: "in_progress" } })];
+    const r = await office();
+    expect(idsOf(r, "appointment")).toEqual(["final"]);
+    expect(idsOf(r, "inspection_writeup")).toEqual([]);
   });
 });

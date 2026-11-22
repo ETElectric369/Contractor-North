@@ -294,7 +294,8 @@ describe("source pins and words", () => {
 
   it("the page reads through the one reader and builds its rows with the Inspections page's builder", () => {
     expect(src).toContain("readInspectionBuckets(supabase, { now })");
-    expect(src).toContain("inspectionsToEstimate(read.buckets).map((a) => rowOf(a, \"write_up\"))");
+    // cn-v1175 (R5): each row is handed its offer (a job made for its customer record after it), if any.
+    expect(src).toContain("inspectionsToEstimate(read.buckets).map((a) => rowOf(a, \"write_up\", read.offers.get(a.id) ?? null))");
     expect(src).toContain("isStaff && estimatesOn && !filter && !statusFilter ? readInspectionBuckets");
     // The comment says drafts first, as the sort does.
     expect(src).toContain("DRAFTS FIRST");

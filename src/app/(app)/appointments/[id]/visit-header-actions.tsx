@@ -13,7 +13,8 @@ import {
   useCloseActionsMenu,
 } from "@/components/section-actions-menu";
 import { wontHappenConfirm, wontHappenToast, wontHappenUndo } from "@/lib/appointments/wont-happen";
-import { putVisitBackOnSchedule, setAppointmentStatus, wontHappenAppointment } from "../actions";
+import { notSoldAnswer, undoneKey } from "@/lib/appointments/not-sold";
+import { putVisitBackOnSchedule, setAppointmentOutcome, setAppointmentStatus, wontHappenAppointment } from "../actions";
 
 /**
  * THE VISIT PAGE'S ⋯ ACTIONS ROWS (W2-11). The header used to carry up to seven controls: Get Paid,
@@ -135,6 +136,67 @@ export function PutBackRow({ id }: { id: string }) {
     >
       <CalendarPlus className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {pending ? t("vp_btn_saving") : t("vp_btn_putItBackOnTheSchedule")}
     </button>
+  );
+}
+
+/**
+ * 'Not Sold' — A SALES VISIT'S ONE ENDING ON ITS OWN PAGE (cn-v1175, R8). The owner: "i thought we got rid
+ * of the Didn't Happen terminology and now could we safely say that it could go in the Not Sold box to
+ * simplify everything". On an inspection or an estimate visit that is still booked, the ⋯ menu holds Not
+ * Sold where Dismiss was: the record is kept (nothing is deleted), its lead goes Not Sold by the rule it
+ * already had, and a visit answered before its day comes off the schedule (setAppointmentOutcome). The
+ * Undo clears the answer and, when it came off the schedule, puts it back. A work visit keeps Dismiss.
+ * No browser dialog: the toast's Undo is the way back, as the ending card's Not Sold has it.
+ */
+export function NotSoldRow({ id }: { id: string }) {
+  const router = useRouter();
+  const toast = useToast();
+  const lang = useLang();
+  const t = translator(lang);
+  const closeMenu = useCloseActionsMenu();
+  const [pending, start] = useTransition();
+  return (
+    <>
+      <div className={ACTIONS_DIVIDER_CLS} />
+      <button
+        type="button"
+        disabled={pending}
+        className={ACTIONS_DANGER_ROW_CLS}
+        onClick={() =>
+          start(async () => {
+            const res = await setAppointmentOutcome(id, "lost", { offSchedule: true });
+            if (!res.ok) {
+              toast(res.error ?? t("vp_thatDidntSave"), "error");
+              return;
+            }
+            closeMenu();
+            const a = notSoldAnswer(res);
+            const off = res.offSchedule ?? null;
+            toast(t(a.said), "success", {
+              label: t("vp_btn_undo"),
+              onClick: () => {
+                void (async () => {
+                  const r = await setAppointmentOutcome(id, null);
+                  let failed = r.ok ? null : (r.error ?? t("vp_thatDidntSave"));
+                  if (r.ok && off) {
+                    const back = await setAppointmentStatus(id, wontHappenUndo(off.previousStatus, lang, t).status);
+                    if (!back.ok) failed = back.error ?? t("vp_couldntPutItBack");
+                  }
+                  toast(failed ?? t(undoneKey(r) ?? "vp_answerCleared"), failed ? "error" : "success");
+                  if (r.ok && r.warning) toast(r.warning, "error");
+                  router.refresh();
+                })();
+              },
+            });
+            if (a.warning) toast(a.warning, "error");
+            if (off?.note) toast(off.note, "info", undefined, { sticky: true });
+            router.refresh();
+          })
+        }
+      >
+        <Ban className="h-4 w-4 shrink-0" /> {pending ? t("vp_btn_saving") : t("vp_btn_lost")}
+      </button>
+    </>
   );
 }
 

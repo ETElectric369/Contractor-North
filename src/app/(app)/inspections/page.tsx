@@ -7,12 +7,12 @@ import { PageHeader, EmptyState } from "@/components/page-header";
 import { translator } from "@/lib/i18n";
 import { fillSlots } from "@/lib/lang-words";
 import { currentLangFor } from "@/lib/current-lang";
-import { filedUnder, filedWithNobody, inspectionList, inspectionsToEstimate, type FiledUnder } from "@/lib/inspections";
+import { filedUnder, notSoldWithNobody, inspectionList, inspectionsToEstimate, type FiledUnder } from "@/lib/inspections";
 import { readInspectionBuckets, VISIT_READ_CAP } from "@/lib/inspections-read";
 import { reportError } from "@/lib/observe";
 import { dayWords } from "@/lib/action-items/dated-when";
 import { featureOn } from "@/lib/features";
-import { FiledWithNobodyFold, InspectionList, PRIMARY, ToEstimateLine } from "./inspection-list";
+import { NotSoldFold, InspectionList, PRIMARY, ToEstimateLine } from "./inspection-list";
 import { inspectionRowBuilder } from "./row-words";
 import type { FoldRow, ListRow } from "./list-rows";
 
@@ -34,7 +34,8 @@ const ENDED_KEY: Record<FiledUnder, string> = {
  * switch and the header's two buttons are gone: an inspection is booked from a lead, and a finished
  * one is found in its person's file. Which rows are on the list, and in what state, is ONE rule
  * (lib/inspections inspectionList, over the buckets My Day's Needs You reads too, so the two never
- * disagree). Filed inspections that hang on nobody wait in one fold under the list.
+ * disagree). Inspections that ended Not Sold or cancelled and hang on nobody wait in one fold under
+ * the list, Not Sold (cn-v1175).
  *
  * INSPECTED, WAITING ON A PRICE, IS ON THE ESTIMATES PAGE (cn-v1172). Erik, after the second meeting:
  * "lets break the Estimate page into 2 parts consisting of completed inspections in its own new list
@@ -89,11 +90,12 @@ export default async function InspectionsPage({
   const toEstimate = estimatesOn ? inspectionsToEstimate(buckets).length : 0;
 
   const { todayStr, wordsOf, rowOf } = inspectionRowBuilder({ t, lang, tz, now, estimatesOn });
-  const listRows: ListRow[] = listed.map(({ row, state }) => rowOf(row, state));
+  const listRows: ListRow[] = listed.map(({ row, state }) => rowOf(row, state, read.offers.get(row.id) ?? null));
 
-  // FILED UNDER NOBODY: no lead, no customer, no job, so no file to find them in. Its day and how it
-  // ended (filedUnder: the outcome first, whatever the status).
-  const foldRows: FoldRow[] = filedWithNobody(buckets.filed).map((a) => {
+  // NOT SOLD (cn-v1175, R8): ended without becoming work (Not Sold or cancelled), and no lead, no
+  // customer, no job, so no file to find them in. Its day and its own state word (filedUnder: the
+  // outcome first, whatever the status).
+  const foldRows: FoldRow[] = notSoldWithNobody(buckets.filed).map((a) => {
     const ended = filedUnder(a);
     const words = wordsOf(a, ended);
     return {
@@ -137,7 +139,7 @@ export default async function InspectionsPage({
         </>
       )}
       {read.capped && <p className="mt-3 px-1 text-xs text-slate-600">{fillSlots(t("ip_capped"), { n: VISIT_READ_CAP })}</p>}
-      <FiledWithNobodyFold rows={foldRows} t={t} />
+      <NotSoldFold rows={foldRows} t={t} />
     </div>
   );
 }

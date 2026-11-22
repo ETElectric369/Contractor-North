@@ -15,7 +15,7 @@ import type { FileVisitRow } from "@/lib/appointments/file-visit";
 /** The lead's own columns, with who referred it (the list page's join). */
 export const LEAD_FILE_COLUMNS =
   "id, name, company_name, type, email, phone, address, unit, city, state, zip, message, notes, source, status, last_contacted_at, customer_id, converted_to, converted_at, created_by, created_at, updated_at, priority, intake, lead_bucket, site_inspection_required, referrer:profiles!inquiries_referred_by_fkey(full_name)";
-export const FILE_VISIT_COLUMNS = "id, type, status, outcome, starts_at, title";
+export const FILE_VISIT_COLUMNS = "id, type, status, outcome, starts_at, title, job_id";
 export const FILE_ESTIMATE_COLUMNS = "id, quote_number, title, status, created_at";
 export const FILE_JOB_COLUMNS = "id, job_number, name, status";
 

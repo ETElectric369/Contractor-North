@@ -364,8 +364,9 @@ describe("This Day: one day's time, that day only (setJobDayTimes)", () => {
     expect(job("t1")).toMatchObject({ scheduled_start: at("2026-09-28", "09:00"), scheduled_end: at("2026-09-29", "17:00"), planned_minutes: 960 });
     expect(await actions.setJobDayTimes("t1", "2026-09-29", { length: 120 })).toEqual({ ok: true });
     expect(days("t1")).toContain("2026-09-29..2026-09-29 12:00-14:00");
-    expect(await actions.setJobDayTimes("t1", "2026-09-29", { usual: true })).toEqual({ ok: true });
-    expect(days("t1")).toEqual(["2026-09-28..2026-09-29 usual"]);
+    // The way back to the usual hours was removed (cn-v1175): an unknown field asks for nothing.
+    expect(await actions.setJobDayTimes("t1", "2026-09-29", { usual: true } as never)).toEqual({ ok: true });
+    expect(days("t1")).toContain("2026-09-29..2026-09-29 12:00-14:00");
   });
 
   it("the job's one day IS the job's time: the job's hours move (and a day's leftover own hours give way)", async () => {

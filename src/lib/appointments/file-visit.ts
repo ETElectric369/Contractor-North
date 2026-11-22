@@ -20,6 +20,8 @@ export type FileVisitRow = {
   outcome: string | null;
   starts_at: string | null;
   title: string | null;
+  /** Its job (cn-v1175): the one visit rule reads it (a win with no job picked is still open). */
+  job_id?: string | null;
 };
 
 /**

@@ -393,3 +393,53 @@ describe("a visit marked Won does not hide its lead", () => {
     expect([...res.wonPending]).toEqual(["lead-1"]);
   });
 });
+
+/**
+ * THE SIDE HOLE (cn-v1175, R4) AND ONE THING, ONE PILE (R7). Close Out on a call or a meeting wrote
+ * completed with no outcome, and this rule then counted the visit as standing, so its lead was on no
+ * list. A call or a meeting that has happened, or whose time went by, stands for nothing now: its lead
+ * is back on the Leads list, which is the reminder. An inspection or an estimate visit is unchanged.
+ */
+describe("visitStands: a call or a meeting that has happened stands for nothing (cn-v1175)", () => {
+  it.each([
+    ["call", "completed", GONE_BY, false],
+    ["meeting", "completed", AHEAD, false],
+    ["other", "completed", GONE_BY, false],
+    ["call", "scheduled", GONE_BY, false],
+    ["call", "scheduled", AHEAD, true],
+    ["call", "scheduled", null, true],
+    ["inspection", "completed", GONE_BY, true],
+    ["quote", "scheduled", GONE_BY, true],
+  ] as const)("a %s %s at %s -> %s", (type, status, starts_at, expected) => {
+    expect(visitStands({ type, status, outcome: null, starts_at, job_id: null }, NOW)).toBe(expected);
+  });
+
+  it("its lead is back on the Leads list (the read selects the kind)", async () => {
+    expect(LEAD_VISIT_COLUMNS).toBe("inquiry_id, status, outcome, starts_at, type, job_id");
+    const read = await readStanding(
+      ["lead-call", "lead-insp"],
+      async () => ({
+        data: [
+          { inquiry_id: "lead-call", status: "completed", outcome: null, starts_at: GONE_BY, type: "call", job_id: null },
+          { inquiry_id: "lead-insp", status: "completed", outcome: null, starts_at: GONE_BY, type: "inspection", job_id: null },
+        ],
+        error: null,
+      }),
+      NOW,
+    );
+    expect([...read.standing]).toEqual(["lead-insp"]);
+  });
+
+  it("a win with no job picked stands (R8): it is on the Inspections list asking for its job, so its lead waits there", () => {
+    expect(visitStands({ type: "inspection", status: "completed", outcome: "won", starts_at: GONE_BY, job_id: null }, NOW)).toBe(true);
+    expect(visitStands({ type: "inspection", status: "completed", outcome: "won", starts_at: GONE_BY, job_id: "job-1" }, NOW)).toBe(false);
+    // A reader that did not select the job keeps the rule it had (won is an ending).
+    expect(visitStands({ status: "completed", outcome: "won", starts_at: GONE_BY }, NOW)).toBe(false);
+  });
+
+  it("a sales visit tied to a job that has happened stands for nothing (the one visit rule's on-a-job)", () => {
+    expect(visitStands({ type: "inspection", status: "completed", outcome: null, starts_at: GONE_BY, job_id: "job-1" }, NOW)).toBe(false);
+    // Still ahead, it stands whatever it is tied to.
+    expect(visitStands({ type: "inspection", status: "scheduled", outcome: null, starts_at: AHEAD, job_id: "job-1" }, NOW)).toBe(true);
+  });
+});

@@ -68,6 +68,11 @@ export function endingOffered(v: {
   return v.isStaff && v.decidable && v.status === "completed" && !v.outcome && !v.hasJob && !v.estimateLive;
 }
 
+/** A visit marked Won with no job picked (cn-v1175, R8): the office is handed the job picker at once. */
+export function jobAsked(v: { isStaff: boolean; decidable: boolean; outcome: string | null; hasJob: boolean }): boolean {
+  return v.isStaff && v.decidable && v.outcome === "won" && !v.hasJob;
+}
+
 const DOOR = "inline-flex min-h-[44px] items-center justify-center";
 
 export function VisitEnding({
@@ -201,6 +206,9 @@ export function VisitEnding({
           {choices}
         </>
       )}
+      {/* A WIN WITH NO JOB PICKED IS NOT AN ENDING (cn-v1175, R8): the Inspections list and Needs You send
+          the office here to pick the job, so the picker is out at once, never behind Change. */}
+      {jobAsked({ isStaff, decidable, outcome, hasJob: !!job }) && !offered && !changing && choices}
       {changing && choices}
     </div>
   );

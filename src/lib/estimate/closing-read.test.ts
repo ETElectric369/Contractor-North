@@ -63,6 +63,9 @@ describe("loadClosing", () => {
       ["quotes", "id, revises_quote_id, status"],
       ["sent_messages", "doc_id, sent_at"],
     ]);
+    // cn-v1175 (R3): its lead's answer rides CLOSING_COLUMNS; no read of the job's or lead's other estimates
+    // (skeptic #78: no sibling rule, see quote-settled.ts).
+    expect(CLOSING_COLUMNS).toContain("inquiry:inquiry_id(name, company_name, status)");
     // Only sent estimates, org-scoped, the cap plus one (to know it was cut), oldest first.
     expect(calls[0].filters).toEqual(
       expect.arrayContaining([["eq", "status", "sent"], ["eq", "org_id", "org-1"], ["order", "created_at", { ascending: true }], ["limit", CLOSING_CAP + 1]]),
@@ -148,5 +151,46 @@ describe("loadClosing", () => {
     const r = await loadClosing(client, { todayStr: TODAY });
     expect(r.cut).toBe(true);
     expect(r.rows).toHaveLength(CLOSING_CAP);
+  });
+});
+
+describe("loadClosing: its lead's answer settles a sent estimate; another estimate's never does (cn-v1175, R3)", () => {
+  it("its lead marked Not Sold takes it off the list; an open lead keeps it", async () => {
+    const { client } = stand((c) => {
+      if (c.table === "quotes" && c.cols === CLOSING_COLUMNS)
+        return {
+          data: [
+            sentRow("1", { inquiry_id: "l-ns", inquiry: { name: "Sam Tillery", company_name: null, status: "lost" } }),
+            sentRow("3", { inquiry_id: "l-open", inquiry: { name: "Dana Rook", company_name: null, status: "contacted" } }),
+          ],
+        };
+      return {};
+    });
+    const r = await loadClosing(client, { todayStr: TODAY });
+    expect(r.rows.map((x) => x.id)).toEqual(["3"]);
+  });
+
+  it("Keep Both's restored estimate (sent again beside the accepted one, same lead and job) stays on Closing", async () => {
+    // planKeepBoth (cn-v1168) puts the earlier estimate back to sent as an open offer. The accepted one
+    // is on the same lead and job; nothing it says answers for this one.
+    const { client, calls } = stand((c) => {
+      if (c.table === "quotes" && c.cols === CLOSING_COLUMNS)
+        return {
+          data: [
+            sentRow("4", {
+              job_id: "j-kb",
+              jobs: { status: "scheduled" },
+              inquiry_id: "l-kb",
+              inquiry: { name: "Theo Vance", company_name: null, status: "converted" },
+            }),
+          ],
+        };
+      // Were anyone to ask for the accepted estimate beside it, here it is: it must change nothing.
+      if (c.table === "quotes") return { data: [{ id: "5", status: "accepted", job_id: "j-kb", inquiry_id: "l-kb", revises_quote_id: null }] };
+      return {};
+    });
+    const r = await loadClosing(client, { todayStr: TODAY });
+    expect(r.rows.map((x) => x.id)).toEqual(["4"]);
+    expect(calls.some((c) => c.table === "quotes" && c.filters.some((f) => f[0] === "eq" && f[1] === "status" && f[2] === "accepted"))).toBe(false);
   });
 });

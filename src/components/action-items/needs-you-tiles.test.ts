@@ -13,7 +13,7 @@ import { fillSlots } from "@/lib/lang-words";
  */
 const inLang = (lang: "en" | "es", el: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(LangProvider, { lang, children: el }));
 const counts = (more: number, lang: "en" | "es") => inLang(lang, createElement(NeedsYouCounts, { summary: { now: 0, soon: 0, more } }));
-const tile = (count: number): TileSummary => ({ group: "run_jobs", count, soon: 0, money: null, moneyCapped: false, unread: 0 });
+const tile = (count: number): TileSummary => ({ group: "run_jobs", count, capped: false, soon: 0, money: null, moneyCapped: false, unread: 0 });
 const tiles = (count: number, lang: "en" | "es") =>
   inLang(lang, createElement(NeedsYouTiles, { tiles: [tile(count)], openId: null, onToggle: () => {}, controlsId: "rows", isStaff: true }));
 
@@ -39,7 +39,7 @@ describe("one versus many", () => {
  */
 describe("one due versus several, said", () => {
   const due = (lang: "en" | "es", n: number) => fillSlots(translator(lang)(n === 1 ? "ny_countDueOne" : "ny_countDue"), { n });
-  const soonTile = (soon: number): TileSummary => ({ group: "run_jobs", count: 4, soon, money: null, moneyCapped: false, unread: 0 });
+  const soonTile = (soon: number): TileSummary => ({ group: "run_jobs", count: 4, capped: false, soon, money: null, moneyCapped: false, unread: 0 });
 
   it("the catalog's words are the ones the owner reads", () => {
     expect(due("en", 1)).toBe("1 due");
@@ -77,7 +77,7 @@ describe("the header's marks are said once", () => {
 });
 
 describe("each tile has its picture (cn-v1162)", () => {
-  const four = (["get_paid", "win_work", "run_jobs", "keep_books"] as const).map((group, i): TileSummary => ({ group, count: i === 3 ? 0 : 2, soon: 0, money: null, moneyCapped: false, unread: 0 }));
+  const four = (["get_paid", "win_work", "run_jobs", "keep_books"] as const).map((group, i): TileSummary => ({ group, count: i === 3 ? 0 : 2, capped: false, soon: 0, money: null, moneyCapped: false, unread: 0 }));
   const html = inLang("en", createElement(NeedsYouTiles, { tiles: four, openId: null, onToggle: () => {}, controlsId: "rows", isStaff: true }));
   const tileOf = (g: string) => html.slice(html.indexOf(`data-tile="${g}"`), html.indexOf("</button>", html.indexOf(`data-tile="${g}"`)));
 
@@ -92,5 +92,30 @@ describe("each tile has its picture (cn-v1162)", () => {
   it("a zero tile is dimmed whole, its picture with it", () => {
     expect(html).toMatch(/<button[^>]*data-tile="keep_books"[^>]*disabled=""[^>]*class="[^"]*opacity-50/);
     expect(tileOf("keep_books")).toContain('data-group-picture="keep_books"');
+  });
+});
+
+/**
+ * A FLOOR SAYS "+" (cn-v1175): every number counts things, and a pile whose read was cut short ("50+")
+ * makes its tile and the header "at least", in both languages.
+ */
+describe("a capped pile makes its figure a floor", () => {
+  it("the tile draws N+ as its number and says it whole to a screen reader", () => {
+    for (const lang of ["en", "es"] as const) {
+      const html = inLang(lang, createElement(NeedsYouTiles, { tiles: [{ ...tile(53), capped: true }], openId: null, onToggle: () => {}, controlsId: "rows", isStaff: true }));
+      expect(html).toContain('data-tile-count="53+"');
+      expect(html).not.toMatch(/disabled=""/);
+      const label = /<button[^>]*aria-label="([^"]*)"/.exec(html)![1];
+      expect(label).toBe(fillSlots(translator(lang)("ny_tileOpen"), { name: translator(lang)("ny_btn_tileOperations"), n: "53+" }));
+    }
+  });
+
+  it("the header's open figure and the octagon carry the + of their own capped pile", () => {
+    const html = inLang("en", createElement(NeedsYouCounts, { summary: { now: 0, soon: 0, more: 51, moreCapped: true } }));
+    expect(html).toContain("51+ open");
+    const es = inLang("es", createElement(NeedsYouCounts, { summary: { now: 50, soon: 0, more: 3, nowCapped: true } }));
+    expect(es).toContain("50+");
+    expect(es).toContain("3 más");
+    expect(es).not.toContain("3+");
   });
 });

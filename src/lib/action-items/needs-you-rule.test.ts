@@ -289,7 +289,7 @@ function seeded(seed: number): () => number {
     return s / 2 ** 32;
   };
 }
-type Row = Pick<ActionItem, "id" | "kind" | "done" | "group" | "level" | "amount" | "pile">;
+type Row = Pick<ActionItem, "id" | "kind" | "done" | "group" | "level" | "amount" | "pile" | "children">;
 function generated(seed: number, n: number): Row[] {
   const r = seeded(seed);
   const levels: Level[] = ["now", "soon", "none"];
@@ -332,19 +332,35 @@ describe("the counts", () => {
     expect([s.now, s.soon, s.more]).toEqual([1, 1, 2]);
     const paid = s.tiles[0];
     // The strip's NOW invoice is not in the tile, nor in its money.
-    expect(paid).toEqual({ group: "get_paid", count: 1, soon: 1, money: 100, moneyCapped: false, unread: 0 });
+    expect(paid).toEqual({ group: "get_paid", count: 1, capped: false, soon: 1, money: 100, moneyCapped: false, unread: 0 });
+    // The badge's number (cn-v1175): every open thing, the NOW invoice included.
+    expect(s.total).toBe(4);
     expect(s.tiles[3]).toMatchObject({ group: "keep_books", count: 1, unread: 1, money: null });
     expect(s.tiles[2]).toMatchObject({ group: "run_jobs", count: 1, soon: 0, money: null });
   });
 
-  it("a pile counts one, with its own mark; a capped pile's money is 'at least'", () => {
+  // RE-PINNED ON PURPOSE (cn-v1175): the owner's pick is that every number counts THINGS. A pile was
+  // one; it is its count now, its SOON children are its soon, and a capped read makes the figure a floor.
+  it("a pile counts its things, its SOON children are its soon; a capped pile makes its tile and the total 'at least'", () => {
+    const kid = (id: string, level: Level) => ({ id, kind: "invoice_draft", group: "get_paid", done: false, level }) as ActionItem;
     const rows: Row[] = [
-      { id: "pile:invoices_not_sent", kind: "invoice_draft", group: "get_paid", done: false, level: "soon", amount: null, pile: { name: "invoices_not_sent", label: "Invoices Not Sent", count: 40, capped: true, listHref: null, listLabel: null, verb: "Send It" } },
+      {
+        id: "pile:invoices_not_sent",
+        kind: "invoice_draft",
+        group: "get_paid",
+        done: false,
+        level: "soon",
+        amount: null,
+        pile: { name: "invoices_not_sent", label: "Invoices Not Sent", count: 40, capped: true, listHref: null, listLabel: null, verb: "Send It" },
+        children: [kid("i1", "soon"), kid("i2", "none")],
+      },
       { id: "q", kind: "quote_draft", group: "win_work", done: false, level: "none", amount: 2500 },
     ];
     const s = summarize(rows, { isStaff: true });
-    expect(s.tiles[0]).toMatchObject({ count: 1, soon: 1, money: null, moneyCapped: true });
-    expect(s.tiles[1]).toMatchObject({ count: 1, money: 2500 });
+    expect(s.tiles[0]).toMatchObject({ count: 40, capped: true, soon: 1, money: null, moneyCapped: true });
+    expect(s.tiles[1]).toMatchObject({ count: 1, capped: false, money: 2500 });
+    expect([s.now, s.soon, s.more, s.total]).toEqual([0, 1, 40, 41]);
+    expect([s.capped, s.nowCapped, s.moreCapped]).toEqual([true, false, true]);
   });
 
   it("money is null for anybody who is not staff", () => {

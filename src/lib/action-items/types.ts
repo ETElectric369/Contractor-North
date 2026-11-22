@@ -8,7 +8,19 @@
 // A NUMBER on chrome = distinct items needing a HUMAN DECISION TODAY that the
 // app cannot defer, shown where the deciding happens, display-capped at 9+.
 // No count may be the length of an unbounded or undated set — every counted
-// item carries an expiry: a date, a bounded window, or a rollup.
+// item carries an expiry: a date, a bounded window, or a rollup whose read is
+// capped (and then the number says "+": at least that many).
+//
+// ── EVERY NUMBER COUNTS THINGS (cn-v1175, the owner's pick) ──
+// He looked at Needs You and saw a tile say 3 over eight rows ("it says 3 above and there are a
+// bunch down there so how is this number getting calculated?"), because a pile counted as one. So
+// a number on Needs You and on the dock counts THINGS, never rows: a pile is its count (piles.ts),
+// any other row is one (needs-you-rule thingsOf). The header, each tile and the dock's Today badge
+// read the one function (needs-you-rule summarize), so badge = header = the tiles plus Act Today.
+// A pile whose read was cut short ("50+") makes its tile and the header a floor, said with "+".
+// THE OLDER FOLD (cn-v1175, his second pick): a visit to close out, an inspection to write up or an
+// unsent draft that has waited thirty days stops being counted and is drawn in one grey fold at the
+// bottom of the board, still with its buttons (older.ts). A new lead never ages out.
 //
 // Chores never badge; decisions badge. TASKS AND REMINDERS ARE NEVER HERE: a job's
 // tasks live on the job's Tasks chip and a person's Reminders on My Day's Tasks & Reminders (0358).
@@ -18,14 +30,16 @@
 // Door labels ("Everything else · N", "Office · N") are browse affordances, not
 // badges — grey inventory only.
 //
-// ── TWO LISTS, ONE BUILD (Wave 1, NY-list) ──
+// ── THREE LISTS, ONE BUILD (Wave 1, NY-list; cn-v1175) ──
 // Erik stopped opening My Day: Needs You was "stockpiled with things i cant act on or already have
-// on hold". One build hands back two lists from one read: NOW, what he can act on today (the badge
-// is its length, a pile counting one), and WAITING, everything waiting on someone else or on a day,
-// each with why and the day it comes back (the grey "Waiting (N)" fold, never a badge). Nothing
-// waits without a day (waitingRow), and a hold never hides money or a legal clock.
+// on hold". One build hands back three lists from one read: NOW, what he can act on today (the badge
+// counts its things), WAITING, everything waiting on someone else or on a day, each with why and the
+// day it comes back (the grey "Waiting (N)" fold, never a badge), and OLDER, the rows that have
+// waited thirty days (the grey "Older (N)" fold, never a badge). Nothing waits without a day
+// (waitingRow), and a hold never hides money or a legal clock.
 
 import type { SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
+import type { VisitOffer } from "@/lib/appointments/visit-offer";
 import { GROUP_ORDER, KIND_GROUP, isUnreadLine } from "./needs-you-rule";
 
 export type ActionKind =
@@ -121,8 +135,7 @@ export type Affordance =
   | "schedule" // put on the calendar / pick a date
   | "assign" // give to a person
   | "snooze" // defer to a later date
-  | "dismiss" // remove from my list (delete / cancel / archive)
-  | "wontHappen" // the visit page's Dismiss (appointment.wontHappen), from a row's ⋯ (added per row, only while the visit is not completed)
+  | "dismiss" // remove from my list (delete / cancel / archive; a visit's Dismiss is appointment.wontHappen)
   | "notACost" // a receipt row's ⋯ Not a Cost: the paper is filed under that name (the job's paper list's own category edit)
   | "open"; // drill into the detail page
 
@@ -168,8 +181,9 @@ export interface ActionItem {
   noJobHours?: { entryIds: string[] } | null;
   /**
    * A PILE (Wave 1, W1-14): two or more open rows of one kind, rolled into this one row (piles.ts
-   * rollUpPiles). Its id is `pile:<name>` (its NOW half `pile:<name>:now`), it only opens (no verb is ever sent against it), and it
-   * counts 1 on the badge. `children` are the rows it holds, in the build's order.
+   * rollUpPiles). Its id is `pile:<name>` (its NOW half `pile:<name>:now`, its Older half
+   * `pile:<name>:older`), it only opens (no verb is ever sent against it), and it counts its THINGS
+   * (pile.count) on the badge, the header and its tile (cn-v1175). `children` are the rows it holds, in the build's order.
    */
   pile?: PileInfo;
   children?: ActionItem[];
@@ -206,6 +220,21 @@ export interface ActionItem {
    * Absent: the relative form (prettyWhen).
    */
   dated?: "Accepted" | "Sent" | "Started" | null;
+  /**
+   * OLDER (cn-v1175, older.ts): this row has waited thirty days (a visit to close out or an inspection
+   * to write up, by the visit's day; an unsent draft, by the day it was written). Stamped by its
+   * feeder; the build hands it back in NeedsYou.older, drawn in the grey Older fold and counted by no
+   * number. Absent: a row of the board.
+   */
+  older?: boolean;
+  /** inspection_writeup only: marked Won with no job picked (R8). Not an ending: its one button asks for the job. */
+  wonNoJob?: boolean;
+  /**
+   * THE OFFER (R5, lib/appointments/visit-offer): a job made, or an estimate written, for the visit's own
+   * customer record after the visit. The row's one boxed button asks it; one tap links them through the
+   * existing doors. Never a guess: a customer_id link only.
+   */
+  visitOffer?: VisitOffer | null;
 }
 
 /** What an Already Invoiced door ties a picked invoice to: an estimate, or done work (a job or a visit). */
@@ -249,7 +278,8 @@ export interface PileInfo {
   name: PileName;
   /** The pile's words without its count: "Estimates Not Sent". */
   label: string;
-  /** How many: a real count (the read's exact count, or the rows that passed). */
+  /** How many THINGS: a real count (the read's exact count, or the rows that passed). This is what the
+   *  badge, the header and its tile add (needs-you-rule thingsOf, cn-v1175). */
   count: number;
   /** The read hit its cap: the count is "at least" ("50+"), and See All opens the list page. */
   capped: boolean;
@@ -277,10 +307,12 @@ export interface WaitingItem {
   href: string;
 }
 
-/** The two lists one build hands back: Now (the badge is its length) and Waiting (the fold). */
+/** The three lists one build hands back: Now (the badge counts its things), Waiting (the fold) and
+ *  Older (its own grey fold, cn-v1175: rows that waited thirty days, counted by no number). */
 export interface NeedsYou {
   now: ActionItem[];
   waiting: WaitingItem[];
+  older: ActionItem[];
 }
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;

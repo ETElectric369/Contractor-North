@@ -39,7 +39,13 @@ export const metadata: Metadata = {
  *                  (lib/sms-readiness.ts). NOT named because not live: OpenAI (no key), QuickBooks
  *                  (no keys), Tap to Pay (Debug entitlement only).
  *   no ads/tracking no ad SDK, no third-party analytics, no ATT; only Vercel Speed Insights
- *   retention      no time-based purge exists anywhere (vercel.json crons do none)
+ *   retention      the daily cron (app/api/automations/daily) runs lib/storage-sweep.ts (a closed bug
+ *                  report's screenshot file and its 0412 copy in the row at 7 days; after 48 hours, and
+ *                  ONLY in three places: a request-form file no lead's intake names (intake-uploads
+ *                  <org>/intake), a visit's photos whose visit row is gone (documents <org>/appointments/<id>),
+ *                  and the estimate editor's read-once stash (documents <org>/ai-uploads)) and
+ *                  lib/error-retention.ts (0399: fixed/ignored errors 90 days after
+ *                  last seen, traces at 14). Nothing else is purged by age (cn-v1175 made this true).
  */
 
 const PERMISSIONS: { name: string; why: string; when: string }[] = [
@@ -102,7 +108,7 @@ export default function NorthPrivacy() {
           <li><strong>Nort conversations:</strong> every message, the notes and business facts Nort remembers for you, a log of the actions Nort takes, and how much AI each person uses.</li>
           <li><strong>Notifications:</strong> a device token for your phone or browser, if you turn notifications on.</li>
           <li><strong>Payments:</strong> invoice amounts, payment status and card fees. Card numbers never reach North.</li>
-          <li><strong>Problems:</strong> error logs, and bug reports sent by office staff, which include a screenshot of the screen and so can show customer details.</li>
+          <li><strong>Problems:</strong> error logs, and bug reports, which anyone using North can send. A report sent with Report a Problem includes a screenshot of the screen, kept as a file and as a copy in the report itself, and so can show customer details.</li>
           <li><strong>Page speed:</strong> performance numbers (which page, how fast, what kind of device).</li>
           <li><strong>Google Calendar</strong>, only if you connect it: North writes jobs and appointments (title, address, notes and a link) to your calendar and reads your calendar events to keep the two in sync.</li>
         </ul>
@@ -163,9 +169,13 @@ export default function NorthPrivacy() {
 
       <Section title="How long we keep it">
         <p>
-          North keeps data while your company&apos;s account is open. It does not yet delete old records on a schedule,
-          and that includes Nort conversations, error logs, bug-report screenshots, clock-in locations, signatures and
-          uploaded files.
+          North keeps data while your company&apos;s account is open. A few things are deleted on a schedule: a bug
+          report&apos;s screenshot, the file and its copy in the report, once the report is closed and the screenshot is
+          more than 7 days old; an error log entry marked fixed or ignored, 90 days after it was last seen, and the most detailed
+          error traces after 14 days; and, after two days, a file left behind that nothing in North points to any
+          more: a file sent with a request form that no lead holds, the photos of a visit that was deleted, or a file
+          given to the estimate editor to read. Nothing else is deleted on a schedule yet, and that includes Nort
+          conversations, clock-in locations, signatures and every other file you upload.
         </p>
         <p>
           You can ask us to delete your account and data at any time. <a href="/support#delete">Here Is How.</a>

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isSalesVisit, visitSettled } from "@/lib/appointments/visit-settled";
 
 /**
  * NEW INTAKE: WHICH LEADS ARE ON THE LEADS LIST, AND WHAT STAGE A LEAD IS AT (cn-v1170).
@@ -38,10 +39,15 @@ export type LeadVisitRow = {
   outcome: string | null;
   /** When it is booked for. On a visit still waiting on the customer's pick: the first time offered. */
   starts_at: string | null;
+  /** Its kind (cn-v1175): a call or a meeting that has happened stands for nothing. Left out, the
+   *  visit is read as a site visit, the rule before cn-v1175. */
+  type?: string | null;
+  /** Its job, when it has one (the one visit rule's on-a-job arm). */
+  job_id?: string | null;
 };
 
 /** What every reader of the rule selects from `appointments`. */
-export const LEAD_VISIT_COLUMNS = "inquiry_id, status, outcome, starts_at";
+export const LEAD_VISIT_COLUMNS = "inquiry_id, status, outcome, starts_at, type, job_id";
 
 /** OPEN: not converted into anything, and not Not Sold. */
 export function isOpenLead(lead: LeadStageRow): boolean {
@@ -83,10 +89,28 @@ function pickRanOut(visit: Pick<LeadVisitRow, "status" | "starts_at">, nowMs: nu
  * took its place. A pick that comes in later books the visit, and the lead leaves again.
  * Dated by argument: `nowMs` is the caller's clock.
  */
-export function visitStands(visit: Pick<LeadVisitRow, "status" | "outcome" | "starts_at">, nowMs: number): boolean {
+export function visitStands(
+  visit: Pick<LeadVisitRow, "status" | "outcome" | "starts_at" | "type" | "job_id">,
+  nowMs: number,
+): boolean {
   if (!STANDING_STATUSES.has(String(visit.status ?? ""))) return false;
-  if (!undecided(visit.outcome)) return false;
-  return !pickRanOut(visit, nowMs);
+  // A win with no job picked is not an ending (cn-v1175, R8): the visit stays on the Inspections list
+  // asking for its job, so its lead waits with it (one list per person) and is not on the Leads list.
+  const wonNoJob = visit.outcome === "won" && !visit.job_id && "job_id" in visit;
+  if (!undecided(visit.outcome) && !wonNoJob) return false;
+  if (pickRanOut(visit, nowMs)) return false;
+  const at = visit.starts_at ? Date.parse(visit.starts_at) : NaN;
+  const happened = visit.status === "completed" || (Number.isFinite(at) && at < nowMs);
+  if (!happened) return true;
+  /* ONCE IT HAS HAPPENED (cn-v1175), THE ONE VISIT RULE DECIDES (lib/appointments/visit-settled).
+     A CALL OR A MEETING that has happened, or whose time went by, stands for nothing: Close Out on one
+     wrote completed with no outcome, and this rule then kept its lead off the Leads list for good while
+     no other list showed the visit (the side hole). Its lead is back on the Leads list, which is the
+     reminder. An INSPECTION or an ESTIMATE VISIT that happened stands until it is settled: it is
+     Sales' to write up, and its lead waits with it. Read with no links (this reader reads none): an
+     answer, or the job it is tied to. */
+  if (!isSalesVisit(visit.type)) return false;
+  return visitSettled({ type: visit.type, starts_at: visit.starts_at, inquiry_id: null, job_id: visit.job_id ?? null, outcome: visit.outcome }) === null;
 }
 
 /** A visit on the books that was marked Won: what `wonPending` collects. Its lead is converted when

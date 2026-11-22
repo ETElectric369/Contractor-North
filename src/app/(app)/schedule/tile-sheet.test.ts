@@ -417,7 +417,7 @@ describe("This Day: the tile's time is the tapped day's, once a day can keep its
   const renderDay = (target: TileTarget, canEdit = true) =>
     renderToStaticMarkup(createElement(TileSheetBody, { target, tz: LA, workDay: WORK_DAY, team, canEdit, perDayHours: true, onClose: () => {} }));
 
-  it("a day of several with its own hours: This Day's noon to 5, said, the quick lengths, and the way back to the usual hours", () => {
+  it("a day of several with its own hours: This Day's noon to 5, said, and the quick lengths", () => {
     const html = renderDay(honeysuckle());
     const t = text(html);
     expect(t).toContain("This Day, Mon, Sep 28: its own hours. The job's other days keep theirs.");
@@ -425,8 +425,27 @@ describe("This Day: the tile's time is the tapped day's, once a day can keep its
     expect(html).toMatch(/<input[^>]*type="time"[^>]*value="17:00"/);
     for (const chip of ["1h", "2h", "4h", "Full Day"]) expect(html).toMatch(new RegExp(`<button[^>]*>${chip}</button>`));
     expect(t).toContain("12:00 PM – 5:00 PM · 5 hours");
-    expect(html).toMatch(/<button[^>]*>Use the Job&#x27;s Usual Hours<\/button>/);
     for (const d of doors(html)) expect(d, d).toMatch(/\b(min-)?h-11\b/);
+  });
+
+  it("Use the Job's Usual Hours is never drawn, whatever the day's hours (cn-v1175)", () => {
+    // The owner: "get rid of the usual hours altogether i really dont think we need it". A day's own
+    // hours are changed by its own Start and length boxes.
+    for (const dayHours of [{ start: "09:00", end: "17:00" }, { start: "09:00", end: "15:00" }, { start: "12:00", end: "17:00" }, null]) {
+      const html = renderDay(honeysuckle({ dayHours }));
+      expect(html).not.toContain("Usual Hours");
+    }
+  });
+
+  it("no file in src names the button's key or asks setJobDayTimes for the usual hours", async () => {
+    const { execSync } = await import("node:child_process");
+    const grep = (pat: string) =>
+      execSync(`grep -rlE --exclude=*.test.ts --exclude=*.test.tsx "${pat}" src || true`, { cwd: process.cwd() }).toString().trim();
+    expect(grep("ag_cal_btn_useUsualHours")).toBe("");
+    expect(grep("usual: true")).toBe("");
+    const actions = readFileSync(join(process.cwd(), "src/app/(app)/schedule/actions.ts"), "utf8");
+    expect(actions).toContain("patch: { start?: string; length?: JobLength },");
+    expect(actions).not.toMatch(/patch\?\.usual/);
   });
 
   it("a day of several on the usual hours: only this day changes, and it says so; no way back for hours it doesn't have", () => {
@@ -453,10 +472,10 @@ describe("This Day: the tile's time is the tapped day's, once a day can keep its
     expect(html).not.toContain("<input");
   });
 
-  it("This Day saves through setJobDayTimes on the tapped day; the way back asks for the usual hours; the job's time stays setJobTimes", () => {
+  it("This Day saves through setJobDayTimes on the tapped day; the job's time stays setJobTimes", () => {
     const src = readFileSync(join(process.cwd(), "src/app/(app)/schedule/tile-sheet.tsx"), "utf8");
     expect(src).toContain('setJobDayTimes(job.id, day, "start" in patch ? { start: patch.start } : { length: patch.length })');
-    expect(src).toContain("setJobDayTimes(job.id, day, { usual: true })");
+    expect(src).not.toContain("{ usual: true }");
     expect(src).toContain("save={thisDay ? saveDayTimes : saveTimes}");
     const actions = readFileSync(join(process.cwd(), "src/app/(app)/schedule/actions.ts"), "utf8");
     const from = actions.indexOf("export async function setJobDayTimes(");

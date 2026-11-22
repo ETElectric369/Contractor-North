@@ -72,6 +72,13 @@ export function resolveRowVerb(
     }
     // Set Aside Until…: a draft invoice parks until a day, with its reason when one is given.
     if (kind === "invoice_draft") return { name: "invoice.setAside", input: { id, date, ...(reason ? { reason } : {}) } };
+    // MOVE TO ANOTHER DAY on a write-up row (cn-v1175, R7): the visit's own move (appointment.update, the
+    // registry's reschedule), on the day picked at the time of day it had (the row's targetId, "HH:mm" in
+    // the company's zone; 9 AM when it had none), keeping its length.
+    if (kind === "inspection_writeup") {
+      const time = typeof target === "string" && /^\d{2}:\d{2}$/.test(target) ? target : "09:00";
+      return { name: "appointment.update", input: { id, starts_at: `${date}T${time}` } };
+    }
     // An endless row (No Costs Yet, To Buy): its day in needs_you_waits (0367).
     if (kind === "job_unbilled_work") {
       const job = recordId(id, "nocosts-");
@@ -89,10 +96,9 @@ export function resolveRowVerb(
     return null;
   }
 
-  // Dismiss on an inspection row: the visit page's own rule (appointment.wontHappen).
-  if (verb === "wontHappen") {
-    return kind === "inspection_writeup" ? { name: "appointment.wontHappen", input: { id } } : null;
-  }
+  // NO DISMISS ON A SALES VISIT (cn-v1175, R8): the write-up row's Dismiss is gone (Not Sold is its one
+  // ending), and with it the verb it sent ("wontHappen" is no longer an Affordance). A work visit's
+  // Dismiss is the plain visit row's "dismiss" below (appointment.wontHappen).
 
   // Not a Cost on a receipt row: the paper is filed under that name by the job's own paper list rule
   // (document.notACost). The row is receipt-<document>; the Couldn't Check line maps to nothing.

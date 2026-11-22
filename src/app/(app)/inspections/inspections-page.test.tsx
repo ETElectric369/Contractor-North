@@ -100,6 +100,7 @@ const MISSED = visit("ms-1", { title: "Deck lighting", starts_at: at("2026-11-06
 // Filed: on a job, and a customer's cancelled one (both in their files); three that hang on nobody.
 const FILED_JOB = visit("fd-1", { status: "completed", title: "Panel upgrade", job_id: "job-1", starts_at: at("2026-11-02") });
 const FILED_CUST = visit("fc-2", { status: "cancelled", title: "Sub panel", customer_id: "cust-9", starts_at: at("2026-11-01") });
+// cn-v1175 (R8): a win with NO job picked is not an ending: it is on the list, asking for its job.
 const NOBODY_DONE = visit("nb-1", { status: "completed", title: "Porch light", outcome: "won", starts_at: at("2026-11-04") });
 const NOBODY_LOST = visit("nb-2", { status: "completed", outcome: "lost", starts_at: at("2025-12-04"), location: "5 Larkspur Ln" });
 const NOBODY_OFF = visit("nb-3", { status: "cancelled", title: "Service change", starts_at: null });
@@ -182,16 +183,18 @@ describe("the rule for a row's buttons (list-rows)", () => {
 
   it("the ⋯ by state, in order: Open (only beside Create Estimate) · Pick a Day · Move · It Happened · Not Sold · Dismiss", () => {
     const d = (s: Parameters<typeof rowDoors>[0], primary: "start" | "estimate" | "open", decidable = true, hasStart = true) => rowDoors(s, { primary, decidable, hasStart });
-    expect(d("coming_up", "start")).toEqual(["move", "del"]);
-    expect(d("needs_day", "start", true, false)).toEqual(["pickDay", "del"]);
+    // cn-v1175 (R8): a sales visit's one ending is Not Sold in every state; a work visit (the city's) keeps Dismiss.
+    expect(d("coming_up", "start")).toEqual(["move", "lost"]);
+    expect(d("coming_up", "open", false)).toEqual(["move", "del"]);
+    expect(d("needs_day", "start", true, false)).toEqual(["pickDay", "lost"]);
     expect(d("write_up", "estimate")).toEqual(["open", "lost"]);
     expect(d("write_up", "open")).toEqual(["lost"]);
     expect(d("write_up", "estimate", false)).toEqual(["open"]);
     expect(d("write_up", "open", false)).toEqual([]);
-    expect(d("missed", "start")).toEqual(["move", "happened", "lost", "del"]);
+    expect(d("missed", "start")).toEqual(["move", "happened", "lost"]);
     expect(d("missed", "open", false)).toEqual(["move", "happened", "del"]);
     // No Move without a start: there is no time of day to keep.
-    expect(d("coming_up", "start", true, false)).toEqual(["del"]);
+    expect(d("coming_up", "start", true, false)).toEqual(["lost"]);
   });
 });
 
@@ -205,13 +208,15 @@ describe("one list: who needs an inspection", () => {
       ["cu-2", "coming_up"],
       ["nd-1", "needs_day"],
       ["nd-2", "needs_day"],
+      // cn-v1175 (R8): the win with no job picked, asking for its job (never on the Estimates page).
+      ["nb-1", "write_up"],
       ["ms-1", "missed"],
     ]);
     // The Leads list's card: space between, a bold border of its own.
     expect(html).toContain('<ul class="space-y-3">');
     expect(html).toMatch(/<li data-row="cu-1" data-state="coming_up" class="flex flex-col gap-1\.5 rounded-xl border-2 border-slate-200 bg-white px-4 py-3 shadow-sm">/);
-    // Nothing filed is on the list.
-    for (const v of FILED) expect(rows.map((r) => r.id)).not.toContain(v.id);
+    // Nothing filed is on the list (the win with no job picked is not filed: cn-v1175, R8).
+    for (const v of FILED.filter((f) => f !== NOBODY_DONE)) expect(rows.map((r) => r.id)).not.toContain(v.id);
   });
 
   it("English: who (a link to their file), the when, what, the state word and the boxed button", async () => {
@@ -222,6 +227,7 @@ describe("one list: who needs an inspection", () => {
       ["Theo Vance", "/crm/cust-3", "9d ago", "4 Bayberry Rd", "Needs a Day", ["Start Inspection", "/appointments/nd-1"]],
       ["2 Catbird Way", null, "2d ago", null, "Needs a Day", ["Start Inspection", "/appointments/nd-2"]],
       // The two inspected rows (Create Estimate) are drawn on the Estimates page: quotes-two-parts.test.
+      ["Porch light", null, "6d ago", "No field notes", "Won, No Job Picked", ["Won · Pick the Job", "/appointments/nb-1"]],
       ["Casey Loam", null, "4d ago", "Deck lighting · 7 Thistlewood Dr", "Day Passed", ["Start Inspection", "/appointments/ms-1"]],
     ]);
     // A name with no file is plain words, never a dead link.
@@ -237,6 +243,7 @@ describe("one list: who needs an inspection", () => {
       [null, "Empezar Inspección"],
       ["Falta el Día", "Empezar Inspección"],
       ["Falta el Día", "Empezar Inspección"],
+      ["Ganada, Sin Trabajo Elegido", "Ganada · Elegir el Trabajo"],
       ["Ya Pasó el Día", "Empezar Inspección"],
     ]);
     expect(rows[1].what).toBe("Por elegir");
@@ -246,11 +253,13 @@ describe("one list: who needs an inspection", () => {
   it("each row's ⋯ by state (the city's Final Inspection has no Not Sold)", async () => {
     const rows = rowsOf(await render());
     expect(Object.fromEntries(rows.map((r) => [r.id, r.menu]))).toEqual({
+      // cn-v1175 (R8): the city's Final Inspection (work) keeps Dismiss; a sales visit ends Not Sold.
       "cu-1": "move,del",
-      "cu-2": "move,del",
-      "nd-1": "pickDay,del",
-      "nd-2": "pickDay,del",
-      "ms-1": "move,happened,lost,del",
+      "cu-2": "move,lost",
+      "nd-1": "pickDay,lost",
+      "nd-2": "pickDay,lost",
+      "nb-1": "lost",
+      "ms-1": "move,happened,lost",
     });
   });
 
@@ -261,6 +270,7 @@ describe("one list: who needs an inspection", () => {
     // cn-v1171 (skeptic #74): nothing says an estimate is needed where the company makes none.
     expect(wu.map((r) => [r.primary, r.menu, r.word])).toEqual([
       [["Open Inspection", "/appointments/wu-1"], "lost", "Inspected"],
+      [["Won · Pick the Job", "/appointments/nb-1"], "lost", "Won, No Job Picked"],
       [["Open Inspection", "/appointments/wu-2"], "lost", "Inspected"],
     ]);
     const html = await render();
@@ -295,24 +305,28 @@ describe("one list: who needs an inspection", () => {
   });
 });
 
-describe("filed under nobody: one shut fold under the list", () => {
-  it("only the filed visits with no lead, no customer and no job, each to its visit, with its day and how it ended", async () => {
+// cn-v1175 (R8): THE FOLD IS NOT SOLD. Every inspection that ended without becoming work (its record says
+// Not Sold, or it was cancelled) and has no person's file; each row says its own state word. A win with
+// no job picked is never in it (it is on the list above, asking for its job).
+describe("Not Sold: one shut fold under the list", () => {
+  it("only the Not Sold and cancelled visits with no lead, no customer and no job, each to its visit, with its day and its own word", async () => {
     const fold = foldOf(await render())!;
     expect(fold.tag).not.toContain("open");
-    expect(fold.summary).toBe("Not Filed Under Anyone (3)");
-    expect(fold.line).toBe("Finished, Not Sold or cancelled inspections with no lead, customer or job to file them under.");
+    expect(fold.summary).toBe("Not Sold (2)");
+    expect(fold.line).toBe("Inspections that ended without becoming work and have no lead, customer or job to keep them. Each one says how it ended.");
     expect(fold.rows.map((r) => [r.id, r.href, r.ending])).toEqual([
-      ["nb-1", "/appointments/nb-1", "Nov 4 · Completed"],
       ["nb-2", "/appointments/nb-2", "Dec 4, 2025 · Not Sold"],
       ["nb-3", "/appointments/nb-3", "Cancelled"],
     ]);
+    expect(fold.rows.map((r) => r.id)).not.toContain("nb-1");
   });
 
   it("Spanish", async () => {
     state.language = "es";
     const fold = foldOf(await render())!;
-    expect(fold.summary).toBe("No Están a Nombre de Nadie (3)");
-    expect(fold.rows.map((r) => r.ending?.split(" · ").pop())).toEqual(["Terminada", "No Vendida", "Cancelada"]);
+    expect(fold.summary).toBe("No Vendidas (2)");
+    expect(fold.line).toBe("Inspecciones que terminaron sin convertirse en trabajo y no tienen prospecto, cliente ni trabajo donde guardarlas. Cada una dice cómo terminó.");
+    expect(fold.rows.map((r) => r.ending?.split(" · ").pop())).toEqual(["No Vendida", "Cancelada"]);
   });
 
   it("no fold when nothing hangs on nobody", async () => {
@@ -387,7 +401,9 @@ describe("what left the page, and the read", () => {
     for (const lang of ["en", "es"] as const) {
       const t = translator(lang);
       for (const k of ["ip_btn_startInspection", "ip_btn_openInspection", "ip_btn_goToLeads", "ip_btn_createEstimate"]) expect(titleCaseIn(t(k), lang), `${lang} ${k}`).toBe(true);
-      expect(titleCaseIn(t("ip_btn_notFiledFold").replace(" ({n})", ""), lang), `${lang} fold`).toBe(true);
+      expect(titleCaseIn(t("ip_btn_notSoldFold").replace(" ({n})", ""), lang), `${lang} fold`).toBe(true);
+      // cn-v1175 (R5): the offer's two buttons, with a job named in them.
+      for (const k of ["ip_btn_doneAs", "ip_btn_doneAsYes"]) expect(titleCaseIn(t(k).replace("{job}", "J-900").replace(/^¿|\?$/g, ""), lang), `${lang} ${k}`).toBe(true);
     }
   });
 });
@@ -410,7 +426,7 @@ describe("nobody falls between Inspections and Estimates (cn-v1172)", () => {
   it("Estimates off: the inspected ones stay on this list in their place, and there is no line", async () => {
     state.features = { estimates: false };
     const html = await render();
-    expect(rowsOf(html).map((r) => r.id)).toEqual(["cu-1", "cu-2", "nd-1", "nd-2", "wu-1", "wu-2", "ms-1"]);
+    expect(rowsOf(html).map((r) => r.id)).toEqual(["cu-1", "cu-2", "nd-1", "nd-2", "wu-1", "nb-1", "wu-2", "ms-1"]);
     expect(lineOf(html)).toBeNull();
   });
 

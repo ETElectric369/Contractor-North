@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Fold } from "@/components/why-fold";
 import { fillText } from "@/lib/i18n";
 import { InspectionRowMenu } from "./inspection-row-menu";
+import { VisitOfferButton } from "./visit-offer-button";
 import type { FoldRow, ListRow } from "./list-rows";
 
 /**
@@ -62,9 +63,14 @@ function InspectionCard({ row, tz }: { row: ListRow; tz: string }) {
         </p>
       )}
       <div className="flex w-full flex-wrap items-center justify-end gap-2" data-doors="">
-        <Link href={row.primary.href} className={PRIMARY} data-primary="">
-          {row.primary.label}
-        </Link>
+        {/* THE OFFER (cn-v1175, R5): a job made for this customer after the visit is asked, never assumed. */}
+        {row.offer ? (
+          <VisitOfferButton visitId={row.id} job={row.offer} className={PRIMARY} />
+        ) : (
+          <Link href={row.primary.href} className={PRIMARY} data-primary="">
+            {row.primary.label}
+          </Link>
+        )}
         <InspectionRowMenu row={row} tz={tz} />
       </div>
     </li>
@@ -94,19 +100,20 @@ export function ToEstimateLine({ n, t }: { n: number; t: (key: string) => string
 }
 
 /**
- * FILED UNDER NOBODY (cn-v1171). The page's Filed side is gone (Erik said yes: a finished inspection
- * is found in its person's file). The few with no lead, no customer and no job have no file, so they
- * wait here, folded shut, each opening its visit. Drawn only when there is one.
+ * NOT SOLD (cn-v1175, R8; was Not Filed Under Anyone, cn-v1171). The page's Filed side is gone (a
+ * finished inspection is found in its person's file). The ones that ended without becoming work (Not
+ * Sold, or cancelled) with no lead, no customer and no job have no file, so they wait here, folded shut,
+ * each saying its own state word and opening its visit. Drawn only when there is one.
  */
-export function FiledWithNobodyFold({ rows, t }: { rows: readonly FoldRow[]; t: (key: string) => string }) {
+export function NotSoldFold({ rows, t }: { rows: readonly FoldRow[]; t: (key: string) => string }) {
   if (rows.length === 0) return null;
   return (
     <Fold
       className="mt-6 rounded-xl border border-slate-200 bg-white px-4 py-1"
       summaryClassName="text-sm font-semibold text-slate-700"
-      summary={fillText(t("ip_btn_notFiledFold"), { n: String(rows.length) })}
+      summary={fillText(t("ip_btn_notSoldFold"), { n: String(rows.length) })}
     >
-      <p className="pb-1 text-xs text-slate-600">{t("ip_notFiledLine")}</p>
+      <p className="pb-1 text-xs text-slate-600">{t("ip_notSoldLine")}</p>
       <ul className="divide-y divide-slate-100 pb-2">
         {rows.map((r) => (
           <li key={r.id} data-fold-row={r.id}>
