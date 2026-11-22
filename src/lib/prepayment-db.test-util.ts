@@ -4,6 +4,11 @@
  * code wrote. A row inserted with no org_id takes the company's, as 0004's set_org_id trigger does, and
  * an invoice line's line_total is computed, as the generated column is. Not a database: the triggers of
  * 0414 are src/lib/payment-request.integration.test.ts's.
+ *
+ * AN INVOICE READ WITH ITS LINES GETS ITS LINES. A select on invoices that names invoice_items(...) is
+ * answered with each bill's lines embedded, as PostgREST answers it. Until the night cn-v1177 was
+ * released this ignored the select list, so the status door read a bill with NO lines and its un-void
+ * check had nothing to look at: the tests passed on a door the real database refused at.
  */
 export type Row = Record<string, any>;
 export type Tables = Record<string, Row[]>;
@@ -21,6 +26,7 @@ export function fakeDb(tables: Tables, opts: { org: string; writes: Write[]; seq
     let payload: any = null;
     let order: { col: string; asc: boolean } | null = null;
     let limit: number | null = null;
+    let withLines = false;
     const rows = () => (tables[table] ??= []);
     const matching = () => rows().filter((r) => filters.every((f) => f(r)));
     const run = (): { data: any; error: any } => {
@@ -62,10 +68,14 @@ export function fakeDb(tables: Tables, opts: { org: string; writes: Write[]; seq
         out = out.sort((a, b) => (String(a[col]) < String(b[col]) ? -1 : String(a[col]) > String(b[col]) ? 1 : 0) * (asc ? 1 : -1));
       }
       if (limit !== null) out = out.slice(0, limit);
+      if (withLines) out = out.map((r) => ({ ...r, invoice_items: (tables.invoice_items ?? []).filter((l) => l.invoice_id === r.id).map((l) => ({ ...l })) }));
       return { data: out, error: null };
     };
     const chain: any = {
-      select: () => chain,
+      select: (cols?: unknown) => {
+        if (table === "invoices" && typeof cols === "string" && /\binvoice_items\s*\(/.test(cols)) withLines = true;
+        return chain;
+      },
       insert: (p: any) => ((verb = "insert"), (payload = p), chain),
       update: (p: any) => ((verb = "update"), (payload = p), chain),
       delete: () => ((verb = "delete"), chain),

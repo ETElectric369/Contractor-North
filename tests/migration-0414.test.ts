@@ -114,9 +114,9 @@ describe("migration 0414: money ahead of the work", () => {
   const self = sql.slice(at(SELF));
   const between = (a: string, b: string) => sql.slice(at(a), at(b));
 
-  it("is the newest migration, the one 0414, under the house timeouts, with no transaction of its own", () => {
+  it("is the one 0414 (what sits past it is the newest migration's own test: migration-0415.test.ts), under the house timeouts, with no transaction of its own", () => {
     expect(names.filter((n) => n.startsWith("0414_"))).toEqual(["0414_money_ahead.sql"]);
-    expect(names[names.length - 1]).toBe("0414_money_ahead.sql");
+    // The newest-migration line moved to migration-0415.test.ts the night 0415 was written.
     expect(code).toContain("set local lock_timeout = '3s';");
     expect(code).toContain("set local statement_timeout = '15s';");
     expect(code).not.toMatch(/^\s*(begin|commit|rollback|start transaction)\b[^;\n]*;/im);

@@ -57,6 +57,20 @@ export function isCreditSource(src: string | null | undefined): boolean {
   return src === DRAW_CREDIT || src === PREPAID_CREDIT;
 }
 
+/**
+ * IS THIS LINE MONEY AHEAD, AND NOT WORK: a request's own line, or the line that takes a request off a
+ * later bill. Neither came from an importer and neither bills an hour or a receipt, so there is no claim
+ * it could have failed to record. The un-void guards ask this (the app's unvoidConflict, and
+ * guard_invoice_unvoid as migration 0415 leaves it): both read "a line with an import source and no
+ * recorded claim" as a line built before claims existed, which closes the way back from void beside any
+ * other live bill, and on a job with a request there is always another live bill. A draw's
+ * "Less previous billings" line is NOT here, on purpose: nothing re-resolves it, and the older rule
+ * still decides it. Each of these two is held by 0414's own boundary.
+ */
+export function isMoneyAheadLine(src: string | null | undefined): boolean {
+  return src === PREPAYMENT_LINE || src === PREPAID_CREDIT;
+}
+
 const BUILT_IN_LABEL: Record<Exclude<PrepaymentPurpose, "other">, string> = {
   deposit: "Deposit",
   materials: "Materials Payment",

@@ -7,6 +7,13 @@ import { fakeDb, type Row, type Tables, type Write } from "@/lib/prepayment-db.t
  * lines that would no longer hold off FIRST, then flips, then recalculates (a draft's sync takes what
  * is left). The database no longer re-checks a void bill coming back as a draft (0414), so this door is
  * what keeps it whole. On the small in-memory database. Stand-ins only.
+ *
+ * AND THE DOOR BEFORE IT (found by the database suite the night of the release): unvoidConflict reads a
+ * line with an import source and no recorded claim as a line built before claims existed, and refuses
+ * to bring its bill back beside any other live bill. A "Less deposit" line is exactly that shape, and
+ * its request is always another live bill, so every case below was refused on a real database while
+ * this file passed: the in-memory database did not hand the door the bill's lines. It does now, and the
+ * last two cases hold both halves: money ahead is not a legacy line, and a real one still closes the way.
  */
 const state = vi.hoisted(() => ({ client: null as any }));
 vi.mock("@/lib/staff-guard", () => ({ requireStaff: vi.fn(async () => ({ supabase: state.client, userId: "user-1", orgId: "org-larkspur", role: "owner" })) }));
@@ -89,5 +96,27 @@ describe("un-voiding a bill whose credit would no longer hold", () => {
     expect(await setInvoiceStatus("inv-901", "sent")).toEqual({ ok: true });
     expect(credits("inv-901")).toEqual([[-1000, "inv-900"]]);
     expect(writes.some((w) => w.table === "invoice_items" && w.verb === "delete")).toBe(false);
+  });
+});
+
+describe("money ahead is not a legacy line, and a legacy line still is", () => {
+  it("the door is handed the bill's lines: a labor line that records no claim still closes the way back, naming the live bills", async () => {
+    db.invoice_items.push(item("inv-901", 800, { id: "inv-901-labor", import_source: "labor", description: "Labor: Sam Tillery" }));
+    const r = await setInvoiceStatus("inv-901", "draft");
+    expect(r.ok).toBe(false);
+    const said = (r as { error?: string }).error ?? "";
+    expect(said).toContain("INV-901 can't come back from void");
+    expect(said).toContain("INV-900");
+    expect(said).toContain("INV-902");
+    expect(db.invoices.find((i) => i.id === "inv-901")!.status).toBe("void");
+    expect(writes).toEqual([]);
+  });
+
+  it("a voided payment request comes back beside the job's other live bill", async () => {
+    // Nothing takes it off: the one bill that did is void, and the bill that went out carries only work.
+    db.invoices.find((i) => i.id === "inv-900")!.status = "void";
+    db.invoice_items = db.invoice_items.filter((l) => l.import_source !== "prepaid_credit");
+    expect(await setInvoiceStatus("inv-900", "sent")).toEqual({ ok: true });
+    expect(db.invoices.find((i) => i.id === "inv-900")!.status).toBe("sent");
   });
 });

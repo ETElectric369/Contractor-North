@@ -49,7 +49,7 @@ import { HELD_HERE_READ_FAILED, costsKeyNames, idKeyNames, laborKeyNames, readHe
 import { removedLines, removedSentence, staleTombstones, textArrayLiteral } from "@/lib/import-reconcile";
 import { linesByBillId, readBillLines, readInvoiceMarkup } from "@/lib/invoice-markup-read";
 import { recalcInvoice } from "@/lib/invoice-recalc";
-import { PREPAID_CREDIT, PREPAYMENT_KIND, PREPAYMENT_LINE, isPrepaymentKind, prepaymentsLeft } from "@/lib/prepayments";
+import { PREPAID_CREDIT, PREPAYMENT_KIND, PREPAYMENT_LINE, isMoneyAheadLine, isPrepaymentKind, prepaymentsLeft } from "@/lib/prepayments";
 import { outgoingDraftFirst, readPrepaymentStates, readPrepaymentStatesForOutgoing, resyncJobDrafts } from "@/lib/payment-request";
 // WHAT FOLLOWS A PAYMENT, for every door that writes one (M1): recalc, finish the job, the bell,
 // the refresh. This file used to carry its own copy of all four.
@@ -3878,7 +3878,11 @@ async function unvoidConflict(supabase: Awaited<ReturnType<typeof createClient>>
   // ANY imported line that claims nothing is a legacy line — labor, or a cost line from before
   // 0255 whose only key was bli:<line> (no bill id anywhere on it). Both walk past the held-ids
   // check the same way, so both close the way back while another invoice is live on the job.
-  const legacyLabor = items.some((it) => !!it.import_source && !it.source_ids?.length && !claimedIdsOfLines([it]).length);
+  // MONEY AHEAD IS NOT A LEGACY LINE (cn-v1177): a request's own line and the line that takes a request
+  // off a bill carry an import source and no claim BY DESIGN (they bill no work), and a job with a
+  // request always has another live bill, so read as legacy they would close the way back for every
+  // bill on such a job, in words that are untrue of it. 0415 says the same in guard_invoice_unvoid.
+  const legacyLabor = items.some((it) => !!it.import_source && !isMoneyAheadLine(it.import_source) && !it.source_ids?.length && !claimedIdsOfLines([it]).length);
   if (!mine.length && !legacyLabor) return null; // hand-typed lines only: nothing on it can be on another invoice
   const claims = await claimedSourcesOnJob(supabase, inv.job_id ?? null, inv.id, mine);
   const label = inv.invoice_number ?? "this invoice";
