@@ -30,8 +30,10 @@ export type Row = Record<string, any>;
 export type Tables = Record<string, Row[]>;
 export type Write = { table: string; verb: string; payload?: any };
 
-/** The tables whose reads are projected to the select list (top-level columns; embeds as before). */
-const PROJECTED = new Set(["invoices", "quotes"]);
+/** The tables whose reads are projected to the select list (top-level columns; embeds as before).
+ *  change_orders and invoice_items since cn-v1181: the paid gate's Everything Billable reads them, and a
+ *  read that forgot `amount` or `line_total` must read nothing here, as on the database. */
+const PROJECTED = new Set(["invoices", "quotes", "change_orders", "invoice_items"]);
 
 /** Split a select list at its top-level commas (an embed's own commas stay inside it). */
 function topLevel(cols: string): string[] {
@@ -130,6 +132,7 @@ export function fakeDb(tables: Tables, opts: { org: string; writes: Write[]; seq
     let order: { col: string; asc: boolean } | null = null;
     let limit: number | null = null;
     let withLines = false;
+    let lineProject: ((r: Row) => Row) | null = null;
     let project: ((r: Row) => Row) | null = null;
     const rows = () => (tables[table] ??= []);
     const matching = () => rows().filter((r) => filters.every((f) => f(r)));
@@ -195,12 +198,22 @@ export function fakeDb(tables: Tables, opts: { org: string; writes: Write[]; seq
         out = out.sort((a, b) => (String(a[col]) < String(b[col]) ? -1 : String(a[col]) > String(b[col]) ? 1 : 0) * (asc ? 1 : -1));
       }
       if (limit !== null) out = out.slice(0, limit);
-      if (withLines) out = out.map((r) => ({ ...r, invoice_items: (tables.invoice_items ?? []).filter((l) => l.invoice_id === r.id).map((l) => ({ ...l })) }));
+      if (withLines)
+        out = out.map((r) => ({
+          ...r,
+          invoice_items: (tables.invoice_items ?? []).filter((l) => l.invoice_id === r.id).map((l) => (lineProject ? lineProject(l) : { ...l })),
+        }));
       return { data: shape(out), error: null };
     };
     const chain: any = {
       select: (cols?: unknown) => {
-        if (table === "invoices" && typeof cols === "string" && /\binvoice_items\s*\(/.test(cols)) withLines = true;
+        if (table === "invoices" && typeof cols === "string" && /\binvoice_items\s*\(/.test(cols)) {
+          withLines = true;
+          // The embed's own column list is honoured too (cn-v1181): a door that embeds
+          // invoice_items(line_total) and then reads a line's line_kind reads nothing, as on the database.
+          const inner = topLevel(cols).find((p) => /^(\w+:)?invoice_items(!\w+)?\s*\(/.test(p));
+          lineProject = inner ? projector(inner.slice(inner.indexOf("(") + 1, inner.lastIndexOf(")"))) : null;
+        }
         project = projector(cols);
         return chain;
       },

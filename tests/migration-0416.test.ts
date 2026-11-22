@@ -134,9 +134,9 @@ describe("migration 0416: one sale, one deposit", () => {
   const qf = fnText(sql, QF, "$$");
   const guard = fnText(sql, GUARD, "$$");
 
-  it("is the newest migration, the one 0416, under the house timeouts, with no transaction of its own", () => {
+  it("is the one 0416 (what sits past it is the newest migration's own test: migration-0417.test.ts), under the house timeouts, with no transaction of its own", () => {
     expect(names.filter((n) => n.startsWith("0416_"))).toEqual(["0416_one_sale_one_deposit.sql"]);
-    expect(names[names.length - 1]).toBe("0416_one_sale_one_deposit.sql");
+    // The newest-migration line moved to migration-0417.test.ts the night 0417 was written.
     expect(code).toContain("set local lock_timeout = '3s';");
     expect(code).toContain("set local statement_timeout = '15s';");
     expect(code).not.toMatch(/^\s*(begin|commit|rollback|start transaction)\b[^;\n]*;/im);

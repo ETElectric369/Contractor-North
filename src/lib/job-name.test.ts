@@ -232,7 +232,7 @@ describe("every door that inserts a job names it with jobNameFrom", () => {
     const src = read("src/app/(app)/schedule/actions.ts");
     expect(src).toMatch(/if \(typedNameMayBeATag\(sentName\)\)/);
     expect(src).toMatch(/name = jobNameFrom\(\{\s*typed: sentName,[\s\S]*?street: address,\s*unit: emptyToNull\(formData\.get\("unit"\)\),/);
-    expect(read("src/lib/actions/entities/job.ts")).toMatch(/return createJob\(fd\)/);
+    expect(read("src/lib/actions/entities/job.ts")).toMatch(/const made = await createJob\(fd\);/);
     expect(src).toMatch(/name = jobNameFrom\(\{ typed: sentName, customer: who, street: address, unit: emptyToNull\(formData\.get\("unit"\)\), todayStr, lang, words: translator\(lang\) \}\)/);
     expect(read("src/app/(app)/schedule/new-job-button.tsx")).toMatch(/<input type="hidden" name="lang" value=\{lang\} \/>/);
     // The New Job form's live line is the same default, unit and all.
@@ -281,7 +281,10 @@ describe("every door that inserts a job names it with jobNameFrom", () => {
     const src = read("src/app/(app)/timeclock/new-job-inline.tsx");
     expect(src).toMatch(/if \(isOnlyASourceTag\(trimmed\)\) \{/);
     expect(src).toMatch(/onCreated\(\{ id: res\.id, name: res\.name \|\| trimmed \}\)/);
-    expect(read("src/app/(app)/schedule/actions.ts")).toMatch(/return \{ ok: true, id: data\.id, name \};/);
+    // The name the job was saved under is echoed; since cn-v1181 the visit it tied is said beside it.
+    expect(read("src/app/(app)/schedule/actions.ts")).toMatch(
+      /return \{ ok: true, id: data\.id, name, \.\.\.\(tieNote \? \{ note: tieNote \} : \{\}\), \.\.\.\(tieWarning \? \{ warning: tieWarning \} : \{\}\) \};/,
+    );
   });
 
   it("the office's estimate accept names the job for the street and unit it inherits, the lead's spelling as who", () => {

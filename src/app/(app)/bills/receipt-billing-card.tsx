@@ -7,7 +7,10 @@ import { NumberInput } from "@/components/ui/number-input";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { WhyFold } from "@/components/why-fold";
 import { useToast } from "@/components/toast";
-import { billedPortion } from "@/lib/bill-itemisation";
+import { billedPortion, excludedReceiptCost } from "@/lib/bill-itemisation";
+import { isStillOwed } from "@/lib/supplier-owed";
+import { PEN_WORDS, creditExpectedOf, penSentence, penSummary, type PenMark } from "@/lib/pen-marks";
+import { readFiledPaperAgain } from "@/app/(app)/organize/read-again-actions";
 import { isFreightLine } from "@/lib/shelf-plan";
 import { formatCurrency } from "@/lib/utils";
 import {
@@ -22,7 +25,7 @@ import {
   usedCountFromCost,
   type ContainerHint,
 } from "./receipt-billing";
-import { putRestOnShelf, setReceiptLineBillable, setReceiptLineUsage, takeRollOffShelf } from "./receipt-billing-actions";
+import { putRestOnShelf, setReceiptLineBillable, setReceiptLineReturned, setReceiptLineUsage, takeRollOffShelf } from "./receipt-billing-actions";
 import {
   ShelfCountRow,
   initialShelfCount,
@@ -68,6 +71,12 @@ export interface ReceiptBillingLine {
     liveMoves: number;
     stale: boolean;
   } | null;
+  /** PEN MARKS (cn-v1181, 0417): what the reader saw written by hand on this line (`unclear` is the
+   *  open question), whether it went back on account (a credit is tracked), and the credit memo's
+   *  bill that closed it. Absent on a database before 0417: an ordinary line. */
+  pen?: PenMark | null;
+  returned?: boolean;
+  creditBillId?: string | null;
 }
 
 export interface ReceiptForBilling {
@@ -91,6 +100,61 @@ export interface ReceiptForBilling {
    */
   billedOn: { label: string; status: string } | null;
   lines: ReceiptBillingLine[];
+  /** Whether what goes back is a credit the supplier owes (lib/pen-marks creditExpectedOf), when the
+   *  feeder read the paper's tender; else `status` and `hasSupplierAccount` say it, as the server does
+   *  with no paper. The server's answer is the one written: this only words the button. */
+  creditExpected?: boolean | null;
+  status?: string | null;
+  hasSupplierAccount?: boolean;
+  /** The bill was made from a paper (an organized_items row carries its id): Read Again is offered. */
+  fromPaper?: boolean;
+}
+
+/** WHAT A LINE'S PEN MARK SAYS ON ITS FACE (PEN_WORDS), or null for an ordinary line. */
+export type PenFace = "needsAnswer" | "creditReceived" | "creditExpected" | "crossedOutNotBilled";
+export function penFaceOf(l: Pick<ReceiptBillingLine, "pen" | "returned" | "creditBillId" | "billable">): PenFace | null {
+  if (l.pen === "unclear") return "needsAnswer";
+  if (l.returned === true) return l.creditBillId ? "creditReceived" : "creditExpected";
+  if (l.pen && !l.billable) return "crossedOutNotBilled";
+  return null;
+}
+
+/** Is a credit tracked on this bill? A line already returned says yes; else the feeder's reading. */
+export function receiptCreditExpected(r: Pick<ReceiptForBilling, "lines" | "creditExpected" | "status" | "hasSupplierAccount">): boolean {
+  if (typeof r.creditExpected === "boolean") return r.creditExpected;
+  if (r.lines.some((l) => l.returned === true)) return true;
+  return creditExpectedOf({ billStatus: r.status ?? null, hasSupplierAccount: r.hasSupplierAccount ?? null });
+}
+
+/** Read Again is not offered on a bill paid other than at the counter: its payment record would go. */
+export function readAgainHidden(r: Pick<ReceiptForBilling, "lines" | "creditExpected" | "status" | "hasSupplierAccount">): boolean {
+  return !isStillOwed({ status: r.status ?? null }) && receiptCreditExpected(r);
+}
+
+/** A line the pen took off the customer's bill (returned, or crossed out on a receipt paid at purchase). */
+const penOff = (l: ReceiptBillingLine) => l.returned === true || (!!l.pen && l.pen !== "unclear" && !l.billable);
+
+/**
+ * THE PEN SENTENCE ON TOP OF THE CARD (lib/pen-marks penSentence): what ink was read, and what came
+ * off the customer's bill for it, tax share included (lib/bill-itemisation's own reading over the
+ * pen's lines alone, so a snack switched off is not counted as a pen mark). Null: nothing to say.
+ */
+export function receiptPenSentence(r: ReceiptForBilling): string | null {
+  const s = penSummary(r.lines.map((l) => ({ pen: l.pen ?? undefined, amount: l.amount, returned: penOff(l) })));
+  if (!s.any) return null;
+  const comesOff = excludedReceiptCost(
+    r.lines.map((l) => ({
+      id: l.id,
+      description: l.description,
+      quantity: l.quantity,
+      unit_price: l.unitPrice,
+      amount: l.amount,
+      category: l.category,
+      billable: !penOff(l),
+      billed_amount: null,
+    })),
+  );
+  return penSentence(s, { creditExpected: receiptCreditExpected(r), comesOff: s.returnedLines > 0 ? comesOff : null });
 }
 
 /** What the card is allowed to believe before the server has agreed. */
@@ -171,6 +235,27 @@ export function ReceiptLines({
   /** The line whose rest is being put on the shelf (Shop Stock, Phase 2). */
   const [shelving, setShelving] = useState<{ receipt: ReceiptForBilling; line: ReceiptBillingLine } | null>(null);
   const [shelfBusy, setShelfBusy] = useState<string | null>(null);
+  /** The line whose pen mark is being answered, while the server writes it. */
+  const [penBusy, setPenBusy] = useState<string | null>(null);
+  /** Read Again's one-sentence confirm (mounted while asked, never re-keyed). */
+  const [askReadAgain, setAskReadAgain] = useState(false);
+
+  /** KEPT OR RETURNED (setReceiptLineReturned): the server decides whether a credit is tracked. */
+  function answer(line: ReceiptBillingLine, returned: boolean) {
+    setPenBusy(line.id);
+    start(async () => {
+      const res = await setReceiptLineReturned(line.id, returned);
+      setPenBusy(null);
+      if (!res?.ok) {
+        toast(res?.error ?? "Couldn't change that line. Try again.", "error");
+        return;
+      }
+      toast(returned ? "Marked returned: off the customer's bill" : "Marked kept", "success");
+      if (res.note) toast(res.note, "info");
+      router.refresh();
+      onChanged?.();
+    });
+  }
 
   function takeOff(line: ReceiptBillingLine) {
     if (!line.shelf) return;
@@ -264,9 +349,16 @@ export function ReceiptLines({
   // A receipt on a SENT invoice is settled: the importer skips it forever after, so neither the
   // switch nor the split could move a dollar. A control that can only refuse does not render.
   const locked = !!r.billedOn && r.billedOn.status !== "draft";
+  const creditTracked = receiptCreditExpected(r);
+  // PAID, AND NOT AT THE COUNTER: a payment record would go with Read Again, and the server refuses
+  // it (read-again-core), so the door isn't drawn (skeptic #84, S5). Asked through isStillOwed.
+  const paidElsewhere = readAgainHidden(r);
+  const penSaid = receiptPenSentence({ ...r, lines });
 
   return (
     <div>
+      {/* WHAT INK WAS READ (cn-v1181): plain, never amber; nothing when there is nothing to say. */}
+      {penSaid && <p className="mb-1 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">{penSaid}</p>}
       {/* WHERE THIS RECEIPT STANDS, one line, the reasoning in a Why? fold (Wave B). */}
       {r.billedOn && r.billedOn.status === "draft" ? (
         /* A DRAFT CLAIMANT IS NOT A WALL: its lines are still editable, and the switch still
@@ -315,7 +407,9 @@ export function ReceiptLines({
                   <span className="block truncate text-xs text-slate-400">
                     {formatCurrency(l.amount)}
                     {l.category ? ` · ${l.category}` : ""} ·{" "}
-                    {!l.billable ? (
+                    {penFaceOf(l) ? (
+                      <span className="font-medium text-slate-700">{PEN_WORDS[penFaceOf(l)!]}</span>
+                    ) : !l.billable ? (
                       <span className="font-medium text-amber-700">Not billed to the customer</span>
                     ) : part == null ? (
                       <span className="text-slate-400">Billed to the customer</span>
@@ -330,6 +424,30 @@ export function ReceiptLines({
                 </span>
                 {locked ? (
                   <span className="shrink-0 text-xs text-slate-400">On {r.billedOn?.label}</span>
+                ) : penFaceOf(l) === "creditReceived" ? null : penFaceOf(l) && !l.shelf ? (
+                  /* A PEN MARK'S ANSWER: the question asks Kept or Returned (on a receipt paid at
+                     purchase there is no credit to track, so Returned is Not Billed); a line off
+                     the bill for its mark offers Kept, the way back. */
+                  <span className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={penBusy === l.id}
+                      onClick={() => answer(l, false)}
+                      className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      {PEN_WORDS.kept}
+                    </button>
+                    {penFaceOf(l) === "needsAnswer" && (
+                      <button
+                        type="button"
+                        disabled={penBusy === l.id}
+                        onClick={() => answer(l, true)}
+                        className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        {creditTracked ? PEN_WORDS.returned : "Not Billed"}
+                      </button>
+                    )}
+                  </span>
                 ) : l.shelf ? (
                   /* A ROLL IS ON THE SHELF FROM THIS LINE: the switch would re-cost the
                      roll without moving its pieces, so it doesn't render (the server
@@ -367,6 +485,33 @@ export function ReceiptLines({
                   to split. */}
               {!locked && l.billable && !l.shelf && (
                 <div className="flex flex-wrap items-center gap-x-2">
+                  {l.pen && creditTracked && (
+                    /* A marked line read as kept (or answered Kept): the way to Returned. */
+                    <button
+                      type="button"
+                      disabled={penBusy === l.id}
+                      onClick={() => answer(l, true)}
+                      className="-ml-1 flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
+                    >
+                      {PEN_WORDS.returned}
+                    </button>
+                  )}
+                  {!l.pen && creditTracked && (
+                    /* AN UNMARKED LINE CAN BE MARKED RETURNED BY HAND (cn-v1181 fixer, F4): the reader
+                       will miss a strike some day, and the answer to "do i just need to go back and
+                       delete line items?" is this tap, never a delete. Quiet and slate; only where a
+                       credit is tracked (a receipt paid at purchase keeps its Bill switch alone).
+                       After it the line reads Returned · Credit Expected, with Kept as the way back. */
+                    <button
+                      type="button"
+                      disabled={penBusy === l.id}
+                      onClick={() => answer(l, true)}
+                      aria-label={`${PEN_WORDS.returned}: ${l.description}`}
+                      className="-ml-1 flex min-h-11 min-w-11 items-center rounded-lg px-1 text-xs font-medium text-slate-500 hover:underline disabled:opacity-50"
+                    >
+                      {PEN_WORDS.returned}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setEditing({ receipt: r, line: l, hint: showHint ? hint : null })}
@@ -414,6 +559,9 @@ export function ReceiptLines({
               ) : (
                 shopStock &&
                 !locked &&
+                // A line that went back (or is still asked about) is never shop stock.
+                !penOff(l) &&
+                l.pen !== "unclear" &&
                 l.amount > 0 &&
                 !/tax/i.test(String(l.category ?? "")) &&
                 !isFreightLine(l) && (
@@ -431,6 +579,31 @@ export function ReceiptLines({
         })}
       </ul>
       {/* Open the Job lives once, on the bill's own detail row above these lines. */}
+
+      {/* READ AGAIN (cn-v1181): a bill made from a paper is taken down and made again from the same
+          picture. Not on a bill a sent invoice holds: Undo refuses there, so it would be a dead door. */}
+      {r.fromPaper && !locked && !paidElsewhere && (
+        <button
+          type="button"
+          onClick={() => setAskReadAgain(true)}
+          className="-ml-1 mt-1 flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline"
+        >
+          Read Again
+        </button>
+      )}
+      {askReadAgain && (
+        <ReadAgainConfirm
+          billId={r.id}
+          portal={modalPortal}
+          onClose={() => setAskReadAgain(false)}
+          onDone={(message) => {
+            setAskReadAgain(false);
+            toast(message, "success");
+            router.refresh();
+            onChanged?.();
+          }}
+        />
+      )}
 
       {editing && (
         <UsedOnThisJob
@@ -458,6 +631,57 @@ export function ReceiptLines({
         />
       )}
     </div>
+  );
+}
+
+/** READ AGAIN's confirm, in one sentence; the refusal is shown here, the message toasted. */
+export const READ_AGAIN_CONFIRM =
+  "This bill is taken down and made again from the same picture, and the choices made on its lines are read again too.";
+
+export function ReadAgainConfirm({
+  billId,
+  portal = false,
+  onClose,
+  onDone,
+}: {
+  billId: string;
+  portal?: boolean;
+  onClose: () => void;
+  onDone: (message: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  function go() {
+    setBusy(true);
+    setError(null);
+    readFiledPaperAgain(billId)
+      .then((res) => {
+        setBusy(false);
+        if (!res?.ok) {
+          setError(res?.error ?? "It wasn't read again. Try again.");
+          return;
+        }
+        onDone(res.message ?? "Read again.");
+      })
+      .catch(() => {
+        setBusy(false);
+        setError("It wasn't read again: the connection dropped. Try again.");
+      });
+  }
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Read Again"
+      size="md"
+      portal={portal}
+      footer={<ModalActions onCancel={onClose} onSave={go} saving={busy} saveLabel="Read Again" disabled={busy} />}
+    >
+      <div className="space-y-3">
+        <p className="text-sm text-slate-700">{READ_AGAIN_CONFIRM}</p>
+        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      </div>
+    </Modal>
   );
 }
 

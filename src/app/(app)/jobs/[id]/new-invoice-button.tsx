@@ -51,7 +51,7 @@ const presetParam = createParamClaim();
 
 /**
  * THE PROPS ARE THE FACTS THE JOB PAGE ALREADY HAS (W1-24), so another door can mount the same
- * button (lane 6's Left to Bill card, next wave, with preset "part") and get the same answers.
+ * button (the Overview's Everything Billable card, with preset "part") and get the same answers.
  * `preset` opens the sheet with that choice made; `label` renames the button.
  */
 export type NewInvoiceButtonProps = {
@@ -70,6 +70,15 @@ export type NewInvoiceButtonProps = {
   worked?: number | null;
   /** Sent bills (non-void, non-draft) and what's been paid on the job's bills. */
   billed?: number | null;
+  /** What Part of the Estimate may still take (lib/everything-billable partLeftGross, cn-v1181): the
+   *  Everything Billable tile's own figure, so the sheet's Left and its percent base are the tile's.
+   *  Absent (or null): the sheet's own subtraction, estimate less billed, as before. */
+  partLeft?: number | null;
+  /** Money asked ahead on payment requests that no sent bill has taken off yet (lib/everything-billable
+   *  requestsToComeOff, cn-v1181): it comes off the part's bill by itself, so the Part choice says so. */
+  requestsToComeOff?: number | null;
+  /** A read the Part base rests on failed (jobs/[id]/billable-view): the sheet says Couldn't total. */
+  partUnread?: boolean;
   paid?: number | null;
   /** The job's open draft (openDraftOnJob), if any. */
   openDraft?: Pick<OpenDraft, "id" | "number" | "refreshable"> | null;
@@ -345,6 +354,30 @@ const CHOICE_WORDS: Record<NewInvoiceChoice, string> = {
 };
 
 /**
+ * WHAT PART OF THE ESTIMATE TAKES A PART OF (cn-v1181): the Everything Billable tile's own figure
+ * (`partLeft`, lib/everything-billable partLeftGross: never more than the estimate has left, never more
+ * than is still to bill, so an approved deduct or a discount is not billed again as a part) when the page
+ * handed it; else the sheet's own subtraction, the estimate less what went out. null = couldn't total.
+ */
+/** The one sentence under Part of the Estimate's percent box when money asked ahead will come off the
+ *  part's bill (the recalc nets the job's payment requests), so a draft lower than the part is no
+ *  surprise. null when there is none. English: the sheet's words are literals. */
+export function partRequestsWords(requestsToComeOff: number | null | undefined): string | null {
+  const n = Math.round((Number(requestsToComeOff) || 0) * 100) / 100;
+  return n > 0.005 ? `${money(n)} already requested on this job comes off this bill, so its total will be lower than the part.` : null;
+}
+
+export function partBaseFor(p: Pick<NewInvoiceButtonProps, "estimate" | "billed" | "partLeft" | "partUnread">): number | null {
+  // A read the page's figure rests on failed: Couldn't total, never a guess by subtraction (M2).
+  if (p.partUnread) return null;
+  if (p.partLeft != null && Number.isFinite(Number(p.partLeft))) return Math.max(0, Math.round(Number(p.partLeft) * 100) / 100);
+  if (p.billed == null) return null;
+  const estimate = Math.max(0, Number(p.estimate) || 0);
+  const billed = Math.max(0, Number(p.billed) || 0);
+  return Math.max(0, Math.round((estimate - billed) * 100) / 100);
+}
+
+/**
  * THE NEW INVOICE SHEET. At the top, the money as one thin bar (the estimate its full width,
  * Billed filled, Paid darker) and the figures under it; then one choice of 2 or 3 buttons
  * (newInvoiceChoices), the choice's one box, This Is the Last Bill where a bill can be the last,
@@ -368,7 +401,7 @@ function NewInvoiceSheet(
   const estimate = Math.max(0, Number(p.estimate) || 0);
   const billed = p.billed == null ? null : Math.max(0, Number(p.billed) || 0);
   const paid = p.paid == null ? null : Math.max(0, Number(p.paid) || 0);
-  const left = billed == null ? null : Math.max(0, Math.round((estimate - billed) * 100) / 100);
+  const left = partBaseFor(p);
   const isTM = p.billingType === "tm";
   const { choices, initial, workDoor } = useMemo(
     () => sheetChoicesFor(p, p.preset),
@@ -584,6 +617,7 @@ function NewInvoiceSheet(
                     The Rest
                   </button>
                 </div>
+                {partRequestsWords(p.requestsToComeOff) && <p className="text-sm text-slate-500">{partRequestsWords(p.requestsToComeOff)}</p>}
               </>
             ) : (
               <>

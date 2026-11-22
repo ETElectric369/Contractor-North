@@ -6,6 +6,8 @@ import { Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createJob } from "../schedule/actions";
+import { sayTie } from "@/lib/appointments/say-tie";
+import { useToast } from "@/components/toast";
 import { isOnlyASourceTag } from "@/lib/job-name";
 import { fillText, translator } from "@/lib/i18n";
 import { useLang } from "@/components/lang-provider";
@@ -46,6 +48,7 @@ export function NewJobInline({
   className?: string;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const t = translator(useLang());
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -86,6 +89,8 @@ export function NewJobInline({
         // The name it was SAVED under: the picker and the "Created …" toast say what the timecard,
         // the schedule and the job list will say.
         onCreated({ id: res.id, name: res.name || trimmed });
+        // The visit createJob tied, or could not tie, is said here too (skeptic #84, S6).
+        sayTie(toast, res);
         setName("");
         setOpen(false);
         // The page's job list is server-rendered and createJob revalidates /schedule and

@@ -77,3 +77,51 @@ describe("a paper whose number is already on a bill", () => {
     expect(out).toEqual({ kind: "already", docId: "doc-1", tone: "ok", sentence: "Already recorded as a cost — nothing added twice." });
   });
 });
+
+describe("the pen sentence is not a warning (cn-v1181 fixer, skeptic #84 S7)", () => {
+  it("a read with ink: tone ok, the sentence carries no pen words, the pen rides on its own field", async () => {
+    bill.mockResolvedValueOnce({ ok: true, amount: 162, vendor: "Northline Supply", lineCount: 4, pen: "Pen marks read: 1 line crossed out." });
+    const out = await readReceiptDocument("doc-1");
+    expect(out).toMatchObject({ kind: "billed", tone: "ok", warning: null, pen: "Pen marks read: 1 line crossed out." });
+    expect(out.sentence).not.toContain("Pen marks");
+    const { penLineOf } = await import("./receipt-capture");
+    expect(penLineOf(out)).toBe("Pen marks read: 1 line crossed out.");
+  });
+  it("a real warning still makes the tone warn, with the pen beside it", async () => {
+    bill.mockResolvedValueOnce({ ok: true, amount: 162, vendor: "Northline Supply", lineCount: 4, warning: "The lines come to $150.00.", pen: "Pen marks read: 1 line crossed out." });
+    const out = await readReceiptDocument("doc-1");
+    expect(out).toMatchObject({ tone: "warn", warning: "The lines come to $150.00." });
+    const { penLineOf } = await import("./receipt-capture");
+    expect(penLineOf(out)).toBe("Pen marks read: 1 line crossed out.");
+  });
+});
+
+describe("every door that draws a receipt's read draws the pen line, slate (S7)", () => {
+  it("PenNote: slate, never amber; nothing when empty", async () => {
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { createElement } = await import("react");
+    const { PenNote } = await import("@/components/pen-note");
+    const html = renderToStaticMarkup(createElement(PenNote, { text: "Pen marks read: 1 line crossed out." }));
+    expect(html).toMatch(/text-slate-600/);
+    expect(html).not.toMatch(/amber/);
+    expect(renderToStaticMarkup(createElement(PenNote, { text: null }))).toBe("");
+  });
+  it("the job page's two doors and the Add Cost sheet each draw it", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = (p: string) => readFileSync(`${process.cwd()}/${p}`, "utf8");
+    const capture = src("src/app/(app)/jobs/[id]/job-cost-capture.tsx");
+    expect(capture).toContain("say(p.id, p.name, sentence, out.tone, differentDoc, sameBillId, penLineOf(out));");
+    expect(capture).toContain("say(l.id, l.name, out.sentence, out.tone, undefined, undefined, penLineOf(out));");
+    expect(capture).toContain('<PenNote text={l.pen} className="mt-0.5" />');
+    const docs = src("src/app/(app)/jobs/[id]/job-documents.tsx");
+    expect(docs).toContain("pen: penLineOf(out),");
+    expect(docs).toContain('<PenNote text={n.pen} className="mt-0.5" />');
+    const sheet = src("src/components/quick-cost-button.tsx");
+    expect(sheet).toContain("if (res.warning || res.pen) {");
+    expect(sheet).toContain('{penSaid && <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{penSaid}</p>}');
+  });
+  it("Read Again keeps the door's pen sentence", async () => {
+    const { readFileSync } = await import("node:fs");
+    expect(readFileSync(`${process.cwd()}/src/app/(app)/organize/read-again-core.ts`, "utf8")).toContain('doorSaid = [made.pen, made.warning].filter(Boolean).join(" ");');
+  });
+});

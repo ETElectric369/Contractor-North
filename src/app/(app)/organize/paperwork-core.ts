@@ -35,6 +35,7 @@ import {
 import {
   FOOD_AND_DRINK_PROMPT_RULE,
   MASKED_PRICE_PROMPT_RULE,
+  PEN_MARKS_PROMPT_RULE,
   looksProvisionallyPriced,
   RECEIPT_LINE_CATEGORY_SCHEMA_HINT,
 } from "@/app/(app)/bills/receipt-billing";
@@ -53,6 +54,57 @@ import {
 // row can key a Shop Stock count to the same index the bill's sort_order gets).
 export { cleanLines, type BillLine } from "@/lib/paper-lines";
 import { cleanLines, type BillLine } from "@/lib/paper-lines";
+import { penColumns, penFromColumns, penSentence, penSummary } from "@/lib/pen-marks";
+import { excludedReceiptCost } from "@/lib/bill-itemisation";
+
+/** A total written by hand on the paper (the reader's `hand_total`), or null. */
+export function handTotalOf(raw: unknown): number | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : null;
+}
+
+/**
+ * WHAT THE BILL SAYS IT READ (cn-v1181, P7): the pen sentence for a paper's lines as they are filed,
+ * or null when no pen mark was read. `comesOff` and `keptTotal` are lib/bill-itemisation's own
+ * reading (excludedReceiptCost, tax share included) of the lines a pen mark took off, and nothing
+ * else: a snack the company eats is not the pen's to say. `creditExpected` is the bill's own answer
+ * (written unpaid: on account or unknown), the same one its lines' columns are written with.
+ */
+export function penSaidFor(
+  lines: readonly BillLine[],
+  o: { amount: number | null; creditExpected: boolean; handTotal?: number | null },
+): string | null {
+  const s = penSummary(lines);
+  if (!s.any) return null;
+  const off = s.returnedLines
+    ? excludedReceiptCost(
+        lines.map((l, i) => ({
+          id: i,
+          amount: l.amount,
+          quantity: l.quantity,
+          unit_price: l.unit_price,
+          category: l.category,
+          billable: l.returned !== true,
+        })),
+      )
+    : 0;
+  const total = o.amount === null || !Number.isFinite(Number(o.amount)) ? null : Number(o.amount);
+  const keptTotal = total === null ? null : Math.round((Math.abs(total) - Math.abs(off)) * 100) / 100;
+  return penSentence(s, {
+    creditExpected: o.creditExpected,
+    comesOff: s.returnedLines ? off : null,
+    handTotal: o.handTotal ?? null,
+    keptTotal,
+  });
+}
+
+/** The bill's line as an Undo puts it back on the paper: the stored row with what a person answered
+ *  about its pen mark (penFromColumns), read by cleanLines exactly as File It wrote it. */
+export function standingLineOf(row: any): any {
+  const { pen_mark: _p, returned: _r, returned_credit_bill_id: _c, ...rest } = row ?? {};
+  return { ...rest, ...penFromColumns(row ?? {}) };
+}
 
 /** A store receipt is already paid; a supplier bill/invoice is still owed. */
 function billStatusFor(category: string | null | undefined): "paid" | "unpaid" {
@@ -154,22 +206,35 @@ export async function insertItemizedBill(
     return { id: null, refusal: null };
   }
   if (lines.length) {
+    // PEN MARKS (cn-v1181, 0417): a line with a pen mark, or one that went back, carries pen_mark and
+    // returned (src/lib/pen-marks.ts penColumns: returned only where a credit is expected, which is a
+    // bill written unpaid: on account or unknown). An ordinary line's insert names exactly the columns
+    // it always named. The bill's amount above is the printed total as read: ink never lowers it.
+    // An `unclear` line is written like any other, held off the customer's bill (billable = false)
+    // and asked on the bill: nothing waits for it (P8).
+    const creditExpected = status === "unpaid";
     const { error: lineErr } = await supabase
       .from("bill_line_items")
       .insert(
-        lines.map((l, i) => ({
-          bill_id: data.id,
-          description: l.description,
-          quantity: l.quantity,
-          unit_price: l.unit_price,
-          amount: l.amount,
-          category: l.category,
-          billable: l.billable,
-          // A part-used amount a person set on the bill before an Undo (TD3); absent otherwise,
-          // so a line as read writes exactly what it always wrote.
-          ...(l.billed_amount !== undefined ? { billed_amount: l.billed_amount } : {}),
-          sort_order: i,
-        })),
+        lines.map((l, i) => {
+          const marked = l.pen != null || l.returned === true;
+          const pen = penColumns(l, creditExpected);
+          return {
+            bill_id: data.id,
+            description: l.description,
+            quantity: l.quantity,
+            unit_price: l.unit_price,
+            amount: l.amount,
+            category: l.category,
+            billable: marked ? pen.billable : l.billable,
+            // A part-used amount a person set on the bill before an Undo (TD3); absent otherwise,
+            // so a line as read writes exactly what it always wrote. Never on a marked line that is
+            // off the customer's bill.
+            ...(l.billed_amount !== undefined && (!marked || pen.billable) ? { billed_amount: l.billed_amount } : {}),
+            ...(marked ? { pen_mark: pen.pen_mark, returned: pen.returned } : {}),
+            sort_order: i,
+          };
+        }),
       )
       .select("id");
     // A BILL WITH NO LINES IS STILL A NUMBER (silent-write law, same pass as 0278): the cost is
@@ -398,9 +463,11 @@ Respond with ONLY a JSON object (no prose):
   "summary": receipt/bill → brief list of what was bought; note → full clean transcription of the handwriting; otherwise what the document is,
   "document_number": the invoice, ticket or receipt number printed on it, exactly as printed, or null,
   "po_number": what is printed or written in its PO, customer order or job box, copied exactly as it appears (a contractor often writes the job's name or street there instead of a number), or null,
-  "line_items": receipts, bills and credit memos ONLY — an array of every purchased or returned line: [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": ${RECEIPT_LINE_CATEGORY_SCHEMA_HINT}}]. Transcribe EVERY line you can read, including tax as its own line. On a credit memo or a return, every line that comes back (and its tax) has a NEGATIVE amount and unit_price; a restocking fee the supplier keeps stays positive. Use [] otherwise,
+  "line_items": receipts, bills and credit memos ONLY — an array of every purchased or returned line: [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": ${RECEIPT_LINE_CATEGORY_SCHEMA_HINT}, "pen": "struck" | "quantity" | "unclear" | null, "hand_quantity": number | null}]. Transcribe EVERY line you can read, including tax as its own line. On a credit memo or a return, every line that comes back (and its tax) has a NEGATIVE amount and unit_price; a restocking fee the supplier keeps stays positive. Use [] otherwise,
   "vendor": store/supplier name or null,
   "amount": total in dollars as a number, or null — on a credit memo or a return, the total is NEGATIVE (money coming back),
+  "hand_total": a total written by hand on the paper (a number), or null,
+  "reverses_number": credit memos ONLY — the invoice, order or ticket number the credit says it reverses, exactly as printed, or null,
   "date": "YYYY-MM-DD" date printed on it, or null,
   "category": "Receipt" | "Bill" | "Invoice" | "Photo" | "Plan" | "Permit" | "Other",
   "pricing_provisional": true | false — true when the price column is masked (*****), blank or "N/A", or the paper is a quote/counter preview rather than this account's own pricing,
@@ -417,7 +484,9 @@ Rules: copy job_marks only from what is on the paper; never fill one in from any
 
 ${FOOD_AND_DRINK_PROMPT_RULE}
 
-${MASKED_PRICE_PROMPT_RULE}`;
+${MASKED_PRICE_PROMPT_RULE}
+
+${PEN_MARKS_PROMPT_RULE}`;
 }
 
 export type ReadFields = {
@@ -530,6 +599,13 @@ export function readerFields(parsed: any, fallbackTitle: string, opts: ReaderOpt
   const { job: byMarks, companyUse } = placeFromMarks(marks, opts.markJobs ?? [], opts.pos ?? [], opts.selfNames ?? [], { feeShaped });
   const hint = parsed?.job_hint ? String(parsed.job_hint).slice(0, 200) : null;
   const bucket = isCost && bucketRead && !feeShaped ? bucketRead : null;
+  // INK ON THE PAPER (cn-v1181): what the pen did, counted from the cleaned lines, and a total
+  // written by hand. Kept on the proposal only when there is something to say.
+  const pen = penSummary(lines);
+  const handTotal = handTotalOf(parsed?.hand_total);
+  // A CREDIT MEMO SAYS WHAT IT REVERSES (cn-v1181, for the credit memo's own door): the number as
+  // printed, cleaned the way a paper's own number is.
+  const reverses = doc_type === "credit_memo" ? cleanDocNumber(parsed?.reverses_number) : null;
   const proposal: PaperProposal = {
     jobId: byMarks.kind === "one" ? byMarks.jobId : null,
     jobFrom: byMarks.kind === "one" ? byMarks.from : null,
@@ -543,6 +619,8 @@ export function readerFields(parsed: any, fallbackTitle: string, opts: ReaderOpt
     po: cleanDocNumber(parsed?.po_number),
     // Kept, so the tray can match this paper again when the rules learn something (rematchPaper).
     marks,
+    ...(pen.any ? { penMarks: { ...pen, handTotal } } : {}),
+    ...(reverses ? { reverses } : {}),
     ...(picture ? { picture: true } : {}),
     // A SCANNED STATEMENT: the open items the reader transcribed, as a supplier's open list. The
     // card compares it against that supplier's papers and changes nothing until Apply; its own
@@ -881,16 +959,27 @@ export async function readBillStanding(
     return scoped(withCorrections ? q.or(`superseded_by_bill_id.eq.${billId},corrects_bill_id.eq.${billId}`) : q.eq("superseded_by_bill_id", billId)).limit(40);
   };
   const askCorrections = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(billId));
-  const [billRead, firstLeaning, tiedRead] = await Promise.all([
+  /**
+   * THE BILL AND ITS LINES, WITH WHAT A PERSON ANSWERED ABOUT INK ON THEM (cn-v1181, 0417): pen_mark,
+   * returned and returned_credit_bill_id ride back onto the paper through penFromColumns, so an Undo
+   * then File It keeps a Kept or a Returned. Before 0417 is on the database the read is asked again
+   * without them: no line carries a pen mark yet.
+   */
+  const billOf = (withPen: boolean) =>
     scoped(
       supabase
         .from("bills")
-        .select("id, amount, on_shelf, bill_line_items(description, quantity, unit_price, amount, category, billable, billed_amount, is_stock, sort_order)")
+        .select(
+          `id, amount, on_shelf, bill_line_items(description, quantity, unit_price, amount, category, billable, billed_amount, is_stock, sort_order${withPen ? ", pen_mark, returned, returned_credit_bill_id" : ""})`,
+        )
         .eq("id", billId),
-    ).maybeSingle(),
+    ).maybeSingle();
+  const [firstBill, firstLeaning, tiedRead] = await Promise.all([
+    billOf(true),
     leaning(askCorrections),
     scoped(supabase.from("organized_items").select("id, title, vendor, proposal").eq("tied_bill_id", billId)).limit(50),
   ]);
+  const billRead = firstBill?.error && isMissingColumnError(firstBill.error) ? await billOf(false) : firstBill;
   const copiesRead = askCorrections && firstLeaning?.error && isMissingColumnError(firstLeaning.error) ? await leaning(false) : firstLeaning;
   if (billRead?.error || copiesRead?.error || tiedRead?.error) {
     reportError("organize:readBillStanding", billRead?.error ?? copiesRead?.error ?? tiedRead?.error, { billId });
@@ -908,7 +997,7 @@ export async function readBillStanding(
       label: `${jobSaid(c)} (${c.supplier ?? "a bill"}${Number.isFinite(Number(c.amount)) ? `, ${moneySaid(Number(c.amount))}` : ""}${c.bill_date ? `, ${String(c.bill_date).slice(0, 10)}` : ""})`,
     })),
     tiedPapers: ((tiedRead?.data ?? []) as any[]).map((t) => ({ id: String(t.id), title: String(t.title ?? t.vendor ?? "a paper"), proposal: t.proposal })),
-    lines: cleanLines(raw),
+    lines: cleanLines(raw.map(standingLineOf)),
     amount,
     onShelf: bill.on_shelf === true,
     stocked: bill.on_shelf === true ? [] : raw.filter((l) => l?.is_stock === true).map((l) => String(l.description ?? "a line")),

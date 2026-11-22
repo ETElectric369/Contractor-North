@@ -23,7 +23,12 @@ export const organizeActions: Record<string, ActionDef> = {
     effect: "write",
     confirm: "financial",
     describe: () => "Turn this captured receipt into a billable job cost (at the amount read off the receipt) — say yes to confirm.",
-    handler: (i) => billJobReceipt(i.document_id),
+    // The pen sentence rides on its own field now (not `warning`), and the model is handed only what
+    // agent-tool-result projects: it goes on as `speak`, so Nort still says what ink was read.
+    handler: async (i) => {
+      const r = await billJobReceipt(i.document_id);
+      return r.ok && r.pen ? { ...r, speak: r.pen } : r;
+    },
   },
   "organize.saveNote": {
     name: "organize.saveNote",

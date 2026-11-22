@@ -22,7 +22,9 @@ import { fillText } from "@/lib/i18n";
 /**
  * AN INSPECTION ROW'S ⋯ (Sales › Inspections). The row's moves sit behind the app's one row sheet
  * (components/row-more-sheet), each a full-width row that says what it does, in this order:
- *   · Open Inspection and Pick a Day (cn-v1171): links, to the visit and to the Schedule.
+ *   · Open Inspection and Pick a Day (cn-v1171): links, to the visit and to the Schedule. Open Inspection is
+ *     on every row whose boxed button does not already say it (cn-v1181, I1); Won · Start the Job is a link
+ *     to the Won sheet, here when the offer took the boxed button (cn-v1181, I3).
  *   · Move to Another Day…: the one day picker; the visit keeps its time of day and its length, and
  *     the toast names the day it went to.
  *   · It Happened: Write It Up: marks the visit done (Undo puts its status back).
@@ -56,7 +58,7 @@ import { fillText } from "@/lib/i18n";
  * endings are proven without a server.
  */
 
-type Row = Pick<ListRow, "id" | "who" | "what" | "doors" | "visitHref" | "startsAt" | "endsAt" | "happenedSaid" | "offerOthers">;
+type Row = Pick<ListRow, "id" | "who" | "what" | "doors" | "visitHref" | "startsAt" | "endsAt" | "happenedSaid" | "offerOthers"> & Partial<Pick<ListRow, "wonHref">>;
 type ToastFn = ReturnType<typeof useToast>;
 type Words = ReturnType<typeof translator>;
 
@@ -331,6 +333,7 @@ function InspectionRowDoors({
     <InspectionRowMenuView
       doors={doors}
       visitHref={row.visitHref}
+      wonHref={row.wonHref ?? undefined}
       rowClass={rowClass}
       asking={asking}
       pending={pending}
@@ -354,6 +357,7 @@ function InspectionRowDoors({
 export function InspectionRowMenuView({
   doors,
   visitHref = "",
+  wonHref,
   rowClass = SHEET_ROW,
   asking,
   pending,
@@ -367,6 +371,8 @@ export function InspectionRowMenuView({
   doors: MenuDoor[];
   /** The inspection's own page, for Open Inspection. */
   visitHref?: string;
+  /** The Won sheet on the visit, for Won · Start the Job (cn-v1181: in the ⋯ when an offer is boxed). */
+  wonHref?: string;
   rowClass?: string;
   asking: boolean;
   pending: boolean;
@@ -405,6 +411,13 @@ export function InspectionRowMenuView({
                 {t("ip_btn_openInspection")}
               </SheetLink>
             );
+          case "wonStart":
+            // A link to the Won sheet, never a deed: there the job is made from the sale (cn-v1176).
+            return wonHref ? (
+              <SheetLink key="wonStart" href={wonHref} className={rowClass}>
+                {t("vi_btn_wonStartTheJob")}
+              </SheetLink>
+            ) : null;
           case "pickDay":
             return (
               <SheetLink key="pickDay" href="/schedule" className={rowClass}>

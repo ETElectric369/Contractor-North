@@ -134,7 +134,7 @@ export default async function InspectionsPage({
         </EmptyState>
       ) : (
         <>
-          <InspectionList rows={listRows} tz={tz} />
+          <InspectionList rows={listRows} tz={tz} nameOpensVisit />
           <ToEstimateLine n={toEstimate} t={t} />
         </>
       )}

@@ -38,7 +38,8 @@ describe("the Inspections row of a win with no job", () => {
     const en = build("en").rowOf(WON, "write_up");
     expect(en.primary).toEqual({ label: "Won · Start the Job", href: "/appointments/v-won?won=1" });
     expect(en.stateWord).toBe("Won, No Job Picked");
-    expect(en.doors).toEqual(["lost"]);
+    // cn-v1181 (I1): every row's ⋯ holds Open Inspection first when the boxed button does not say it.
+    expect(en.doors).toEqual(["open", "lost"]);
     const es = build("es").rowOf(WON, "write_up");
     expect(es.primary).toEqual({ label: "Ganada · Empezar el Trabajo", href: "/appointments/v-won?won=1" });
   });
@@ -47,7 +48,10 @@ describe("the Inspections row of a win with no job", () => {
     const row = build("en").rowOf(WON, "write_up", OFFER);
     expect(row.offer).toEqual({ id: "job-900", label: "J-900" });
     expect(row.offerOthers).toEqual([{ id: "job-901", label: "J-901" }]);
-    expect(row.doors).toEqual(["open", "lost"]);
+    // cn-v1181 (I3): the offer is the boxed button, and Won · Start the Job moves behind the ⋯ (a second
+    // job is never the first thing offered when the job exists), to the Won sheet.
+    expect(row.doors).toEqual(["open", "wonStart", "lost"]);
+    expect(row.wonHref).toBe("/appointments/v-won?won=1");
     // The won row's button underneath is still the Won sheet's (drawn when no offer takes its place).
     expect(row.primary.href).toBe("/appointments/v-won?won=1");
   });
@@ -101,5 +105,16 @@ describe("cn-v1176 fix F2: the Won button only where the Won sheet takes the vis
     const q = readFileSync("src/lib/action-items/query.ts", "utf8");
     expect(q).toContain("wonNoJob: wonStartShown({ type: a.type, outcome: a.outcome, hasJob: !!a.job_id }),");
     expect(q).not.toContain('wonNoJob: a.outcome === "won" && !a.job_id,');
+  });
+});
+
+describe("cn-v1181 fixer: inspectionFileHref's comment says where a name with no file is a link now (F18)", () => {
+  it("names the Inspections page's link to the visit, and the one list that still draws plain words", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(`${process.cwd()}/src/lib/inspections.ts`, "utf8");
+    const doc = src.slice(src.lastIndexOf("/**", src.indexOf("export function inspectionFileHref")), src.indexOf("export function inspectionFileHref"));
+    expect(doc).toContain("On the Inspections page such a name is still a link, to the visit itself");
+    expect(doc).toContain("`nameOpensVisit`");
+    expect(doc).not.toMatch(/the name is plain words, and the row's button still opens the visit/);
   });
 });

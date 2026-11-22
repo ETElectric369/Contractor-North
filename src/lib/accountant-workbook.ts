@@ -1218,8 +1218,9 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
           // read as "none at $0.00" instead of "nobody typed it".
           l.quantity == null || l.quantity === "" ? null : round3(l.quantity),
           l.unit_price == null || l.unit_price === "" ? null : money(cents(l.unit_price)),
-          // billable false is 0268's "the company eats this line": it never reaches an invoice.
-          yesNo(l.billable !== false, "No (the company's)"),
+          // billable false is 0268's "the company eats this line": it never reaches an invoice. A line
+          // that went back to the supplier (0417) is not the company's cost: it says so (skeptic #84, M1).
+          yesNo(l.billable !== false, (l as { returned?: unknown }).returned === true ? "No (returned to the supplier)" : "No (the company's)"),
           l.billed_amount == null ? null : money(cents(l.billed_amount)),
           yesNo(shelved.has(String(l.id)), null),
         ),

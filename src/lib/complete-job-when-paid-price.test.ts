@@ -49,7 +49,7 @@ beforeEach(() => {
   calls.reported.length = 0;
   work.total = 0;
   writes = [];
-  db = { jobs: [job()], quotes: [quote()], invoices: [], invoice_items: [], tasks: [], customer_credits: [], payments: [], payment_milestones: [] };
+  db = { jobs: [job()], quotes: [quote()], change_orders: [], invoices: [], invoice_items: [], tasks: [], customer_credits: [], payments: [], payment_milestones: [] };
   client = fakeDb(db, { org: ORG, writes, seq: { n: 100 } });
 });
 
@@ -133,6 +133,135 @@ describe("the fixed-price gate", () => {
     expect(r.sayTitle).toBe("Couldn't check this job's bills");
     expect(r.say).toContain("couldn't check its price against its bills");
     expect(db.jobs[0].status).toBe("in_progress");
+    expect(calls.reported).toContain("priceLeftToBill.read");
+  });
+});
+
+/**
+ * EVERYTHING BILLABLE IS THE GATE'S FIGURE (cn-v1181): the gate reads lib/everything-billable, the job
+ * page's tile, so change orders, discounts on sent bills and tax are measured the same way in both. Each
+ * case below was wrong under the old figure (computeJobProgress: accepted totals less sent totals).
+ */
+describe("the gate reads Everything Billable", () => {
+  const co = (id: string, amount: number, over: Row = {}): Row => ({ id, org_id: ORG, job_id: JOB, co_number: "CO-900", description: "Add two receptacles", amount, status: "approved", ...over });
+
+  it("a discount line on the sent bill is a lower price: billed in full, the job finishes (it stayed open for ever)", async () => {
+    db.invoices.push(bill("inv-900", 4500, { subtotal: 4500, tax: 0 }));
+    db.invoice_items.push({ id: "d", org_id: ORG, invoice_id: "inv-900", line_kind: "discount", line_total: -500 });
+    expect(await paid("inv-900")).toEqual({ completed: true, jobId: JOB });
+    expect(db.jobs[0].status).toBe("complete");
+  });
+
+  it("another company's discount line on the same bill id is never read (the company pin)", async () => {
+    db.invoices.push(bill("inv-900", 4500, { subtotal: 4500, tax: 0 }));
+    db.invoice_items.push({ id: "d", org_id: "org-other", invoice_id: "inv-900", line_kind: "discount", line_total: -500 });
+    expect((await paid("inv-900")).completed).toBe(false);
+  });
+
+  it("an approved deduct, billed: the price came down with it, the job finishes", async () => {
+    db.change_orders.push(co("co-1", -900));
+    db.invoices.push(bill("inv-900", 4100, { subtotal: 4100, tax: 0 }));
+    expect(await paid("inv-900")).toEqual({ completed: true, jobId: JOB });
+  });
+
+  it("an approved add never billed keeps the job open, and the figures say it; a pending one or another company's is no price", async () => {
+    db.change_orders.push(co("co-1", 1000), co("co-2", 700, { status: "pending" }), co("co-3", 300, { org_id: "org-other" }));
+    db.invoices.push(bill("inv-900", 5000, { subtotal: 5000, tax: 0 }));
+    const r = await paid("inv-900");
+    expect(r.completed).toBe(false);
+    expect(r).toMatchObject({ open: "price", sayTitle: "Still to bill" });
+    expect(r.say).toContain("$6,000.00 agreed, $5,000.00 billed, $1,000.00 still to bill");
+    expect(db.jobs[0].status).toBe("in_progress");
+  });
+
+  it("a taxed estimate billed with no tax (exempt): the price is measured before tax, the job finishes", async () => {
+    db.quotes = [quote({ subtotal: 5000, tax: 400, total: 5400 })];
+    client = fakeDb(db, { org: ORG, writes, seq: { n: 100 } });
+    db.invoices.push(bill("inv-900", 5000, { subtotal: 5000, tax: 0 }));
+    expect(await paid("inv-900")).toEqual({ completed: true, jobId: JOB });
+  });
+
+  it("draws on a taxed estimate (born tax 0 on the tax-included total): said in before-tax dollars", async () => {
+    db.quotes = [quote({ subtotal: 5000, tax: 400, total: 5400 })];
+    client = fakeDb(db, { org: ORG, writes, seq: { n: 100 } });
+    // A paid draw is a stage, never the end (the gate's rule 1): the standard bill after it is where the price is asked.
+    db.invoices.push(bill("inv-900", 2700, { invoice_kind: "progress", subtotal: 2700, tax: 0 }), bill("inv-901", 1250, { subtotal: 1250, tax: 0 }));
+    const r = await paid("inv-901");
+    expect(r.completed).toBe(false);
+    expect(r.say).toContain("$5,000.00 agreed, $3,750.00 billed, $1,250.00 still to bill");
+    db.invoices[1].total = db.invoices[1].subtotal = db.invoices[1].amount_paid = 2500;
+    expect(await paid("inv-901")).toEqual({ completed: true, jobId: JOB });
+  });
+
+  it("a taxed estimate, a paid request and a standard taxed final that took it off: the credit line is read and handed to the rule, so the price reads billed in full and the job finishes (cn-v1181 fixer, F15)", async () => {
+    // $10,000 + $725 tax. $1,000 asked ahead and paid (tax-free money against the tax-included price:
+    // it counts at its before-tax share, $932.40). The final carries its own tax: its subtotal holds the
+    // credit line at the request's FULL $1,000, so the rule puts the request's tax share back
+    // (credit x (1 - ratio) = $67.60). Without the credit handed in, $67.60 reads as still to bill and a
+    // job billed in full is held open for ever.
+    db.quotes = [quote({ subtotal: 10000, tax: 725, total: 10725 })];
+    client = fakeDb(db, { org: ORG, writes, seq: { n: 100 } });
+    db.invoices.push(
+      { ...bill("inv-900", 1000), invoice_kind: "prepayment", subtotal: 1000, tax: 0, created_at: "2026-10-05T00:00:00Z" },
+      bill("inv-901", 9725, { subtotal: 9000, tax: 725 }),
+    );
+    db.invoice_items.push(
+      { id: "w", org_id: ORG, invoice_id: "inv-901", line_total: 10000, import_source: "quote", line_kind: null },
+      { id: "c", org_id: ORG, invoice_id: "inv-901", line_total: -1000, import_source: "prepaid_credit", line_kind: "credit", prepaid_invoice_id: "inv-900" },
+    );
+    expect(await paid("inv-901")).toEqual({ completed: true, jobId: JOB });
+    expect(db.jobs[0].status).toBe("complete");
+  });
+
+  it("a taxed estimate, a paid request and a DRAW that took it off: a draw needs no credit term (it left the tax-included slice, and the ratio turns both back), so before-tax dollars still unbilled keep the job open (cn-v1181, lane S; the rule as changed after skeptic #84)", async () => {
+    db.quotes = [quote({ subtotal: 10000, tax: 725, total: 10725 })];
+    client = fakeDb(db, { org: ORG, writes, seq: { n: 100 } });
+    db.invoices.push(
+      { ...bill("inv-900", 1000), invoice_kind: "prepayment", created_at: "2026-10-05T00:00:00Z" },
+      bill("inv-901", 9671.36, { invoice_kind: "progress", subtotal: 9671.36, tax: 0 }),
+      bill("inv-902", 10, { subtotal: 10, tax: 0 }),
+    );
+    db.invoice_items.push(
+      { id: "w", org_id: ORG, invoice_id: "inv-901", line_total: 10671.36, import_source: null, line_kind: null },
+      { id: "c", org_id: ORG, invoice_id: "inv-901", line_total: -1000, import_source: "prepaid_credit", line_kind: "credit", prepaid_invoice_id: "inv-900" },
+      // Another company's credit on the same bill id is never read (the company pin).
+      { id: "x", org_id: "org-other", invoice_id: "inv-901", line_total: -5000, import_source: "prepaid_credit", line_kind: "credit", prepaid_invoice_id: "inv-900" },
+    );
+    const r = await paid("inv-902");
+    expect(r.completed).toBe(false);
+    expect(r.say).toContain("$10,000.00 agreed, $9,959.99 billed, $40.01 still to bill");
+    expect(db.jobs[0].status).toBe("in_progress");
+  });
+
+  it("a failed read of the credit lines is never 'nothing taken off': the job stays open", async () => {
+    db.invoices.push(bill("inv-900", 5000));
+    const real = client.from;
+    // Only the read of the credit lines fails (a timeout); the discount read beside it answers.
+    client = {
+      ...client,
+      from: (t: string) => {
+        const c = real(t);
+        if (t !== "invoice_items") return c;
+        let fail = false;
+        const eq = c.eq;
+        const then = c.then;
+        c.eq = (col: string, v: unknown) => ((fail ||= col === "import_source"), eq(col, v));
+        c.then = (ok: any, bad: any) => (fail ? Promise.resolve({ data: null, error: { message: "timeout" } }).then(ok, bad) : then(ok, bad));
+        return c;
+      },
+    };
+    const r = await paid("inv-900");
+    expect(r.completed).toBe(false);
+    expect(r.sayTitle).toBe("Couldn't check this job's bills");
+    expect(calls.reported).toContain("priceLeftToBill.read");
+  });
+
+  it("a failed change-order read is never 'nothing left': the job stays open", async () => {
+    db.invoices.push(bill("inv-900", 5000));
+    client = failingReads(client, "change_orders");
+    const r = await paid("inv-900");
+    expect(r.completed).toBe(false);
+    expect(r.sayTitle).toBe("Couldn't check this job's bills");
     expect(calls.reported).toContain("priceLeftToBill.read");
   });
 });

@@ -40,7 +40,8 @@ import { JobDailyReports } from "./job-daily-reports";
 import { JobCostCapture } from "./job-cost-capture";
 import { UnbilledCard, UnbilledDoorButton, type UnbilledView } from "./unbilled-card";
 import { LeftToBillCard } from "./left-to-bill-card";
-import { contractEstimates } from "./contract-estimates";
+import { jobBillableView } from "./billable-view";
+import { PREPAID_CREDIT } from "@/lib/prepayments";
 import { fixedBillingsNotYetNetted, unbilledWorkForJob } from "@/lib/unbilled-work";
 import { groupJobCosts, openRowsDrawn } from "@/lib/job-cost-groups";
 import { readJobPapers } from "./job-papers";
@@ -188,7 +189,8 @@ export default async function JobDetailPage({
     },
     rates,
   ] = await Promise.all([
-    supabase.from("quotes").select("id, quote_number, status, total, doc_type, created_at").eq("job_id", id),
+    // subtotal and tax (cn-v1181): Everything Billable measures the estimate before tax.
+    supabase.from("quotes").select("id, quote_number, status, subtotal, tax, total, doc_type, created_at").eq("job_id", id),
     supabase.from("work_orders").select("id, wo_number, title, status").eq("job_id", id),
     supabase.from("change_orders").select("*").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("invoices").select("id, invoice_number, status, total, amount_paid, invoice_kind, created_at").eq("job_id", id).order("created_at", { ascending: false }),
@@ -231,7 +233,9 @@ export default async function JobDetailPage({
         // Without it on the wire the Costs tab row would say no part is set on every cost, and the Edit
         // Bill box would open empty and clear a part somebody had already set — THE PROJECTION LAW.
         .select(
-          "id, supplier, supplier_account_id, supplier_invoice_number, is_statement, notes, bill_number, amount, status, bill_date, po_id, scope_category, bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount)" +
+          // The pen-mark columns (0417, cn-v1181) ride the newest rung with corrects: a database
+          // behind the deploy drops both on the retry, and the Costs tab keeps every bill.
+          `id, supplier, supplier_account_id, supplier_invoice_number, is_statement, notes, bill_number, amount, status, bill_date, po_id, scope_category, bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount${withCorrects ? ", pen_mark, returned, returned_credit_bill_id" : ""})` +
             (withCorrects ? ", corrects_bill_id, amount_paid" : ""),
         )
         .eq("job_id", id)
@@ -1007,15 +1011,55 @@ export default async function JobDetailPage({
   );
   /** A time and material job: the Invoices tab draws no payment-schedule card for it (cn-v1174). */
   const isTmJob = (j as any).billing_type === "tm";
-  // THE OVERVIEW'S ONE FIGURE ON A JOB BILLED BY ITS CONTRACT (W1-19): Left to Bill, from the same
-  // figures above (the contract, what went out on sent bills) or the schedule's own status, the one
-  // PaymentScheduleCard shows. Staff only (the card is never mounted for a tech).
+  // THE OVERVIEW'S ONE FIGURE ON A JOB BILLED BY ITS CONTRACT (W1-19; Everything Billable since cn-v1181):
+  // on a payment schedule, the schedule's own status, the one PaymentScheduleCard shows (leftView); with
+  // no schedule, Everything Billable below. Staff only (the card is never mounted for a tech).
   const scheduleView = (paymentMilestones ?? []).length ? scheduleStatus((paymentMilestones ?? []) as Milestone[], contractTotal) : null;
   const leftView = leftToBill(progress, scheduleView);
+  // EVERYTHING BILLABLE (cn-v1181): on a job billed by its contract with no schedule, the tile reads
+  // lib/everything-billable, the same function the paid-in-full gate and Get Paid read (finish-bills-first
+  // priceLeftToBill), over this page's estimates, change orders and bills, and the sent bills' discount
+  // lines (invoice_items.line_kind 'discount', 0389), read once here with each bill's subtotal and tax
+  // (the page's own invoices read stays as tests/invoice-order pins it), and the lines that took a payment
+  // request off (import_source 'prepaid_credit'): without them a draw that took one off on a taxed
+  // estimate reads as more work than it billed (lib/everything-billable, cn-v1181). A failed read is
+  // said on the tile (billableUnread), never a figure that silently left the discounts or the tax out.
+  // Only where the tile is drawn: the office, a job billed by its contract (not its work), no schedule.
+  const billableWanted = viewerIsStaff && !importsActuals && !scheduleView && (j as any).billing_type !== "tm";
+  // THE NEW INVOICE SHEET'S PART BASE is the same rule's figure on EVERY job with an estimate (the Part
+  // door bills that figure whatever the tile shows), so the money read is made for those jobs too.
+  const partWanted = viewerIsStaff && (!!quotesErr || (quotes ?? []).length > 0);
+  const billsRead = billableWanted || partWanted
+    ? await supabase
+        .from("invoices")
+        .select("id, subtotal, tax, invoice_items(line_kind, line_total, import_source)")
+        .eq("job_id", id)
+        .or(`line_kind.eq.discount,import_source.eq.${PREPAID_CREDIT}`, { referencedTable: "invoice_items" })
+    : { data: [] as { id: string; subtotal: number | null; tax: number | null; invoice_items: { line_kind: string | null; line_total: number | null; import_source: string | null }[] | null }[], error: null };
+  const billMoney = new Map<string, { subtotal: number | null; tax: number | null; discount: number; prepaidCredit: number }>();
+  for (const r of (billsRead.data ?? []) as { id: string; subtotal: number | null; tax: number | null; invoice_items: { line_kind: string | null; line_total: number | null; import_source: string | null }[] | null }[]) {
+    const discount = (r.invoice_items ?? []).filter((l) => l.line_kind === "discount").reduce((s, l) => s + (Number(l.line_total) || 0), 0);
+    const prepaidCredit = (r.invoice_items ?? []).filter((l) => l.import_source === PREPAID_CREDIT).reduce((s, l) => s + (Number(l.line_total) || 0), 0);
+    billMoney.set(String(r.id), { subtotal: r.subtotal, tax: r.tax, discount, prepaidCredit });
+  }
+  // ONE DECISION (./billable-view): the tile is unread when ANY read it rests on failed, the page's own
+  // estimates, change orders and invoices reads included (skeptic #84, S3); the sheet's Part base is the
+  // rule's figure, or Couldn't total when a read failed, never its own subtraction (M2).
+  const billable = jobBillableView({
+    tileWanted: billableWanted,
+    partWanted,
+    failed: { money: !!billsRead.error, quotes: !!quotesErr, changeOrders: !!changeOrdersErr, invoices: !!invoicesErr },
+    quotes: (quotes ?? []) as any[],
+    changeOrders: (changeOrders ?? []) as any[],
+    invoices: (invoices ?? []) as any[],
+    billMoney,
+  });
+  const billableView = billable.tile;
+  const billableUnread = billable.tileUnread;
   const draftInvoice =
     ((invoices ?? []) as any[]).find((i) => openDraft && i.id === openDraft.id) ?? ((invoices ?? []) as any[]).find((i) => i.status === "draft") ?? null;
-  // THE JOB'S NEW INVOICE, ONE SET OF FACTS (W1-24, W1-19): the Invoices tab's button and the Left To
-  // Bill card's are the same button with the same props, so the two can never answer differently.
+  // THE JOB'S NEW INVOICE, ONE SET OF FACTS (W1-24, W1-19): the Invoices tab's button and the
+  // Everything Billable card's are the same button with the same props, so the two can never answer differently.
   // Every prop is a fact this page already read; what one tap does is lib/actuals-draw newInvoiceRoute.
   // THE PAY-DOOR FACTS (cn-v1177): what a Get Paid sheet opened from the Request a Payment form needs,
   // read once from the company row the header's Get Paid already reads them from.
@@ -1049,6 +1093,13 @@ export default async function JobDetailPage({
     }),
     worked: workedToDate,
     billed: billedToDate,
+    // Part of the Estimate's base: Everything Billable's own (cn-v1181), so the Invoices tab's sheet and
+    // the tile's say the same Left, on every job with an estimate. null with no accepted estimate.
+    partLeft: billable.partLeft,
+    // A read the Part base rests on failed: the sheet says Couldn't total, never its own subtraction.
+    partUnread: billable.partUnread,
+    // Money asked ahead that the part's bill will take off by itself: the sheet says it under the percent.
+    requestsToComeOff: billable.requestsToComeOff,
     paid: collected,
     openDraft: openDraft ? { id: openDraft.id, number: openDraft.number, refreshable: openDraft.refreshable } : null,
     // The Overview card's own figures (the same door, so the sheet and the card agree).
@@ -1363,8 +1414,9 @@ export default async function JobDetailPage({
               job, and for the office a fixed-price job with no live estimate: importsActuals, New
               Invoice's own rule) leads with the running total (Erik: "a running total of open time
               and materials on the overview"): "Open $X" and the door that bills it. A job billed by
-              its CONTRACT (a live fixed-price estimate, or any payment schedule) leads with Left To
-              Bill and the job's own New Invoice or Request Next Payment. Both are money, so the
+              its CONTRACT (a live fixed-price estimate, or any payment schedule) leads with
+              Everything Billable and its one door (Part of the Estimate, Bill the Change Orders, or
+              Request Next Payment). Both are money, so the
               office's only; a tech's card is hours only on a job that bills its actuals (unbilledView
               is projected above) and nothing on one billed by its contract. */}
           {viewerIsStaff ? (
@@ -1374,10 +1426,8 @@ export default async function JobDetailPage({
               <LeftToBillCard
                 jobId={j.id}
                 view={leftView}
-                estimates={contractEstimates((quotes ?? []) as any[])}
-                sent={((invoices ?? []) as any[])
-                  .filter((i) => i.status !== "void" && i.status !== "draft")
-                  .map((i) => ({ id: String(i.id), number: i.invoice_number ?? null, total: Number(i.total) || 0 }))}
+                billable={billableView}
+                unread={billableUnread}
                 draft={draftInvoice ? { id: String(draftInvoice.id), number: draftInvoice.invoice_number ?? null, total: Number(draftInvoice.total) || 0 } : null}
                 rows={(scheduleView?.rows ?? []).map((r) => ({
                   label: r.label,
@@ -2168,7 +2218,7 @@ export default async function JobDetailPage({
               {/* REQUEST A PAYMENT (cn-v1177): a quiet door beside New Invoice on every job, a job billed
                   with draws included (the header's Get Paid is hidden there). */}
               <RequestPaymentButton jobId={j.id} payDoor={payDoor} />
-              {/* The page's facts, computed once (newInvoiceProps): the Overview's Left to Bill card
+              {/* The page's facts, computed once (newInvoiceProps): the Overview's Everything Billable card
                   mounts the same button with the same props, opened on Part of the Estimate. */}
               <NewInvoiceButton {...newInvoiceProps} />
             </div>

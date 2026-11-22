@@ -7,8 +7,9 @@ import type { InspectionListState } from "@/lib/inspections";
  * pure rule here, so it is proven without a page.
  */
 
-/** One move a row's ⋯ can hold, in the order the sheet draws them. Open and Pick a Day are links. */
-export type MenuDoor = "open" | "pickDay" | "move" | "happened" | "lost" | "del";
+/** One move a row's ⋯ can hold, in the order the sheet draws them. Open, Won · Start the Job and Pick a
+ *  Day are links. */
+export type MenuDoor = "open" | "wonStart" | "pickDay" | "move" | "happened" | "lost" | "del";
 
 /** The row's one boxed button: Start Inspection, Create Estimate, or Open Inspection; and for a visit
  *  marked Won with no job picked (cn-v1175, R8), Won · Start the Job (cn-v1176: the Won sheet). */
@@ -21,7 +22,7 @@ export type ListRow = {
   state: InspectionListState;
   /** Who it is for, in bold. */
   who: string;
-  /** Where the name leads (the person's file), or null: the name is plain words. */
+  /** Where the name leads (the person's file), or null: the name opens the visit itself (cn-v1181, I1). */
   whoHref: string | null;
   /** What it is, as a phrase. May be empty. */
   what: string;
@@ -32,6 +33,8 @@ export type ListRow = {
   primary: { label: string; href: string };
   /** The inspection's own page (the ⋯'s Open Inspection). */
   visitHref: string;
+  /** The Won sheet on the visit, for the ⋯'s Won · Start the Job when an offer took the boxed button. */
+  wonHref?: string | null;
   /** The ⋯'s moves, in order. One: drawn as its own button. None: nothing. */
   doors: MenuDoor[];
   /** The visit's start and end as stored, for Move to Another Day… (it keeps the time and the length). */
@@ -45,8 +48,20 @@ export type ListRow = {
   offerOthers?: { id: string; label: string }[];
 };
 
-/** One inspection that ended without becoming work and hangs on nobody, in the Not Sold fold. */
+/** One inspection that ended without becoming work and hangs on nobody, in the Not Sold fold. Each one
+ *  opens its visit and has Delete… (cn-v1181, I2b: the server deletes it only when nothing is on it). */
 export type FoldRow = { id: string; who: string; what: string; day: string | null; ending: string; href: string };
+
+/**
+ * EVERY ROW OPENS ITS VISIT (cn-v1181, I1). The owner, 2026-11-22: "theres no way to access it [...]
+ * shouldnt each item be clickable to open or delete?". The row's ⋯ holds Open Inspection FIRST, always,
+ * unless the boxed button already says Open Inspection (then it is never said twice).
+ */
+export function openFirst(doors: readonly MenuDoor[], boxedSaysOpen: boolean): MenuDoor[] {
+  const rest = doors.filter((d) => d !== "open");
+  return boxedSaysOpen ? rest : ["open", ...rest];
+}
+
 
 /**
  * THE ROW'S ONE BOXED BUTTON (the meeting's notes: a boxed "START INSPECTION"). An inspection waiting
@@ -71,17 +86,31 @@ export function primaryOf(state: InspectionListState, o: { decidable: boolean; e
  * terminology and now could we safely say that it could go in the Not Sold box to simplify everything".
  * A SALES visit (a kind with a win or a loss: an inspection, an estimate visit) ends one way, Not Sold,
  * in every state, whether or not it took place; it keeps the record, and one answered before its day
- * comes off the schedule (setAppointmentOutcome). Dismiss is never offered on one. A WORK visit (the
- * city's final inspection) is never "not sold": it keeps Dismiss while it is not done.
+ * comes off the schedule (setAppointmentOutcome). A WORK visit (the city's final inspection) is never
+ * "not sold": it keeps Dismiss while it is not done.
+ *
+ * A SALES VISIT THAT HANGS ON NOBODY GETS DISMISS… BESIDE NOT SOLD (cn-v1181, I2a). No lead, no customer,
+ * no job, no estimate: a visit put in by hand that nothing else holds, which Not Sold alone would only
+ * move to the fold. The owner, 2026-11-21: "could we safely say that it could go in the Not Sold box to
+ * simplify everything"; and 2026-11-22, of such a visit: "theres no way to access it [...] shouldnt each
+ * item be clickable to open or delete?". So Dismiss… is offered on it, while it is not done (the existing
+ * door and its existing ask: deleted when nothing is on it, else cancelled and kept on file). A sales
+ * visit that belongs to somebody keeps its ONE ending, Not Sold.
  */
-export function rowDoors(state: InspectionListState, o: { primary: PrimaryKind; decidable: boolean; hasStart: boolean }): MenuDoor[] {
+export function rowDoors(
+  state: InspectionListState,
+  o: { primary: PrimaryKind; decidable: boolean; hasStart: boolean; nobody?: boolean },
+): MenuDoor[] {
   const doors: MenuDoor[] = [];
+  const notDone = state === "coming_up" || state === "needs_day" || state === "missed";
   if (o.primary === "estimate") doors.push("open");
   if (state === "needs_day") doors.push("pickDay");
   if ((state === "coming_up" || state === "missed") && o.hasStart) doors.push("move");
   if (state === "missed") doors.push("happened");
-  if (o.decidable) doors.push("lost");
-  else if (state === "coming_up" || state === "needs_day" || state === "missed") doors.push("del");
+  if (o.decidable) {
+    doors.push("lost");
+    if (o.nobody && notDone) doors.push("del");
+  } else if (notDone) doors.push("del");
   return doors;
 }
 

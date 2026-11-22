@@ -73,6 +73,11 @@ jobs:
       - name: Build
         run: npm run build
         env:
+          # THE TYPE CHECK NEEDS MORE THAN NODE'S DEFAULT HEAP (cn-v1181). The run for cn-v1180 died in
+          # "Checking validity of types" with "JavaScript heap out of memory" at about 4 GB: the tree
+          # had grown past the default, nothing in the code was wrong, and the deploy's own build (its
+          # own machine) had passed. A hosted runner for a public repository has 16 GB; 8 is asked for.
+          NODE_OPTIONS: --max-old-space-size=8192
           # Builds don't need real secrets (all data pages are dynamic), but a
           # couple of public vars keep the client bundle happy.
           NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co

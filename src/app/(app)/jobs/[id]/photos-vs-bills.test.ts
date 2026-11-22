@@ -317,7 +317,7 @@ describe("the Costs tab: a loose receipt ties itself to the bill it is", () => {
   it("Snap the Bill's line offers the same door for a paper the reader matched to a bill of this job (source)", () => {
     const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-cost-capture.tsx"), "utf8");
     expect(src).toContain('const sameBillId = out.kind === "already" && out.samePurchase && out.sameOnThisJob ? out.sameBillId : undefined;');
-    expect(src).toContain("say(p.id, p.name, sentence, out.tone, differentDoc, sameBillId);");
+    expect(src).toContain("say(p.id, p.name, sentence, out.tone, differentDoc, sameBillId, penLineOf(out));");
     expect(src).toMatch(/\{l\.sameBillId && \(\s*<button[\s\S]*?onClick=\{\(\) => tieIt\(l\)\}[\s\S]*?Same Purchase: It&apos;s That Bill/);
     expect(src).toContain("const res = await linkReceiptToBill(l.sameBillId, l.differentDoc);");
   });
@@ -402,7 +402,7 @@ describe("the Costs tab: one way to add a cost", () => {
     expect(notACostSentence("Plan")).toBe("Filed on the job as a Plan. It isn't a cost, so it wasn't read.");
     // Upload and Snap the Bill stay costs: filed as a Receipt (no category) and read.
     capture.mockReset();
-    capture.mockResolvedValueOnce({ kind: "billed", docId: "d2", tone: "ok", sentence: "Bill created.", vendor: null, amount: 1, lineCount: 1, warning: null });
+    capture.mockResolvedValueOnce({ kind: "billed", docId: "d2", tone: "ok", sentence: "Bill created.", vendor: null, amount: 1, lineCount: 1, warning: null, pen: null });
     await capturePaper({ orgId: "org1", jobId: "j1", file, nortOn: true });
     expect(capture).toHaveBeenCalledWith(expect.objectContaining({ category: undefined, read: true }));
   });

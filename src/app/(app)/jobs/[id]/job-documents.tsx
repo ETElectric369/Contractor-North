@@ -12,7 +12,8 @@ import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { MediaLightbox } from "@/components/media-lightbox";
 import { ModelViewer, modelKind } from "@/components/model-viewer";
-import { prettyBytes, readReceiptDocument, type ReceiptTone } from "@/lib/receipt-capture";
+import { penLineOf, prettyBytes, readReceiptDocument, type ReceiptTone } from "@/lib/receipt-capture";
+import { PenNote } from "@/components/pen-note";
 import { isCostableCategory, NOT_A_COST_CATEGORY } from "@/lib/job-photos";
 import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
@@ -79,6 +80,8 @@ type BillNote = {
    *  paper to it (linkReceiptToBill) instead of reading it again or billing it twice. */
   sameBillId?: string;
   sameOnThisJob?: boolean;
+  /** What ink was read: its own slate line, never the note's tone (skeptic #84, S7). */
+  pen?: string | null;
 };
 
 /** One of the job's live bills, said the way the page says them ("the CED bill #8802-1106969"). */
@@ -212,6 +215,7 @@ export function JobDocuments({
         text: out.sentence,
         done: out.kind !== "filed",
         tone: out.tone,
+        pen: penLineOf(out),
         different: out.kind === "already" && out.samePurchase === true,
         ...(out.kind === "already" && out.samePurchase && out.sameBillId ? { sameBillId: out.sameBillId, sameOnThisJob: out.sameOnThisJob === true } : {}),
       });
@@ -399,6 +403,7 @@ export function JobDocuments({
         {n && (
           <div className={`pl-15 text-xs ${NOTE_COLOR[n.tone]}`}>
             {n.text}
+            <PenNote text={n.pen} className="mt-0.5" />
           </div>
         )}
         {n?.different && (

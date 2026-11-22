@@ -117,6 +117,33 @@ describe("how a row's moves are drawn (which moves a row gets is list-rows rowDo
     expect(buttons(html)).toEqual(["Dismiss…"]);
     expect(text(face(["open", "pickDay"], false, "es"))).toBe("Abrir Inspección Elegir un Día");
   });
+
+  it("cn-v1181 (I3): Won · Start the Job behind the ⋯ is a link to the Won sheet, never a deed; with no Won sheet to open it is not drawn", () => {
+    const draw = (lang: "en" | "es", wonHref?: string) =>
+      renderToStaticMarkup(
+        <LangProvider lang={lang}>
+          <InspectionRowMenuView
+            doors={["open", "wonStart", "lost"]}
+            visitHref="/appointments/a1"
+            wonHref={wonHref}
+            asking={false}
+            pending={false}
+            onPickDay={async () => ({ ok: true })}
+            onHappened={noop}
+            onLost={noop}
+            onAsk={noop}
+            onDelete={noop}
+            onKeep={noop}
+          />
+        </LangProvider>,
+      );
+    const html = draw("en", "/appointments/a1?won=1");
+    expect(html).toMatch(/<a [^>]*href="\/appointments\/a1\?won=1"[^>]*>Won · Start the Job<\/a>/);
+    expect(text(html)).toBe("Open Inspection Won · Start the Job Not Sold");
+    expect(buttons(html)).toEqual(["Not Sold"]);
+    expect(draw("es", "/appointments/a1?won=1")).toContain(">Ganada · Empezar el Trabajo</a>");
+    expect(text(draw("en"))).toBe("Open Inspection Not Sold");
+  });
 });
 
 describe("the sheet's two faces", () => {

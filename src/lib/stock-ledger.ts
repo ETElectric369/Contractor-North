@@ -76,6 +76,13 @@ export function isMissingShelfRpc(err: unknown): boolean {
 }
 
 const LINE_COLUMNS = "id, description, quantity, unit_price, amount, category, billable, billed_amount";
+const PEN_COLUMNS = "returned, pen_mark";
+const NOT_STOCK_PEN =
+  "went back to the supplier, or its pen mark is still asked, so it can't go into stock. Answer Kept on it first if it was kept.";
+const isMissingColumn = (e: unknown) => {
+  const x = e as { code?: string; message?: string } | null;
+  return x?.code === "42703" || /column .* does not exist/i.test(String(x?.message ?? ""));
+};
 
 export type ShelvedLot = { lotId: string; itemId: string; lineId: string; cost: number; pieces: number; unit: string; billedAmount: number };
 export type ShelveResult = { ok: true; lots: ShelvedLot[]; billId: string } | { ok: false; error: string };
@@ -97,14 +104,25 @@ export type ShelveResult = { ok: true; lots: ShelvedLot[]; billId: string } | { 
  */
 export async function shelveLines(supabase: Sb, orgId: string, billId: string, picks: ShelfPick[]): Promise<ShelveResult> {
   if (!supabase.rpc) return { ok: false, error: "This connection can't put things in stock." };
-  const [{ data: lines, error: linesErr }, { data: lots, error: lotsErr }] = await Promise.all([
-    supabase.from("bill_line_items").select(LINE_COLUMNS).eq("bill_id", billId).eq("org_id", orgId).order("sort_order"),
+  const readLines = (cols: string) => supabase.from("bill_line_items").select(cols).eq("bill_id", billId).eq("org_id", orgId).order("sort_order");
+  let [{ data: lines, error: linesErr }, { data: lots, error: lotsErr }] = await Promise.all([
+    readLines(`${LINE_COLUMNS}, ${PEN_COLUMNS}`),
     supabase.from("stock_lot_balance").select("lot_id, bill_line_id, cost, live, live_moves").eq("org_id", orgId).eq("bill_id", billId).eq("live", true),
   ]);
+  // A database before 0417 has no pen columns, and no line on it went back: read as it always was.
+  if (linesErr && isMissingColumn(linesErr)) ({ data: lines, error: linesErr } = await readLines(LINE_COLUMNS));
   if (linesErr) return { ok: false, error: dbError(linesErr) };
   if (lotsErr) return { ok: false, error: isMissingShelf(lotsErr) ? SHELF_NEEDS_0328 : dbError(lotsErr) };
-  const all = (lines ?? []) as (BillLine & { id: string })[];
+  const all = (lines ?? []) as (BillLine & { id: string; returned?: boolean | null; pen_mark?: string | null })[];
   if (!all.length) return { ok: false, error: SHELF_NEEDS_LINES };
+  // GOODS THAT WENT BACK ARE NEVER SHOP STOCK (skeptic #84, S1): a line returned to the supplier, or
+  // one whose pen mark is still asked, is refused here, one guard for every door that shelves (the
+  // tray's File It to Stock, Put the Rest in Stock, a supplier's stock invoice).
+  for (const p of picks) {
+    const l = all.find((x) => String(x.id) === String(p.lineId));
+    if (l && (l.returned === true || l.pen_mark === "unclear"))
+      return { ok: false, error: `${String(l.description ?? "That line").trim() || "That line"} ${NOT_STOCK_PEN}` };
+  }
   const live = (lots ?? []) as StoredLineLot[];
   for (const p of picks) {
     if (live.some((l) => String(l.bill_line_id) === String(p.lineId)))

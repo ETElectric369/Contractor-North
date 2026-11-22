@@ -1,6 +1,7 @@
 "use server";
 import { recalcInvoice } from "@/lib/invoice-recalc";
-import { PREPAID_CREDIT, isPrepaymentKind } from "@/lib/prepayments";
+import { PREPAID_CREDIT } from "@/lib/prepayments";
+import { everythingBillable } from "@/lib/everything-billable";
 import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
@@ -232,22 +233,54 @@ export async function createProgressInvoice(
   // quote revision can't inflate the "% of remaining estimate" draw base. Billed-to-date =
   // the job's SENT invoices (non-void, non-draft — a draft draw isn't a real bill; matches
   // the job page + modal so the "% of remaining" base can't diverge by an outstanding draft).
-  const [{ data: quotes }, { data: invoices }] = await Promise.all([
-    supabase.from("quotes").select("total, status, created_at").eq("job_id", jobId),
-    supabase.from("invoices").select("total, status, invoice_kind, invoice_items(line_total, import_source)").eq("job_id", jobId),
-  ]);
-  const estimate = contractTotalFromQuotes((quotes ?? []) as any);
+  //
   // THE WORK BILLED, not the money asked ahead (cn-v1177): a payment request is not part of it (its
   // money comes off this draw by itself, through the recalc below), and a bill that took one off is
   // counted at its work, its "prepaid_credit" lines added back. Counted once, never twice.
-  const billed = (invoices ?? []).reduce((s: number, i: any) => {
-    if (i.status === "void" || i.status === "draft" || isPrepaymentKind(i.invoice_kind)) return s;
-    const tookOff = ((i.invoice_items ?? []) as { line_total?: unknown; import_source?: string | null }[])
-      .filter((l) => l.import_source === PREPAID_CREDIT)
-      .reduce((t, l) => t + Math.abs(Number(l.line_total) || 0), 0);
-    return s + Number(i.total ?? 0) + tookOff;
-  }, 0);
-  const remaining = Math.max(0, estimate - billed);
+  //
+  // ONE FIGURE WITH THE SHEET (cn-v1181). The base worked out here (the tax-included estimate less the
+  // sent bills' work) was this door's own, while the New Invoice sheet's "Percent of what is left"
+  // showed lib/everything-billable's partLeftGross: where a sent bill gave a discount, an approved
+  // deduct change order stands, or a taxed estimate was billed with no tax, the sheet said a part of
+  // one figure and this door billed a part of a larger one (two doors, one thing). The base is now
+  // that rule's partLeftGross, read from the same columns the gate reads (the estimates, the job's
+  // change orders, the bills with their discount and request-credit lines); in the plain cases (no
+  // discount, no change order, tax billed as estimated, requests or not) it is the figure the lines
+  // above always gave. A read that failed is never "nothing billed": the door refuses and makes nothing.
+  // A fixed amount stays the person's own figure, uncapped, as it always was.
+  const [quotesRead, changeOrdersRead, invoicesRead] = await Promise.all([
+    supabase.from("quotes").select("subtotal, tax, total, status, created_at").eq("job_id", jobId),
+    supabase.from("change_orders").select("id, co_number, description, amount, status").eq("job_id", jobId),
+    supabase
+      .from("invoices")
+      .select("id, status, invoice_kind, subtotal, tax, total, invoice_items(line_total, import_source, line_kind)")
+      .eq("job_id", jobId),
+  ]);
+  const readFailed = "The job's estimate and bills couldn't be read, so nothing was made. Try again.";
+  if (quotesRead.error || changeOrdersRead.error || invoicesRead.error) return { ok: false, error: readFailed };
+  const quotes = (quotesRead.data ?? []) as { total?: number | null; status?: string | null; created_at?: string | null }[];
+  const invoices = ((invoicesRead.data ?? []) as any[]).map((i) => {
+    const lines = (i.invoice_items ?? []) as { line_total?: unknown; import_source?: string | null; line_kind?: string | null }[];
+    const sum = (keep: (l: (typeof lines)[number]) => boolean) => lines.filter(keep).reduce((t, l) => t + (Number(l.line_total) || 0), 0);
+    return {
+      id: i.id,
+      status: i.status,
+      invoice_kind: i.invoice_kind,
+      subtotal: i.subtotal,
+      tax: i.tax,
+      total: i.total,
+      discount: sum((l) => l.line_kind === "discount"),
+      prepaidCredit: sum((l) => l.import_source === PREPAID_CREDIT),
+    };
+  });
+  let estimate: number;
+  let remaining: number;
+  try {
+    estimate = contractTotalFromQuotes(quotes);
+    remaining = everythingBillable({ quotes, changeOrders: (changeOrdersRead.data ?? []) as any, invoices })?.partLeftGross ?? 0;
+  } catch {
+    return { ok: false, error: readFailed };
+  }
 
   const titleFor: Record<string, string> = { deposit: "Deposit", progress: "Progress payment", final: "Final invoice" };
   const title = titleFor[kind] ?? "Progress payment";
@@ -256,6 +289,8 @@ export async function createProgressInvoice(
   let label: string;
   if (input.mode === "percent") {
     if (estimate <= 0) return { ok: false, error: "Add a quote/estimate to bill a percentage — or bill a fixed amount." };
+    if (!(remaining > 0))
+      return { ok: false, error: "Nothing of the estimate is left to bill as a part: its sent bills already cover it. Nothing was made." };
     const pct = Math.max(0, Math.min(100, Number(input.value) || 0));
     amount = drawAmount("percent", pct, remaining);
     label = `${title} — ${pct}% of remaining estimate`;

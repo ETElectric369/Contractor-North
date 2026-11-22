@@ -1510,3 +1510,18 @@ const SAMPLE = process.env.WRITE_SAMPLE_XLSX;
     expect(unzip(workbookXlsx(wb)).length).toBeGreaterThan(6);
   });
 });
+
+describe("cn-v1181 fixer: a line that went back to the supplier is not the company's (skeptic #84, M1)", () => {
+  it("Every Line on Every Ticket says No (returned to the supplier), and a kept line still says the company's", () => {
+    const l = lists();
+    const wire = l.lines.find((x) => x.description === "Wire and boxes")!;
+    wire.billable = false;
+    (wire as { returned?: boolean }).returned = true;
+    const wb = buildAccountantWorkbook(input({ lists: l }));
+    const costs = tab(wb, "Costs");
+    const at = costs.rows.findIndex((r) => r.cells[0] === "Every Line on Every Ticket");
+    const rows = dataRows(costs.rows.slice(at + 3));
+    expect(rows.find((r) => r.cells[7] === "Wire and boxes")!.cells[10]).toBe("No (returned to the supplier)");
+    expect(rows.find((r) => r.cells[7] === "12/2 NM-B 250'")!.cells[10]).toBe("No (the company's)");
+  });
+});

@@ -73,12 +73,11 @@ import { DRAW_KINDS } from "@/lib/invoice-math";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { fixedBillingsNotYetNetted, unbilledWorkForJob } from "@/lib/unbilled-work";
 import { depositCoversWords, paidAheadUnusedWords, paidLeftWorkOffBill, type NotBilled, type PaidAheadAtFinish } from "@/lib/finish-job-words";
-import { prepaymentsLeft, type PrepaymentState } from "@/lib/prepayments";
+import { PREPAID_CREDIT, prepaymentsLeft, type PrepaymentState } from "@/lib/prepayments";
 import { readPrepaymentStates, readPrepaymentStatesInCompany } from "@/lib/payment-request";
 import { reportError } from "@/lib/observe";
 import { formatCurrency } from "@/lib/utils";
-import { computeJobProgress } from "@/lib/job-progress-math";
-import { leftToBill } from "@/lib/payment-schedule-math";
+import { everythingBillable, type BillableChangeOrder, type BillableInvoice, type BillableQuote } from "@/lib/everything-billable";
 
 /**
  * WHAT FINISHING THIS JOB HAS TO BILL, decided once — for the press, for the modal before it, and for
@@ -348,42 +347,38 @@ export function paidDoorVerdict(step: FinishBillingStep, jobSaid: string): PaidD
  * doing which is im not sure". So the paid-in-full gate asks one more question of a fixed-price job: is
  * its price billed? Finish Job by hand is a person saying "done" and is not asked (it is unchanged).
  *
- * THE FIGURES ARE THE JOB PAGE'S OWN, NEVER A SECOND SUM: the price is computeJobProgress's `estimate`
- * (the accepted contract) and "billed" its `invoiced` (sent, non-void bills), measured by leftToBill, the
- * Overview's Left to Bill. The work-to-date inputs are zero on purpose: neither figure read here depends
- * on them. `invoiced` counts every sent bill of every kind, so a deposit request paid ahead and the final
- * bill that took it off ("Less deposit") together come to the price, exactly as the page says.
+ * THE FIGURES ARE THE JOB PAGE'S OWN, NEVER A SECOND SUM (cn-v1181): lib/everything-billable, the rule
+ * the job page's Everything Billable tile draws. `contract` is everything billable before tax (the
+ * estimates, plus approved change orders, less the discounts given on sent bills), `billed` what the sent
+ * bills cover, `left` what is still to bill. Until cn-v1181 this read computeJobProgress, which knew no
+ * change order, no discount and no tax split: a job with a discount line, a billed deduct, or a taxed
+ * estimate billed with no tax stayed open for ever, and an approved add never billed finished the job.
+ * A payment request paid ahead and the bill that took it off together still come to the price.
  *
- * null = not this rule's business: a Time & Material job (its work is the billing step's), or a job with
- * no ACCEPTED estimate (no contract figure: the job finishes as it always did).
+ * null = not this rule's business: a Time & Material job (its work is the billing step's), a job with no
+ * ACCEPTED estimate (no contract figure: the job finishes as it always did), or nothing billable at all.
+ * A job on a payment schedule is measured by its contract here too, as it always was.
  */
 export type PriceLeft = { contract: number; billed: number; left: number };
 
 export function priceLeftToBill(input: {
   billingType: string | null | undefined;
-  quotes: { total: number | null; status?: string | null; created_at?: string | null }[];
-  invoices: { total: number | null; status: string; amount_paid: number | null }[];
+  quotes: BillableQuote[];
+  changeOrders?: BillableChangeOrder[] | null;
+  invoices: (BillableInvoice & { amount_paid?: number | null })[];
 }): PriceLeft | null {
   if (input.billingType === "tm") return null;
   if (!(input.quotes ?? []).some((q) => q.status === "accepted")) return null;
-  const progress = computeJobProgress({
-    billingTypeRaw: input.billingType,
-    quotes: input.quotes ?? [],
-    invoices: input.invoices ?? [],
-    billableLabor: 0,
-    pos: [],
-    bills: [],
-    markupPercent: 0,
-  });
-  const l = leftToBill(progress, null);
-  if (l.contract <= 0.005) return null;
-  return { contract: l.contract, billed: l.billed, left: l.left };
+  const e = everythingBillable({ quotes: input.quotes ?? [], changeOrders: input.changeOrders ?? [], invoices: input.invoices ?? [] });
+  if (!e || e.billable <= 0.005) return null;
+  return { contract: e.billable, billed: e.billed, left: e.left };
 }
 
 /**
- * The two reads behind priceLeftToBill, the columns jobProgressFinancials reads them with, each naming
- * the company by hand (three companies share one database; the paid gate can hold the service role).
- * A failed read is `ok: false`, never "nothing left to bill".
+ * The reads behind priceLeftToBill, each naming the company by hand (three companies share one database;
+ * the paid gate can hold the service role): the estimates, the change orders, the bills, and those bills'
+ * discount lines (invoice_items.line_kind 'discount', migration 0389). A failed read is `ok: false`, never
+ * "nothing left to bill".
  */
 export async function readPriceLeftToBill(
   supabase: { from: (t: string) => any },
@@ -394,18 +389,53 @@ export async function readPriceLeftToBill(
   if (billingType === "tm") return { ok: true, price: null };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- a PostgREST builder
   const pin = (q: any): any => (orgId ? q.eq("org_id", orgId) : q);
-  const [quotesRead, invoicesRead] = await Promise.all([
-    pin(supabase.from("quotes").select("total, status, created_at").eq("job_id", jobId)),
-    pin(supabase.from("invoices").select("total, status, amount_paid").eq("job_id", jobId)),
+  const [quotesRead, changeOrdersRead, invoicesRead] = await Promise.all([
+    pin(supabase.from("quotes").select("subtotal, tax, total, status, created_at").eq("job_id", jobId)),
+    pin(supabase.from("change_orders").select("id, co_number, description, amount, status").eq("job_id", jobId)),
+    pin(supabase.from("invoices").select("id, status, invoice_kind, subtotal, tax, total, amount_paid").eq("job_id", jobId)),
   ]);
-  if (quotesRead?.error || invoicesRead?.error) {
-    reportError("priceLeftToBill.read", quotesRead?.error ?? invoicesRead?.error, { jobId });
+  const failed = quotesRead?.error ?? changeOrdersRead?.error ?? invoicesRead?.error;
+  if (failed) {
+    reportError("priceLeftToBill.read", failed, { jobId });
     return { ok: false };
   }
+  const invoices = ((invoicesRead?.data ?? []) as (BillableInvoice & { amount_paid?: number | null })[]).map((i) => ({ ...i }));
+  const sentIds = invoices.filter((i) => i.status !== "void" && i.status !== "draft" && i.id).map((i) => String(i.id));
+  if (sentIds.length) {
+    // The discount lines, and (cn-v1181) the lines that took a payment request off: a bill with its own
+    // tax holds the credit line in its subtotal at the request's full amount, and without the credit the
+    // request's tax share reads as still to bill, so a job billed in full on a TAXED estimate is held
+    // open (lib/everything-billable; a draw needs no credit term there, the ratio turns both back).
+    const [discountsRead, creditsRead] = await Promise.all([
+      pin(supabase.from("invoice_items").select("invoice_id, line_total").eq("line_kind", "discount").in("invoice_id", sentIds)),
+      pin(supabase.from("invoice_items").select("invoice_id, line_total").eq("import_source", PREPAID_CREDIT).in("invoice_id", sentIds)),
+    ]);
+    const linesFailed = discountsRead?.error ?? creditsRead?.error;
+    if (linesFailed) {
+      reportError("priceLeftToBill.read", linesFailed, { jobId });
+      return { ok: false };
+    }
+    const sumBy = (rows: unknown) => {
+      const m = new Map<string, number>();
+      for (const l of (rows ?? []) as { invoice_id: string; line_total: number | null }[]) {
+        m.set(String(l.invoice_id), (m.get(String(l.invoice_id)) ?? 0) + (Number(l.line_total) || 0));
+      }
+      return m;
+    };
+    const cut = sumBy(discountsRead?.data);
+    const tookOff = sumBy(creditsRead?.data);
+    for (const i of invoices) {
+      if (i.id && cut.has(String(i.id))) i.discount = cut.get(String(i.id));
+      if (i.id && tookOff.has(String(i.id))) i.prepaidCredit = tookOff.get(String(i.id));
+    }
+  }
   try {
-    return { ok: true, price: priceLeftToBill({ billingType, quotes: quotesRead?.data ?? [], invoices: invoicesRead?.data ?? [] }) };
+    return {
+      ok: true,
+      price: priceLeftToBill({ billingType, quotes: quotesRead?.data ?? [], changeOrders: changeOrdersRead?.data ?? [], invoices }),
+    };
   } catch (e) {
-    // contractTotalFromQuotes refuses a select list without created_at; never a silent "nothing left".
+    // everythingBillable refuses a select list without created_at; never a silent "nothing left".
     reportError("priceLeftToBill.rule", e, { jobId });
     return { ok: false };
   }

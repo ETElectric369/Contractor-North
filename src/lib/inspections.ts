@@ -415,7 +415,9 @@ export function notSoldWithNobody<T extends InspectionBucketRow & { customer_id:
  * 2026-11-19: "on the inspections page lets have just the lead which will be where all of their info
  * is stored"). The lead's file while there is a lead; else the customer's page; else the job. The
  * city's Final Inspection is about a job's permit, so it leads to its job first. null: the visit
- * hangs on nobody, the name is plain words, and the row's button still opens the visit.
+ * hangs on nobody. On the Inspections page such a name is still a link, to the visit itself
+ * (inspections/inspection-list.tsx, `nameOpensVisit`, cn-v1181); only the Estimates page's top list
+ * draws it as plain words, where the row's dots still open the visit.
  */
 export function inspectionFileHref(r: {
   type?: string | null;

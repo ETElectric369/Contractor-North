@@ -30,6 +30,7 @@
 
 import { billedPortion, billLineCost, excludedReceiptCost } from "@/lib/bill-itemisation";
 import { formatCurrency } from "@/lib/utils";
+import { creditExpectedOf } from "@/lib/pen-marks";
 
 /** The per-line category the receipt reader must choose from. `Food & Drink` is the new one. */
 export const RECEIPT_LINE_CATEGORIES = [
@@ -532,6 +533,18 @@ export const MASKED_PRICE_PROMPT_RULE =
   'Set "pricing_provisional": true when the document does NOT show this account\'s own prices - a price column masked with asterisks (*****), left blank, or shown as "N/A", a quote or counter preview, or a header saying the pricing is pending. Supply houses print asterisks where a contract price will go and show the branch retail price beside it, and that retail figure is NOT what this contractor pays. Still transcribe the numbers you can read, and still set the total, but say the pricing is provisional so nothing downstream treats it as settled cost.';
 
 /**
+ * INK ON THE PAPER (cn-v1181). The owner scans delivery tickets he has marked up by hand: lines
+ * crossed out that went back to the supplier, quantities written over. With no rule the readers chose
+ * per page: a struck line at $0 with the tax worked out again (the bill LOWER than the supplier's
+ * paper), the struck lines charged in full (the customer billed for goods that went back), or the
+ * lines dropped. One rule, in BOTH readers (the tray's paperReaderSystem and the job page's
+ * billJobReceipt): transcribe what is PRINTED, and say what the pen did in its own fields. What the
+ * marks mean for the money is src/lib/pen-marks.ts's, in code, never the model's.
+ */
+export const PEN_MARKS_PROMPT_RULE =
+  'PEN MARKS. Always transcribe what is PRINTED: every printed line with its printed quantity, unit price and line total, even when a pen line runs through it; the printed tax as its own line; and the printed total as "amount", even when it is crossed out or rewritten by hand. Never drop a line, never set a struck line to 0, never recalculate the tax or the total for a pen mark, and never write about a pen mark inside "description". Say what the pen did in each line\'s "pen": "struck" = a line drawn through the printed line so it is plainly crossed out; "quantity" = the printed quantity is crossed out or overwritten with a handwritten number, and that number (the amount KEPT) goes in "hand_quantity"; "unclear" = a hand mark that changes the line and cannot be told apart: a partial strike, a handwritten number that cannot be read or is larger than the printed one, a price or total changed by hand with the quantity untouched, or a line written entirely by hand; null for everything else. A tick, check mark, circle, highlight, underline, initials, a signature, a margin note or a "received" stamp is NOT a pen mark: "pen" is null. "hand_quantity" is null unless "pen" is "quantity". At the top, "hand_total" is a total written by hand on the paper (a number), or null.';
+
+/**
  * The asterisk run a supply house prints where a contract price belongs. Three or more, so a
  * footnote marker or a single emphasis star is never mistaken for a masked price.
  *
@@ -885,4 +898,20 @@ export function splitContradictsReceipt(input: SplitAgainstReceipt): string | nu
     `Saying this line bought ${countWords(bought)} would make them ${perUnitLabel(cost / bought)}. ` +
     `Say this line bought ${qty}, or keep billing the whole line.`
   );
+}
+
+/**
+ * A BILL'S PAPER, AS THE CARD NEEDS IT (cn-v1181 fixer, F11): whether a paper made it (Read Again),
+ * and whether what goes back is a credit the supplier owes, from the PAPER's own word on tender, the
+ * way the server decides it (lib/pen-marks creditExpectedOf). A paper that states no tender, or no
+ * paper, is null: the card then reads the bill, as the server does with no paper.
+ */
+export function paperOfBillForCard(
+  billId: string,
+  ties: readonly { bill_id?: string | null; payment?: string | null }[],
+): { fromPaper: boolean; creditExpected: boolean | null } {
+  const mine = ties.filter((t) => t.bill_id === billId);
+  if (!mine.length) return { fromPaper: false, creditExpected: null };
+  const said = mine.map((t) => String(t.payment ?? "").trim()).find(Boolean);
+  return { fromPaper: true, creditExpected: said ? creditExpectedOf({ paperPayment: said }) : null };
 }

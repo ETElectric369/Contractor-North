@@ -69,7 +69,8 @@ export type InspectionsRead = {
   /** Exactly VISIT_READ_CAP visits came back: older ones may not be listed. */
   capped: boolean;
   /** THE OFFER (cn-v1175, R5, lib/appointments/visit-offer): for an open visit whose day has passed, the
-   *  job made for its customer record after it, by visit id. A failed read offers nothing (said to the
+   *  job made for its customer record after it, by visit id; a visit with no record at all, a job that
+   *  matches it exactly (cn-v1181, visit-offer exactJobMatch). A failed read offers nothing (said to the
    *  ops sink); the rows are as they were. */
   offers: ReadonlyMap<string, VisitOffer>;
   /** Where the read failed, or null. */
@@ -171,15 +172,18 @@ export const OFFER_JOB_COLUMNS = "id, customer_id, created_at, job_number, name"
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function readOffers(sb: any, open: readonly InspectionVisit[]): Promise<Map<string, VisitOffer>> {
   const one = <V,>(v: V | V[] | null | undefined): V | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null));
-  const asked = open
+  const withRecord = open
     .filter((v) => !v.job_id && !!v.starts_at)
-    .map((v) => ({ v, customer: offerCustomerOf({ customer_id: v.customer_id, lead_customer_id: one(v.inquiries)?.customer_id ?? null }) }))
-    .filter((x): x is { v: InspectionVisit; customer: string } => !!x.customer);
+    .map((v) => ({ v, customer: offerCustomerOf({ customer_id: v.customer_id, lead_customer_id: one(v.inquiries)?.customer_id ?? null }) }));
+  const asked = withRecord.filter((x): x is { v: InspectionVisit; customer: string } => !!x.customer);
+  // NO RECORD AT ALL, A PLACE WRITTEN (cn-v1181, I3): offered only a job that matches it exactly.
+  const byName = withRecord.filter((x) => !x.customer && !!String(x.v.location ?? "").trim()).map((x) => x.v);
   const out = new Map<string, VisitOffer>();
-  if (!asked.length) return out;
+  const candidates: OfferCandidate[] = [];
+  if (byName.length) candidates.push(...(await readExactCandidates(sb, byName)));
+  if (!asked.length && !byName.length) return out;
   const customers = [...new Set(asked.map((x) => x.customer))];
   const since = asked.map((x) => String(x.v.starts_at)).sort()[0];
-  const candidates: OfferCandidate[] = [];
   for (let i = 0; i < customers.length; i += LEAD_IDS_PER_REQUEST) {
     try {
       const res = await sb
@@ -197,9 +201,76 @@ async function readOffers(sb: any, open: readonly InspectionVisit[]): Promise<Ma
       reportError("inspections:offers", e);
     }
   }
+  // One job read by both reads is one candidate (the first read of it kept: it carries the street).
+  const seen = new Set<string>();
+  const unique = candidates.filter((c) => (seen.has(c.id) ? false : (seen.add(c.id), true)));
+  candidates.length = 0;
+  candidates.push(...unique);
   for (const { v, customer } of asked) {
     const offer = visitOffer({ starts_at: v.starts_at, job_id: v.job_id, customer_id: customer }, candidates);
     if (offer) out.set(v.id, offer);
   }
+  for (const v of byName) {
+    const offer = visitOffer(
+      { starts_at: v.starts_at, job_id: v.job_id, customer_id: null, lead_customer_id: null, location: v.location, title: v.title, lead_name: one(v.inquiries)?.name ?? null },
+      candidates,
+    );
+    if (offer) out.set(v.id, offer);
+  }
   return out;
+}
+
+/** The jobs an exact match can name: the street, the customer and the customer's name. No money column. */
+export const OFFER_EXACT_COLUMNS = "id, customer_id, created_at, job_number, name, address, unit, customers(name)";
+/** How many such jobs are read at most, newest first; when exactly this many come back it is said. */
+export const OFFER_EXACT_CAP = 500;
+
+/**
+ * THE EXACT MATCH'S READ (cn-v1181, I3): the jobs made after the oldest of the record-less visits, with a
+ * customer and a street (the two things the match reads), not cancelled, newest first, bounded. A cut
+ * read is said to the ops sink (the oldest jobs past the cap are not offered); a failed read offers
+ * nothing and is said there too: the rows are as they were.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function readExactCandidates(sb: any, visits: readonly InspectionVisit[]): Promise<OfferCandidate[]> {
+  const since = visits.map((v) => String(v.starts_at)).sort()[0];
+  try {
+    const res = await sb
+      .from("jobs")
+      .select(OFFER_EXACT_COLUMNS)
+      .gt("created_at", since)
+      .neq("status", "cancelled")
+      .not("customer_id", "is", null)
+      .not("address", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(OFFER_EXACT_CAP);
+    if (res?.error) throw res.error;
+    const rows = (res?.data ?? []) as {
+      id: string;
+      customer_id: string | null;
+      created_at: string | null;
+      job_number?: string | null;
+      name?: string | null;
+      address?: string | null;
+      unit?: string | null;
+      customers?: { name?: string | null } | { name?: string | null }[] | null;
+    }[];
+    if (rows.length >= OFFER_EXACT_CAP) reportError("inspections:offers:exact-capped", new Error(`exact-match jobs read cut at ${OFFER_EXACT_CAP}`));
+    return rows.map((j) => {
+      const c = Array.isArray(j.customers) ? (j.customers[0] ?? null) : (j.customers ?? null);
+      return {
+        kind: "job" as const,
+        id: String(j.id),
+        customer_id: j.customer_id ?? null,
+        created_at: j.created_at ?? null,
+        label: offerJobLabel(j),
+        address: j.address ?? null,
+        unit: j.unit ?? null,
+        customer_name: c?.name ?? null,
+      };
+    });
+  } catch (e) {
+    reportError("inspections:offers:exact", e);
+    return [];
+  }
 }

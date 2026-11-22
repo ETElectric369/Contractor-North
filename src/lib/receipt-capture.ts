@@ -45,6 +45,8 @@ export type ReceiptOutcome =
       amount: number | null;
       lineCount: number;
       warning: string | null;
+      /** What ink was read (lib/pen-marks), its own line: never a warning, never the tone. */
+      pen: string | null;
     }
   /** This file already produced a bill — nothing added twice (organized_items.document_id). Or
    *  `samePurchase`: a bill already carries this paper's printed number (audit v994), so nothing
@@ -55,6 +57,12 @@ export type ReceiptOutcome =
   /** Filed on the job as a document. The reader wasn't asked (a Plan, a Permit), or the file is
    *  over its cap, or it refused (a name it can't read, no total) — the sentence names which. */
   | { kind: "filed"; docId: string; tone: "ok" | "warn"; why: "not_asked" | "over_cap" | "refused"; sentence: string };
+
+/** The pen sentence of a read that wrote a bill, or null: every door that draws the outcome draws it
+ *  on its own slate line (components/pen-note), never in the outcome's tone. */
+export function penLineOf(out: { kind: string; pen?: string | null }): string | null {
+  return out.kind === "billed" ? (out.pen ?? null) : null;
+}
 
 /** Nothing kept — the upload or the filing failed; the sentence says which and what to do. */
 export type ReceiptLost = { kind: "lost"; tone: "fail"; sentence: string };
@@ -148,6 +156,7 @@ export async function readReceiptDocument(
     amount: res.amount ?? null,
     lineCount: n,
     warning,
+    pen: res.pen ?? null,
   };
 }
 

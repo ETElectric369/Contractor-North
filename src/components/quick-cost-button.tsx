@@ -188,6 +188,8 @@ function SnapCostButton({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [warn, setWarn] = useState<string | null>(null);
+  /** What ink the reader saw on the receipt: said in slate, never as a warning (skeptic #84, S7). */
+  const [penSaid, setPenSaid] = useState<string | null>(null);
   // The cost row is saved; only the photo may still be pending (retry mode).
   const [costSaved, setCostSaved] = useState(false);
   // The bill the first save created, kept so a later successful receipt upload can LINK to
@@ -231,6 +233,7 @@ function SnapCostButton({
     setReadMode(null);
     setError(null);
     setWarn(null);
+    setPenSaid(null);
     setCostSaved(false);
     setSameAsDoc(null);
     if (fileRef.current) fileRef.current.value = "";
@@ -476,9 +479,12 @@ function SnapCostButton({
     // now, not discover it in an argument three months later. finishOk() resets state, so
     // the sheet stays open to say so. Clearing the receipt first makes the costSaved branch
     // above fall straight to finishOk() on the next tap: no path can re-attach or re-bill.
-    if (res.warning) {
+    // THE PEN SENTENCE keeps the sheet open the same way, so it is SEEN, but it is not a warning: it
+    // is drawn on its own slate line under the form, never in the amber box.
+    if (res.warning || res.pen) {
       setReceipt(null);
-      setWarn(res.warning);
+      if (res.warning) setWarn(res.warning);
+      setPenSaid(res.pen ?? null);
       setCostSaved(true);
       return;
     }
@@ -488,6 +494,7 @@ function SnapCostButton({
   function onSave() {
     setError(null);
     setWarn(null);
+    setPenSaid(null);
     // A person looked at "already on the books" and says it is a different purchase: the paper
     // already filed on the job is read once more, and recorded.
     if (sameAsDoc) {
@@ -794,6 +801,7 @@ function SnapCostButton({
           </label>
           {!snapTop && !sameAsDoc && receiptBlock}
           {warn && <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{warn}</p>}
+          {penSaid && <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{penSaid}</p>}
           {error && <p className="text-sm text-red-600">{error}</p>}
         </div>
       </Modal>

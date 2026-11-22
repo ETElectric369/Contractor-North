@@ -148,3 +148,20 @@ describe("Tools: Tools & Supplies tickets, and tools the company kept off other 
     expect(t.rows.some((r) => String(r[3]).includes("SUPERHAWG"))).toBe(false);
   });
 });
+
+describe("cn-v1181 fixer: a tool that went back to the supplier is not a tool the company kept (skeptic #84, M1)", () => {
+  it("a returned Tools line on a job ticket is not in the Tools list; the kept one still is", () => {
+    const inp = inputs();
+    const kept = toolsList(inp, { from: "2026-06-01", to: "2026-06-30" }, TZ).rows.filter((r) => r[0] !== "Total");
+    expect(kept.some((r) => String(r[3]).includes("AUGER BIT"))).toBe(true);
+    (inp.lines.find((l) => l.id === "hd2") as { returned?: boolean }).returned = true;
+    const after = toolsList(inp, { from: "2026-06-01", to: "2026-06-30" }, TZ).rows.filter((r) => r[0] !== "Total");
+    expect(after.some((r) => String(r[3]).includes("AUGER BIT"))).toBe(false);
+  });
+  it("the read names `returned` and falls back without it on a database before 0417, as stock_moves' credit column does", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(`${process.cwd()}/src/lib/accountant-lists.ts`, "utf8");
+    expect(src).toContain('all<any>("bill_line_items", `${lineCols}, returned`');
+    expect(src).toContain('first.error && isMissingCreditColumn(first.error) ? await all<any>("bill_line_items", lineCols');
+  });
+});

@@ -13,6 +13,8 @@
 
 import { requireStaff } from "@/lib/staff-guard";
 import { claimedIdsOfLines } from "@/lib/unbilled-work";
+import { isMissingColumn } from "@/lib/job-tasks";
+import { penMarkOf } from "@/lib/pen-marks";
 import type { ReceiptForBilling } from "./receipt-billing-card";
 
 export async function receiptForBilling(billId: string): Promise<{ ok: true; receipt: ReceiptForBilling } | { ok: false; error: string }> {
@@ -22,12 +24,18 @@ export async function receiptForBilling(billId: string): Promise<{ ok: true; rec
   const id = String(billId ?? "");
   if (!id) return { ok: false, error: "Couldn't tell which receipt you meant." };
   const sb = ctx.supabase;
-  const { data: b, error } = await sb
-    .from("bills")
-    .select("id, supplier, bill_date, job_id, amount, po_id, superseded_by_bill_id, jobs(name), bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount, is_stock, sort_order)")
-    .eq("id", id)
-    .eq("org_id", ctx.orgId)
-    .maybeSingle();
+  // The pen marks (0417, cn-v1181) ride along; a database behind the deploy reads without them.
+  const read = (pen: boolean) =>
+    sb
+      .from("bills")
+      .select(
+        `id, supplier, bill_date, job_id, amount, po_id, status, supplier_account_id, superseded_by_bill_id, jobs(name), bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount, is_stock, sort_order${pen ? ", pen_mark, returned, returned_credit_bill_id" : ""})`,
+      )
+      .eq("id", id)
+      .eq("org_id", ctx.orgId!)
+      .maybeSingle();
+  let { data: b, error } = await read(true);
+  if (error && isMissingColumn(error)) ({ data: b, error } = await read(false));
   if (error) return { ok: false, error: "Couldn't read that receipt just now. Try again in a moment." };
   if (!b) return { ok: false, error: "That receipt isn't here anymore. Reload the page." };
   const bill = b as any;
@@ -84,8 +92,13 @@ export async function receiptForBilling(billId: string): Promise<{ ok: true; rec
     job_name: bill.jobs?.name ?? null,
     amount: Number(bill.amount) || 0,
     billedOn: first ? { label: first.invoices?.invoice_number || "an earlier invoice", status: String(first.invoices?.status ?? "") } : null,
+    status: bill.status ?? null,
+    hasSupplierAccount: !!bill.supplier_account_id,
     lines: lines.map((l) => ({
       id: String(l.id),
+      pen: penMarkOf(l.pen_mark),
+      returned: l.returned === true,
+      creditBillId: l.returned_credit_bill_id ?? null,
       description: String(l.description ?? ""),
       quantity: Number(l.quantity) || 0,
       amount: Number(l.amount) || 0,

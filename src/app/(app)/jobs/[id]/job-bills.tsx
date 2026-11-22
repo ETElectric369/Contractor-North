@@ -22,6 +22,7 @@ import type { BillPaper } from "@/lib/job-photos";
 import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/already-billed-sheet";
 import { executeAction } from "@/lib/actions/execute";
 import { canCorrect, correctionFaces, correctionsUnder } from "@/lib/bill-correction";
+import { penMarkOf } from "@/lib/pen-marks";
 import type { CorrectableBill } from "@/components/correct-bill-modal";
 
 /**
@@ -60,7 +61,49 @@ interface Bill {
   /** THE BILL THIS ONE CORRECTS (0381): drawn under it when both are in one pile, and both say so. */
   corrects_bill_id?: string | null;
   /** Its lines, as the page reads them: what Correct This Bill offers a credit to take back. */
-  bill_line_items?: { description: string | null; amount: number | string; billable?: boolean | null; category?: string | null }[] | null;
+  bill_line_items?:
+    | {
+        description: string | null;
+        amount: number | string;
+        billable?: boolean | null;
+        category?: string | null;
+        /** Pen marks (cn-v1181, 0417): the mark, went back on account, the credit memo that closed it. */
+        pen_mark?: string | null;
+        returned?: boolean | null;
+        returned_credit_bill_id?: string | null;
+      }[]
+    | null;
+}
+
+/**
+ * WHAT THE PEN SAID ON A BILL, ON ITS COSTS ROW (cn-v1181): the lines that went back to the supplier,
+ * how many and their printed dollars, with the credit expected or received; and the marks still
+ * asked, Kept or Returned. Plain words, never amber. Null when there is nothing to say.
+ */
+export function billPenNote(lines: Bill["bill_line_items"]): string | null {
+  let expected = 0;
+  let expectedAmt = 0;
+  let received = 0;
+  let receivedAmt = 0;
+  let asked = 0;
+  for (const l of lines ?? []) {
+    if (penMarkOf(l.pen_mark) === "unclear") asked += 1;
+    if (l.returned !== true) continue;
+    const amt = Math.abs(Number(l.amount) || 0);
+    if (l.returned_credit_bill_id) {
+      received += 1;
+      receivedAmt += amt;
+    } else {
+      expected += 1;
+      expectedAmt += amt;
+    }
+  }
+  const lineWord = (n: number) => `${n} ${n === 1 ? "line" : "lines"} returned`;
+  const parts: string[] = [];
+  if (expected) parts.push(`${lineWord(expected)}, ${formatCurrency(expectedAmt)}: credit expected`);
+  if (received) parts.push(`${lineWord(received)}, ${formatCurrency(receivedAmt)}: credit received`);
+  if (asked) parts.push(`${asked} pen ${asked === 1 ? "mark needs" : "marks need"} an answer: Kept or Returned`);
+  return parts.length ? `${parts.join(" · ")}.` : null;
 }
 
 export interface JobPo {
@@ -213,6 +256,7 @@ export function JobBills({
           </div>
           {faces.get(b.id) && <div className="text-xs font-medium text-slate-600">{faces.get(b.id)!.words}</div>}
           {why && <div className="text-xs text-slate-500">{why}</div>}
+          {billPenNote(b.bill_line_items) && <div className="text-xs text-slate-600">{billPenNote(b.bill_line_items)}</div>}
         </div>
         <span className="font-medium text-slate-800">{formatCurrency(b.amount)}</span>
       </Link>

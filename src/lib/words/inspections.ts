@@ -48,6 +48,8 @@ export const words: WordCatalog = {
     "src/app/(app)/inspections/row-words.ts",
     // cn-v1175 (ROWS): the offer's button and its ask
     "src/app/(app)/inspections/visit-offer-button.tsx",
+    // cn-v1181 (I2b): the Not Sold fold's Delete… and its ask
+    "src/app/(app)/inspections/fold-delete.tsx",
   ],
   sameInBoth: [],
   en: {
@@ -101,6 +103,23 @@ export const words: WordCatalog = {
     ip_toEstimateWaiting: "{n} inspected and waiting on an estimate.",
     ip_btn_goToEstimates: "Go to Estimates",
     ip_readFailed: "The inspections couldn't load. Reload to try again.",
+    // cn-v1181 (I2b): the Not Sold fold's Delete…, its ask, and the one door's answers (appointments/actions deleteEndedVisit)
+    ip_btn_deleteVisit: "Delete…",
+    ip_deleteVisitAsk: "Delete this visit for good? Only a visit with nothing on it is deleted. If anything is on it, it stays on file.",
+    ip_btn_deleteVisitIt: "Delete",
+    ip_srv_deleteNotEnded: "Only a visit that ended Not Sold or Cancelled is deleted here.",
+    ip_srv_deleteHasSomebody: "This visit belongs to a lead, a customer or a job, so it stays on file with them.",
+    ip_srv_keptOnFile: "Not deleted: this visit has {what} on it. It stays on file.",
+    ip_srv_onNotes: "notes or answers",
+    ip_srv_onEstimate: "an estimate",
+    ip_srv_onInvoice: "an invoice",
+    ip_srv_onLink: "a time-pick link",
+    ip_srv_keptUnread: "Not deleted: part of this visit couldn't be checked. It stays on file.",
+    ip_srv_deleteChanged: "This visit changed after it was read, so nothing was deleted. Try again.",
+    // cn-v1181 (I3): the by-hand New Job door says the visit it filed (schedule/actions createJob)
+    ip_srv_filedWithJob: "{visit} ({day}) is filed with this job.",
+    ip_srv_tieFailed: "{visit} ({day}) matches this job but couldn't be filed with it. File it from Inspections.",
+    ip_srv_tieUnread: "The open inspections couldn't be checked for this job. Any that match it are offered on Inspections.",
   },
   es: {
     ip_lib_pendingPick: "por elegir",
@@ -152,5 +171,22 @@ export const words: WordCatalog = {
     ip_toEstimateWaiting: "{n} inspeccionadas y esperando un presupuesto.",
     ip_btn_goToEstimates: "Ir a Presupuestos",
     ip_readFailed: "No se pudieron cargar las inspecciones. Recarga para intentar de nuevo.",
+    // cn-v1181 (I2b): the Not Sold fold's Delete…, its ask, and the one door's answers (appointments/actions deleteEndedVisit)
+    ip_btn_deleteVisit: "Eliminar…",
+    ip_deleteVisitAsk: "¿Eliminar esta visita para siempre? Solo se elimina una visita que no tiene nada. Si tiene algo, se conserva en el archivo.",
+    ip_btn_deleteVisitIt: "Eliminar",
+    ip_srv_deleteNotEnded: "Aquí solo se elimina una visita que terminó No Vendida o Cancelada.",
+    ip_srv_deleteHasSomebody: "Esta visita pertenece a un prospecto, un cliente o un trabajo, así que se conserva en su archivo.",
+    ip_srv_keptOnFile: "No se eliminó: esta visita tiene {what}. Se conserva en el archivo.",
+    ip_srv_onNotes: "notas o respuestas",
+    ip_srv_onEstimate: "un presupuesto",
+    ip_srv_onInvoice: "una factura",
+    ip_srv_onLink: "un enlace para elegir hora",
+    ip_srv_keptUnread: "No se eliminó: no se pudo revisar parte de esta visita. Se conserva en el archivo.",
+    ip_srv_deleteChanged: "Esta visita cambió después de leerla, así que no se eliminó nada. Intenta de nuevo.",
+    // cn-v1181 (I3): the by-hand New Job door says the visit it filed (schedule/actions createJob)
+    ip_srv_filedWithJob: "{visit} ({day}) quedó archivada con este trabajo.",
+    ip_srv_tieFailed: "{visit} ({day}) coincide con este trabajo pero no se pudo archivar con él. Archívala desde Inspecciones.",
+    ip_srv_tieUnread: "No se pudieron revisar las inspecciones abiertas para este trabajo. Las que coincidan se ofrecen en Inspecciones.",
   },
 };

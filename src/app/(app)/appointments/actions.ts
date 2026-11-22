@@ -2406,6 +2406,84 @@ export async function wontHappenAppointment(
 }
 
 /**
+ * DELETE AN ENDED VISIT THAT HANGS ON NOBODY (cn-v1181, I2b): the Not Sold fold's Delete…. The owner,
+ * 2026-11-22: "theres no way to access it [...] shouldnt each item be clickable to open or delete?".
+ * Only a visit that ENDED (Not Sold, or cancelled) with no lead, no customer and no job, and only when
+ * nothing is on it, by the very verdict Dismiss uses (lib/appointments/wont-happen: what was captured,
+ * the answers through their view, invoices, a waiting time-pick link) plus an estimate written from it
+ * (capture.quote_id). Anything on it: one sentence says what, and that it stays on file; nothing moves.
+ *
+ * Every fact is read again here, at the write; a fact that can't be read counts as "something is
+ * there". The delete lands only on the row as it was read (its status, outcome, links and updated_at)
+ * and is read back: zero rows is said, never taken for done.
+ */
+export async function deleteEndedVisit(id: string): Promise<Result & { did?: "deleted"; kept?: boolean }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const ws = wordsOf(ctx.supabase, ctx.userId);
+  const supabase = ctx.supabase;
+  const [{ captureQuoteId }, { somethingCaptured }] = await Promise.all([import("@/lib/inspections"), import("@/lib/appointments/wont-happen")]);
+
+  let read = supabase
+    .from("appointments")
+    // PROJECTION LAW: how it ended, who it hangs on, what is on it, and the stamp the delete is checked against.
+    .select("id, status, outcome, capture, updated_at, inquiry_id, customer_id, job_id")
+    .eq("id", id);
+  if (ctx.orgId) read = read.eq("org_id", ctx.orgId);
+  const { data: row, error: rowErr } = await read.maybeSingle();
+  if (rowErr) return { ok: false, error: dbError(rowErr) };
+  if (!row) return { ok: false, error: await ws.say("ag_srv_visitNotThere") };
+  const r = row as {
+    status: string;
+    outcome: string | null;
+    capture: unknown;
+    updated_at: string | null;
+    inquiry_id: string | null;
+    customer_id: string | null;
+    job_id: string | null;
+  };
+  const ended = r.status === "cancelled" || r.outcome === "lost" || r.outcome === "no_bid";
+  if (!ended) return { ok: false, error: await ws.say("ip_srv_deleteNotEnded") };
+  if (r.inquiry_id || r.customer_id || r.job_id) return { ok: false, error: await ws.say("ip_srv_deleteHasSomebody") };
+
+  const [answersRead, invoices, links] = await Promise.all([
+    readViaView<{ inspection_answers: unknown }>(supabase, "answers", (from) => from.select("inspection_answers").eq("id", id).maybeSingle()),
+    supabase.from("invoices").select("id", { count: "exact", head: true }).eq("appointment_id", id),
+    supabase.from("schedule_proposals").select("id", { count: "exact", head: true }).eq("appointment_id", id).eq("status", "pending"),
+  ]);
+  const answers = (answersRead.data as { inspection_answers?: unknown } | null)?.inspection_answers ?? null;
+  const invoiceCount = invoices.error ? null : (invoices.count ?? 0);
+  const pendingLinks = links.error ? null : (links.count ?? 0);
+  const estimate = !!captureQuoteId(r.capture);
+  const verdict = wontHappenVerdict({ capture: r.capture, answers, answersUnread: !!answersRead.error, invoiceCount, pendingLinks });
+  if (verdict !== "delete" || estimate) {
+    if (answersRead.error || invoiceCount === null || pendingLinks === null) return { ok: false, kept: true, error: await ws.say("ip_srv_keptUnread") };
+    // What is on it, each said once, by the verdict's own parts.
+    const what: string[] = [];
+    if (somethingCaptured(r.capture, answers)) what.push(await ws.say("ip_srv_onNotes"));
+    if (estimate) what.push(await ws.say("ip_srv_onEstimate"));
+    if (invoiceCount > 0) what.push(await ws.say("ip_srv_onInvoice"));
+    if (pendingLinks > 0) what.push(await ws.say("ip_srv_onLink"));
+    return { ok: false, kept: true, error: await ws.say("ip_srv_keptOnFile", { what: what.join(", ") }) };
+  }
+
+  // BEFORE the row goes (it reads google_event_id off the row). Fire-safe.
+  await deleteCalendarItem("appointment", id);
+  let del = supabase.from("appointments").delete().eq("id", id).eq("status", r.status).is("inquiry_id", null).is("customer_id", null).is("job_id", null);
+  del = r.outcome ? del.eq("outcome", r.outcome) : del.is("outcome", null);
+  del = r.updated_at ? del.eq("updated_at", r.updated_at) : del.is("updated_at", null);
+  if (ctx.orgId) del = del.eq("org_id", ctx.orgId);
+  const { data: gone, error } = await del.select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!gone?.length) {
+    const { data: still } = await supabase.from("appointments").select("id").eq("id", id).maybeSingle();
+    return { ok: false, error: await ws.say(still ? "ip_srv_deleteChanged" : "ag_srv_visitNotThere") };
+  }
+  revalidateVisit(id);
+  return { ok: true, did: "deleted" };
+}
+
+/**
  * PUT IT BACK ON THE SCHEDULE (W2-11): a cancelled visit had no way back on its page. It comes back
  * Scheduled on its own day when that day is still ahead (today counts); a day that has passed, or
  * none, comes back WAITING FOR A DAY (starts_at and ends_at cleared, 0368), on the rail rather than

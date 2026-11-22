@@ -60,6 +60,7 @@ beforeEach(() => {
   db = {
     jobs: [{ id: JOB, org_id: ORG, status: "in_progress", billing_type: "fixed", job_number: "J-900", name: "Larkspur Rewire" }],
     quotes: [],
+    change_orders: [],
     invoices: [],
     invoice_items: [],
     customer_credits: [],
@@ -171,6 +172,14 @@ describe("readGetPaidFacts", () => {
     db.quotes.push({ id: "q-900", org_id: ORG, job_id: JOB, status: "accepted", total: 5000, created_at: "2026-10-01T00:00:00Z" });
     db.invoices.push(bill("inv-900", 2000, 2000));
     expect((await facts()).owed).toEqual({ kind: "price", contract: 5000, billed: 2000, left: 3000 });
+  });
+
+  it("cn-v1181: the figures are Everything Billable's (the job page's tile): an approved add never billed is still to bill, a discount line is a lower price", async () => {
+    db.quotes.push({ id: "q-900", org_id: ORG, job_id: JOB, status: "accepted", subtotal: 5000, tax: 0, total: 5000, created_at: "2026-10-01T00:00:00Z" });
+    db.change_orders.push({ id: "co-900", org_id: ORG, job_id: JOB, co_number: "CO-900", description: "Add two receptacles", amount: 1000, status: "approved" });
+    db.invoices.push(bill("inv-900", 4500, 4500, { subtotal: 4500, tax: 0 }));
+    db.invoice_items.push({ id: "d", org_id: ORG, invoice_id: "inv-900", line_kind: "discount", line_total: -500 });
+    expect((await facts()).owed).toEqual({ kind: "price", contract: 5500, billed: 4500, left: 1000 });
   });
 
   it("row 6: time and material, recorded work on no bill, no open bill: the billing step's own figure", async () => {

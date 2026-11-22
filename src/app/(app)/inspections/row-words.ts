@@ -1,9 +1,9 @@
 import { todayStrInTz } from "@/lib/tz";
 import type { Lang } from "@/lib/locale";
 import { appointmentTypeLabel, isDecidableVisitType, visitTitle } from "@/lib/statuses";
-import { inspectionFileHref, inspectionRowWords, rowTagWords, type FiledUnder, type InspectionListState } from "@/lib/inspections";
+import { captureQuoteId, inspectionFileHref, inspectionRowWords, rowTagWords, type FiledUnder, type InspectionListState } from "@/lib/inspections";
 import { dayWords, relativeWhen } from "@/lib/action-items/dated-when";
-import { happenedSaidKey, primaryOf, rowDoors, stateWordKey, type ListRow } from "./list-rows";
+import { happenedSaidKey, openFirst, primaryOf, rowDoors, stateWordKey, type ListRow } from "./list-rows";
 import type { VisitOffer } from "@/lib/appointments/visit-offer";
 import { wonStartShown } from "@/lib/appointments/won-sheet";
 
@@ -35,10 +35,6 @@ export type RowContext = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Visit = any;
 
-/** Open Inspection first behind the ⋯, when the boxed button is not the visit's own page (an offer). */
-function withOpen(doors: ListRow["doors"], add: boolean): ListRow["doors"] {
-  return add && !doors.includes("open") ? ["open", ...doors] : doors;
-}
 
 export function inspectionRowBuilder(ctx: RowContext) {
   const { t, lang, tz, now, estimatesOn } = ctx;
@@ -93,8 +89,15 @@ export function inspectionRowBuilder(ctx: RowContext) {
     const wonNoJob = a.outcome === "won" && !a.job_id;
     // cn-v1176 fix F2: the Won sheet's button only where the sheet takes the visit (won-sheet
     // wonStartShown, ONE rule); any other Won visit with no job keeps the button that opens the visit.
-    const kind = primaryOf(state, { decidable, estimatesOn, wonNoJob: wonStartShown({ type: a.type, outcome: a.outcome, hasJob: !!a.job_id }) });
+    const wonShown = wonStartShown({ type: a.type, outcome: a.outcome, hasJob: !!a.job_id });
+    const kind = primaryOf(state, { decidable, estimatesOn, wonNoJob: wonShown });
     const visitHref = `/appointments/${a.id}`;
+    // HANGS ON NOBODY (cn-v1181, I2a): no lead, no customer, no job, no estimate written from it.
+    const nobody = !a.inquiry_id && !a.customer_id && !a.job_id && !captureQuoteId(a.capture);
+    // A WIN WITH NO JOB (cn-v1181, I3): when the offer names the job that exists, the offer is the
+    // boxed button and Won · Start the Job moves behind the ⋯ (a second job is never the first thing
+    // offered when the job exists).
+    const wonDoors: ListRow["doors"] = [...(offer && wonShown ? (["wonStart"] as const) : []), ...(decidable ? (["lost"] as const) : [])];
     // THE BOXED BUTTON. Create Estimate: the capture prefills the estimator scope; the inquiry keeps
     // the lead threading (quotes/new also recovers it from the capture appointment when absent).
     // Start Inspection and Open Inspection both open the visit, where the inspection is done.
@@ -110,15 +113,21 @@ export function inspectionRowBuilder(ctx: RowContext) {
       id: a.id,
       state,
       who: words.who,
+      // The person's file, or null: then the card's name opens the visit itself (cn-v1181, I1).
       whoHref: inspectionFileHref(a),
       what: words.what,
       edge: edgeOf(a, state),
       stateWord: wonNoJob ? t("ip_wonNoJob") : wordKey ? t(wordKey) : null,
       primary,
       visitHref,
-      // A win with no job has one move behind its button: Not Sold, if the work went away after all.
-      // A row with an offer keeps Open Inspection behind the ⋯ (the offer took the boxed button's place).
-      doors: withOpen(wonNoJob ? (decidable ? ["lost"] : []) : rowDoors(state, { primary: kind, decidable, hasStart: !!a.starts_at }), !!offer),
+      wonHref: wonShown ? `${visitHref}?won=1` : null,
+      // A win with no job: Not Sold, if the work went away after all (and Won · Start the Job when an
+      // offer took the boxed button). Every row's ⋯ holds Open Inspection first, unless the boxed button
+      // already says it (cn-v1181, I1: openFirst).
+      doors: openFirst(
+        wonNoJob ? wonDoors : rowDoors(state, { primary: kind, decidable, hasStart: !!a.starts_at, nobody }),
+        !offer && kind === "open",
+      ),
       startsAt: a.starts_at ?? null,
       endsAt: a.ends_at ?? null,
       happenedSaid: t(happenedSaidKey(estimatesOn)),

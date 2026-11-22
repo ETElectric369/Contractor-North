@@ -210,7 +210,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Open a job",
     description:
-      "Open a new JOB — e.g. 'start a job for the Miller deck'. If the person did not say who the customer is, ASK before creating the job. Resolve the customer first with list_customers and pass customer_id (or pass new_customer_name to create one) so the job is born with its customer. Optional description, address, status (to_be_scheduled, scheduled, in_progress, complete, cancelled; default in_progress — a job is put on hold after it exists, with its reason and a day, never at creation), and billing_type (tm for Time & Material or fixed for a fixed price; left out, the job bills the way most of this company's jobs already do, Time & Material when it has none yet or it's a tie). Returns the job id — then you can schedule it, assign it, add costs, or quote it.",
+      "Open a new JOB — e.g. 'start a job for the Miller deck'. If the person did not say who the customer is, ASK before creating the job. Resolve the customer first with list_customers and pass customer_id (or pass new_customer_name to create one) so the job is born with its customer. Optional description, address, status (to_be_scheduled, scheduled, in_progress, complete, cancelled; default in_progress — a job is put on hold after it exists, with its reason and a day, never at creation), and billing_type (tm for Time & Material or fixed for a fixed price; left out, the job bills the way most of this company's jobs already do, Time & Material when it has none yet or it's a tie). Returns the job id — then you can schedule it, assign it, add costs, or quote it. When the new job filed an open site visit at the same place with it, the result's speak says which; read the speak AND warning back to the user.",
     input: z.object({
       name: z.string().min(1),
       customer_id: z.string().nullable().optional(),
@@ -240,7 +240,10 @@ export const jobActions: Record<string, ActionDef> = {
       if (i.address) fd.set("address", i.address);
       if (i.status) fd.set("status", i.status);
       if (i.billing_type) fd.set("billing_type", i.billing_type);
-      return createJob(fd);
+      // THE VISIT createJob TIED is in the words Nort gives back (skeptic #84, S6): `note` is not a field
+      // the model is handed (agent-tool-result), so it rides as `speak`; a failed tie is `warning`.
+      const made = await createJob(fd);
+      return made.ok && made.note ? { ...made, speak: made.note } : made;
     },
   },
   "job.setStatus": {

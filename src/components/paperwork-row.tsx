@@ -58,6 +58,19 @@ import {
   undoPaperwork,
 } from "@/app/(app)/organize/actions";
 import { addSupplierDocuments, keepPaperwork, updatePaperwork } from "@/app/(app)/organize/paperwork-actions";
+import { setPaperLineReturned } from "@/app/(app)/organize/pen-line-actions";
+import { CreditMemoDoor } from "@/components/credit-memo-door";
+import { creditExpectedOf, penMarkOf, penSentence, penSummary, PEN_WORDS, type PenMark } from "@/lib/pen-marks";
+
+/**
+ * THE ROWS THE TRAY'S STOCK SHEET ASKS TO COUNT (skeptic #84, S1): goods that went back are never
+ * shop stock, so a line returned to the supplier, or one whose pen mark is still asked, is not
+ * listed. Each row keeps its own `index` into the stored lines, so a count lands on the right line
+ * (the server shelves by that index). The server refuses such a line too (lib/stock-ledger).
+ */
+export function stockSheetRows(item: Parameters<typeof shelfRowsOf>[0]) {
+  return shelfRowsOf(item).filter((l) => (l as { returned?: unknown }).returned !== true && (l as { pen?: unknown }).pen !== "unclear");
+}
 
 /**
  * ONE CARD FOR ONE PIECE OF PAPER, ON EVERY PAGE THAT HOLDS PAPER (0295; W1-31).
@@ -180,6 +193,46 @@ export function paperMenuRows(state: Readiness["state"], hasFile: boolean, onCar
   // Only paper this update can't file (a statement, a credit memo, a PO); last, and asked first.
   if (state === "later") rows.push("Delete");
   return rows.filter((r) => !onCard.includes(r));
+}
+
+/** One line the reader saw ink on, as the tray row shows it (cn-v1181, lib/pen-marks). */
+export type PenRowLine = {
+  /** Its place in the paper's stored `line_items`: the server's setPaperLineReturned keys by it. */
+  index: number;
+  description: string;
+  amount: number;
+  pen: PenMark | null;
+  /** "open" = a mark nobody could read, still asked; else what the line is now. */
+  state: "open" | "kept" | "returned";
+  face: string;
+};
+
+/**
+ * WHAT THE PEN MARKS ON A WAITING PAPER SAY, line by line, from the paper's OWN stored lines (the
+ * same array setPaperLineReturned answers, so a tap lands on the line it shows). Null when the
+ * reader saw no ink. `creditExpected`: the paper was not paid at the counter, so what went back is
+ * a credit the supplier owes; else it is only crossed off the customer's bill.
+ */
+export function penViewOf(item: Pick<PaperItem, "line_items" | "payment">): { sentence: string | null; creditExpected: boolean; lines: PenRowLine[] } | null {
+  const raw = Array.isArray(item.line_items) ? (item.line_items as Record<string, unknown>[]) : [];
+  const summary = penSummary(raw);
+  if (!summary.any) return null;
+  const creditExpected = creditExpectedOf({ paperPayment: item.payment });
+  const lines: PenRowLine[] = [];
+  raw.forEach((l, index) => {
+    const pen = penMarkOf(l?.pen);
+    if (!pen && l?.returned !== true) return;
+    const state = pen === "unclear" ? "open" : l?.returned === true ? "returned" : "kept";
+    lines.push({
+      index,
+      description: String(l?.description ?? "").trim(),
+      amount: Number(l?.amount) || 0,
+      pen,
+      state,
+      face: state === "open" ? PEN_WORDS.needsAnswer : state === "kept" ? PEN_WORDS.kept : creditExpected ? PEN_WORDS.creditExpected : PEN_WORDS.crossedOut,
+    });
+  });
+  return { sentence: penSentence(summary, { creditExpected }), creditExpected, lines };
 }
 
 function Thumb({ item }: { item: PaperRowItem }) {
@@ -517,6 +570,10 @@ export function PaperworkRow({
 
   /** Why it is back in the tray: its bill was deleted, maybe as a duplicate (review of wave 2, TD5). */
   const billBack = billDeletedSaid(item);
+  /** THE INK THE READER SAW (cn-v1181): on a cost paper still waiting, said and answered line by line. */
+  const pens = isCost && costCard ? penViewOf(item) : null;
+  /** A CREDIT MEMO waiting in the tray: its one door, File With Its Bill (lane M's component). */
+  const creditMemoDoor = r.state === "later" && type === "credit_memo";
   /** Why the ⋯ may also say a door: what is already on the card. */
   const onCard: ("Fix Details" | "Read Again" | "Keep It in Files" | "Set Aside" | "Delete")[] = [];
   if (readAgainNamed) onCard.push("Read Again");
@@ -808,7 +865,46 @@ export function PaperworkRow({
             The prices on this paper look like a counter preview, not your account&apos;s own. The bill will say so.
           </p>
         )}
+        {creditMemoDoor && (
+          <div className="mt-2">
+            <CreditMemoDoor itemId={item.id} />
+          </div>
+        )}
         {stateSentence && <p className="mt-2 text-sm text-slate-600">{stateSentence}</p>}
+
+        {/* PEN MARKS (cn-v1181): what the reader saw, in plain slate, and a Kept / Returned tap on
+            every marked line. A mark nobody could read asks; nothing here is amber. */}
+        {pens && (
+          <div className="mt-2 space-y-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700" role="group" aria-label="Pen marks">
+            {pens.sentence && <p>{pens.sentence}</p>}
+            <ul className="divide-y divide-slate-200 rounded border border-slate-200 bg-white">
+              {pens.lines.map((l) => {
+                const back = pens.creditExpected ? PEN_WORDS.returned : PEN_WORDS.crossedOut;
+                const answer = (returned: boolean) =>
+                  run(`pen:${l.index}:${returned ? "back" : "kept"}`, () => setPaperLineReturned(item.id, l.index, returned, l.description));
+                return (
+                  <li key={l.index} className="space-y-1.5 px-3 py-2">
+                    <div className="flex items-start gap-2">
+                      <span className="min-w-0 flex-1 break-words">{l.description}</span>
+                      <span className="shrink-0 tabular-nums">{formatCurrency(l.amount)}</span>
+                    </div>
+                    <p className="text-xs font-medium text-slate-600">{l.face}</p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" className="min-h-11" aria-pressed={l.state === "kept"} disabled={working || l.state === "kept"} onClick={() => answer(false)}>
+                        {spin(`pen:${l.index}:kept`) ? <Loader2 className="animate-spin" /> : null}
+                        {PEN_WORDS.kept}
+                      </Button>
+                      <Button variant="outline" className="min-h-11" aria-pressed={l.state === "returned"} disabled={working || l.state === "returned"} onClick={() => answer(true)}>
+                        {spin(`pen:${l.index}:back`) ? <Loader2 className="animate-spin" /> : null}
+                        {back}
+                      </Button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
 
         {/* OPEN PAPER, the first row: the file and its lines inline, the supplier card's Open Bill. */}
         {(item.signedUrl || rowLines.length > 0) && (
@@ -945,7 +1041,7 @@ export function PaperworkRow({
       {shelfSheet && (
         <ShelfTicketSheet
           title="File It to Stock"
-          lines={shelfRowsOf(item).map(
+          lines={stockSheetRows(item).map(
             (l): ShelfCountLine => ({
               key: String(l.index),
               description: l.description,

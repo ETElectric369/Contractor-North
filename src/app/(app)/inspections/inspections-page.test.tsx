@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { titleCaseIn } from "../../../../tests/title-case-words";
-import { happenedSaidKey, primaryOf, rowDoors, stateWordKey } from "./list-rows";
+import { happenedSaidKey, openFirst, primaryOf, rowDoors, stateWordKey } from "./list-rows";
 import { translator } from "@/lib/i18n";
 
 /**
@@ -139,11 +139,13 @@ const foldOf = (html: string) => {
     tag: /<details[^>]*>/.exec(html)![0],
     summary: decode(/<summary[^>]*>([\s\S]*?)<\/summary>/.exec(m[1])?.[1] ?? ""),
     line: decode(/<p [^>]*>([\s\S]*?)<\/p>/.exec(m[1])?.[1] ?? ""),
-    rows: [...m[1].matchAll(/<li data-fold-row="([^"]+)">(<a [^>]*>)([\s\S]*?)<\/a><\/li>/g)].map((r) => ({
+    rows: [...m[1].matchAll(/<li data-fold-row="([^"]+)"[^>]*>(<a [^>]*>)([\s\S]*?)<\/a>([\s\S]*?)<\/li>/g)].map((r) => ({
       id: r[1],
       href: hrefOf(r[2]),
       text: decode(r[3]),
       ending: field(r[3], "ending"),
+      // cn-v1181 (I2b): the row's Delete…, beside the link that opens it.
+      del: /<button [^>]*data-fold-delete="([^"]+)"[^>]*>([\s\S]*?)<\/button>/.exec(r[4])?.slice(1, 3) ?? null,
     })),
   };
 };
@@ -196,6 +198,26 @@ describe("the rule for a row's buttons (list-rows)", () => {
     // No Move without a start: there is no time of day to keep.
     expect(d("coming_up", "start", true, false)).toEqual(["lost"]);
   });
+
+  it("cn-v1181 (I2a): a sales visit that hangs on nobody gets Dismiss… beside Not Sold while it is not done; one that belongs to somebody keeps Not Sold alone", () => {
+    const d = (s: Parameters<typeof rowDoors>[0], nobody: boolean, decidable = true) => rowDoors(s, { primary: "start", decidable, hasStart: true, nobody });
+    expect(d("coming_up", true)).toEqual(["move", "lost", "del"]);
+    expect(d("needs_day", true)).toEqual(["pickDay", "lost", "del"]);
+    expect(d("missed", true)).toEqual(["move", "happened", "lost", "del"]);
+    // Inspected (it happened): Dismiss refuses a done visit, so it is never offered there.
+    expect(rowDoors("write_up", { primary: "estimate", decidable: true, hasStart: true, nobody: true })).toEqual(["open", "lost"]);
+    // Somebody's: the one ending stands.
+    for (const s of ["coming_up", "needs_day", "missed"] as const) expect(d(s, false)).not.toContain("del");
+    // A work visit is as it was, nobody's or not.
+    expect(d("coming_up", true, false)).toEqual(["move", "del"]);
+  });
+
+  it("cn-v1181 (I1): Open Inspection first in every ⋯, unless the boxed button says it", () => {
+    expect(openFirst(["move", "lost"], false)).toEqual(["open", "move", "lost"]);
+    expect(openFirst(["open", "lost"], false)).toEqual(["open", "lost"]);
+    expect(openFirst(["move", "del"], true)).toEqual(["move", "del"]);
+    expect(openFirst(["open", "lost"], true)).toEqual(["lost"]);
+  });
 });
 
 describe("one list: who needs an inspection", () => {
@@ -223,16 +245,18 @@ describe("one list: who needs an inspection", () => {
     const rows = rowsOf(await render());
     expect(rows.map((r) => [r.who, r.whoHref, r.edge, r.what, r.word, r.primary])).toEqual([
       ["Dana Rook", "/crm/cust-2", "Thu, Nov 12 · 10:00 AM", "9 Snowbell Ct · Final Inspection", null, ["Open Inspection", "/appointments/cu-1"]],
-      ["Hot tub circuit", null, "Fri, Nov 20 · 10:00 AM", "Pending pick", null, ["Start Inspection", "/appointments/cu-2"]],
+      // cn-v1181 (I1): a name with no file opens the visit itself.
+      ["Hot tub circuit", "/appointments/cu-2", "Fri, Nov 20 · 10:00 AM", "Pending pick", null, ["Start Inspection", "/appointments/cu-2"]],
       ["Theo Vance", "/crm/cust-3", "9d ago", "4 Bayberry Rd", "Needs a Day", ["Start Inspection", "/appointments/nd-1"]],
-      ["2 Catbird Way", null, "2d ago", null, "Needs a Day", ["Start Inspection", "/appointments/nd-2"]],
+      ["2 Catbird Way", "/appointments/nd-2", "2d ago", null, "Needs a Day", ["Start Inspection", "/appointments/nd-2"]],
       // The two inspected rows (Create Estimate) are drawn on the Estimates page: quotes-two-parts.test.
-      ["Porch light", null, "6d ago", "No field notes", "Won, No Job Picked", ["Won · Start the Job", "/appointments/nb-1?won=1"]],
-      ["Casey Loam", null, "4d ago", "Deck lighting · 7 Thistlewood Dr", "Day Passed", ["Start Inspection", "/appointments/ms-1"]],
+      ["Porch light", "/appointments/nb-1", "6d ago", "No field notes", "Won, No Job Picked", ["Won · Start the Job", "/appointments/nb-1?won=1"]],
+      ["Casey Loam", "/appointments/ms-1", "4d ago", "Deck lighting · 7 Thistlewood Dr", "Day Passed", ["Start Inspection", "/appointments/ms-1"]],
     ]);
-    // A name with no file is plain words, never a dead link.
-    const plain = rowsOf(await render()).find((r) => r.id === "cu-2")!;
-    expect(plain.html).toMatch(/<span class="[^"]*font-semibold[^"]*" data-who="">Hot tub circuit<\/span>/);
+    // cn-v1181 (I1): a name with no file is a link to the visit, never plain words nobody can open.
+    const opened = rowsOf(await render()).find((r) => r.id === "cu-2")!;
+    expect(opened.html).toMatch(/<a [^>]*data-who=""[^>]*>Hot tub circuit<\/a>/);
+    expect(opened.html).not.toMatch(/<span class="[^"]*font-semibold[^"]*" data-who="">/);
   });
 
   it("Spanish: the state words, the buttons and the rows' own words", async () => {
@@ -254,12 +278,14 @@ describe("one list: who needs an inspection", () => {
     const rows = rowsOf(await render());
     expect(Object.fromEntries(rows.map((r) => [r.id, r.menu]))).toEqual({
       // cn-v1175 (R8): the city's Final Inspection (work) keeps Dismiss; a sales visit ends Not Sold.
+      // cn-v1181 (I1): Open Inspection first, except where the boxed button already says it (cu-1).
+      // cn-v1181 (I2a): a sales visit that hangs on nobody has Dismiss… beside Not Sold (cu-2, nd-2, ms-1).
       "cu-1": "move,del",
-      "cu-2": "move,lost",
-      "nd-1": "pickDay,lost",
-      "nd-2": "pickDay,lost",
-      "nb-1": "lost",
-      "ms-1": "move,happened,lost",
+      "cu-2": "open,move,lost,del",
+      "nd-1": "open,pickDay,lost",
+      "nd-2": "open,pickDay,lost,del",
+      "nb-1": "open,lost",
+      "ms-1": "open,move,happened,lost,del",
     });
   });
 
@@ -270,7 +296,7 @@ describe("one list: who needs an inspection", () => {
     // cn-v1171 (skeptic #74): nothing says an estimate is needed where the company makes none.
     expect(wu.map((r) => [r.primary, r.menu, r.word])).toEqual([
       [["Open Inspection", "/appointments/wu-1"], "lost", "Inspected"],
-      [["Won · Start the Job", "/appointments/nb-1?won=1"], "lost", "Won, No Job Picked"],
+      [["Won · Start the Job", "/appointments/nb-1?won=1"], "open,lost", "Won, No Job Picked"],
       [["Open Inspection", "/appointments/wu-2"], "lost", "Inspected"],
     ]);
     const html = await render();
@@ -319,6 +345,11 @@ describe("Not Sold: one shut fold under the list", () => {
       ["nb-3", "/appointments/nb-3", "Cancelled"],
     ]);
     expect(fold.rows.map((r) => r.id)).not.toContain("nb-1");
+    // cn-v1181 (I2b): each row opens its visit AND has Delete… beside it (the ask comes on the tap).
+    expect(fold.rows.map((r) => r.del)).toEqual([
+      ["nb-2", "Delete…"],
+      ["nb-3", "Delete…"],
+    ]);
   });
 
   it("Spanish", async () => {
@@ -327,6 +358,7 @@ describe("Not Sold: one shut fold under the list", () => {
     expect(fold.summary).toBe("No Vendidas (2)");
     expect(fold.line).toBe("Inspecciones que terminaron sin convertirse en trabajo y no tienen prospecto, cliente ni trabajo donde guardarlas. Cada una dice cómo terminó.");
     expect(fold.rows.map((r) => r.ending?.split(" · ").pop())).toEqual(["No Vendida", "Cancelada"]);
+    expect(fold.rows.map((r) => r.del?.[1])).toEqual(["Eliminar…", "Eliminar…"]);
   });
 
   it("no fold when nothing hangs on nobody", async () => {
@@ -404,6 +436,8 @@ describe("what left the page, and the read", () => {
       expect(titleCaseIn(t("ip_btn_notSoldFold").replace(" ({n})", ""), lang), `${lang} fold`).toBe(true);
       // cn-v1175 (R5): the offer's two buttons, with a job named in them.
       for (const k of ["ip_btn_doneAs", "ip_btn_doneAsYes"]) expect(titleCaseIn(t(k).replace("{job}", "J-900").replace(/^¿|\?$/g, ""), lang), `${lang} ${k}`).toBe(true);
+      // cn-v1181 (I2b, I3): the fold's Delete… and its deed; Won · Start the Job behind the ⋯ is the visit page's own key.
+      for (const k of ["ip_btn_deleteVisit", "ip_btn_deleteVisitIt", "vi_btn_wonStartTheJob"]) expect(titleCaseIn(t(k).replace(/…$/, ""), lang), `${lang} ${k}`).toBe(true);
     }
   });
 });

@@ -1,4 +1,5 @@
 import { decideReceiptLine } from "@/app/(app)/bills/receipt-billing";
+import { applyPenMark, type PenMark } from "@/lib/pen-marks";
 
 /**
  * A PAPER'S LINES, AS THE BILL WILL HOLD THEM (moved out of organize/paperwork-core.ts for Shop
@@ -25,13 +26,32 @@ export interface BillLine {
    * Absent = the whole line, which is what every read line means.
    */
   billed_amount?: number;
+  /**
+   * INK ON THE PAPER (cn-v1181, src/lib/pen-marks.ts): what the reader saw written by hand on this
+   * line. `unclear` IS the open question (held off the customer's bill until a person answers).
+   */
+  pen?: PenMark;
+  /** Crossed out or sent back: off the customer's bill. Explicit once read or answered. */
+  returned?: boolean;
 }
 
-/** Normalize the AI's line_items into clean BillLine rows. */
+/**
+ * Normalize the AI's line_items into clean BillLine rows.
+ *
+ * PEN MARKS (cn-v1181): each cleaned line goes through applyPenMark with what the reader said of it
+ * (`pen`, `hand_quantity`) or what is stored on it (`pen`, `returned`), so a struck line comes off the
+ * customer's bill and a quantity changed by hand becomes two lines, kept and returned, at the PRINTED
+ * extension split cent-exact. IDEMPOTENT: a stored line (File It, an Undo) carries an explicit
+ * `returned` and no `hand_quantity`, and passes through exactly as it is, so cleanLines(cleanLines(x))
+ * is cleanLines(x). The 100-line cap applies after the split.
+ *
+ * AN `unclear` LINE IS NEVER A REASON TO WAIT (P8): it is filed like any other line, held off the
+ * customer's bill by billable = false, and the bill asks Kept or Returned. File It is not blocked.
+ */
 export function cleanLines(raw: any): BillLine[] {
   if (!Array.isArray(raw)) return [];
   return raw
-    .map((l: any) => {
+    .flatMap((l: any): BillLine[] => {
       const quantity = Number(l?.quantity) || 1;
       const unit_price = l?.unit_price != null && !isNaN(Number(l.unit_price)) ? Number(l.unit_price) : 0;
       const amount =
@@ -45,12 +65,14 @@ export function cleanLines(raw: any): BillLine[] {
       // category: it fills a shrug when the words are plainly food, and never overrules a person.
       const { category, billable } = decideReceiptLine(description, stated, l?.billable);
       // A part-used amount a person set on the bill (TD3), kept only where it can stand: on a line
-      // that bills, between nothing and the line itself (0272's check).
+      // that still bills AFTER its pen mark, between nothing and the line itself (0272's check).
       const used = l?.billed_amount === null || l?.billed_amount === undefined || l?.billed_amount === "" ? NaN : Number(l.billed_amount);
-      const keepsUsed = billable && Number.isFinite(used) && used >= 0 && used <= Math.abs(amount) + 0.005;
-      return keepsUsed
-        ? { description, quantity, unit_price, amount, category, billable, billed_amount: Math.round(used * 100) / 100 }
-        : { description, quantity, unit_price, amount, category, billable };
+      const clean: BillLine = { description, quantity, unit_price, amount, category, billable };
+      return applyPenMark(clean, l).map((m) =>
+        m.billable && Number.isFinite(used) && used >= 0 && used <= Math.abs(m.amount) + 0.005
+          ? { ...m, billed_amount: Math.round(used * 100) / 100 }
+          : m,
+      );
     })
     .filter((l: BillLine) => l.description.length > 0)
     .slice(0, 100);

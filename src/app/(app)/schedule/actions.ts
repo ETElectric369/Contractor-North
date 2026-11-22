@@ -143,7 +143,15 @@ async function advanceToScheduled(supabase: SupabaseClient, id: string): Promise
     .in("status", ["to_be_scheduled", "estimate"]);
 }
 
-export async function createJob(formData: FormData): Promise<Result & { /** The name the job was saved under (a sent name that was only a tag is not it). */ name?: string }> {
+export async function createJob(
+  formData: FormData,
+): Promise<
+  Result & {
+    /** The name the job was saved under (a sent name that was only a tag is not it). */ name?: string;
+    /** cn-v1181 (I3): the open visit this job was filed with, in a sentence. */ note?: string;
+    /** cn-v1181 (I3): a visit that matched but could not be filed with it, said. */ warning?: string;
+  }
+> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const ws = wordsOf(ctx.supabase, ctx.userId);
@@ -289,9 +297,45 @@ export async function createJob(formData: FormData): Promise<Result & { /** The 
 
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day reads today's scheduled jobs — keep it in sync
+
+  /* A NEW JOB FINDS ITS VISIT (cn-v1181, I3; lib/appointments/tie-matching-visit). The owner, of an
+     inspection with the job's customer's name and street on it: "shouldnt it have automatically filed
+     having a name and address on it that match exactly the job". EXACTLY ONE open sales visit that
+     matches exactly is tied to this job, and the answer SAYS so; none or several, nothing is written
+     (the Inspections row's offer asks). A tie that fails is said and filed; the job is made either way. */
+  let tieNote: string | undefined;
+  let tieWarning: string | undefined;
+  try {
+    const [{ tieMatchingVisit }, { visitDayWords }] = await Promise.all([import("@/lib/appointments/tie-matching-visit"), import("@/lib/appointments/wont-happen")]);
+    const tie = await tieMatchingVisit(supabase, {
+      orgId: ctx.orgId,
+      job: { id: data.id, customer_id: customerId, address, unit: emptyToNull(formData.get("unit")), created_at: new Date().toISOString() },
+    });
+    if (tie.kind === "tied" || (tie.kind === "failed" && tie.visit)) {
+      const v = tie.visit!;
+      const lang = await ws.lang();
+      const visit = (v.title ?? "").trim() || (v.lead_name ?? "").trim() || (v.location ?? "").trim();
+      const day = v.starts_at ? visitDayWords(todayStrInTz(tz, new Date(v.starts_at)), lang) : "";
+      if (tie.kind === "tied") {
+        tieNote = await ws.say("ip_srv_filedWithJob", { visit, day });
+        if (tie.warning) tieWarning = tie.warning;
+        revalidatePath("/inspections");
+        revalidatePath("/quotes");
+        revalidatePath(`/appointments/${v.id}`);
+      } else tieWarning = await ws.say("ip_srv_tieFailed", { visit, day });
+    } else if (tie.kind === "failed") tieWarning = await ws.say("ip_srv_tieUnread");
+  } catch (e) {
+    try {
+      (await import("@/lib/observe")).reportError("createJob:tieMatchingVisit", e, { jobId: data.id });
+      tieWarning = await ws.say("ip_srv_tieUnread");
+    } catch {
+      /* the job is made; nothing here may undo that */
+    }
+  }
+
   // The name it was SAVED under, so a caller that echoes it (the Timeclock's quick add) never says
   // one name while the job carries another.
-  return { ok: true, id: data.id, name };
+  return { ok: true, id: data.id, name, ...(tieNote ? { note: tieNote } : {}), ...(tieWarning ? { warning: tieWarning } : {}) };
 }
 
 // setJobStatus lived here as an UNGUARDED copy (no requireStaff / no status whitelist) — the job-page
@@ -1544,6 +1588,10 @@ export async function startJobOnDay(
   const made = await createJob(form);
   if (!made.ok || !made.id) return { ok: false, error: made.error ?? (await ws.say("ag_srv_jobNotMade")) };
   const name = made.name?.trim() || (await ws.say("ag_thatJob"));
+  // THE VISIT createJob TIED (or could not tie) is said with this door's own words (skeptic #84, S6):
+  // the person never typed a street here, so a tie they did not see coming must be in front of them.
+  const tieSaid = [made.note, made.warning].filter(Boolean).join(" ");
+  const withTie = (words: string) => [words, tieSaid].filter(Boolean).join(" ");
 
   const on = await addJobDay(made.id, { day, start, length: p?.length, crew: { add: (p?.crew?.add ?? []).map(String).filter(Boolean) } });
   if (!on.ok) {
@@ -1556,11 +1604,11 @@ export async function startJobOnDay(
          · the read itself failed: nothing is claimed either way, and the sheet's retry finds out. */
     const why = on.error ?? "";
     const { data: now, error: nowErr } = await supabase.from("jobs").select("id, scheduled_start").eq("id", made.id).maybeSingle();
-    if (nowErr || !now) return { ok: false, id: made.id, error: await ws.say("ag_srv_madeDayUnknown", { job: name, why }) };
-    if ((now as { scheduled_start?: string | null }).scheduled_start) return { ok: true, id: made.id, note: await ws.say("ag_srv_madePlacedCheck", { job: name, why }) };
-    return { ok: false, id: made.id, error: await ws.say("ag_srv_madeNotPlaced", { job: name, why }) };
+    if (nowErr || !now) return { ok: false, id: made.id, error: withTie(await ws.say("ag_srv_madeDayUnknown", { job: name, why })) };
+    if ((now as { scheduled_start?: string | null }).scheduled_start) return { ok: true, id: made.id, note: withTie(await ws.say("ag_srv_madePlacedCheck", { job: name, why })) };
+    return { ok: false, id: made.id, error: withTie(await ws.say("ag_srv_madeNotPlaced", { job: name, why })) };
   }
-  return { ok: true, id: made.id, note: [await ws.say("ag_srv_newJobMade", { job: name }), on.note ?? ""].filter(Boolean).join(" ") };
+  return { ok: true, id: made.id, note: withTie([await ws.say("ag_srv_newJobMade", { job: name }), on.note ?? ""].filter(Boolean).join(" ")) };
 }
 
 /**

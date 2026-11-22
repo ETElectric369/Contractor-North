@@ -55,6 +55,7 @@ import { applyingNow } from "@/lib/bank-download";
 import {
   FOOD_AND_DRINK_PROMPT_RULE,
   MASKED_PRICE_PROMPT_RULE,
+  PEN_MARKS_PROMPT_RULE,
   looksProvisionallyPriced,
   RECEIPT_LINE_CATEGORY_SCHEMA_HINT,
 } from "@/app/(app)/bills/receipt-billing";
@@ -67,8 +68,10 @@ import {
   documentInUse,
   exactSupplierFor,
   filingDocument,
+  handTotalOf,
   insertItemizedBill,
   insertPaperRow,
+  penSaidFor,
   loadBooks,
   loadMarkContext,
   matchesOnBooks,
@@ -486,6 +489,9 @@ export async function billJobReceipt(
   /** Set when the transcribed lines don't add up to the total the bill recorded — the caller
    *  should show it. Nothing silent: a number a person hasn't checked must say so. */
   warning?: string;
+  /** WHAT INK WAS READ (lib/pen-marks penSentence), on a field of its own: it is not a warning and
+   *  never draws amber (skeptic #84, S7). Every caller that shows the result shows it, in slate. */
+  pen?: string;
 }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -555,7 +561,8 @@ Respond with ONLY a JSON object (no prose):
   "amount": grand total in dollars as a number (the amount actually paid), or null only if you truly cannot read it,
   "date": "YYYY-MM-DD" printed on the receipt, or null,
   "document_number": the invoice, ticket or receipt number printed on it, exactly as printed, or null,
-  "line_items": [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": ${RECEIPT_LINE_CATEGORY_SCHEMA_HINT}}],${scopeSchemaLine}
+  "line_items": [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": ${RECEIPT_LINE_CATEGORY_SCHEMA_HINT}, "pen": "struck" | "quantity" | "unclear" | null, "hand_quantity": number | null}],${scopeSchemaLine}
+  "hand_total": a total written by hand on the paper (a number), or null,
   "pricing_provisional": true | false — true when the price column is masked (*****), blank or "N/A", or the paper is a quote/counter preview rather than this account's own pricing,
   "payment": "paid_at_purchase" | "on_account" | "unknown" — "paid_at_purchase" ONLY when the document shows tender (cash tendered/change, a card number/••••, or an explicit PAID stamp); "on_account" when it shows a charge account, ON ACCT, net terms, "invoice", or a balance due (supply-house account purchases),
   "confidence": "low" | "medium" | "high"
@@ -565,7 +572,9 @@ In every "description", write inches as the word in (e.g. "6 in EMT", not 6") an
 
 ${FOOD_AND_DRINK_PROMPT_RULE}
 
-${MASKED_PRICE_PROMPT_RULE}`,
+${MASKED_PRICE_PROMPT_RULE}
+
+${PEN_MARKS_PROMPT_RULE}`,
       messages: [
         {
           role: "user",
@@ -692,6 +701,13 @@ ${MASKED_PRICE_PROMPT_RULE}`,
     }
   }
 
+  // Paid ONLY when the receipt itself shows tender (the reasons are at the write below). Named once,
+  // because the pen sentence says what it says by the same answer the bill's lines are written with.
+  const billStatus: "paid" | "unpaid" = stated?.paid ? "paid" : parsed.payment === "paid_at_purchase" ? "paid" : "unpaid";
+  // IT SAYS WHAT IT READ (cn-v1181, P7): a reader that acts on ink says what ink it saw. Null when the
+  // paper carries no pen mark, so an ordinary receipt says exactly what it said before.
+  const penSaid = penSaidFor(lines, { amount, creditExpected: billStatus === "unpaid", handTotal: handTotalOf(parsed?.hand_total) });
+
   const written = await insertItemizedBill(
     supabase,
     {
@@ -723,7 +739,7 @@ ${MASKED_PRICE_PROMPT_RULE}`,
     // is settled; stamping them paid silently hid real payables. Unknown = unpaid: a
     // wrongly-unpaid bill nags and gets corrected, a wrongly-paid one loses money.
     // The user's own "Already paid" checkbox wins when they ticked it — they were there.
-    stated?.paid ? "paid" : parsed.payment === "paid_at_purchase" ? "paid" : "unpaid",
+    billStatus,
     jobScopes,
   );
   // THE REFUSAL IS SAID, NOT SWALLOWED: a return with nothing legible under it, or a part this job's
@@ -812,6 +828,8 @@ ${MASKED_PRICE_PROMPT_RULE}`,
     // Both facts or neither: a receipt that did not add up AND did not get linked has two things
     // wrong with it, and hiding one behind the other is how the second one gets found in a month.
     warning: [check.mismatch ? check.note : null, linkWarning, untieWarning].filter(Boolean).join(" ") || undefined,
+    // The pen sentence on its own field (skeptic #84, S7): not a warning, drawn slate by every caller.
+    ...(penSaid ? { pen: penSaid } : {}),
   };
 }
 
@@ -1112,6 +1130,8 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
 
   // THE GATE: the same function the File It button asks. A paper not read, with no total, of a kind
   // this update cannot file, or already filed, is refused here in the sentence the row shows.
+  // A PEN MARK NOBODY CAN BE SURE OF IS NEVER A REFUSAL (cn-v1181, P8): its line is filed like any
+  // other, held off the customer's bill (billable = false) and asked on the bill, Kept or Returned.
   if (dest.type !== "unfiled") {
     const refusal = fileRefusal(
       item,
@@ -1477,8 +1497,15 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   if (prevJob) revalidatePath(`/jobs/${prevJob}`);
   revalidatePath("/inventory");
   const linkedSaid = linkTo.length && !linkNote ? ` Linked to supplier document ${linkTo.map((l) => l.number).join(", ")}.` : "";
-  if (shelfSaid) return { ok: true, message: `Filed in shop stock.${shelfSaid}${linkedSaid}${linkNote}` };
-  return linkedSaid || linkNote ? { ok: true, message: `Filed.${linkedSaid}${linkNote}` } : { ok: true };
+  // IT SAYS WHAT IT READ (cn-v1181, P7): a bill made from a paper with pen marks says what ink was
+  // read, after where it went (the tray row keeps the server's words after its own "Filed on ...").
+  // The lines are the ones the bill was just written with; the credit answer is the bill's own.
+  const penSaid = billId && isCost
+    ? penSaidFor(lines, { amount: total, creditExpected: billStatusFromItem(item) === "unpaid", handTotal: proposalOf(item).penMarks?.handTotal ?? null })
+    : null;
+  const penPart = penSaid ? ` ${penSaid}` : "";
+  if (shelfSaid) return { ok: true, message: `Filed in shop stock.${shelfSaid}${linkedSaid}${linkNote}${penPart}` };
+  return linkedSaid || linkNote || penPart ? { ok: true, message: `Filed.${linkedSaid}${linkNote}${penPart}` } : { ok: true };
 }
 
 /**

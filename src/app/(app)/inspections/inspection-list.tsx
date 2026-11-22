@@ -3,6 +3,7 @@ import { Fold } from "@/components/why-fold";
 import { fillText } from "@/lib/i18n";
 import { InspectionRowMenu } from "./inspection-row-menu";
 import { VisitOfferButton } from "./visit-offer-button";
+import { FoldDelete } from "./fold-delete";
 import type { FoldRow, ListRow } from "./list-rows";
 
 /**
@@ -16,11 +17,20 @@ import type { FoldRow, ListRow } from "./list-rows";
 export const PRIMARY =
   "btn-gloss inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[rgb(var(--glass-ink))] px-4 text-sm font-medium text-white shadow-sm hover:bg-[rgb(var(--glass-ink))]/90";
 
-export function InspectionList({ rows, tz }: { rows: readonly ListRow[]; tz: string }) {
+export function InspectionList({
+  rows,
+  tz,
+  nameOpensVisit = false,
+}: {
+  rows: readonly ListRow[];
+  tz: string;
+  /** The Inspections page (cn-v1181, I1): a name with no file opens the visit itself. */
+  nameOpensVisit?: boolean;
+}) {
   return (
     <ul className="space-y-3">
       {rows.map((row) => (
-        <InspectionCard key={row.id} row={row} tz={tz} />
+        <InspectionCard key={row.id} row={row} tz={tz} nameOpensVisit={nameOpensVisit} />
       ))}
     </ul>
   );
@@ -32,13 +42,19 @@ export function InspectionList({ rows, tz }: { rows: readonly ListRow[]; tz: str
  * when at the right. Line 2: what it is, and the state in a plain slate word (amber means a real
  * deadline in this app, and none of these is one). Then the boxed button and the ⋯.
  */
-function InspectionCard({ row, tz }: { row: ListRow; tz: string }) {
+function InspectionCard({ row, tz, nameOpensVisit }: { row: ListRow; tz: string; nameOpensVisit: boolean }) {
   const name = "inline-flex min-h-11 min-w-0 items-center font-semibold text-slate-900 [overflow-wrap:anywhere]";
   return (
     <li data-row={row.id} data-state={row.state} className="flex flex-col gap-1.5 rounded-xl border-2 border-slate-200 bg-white px-4 py-3 shadow-sm">
       <div className="flex items-center gap-x-3">
         {row.whoHref ? (
           <Link href={row.whoHref} className={`${name} hover:text-brand hover:underline`} data-who="">
+            {row.who}
+          </Link>
+        ) : nameOpensVisit ? (
+          // EVERY ROW OPENS ITS VISIT (cn-v1181, I1). The owner: "theres no way to access it [...]
+          // shouldnt each item be clickable to open or delete?". With no file, the name opens the visit.
+          <Link href={row.visitHref} className={`${name} hover:text-brand hover:underline`} data-who="">
             {row.who}
           </Link>
         ) : (
@@ -116,14 +132,17 @@ export function NotSoldFold({ rows, t }: { rows: readonly FoldRow[]; t: (key: st
       <p className="pb-1 text-xs text-slate-600">{t("ip_notSoldLine")}</p>
       <ul className="divide-y divide-slate-100 pb-2">
         {rows.map((r) => (
-          <li key={r.id} data-fold-row={r.id}>
-            <Link href={r.href} className="flex min-h-11 flex-wrap items-baseline gap-x-2 py-2 hover:text-brand">
+          // Each row opens its visit, and Delete… sits beside it (cn-v1181, I2b: the server deletes it
+          // only when nothing is on it; otherwise it says what is, and the row stays).
+          <li key={r.id} data-fold-row={r.id} className="flex flex-wrap items-center gap-x-2 py-1">
+            <Link href={r.href} className="flex min-h-11 min-w-0 flex-1 flex-wrap items-baseline gap-x-2 py-1 hover:text-brand">
               <span className="font-medium text-slate-900">{r.who}</span>
               {r.what && <span className="text-xs text-slate-600">{r.what}</span>}
               <span className="ml-auto text-xs tabular-nums text-slate-600" data-ending="">
                 {[r.day, r.ending].filter(Boolean).join(" · ")}
               </span>
             </Link>
+            <FoldDelete id={r.id} />
           </li>
         ))}
       </ul>

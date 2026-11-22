@@ -160,6 +160,15 @@ export type PaperProposal = {
   companyUse?: CompanyUse | null;
   /** The reader says this is a plain picture (a job site, a panel, a label), not paperwork. */
   picture?: boolean;
+  /**
+   * INK ON THE PAPER (cn-v1181): what the reader's pen marks came to (src/lib/pen-marks.ts
+   * penSummary over the cleaned lines) and a total written by hand, kept only when any mark was read.
+   * The lines themselves carry each mark; this is what the row and File It say.
+   */
+  penMarks?: (import("@/lib/pen-marks").PenSummary & { handTotal: number | null }) | null;
+  /** A CREDIT MEMO'S OWN WORD for the invoice, order or ticket it reverses, as printed (cleaned the
+   *  way a paper's number is). For the credit memo's door, which finds the bill it goes with. */
+  reverses?: string | null;
   po?: string | null;
   /** Over the reader's size limit: a person fills it in. */
   tooBig?: boolean;
@@ -1531,3 +1540,28 @@ export function shelfRowsOf(item: PaperItem): ShelfRow[] {
 
 /** The business-cost buckets, re-exported so a picker never needs a second import to list them. */
 export const PAPER_BUCKETS = BUSINESS_COST_BUCKETS;
+
+// ── A CREDIT MEMO FILES WITH ITS BILL (cn-v1181, lane M) ─────────────────────────────────────
+
+/** The credit memo's one door in the tray. */
+export const CREDIT_MEMO_DOOR = "File With Its Bill";
+
+/** A credit memo still waiting in the tray: the only paper File With Its Bill takes. */
+export function isWaitingCreditMemo(item: PaperItem): boolean {
+  return paperTypeOfItem(item) === "credit_memo" && (item.status ?? "needs_review") === "needs_review" && !item.bill_id;
+}
+
+/** The invoice, order or ticket number the memo says it reverses, exactly as printed (the reader's
+ *  `reverses`, cn-v1181), or null. */
+export function creditMemoReverses(item: PaperItem): string | null {
+  const raw = (proposalOf(item) as { reverses?: unknown }).reverses;
+  const s = String(raw ?? "").trim().replace(/\s+/g, " ");
+  if (!s || /^(null|none|n\/a|unknown)$/i.test(s)) return null;
+  return s.slice(0, 60);
+}
+
+/** When no bill of the supplier names the memo's returned lines: one sentence, and the old way. */
+export function creditMemoNoneSentence(vendor: string | null | undefined): string {
+  const who = String(vendor ?? "").trim();
+  return `No bill${who ? ` from ${who}` : ""} carries the lines this credit memo returns, so it has no bill to file with. Fix Details can still file it on a job, as before.`;
+}

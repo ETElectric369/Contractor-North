@@ -10,7 +10,8 @@ import { CameraCapture } from "@/components/camera-capture";
 import { QuickCostButton } from "@/components/quick-cost-button";
 import { ACTIONS_ROW_CLS } from "@/components/section-actions-menu";
 import { GLASS_MENU_CLASS, useGlassMenuPlacement } from "@/components/ui/glass-menu";
-import { captureReceipt, readReceiptDocument, type ReceiptTone } from "@/lib/receipt-capture";
+import { captureReceipt, penLineOf, readReceiptDocument, type ReceiptTone } from "@/lib/receipt-capture";
+import { PenNote } from "@/components/pen-note";
 import { linkReceiptToBill } from "@/app/(app)/jobs/actions";
 
 /** Same test JobDocuments / JobPhotos use: a touch device gets the phone's own camera app
@@ -27,7 +28,7 @@ type Tone = ReceiptTone | "busy";
  *  offers Different Purchase: Record It Anyway for the paper filed as this document. `sameBillId`
  *  (d1ff7c5a): that bill is on THIS job, so the line also offers Same Purchase: It's That Bill,
  *  which ties the paper to it instead of reading it again or billing it twice. */
-type Line = { id: number; name: string; text: string; tone: Tone; differentDoc?: string; sameBillId?: string };
+type Line = { id: number; name: string; text: string; tone: Tone; differentDoc?: string; sameBillId?: string; pen?: string };
 
 /**
  * A PAPER THAT ISN'T A COST (a plan, a permit, anything else for the job's file): what it can be filed
@@ -137,9 +138,9 @@ export function JobCostCapture({ orgId, jobId, billsTotal: _billsTotal, nortOn =
 
   // One line per file, newest on top, replaced in place as the file moves through the pipeline —
   // the person watches each bill land (or hears exactly why it didn't).
-  const say = (id: number, name: string, text: string, tone: Tone, differentDoc?: string, sameBillId?: string) =>
+  const say = (id: number, name: string, text: string, tone: Tone, differentDoc?: string, sameBillId?: string, pen?: string | null) =>
     setLines((ls) => [
-      { id, name, text, tone, ...(differentDoc ? { differentDoc } : {}), ...(differentDoc && sameBillId ? { sameBillId } : {}) },
+      { id, name, text, tone, ...(differentDoc ? { differentDoc } : {}), ...(differentDoc && sameBillId ? { sameBillId } : {}), ...(pen ? { pen } : {}) },
       ...ls.filter((l) => l.id !== id),
     ]);
 
@@ -178,7 +179,7 @@ export function JobCostCapture({ orgId, jobId, billsTotal: _billsTotal, nortOn =
     say(l.id, l.name, "Recording it as a different purchase…", "busy");
     try {
       const out = await readReceiptDocument(l.differentDoc, { differentPurchase: true }, nortOn);
-      say(l.id, l.name, out.sentence, out.tone);
+      say(l.id, l.name, out.sentence, out.tone, undefined, undefined, penLineOf(out));
       router.refresh();
     } catch (e) {
       say(l.id, l.name, `Couldn't record it (${(e as Error)?.message ?? "unknown error"}). Try again.`, "fail", l.differentDoc);
@@ -218,7 +219,7 @@ export function JobCostCapture({ orgId, jobId, billsTotal: _billsTotal, nortOn =
           // job) the bill it may be, for the two doors under the line.
           const differentDoc = out.kind === "already" && out.samePurchase ? out.docId : undefined;
           const sameBillId = out.kind === "already" && out.samePurchase && out.sameOnThisJob ? out.sameBillId : undefined;
-          say(p.id, p.name, sentence, out.tone, differentDoc, sameBillId);
+          say(p.id, p.name, sentence, out.tone, differentDoc, sameBillId, penLineOf(out));
         } catch (e) {
           // The pipeline answers in sentences; a throw is the network or a bug. Either way this
           // file's row says so and the loop goes on to the next — one bad file can't strand the
@@ -378,6 +379,7 @@ export function JobCostCapture({ orgId, jobId, billsTotal: _billsTotal, nortOn =
                 >
                   {l.text}
                 </span>
+                <PenNote text={l.pen} className="mt-0.5" />
                 {l.differentDoc && (
                   <span className="mt-1.5 flex flex-wrap items-center gap-2">
                     {l.sameBillId && (

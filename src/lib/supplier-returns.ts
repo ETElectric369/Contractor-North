@@ -83,7 +83,7 @@ function itemWords(desc: unknown): string {
  * HSG"), so one description has to hold the other as whole words - never a fuzzy score. At least
  * two words, so "wire" alone never claims every coil on the job.
  */
-function sameItem(a: string, b: string): boolean {
+export function sameItem(a: string, b: string): boolean {
   if (!a || !b) return false;
   const [short, long] = a.length <= b.length ? [a, b] : [b, a];
   if (short.split(" ").length < 2) return false;

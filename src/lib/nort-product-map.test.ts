@@ -478,3 +478,21 @@ describe("Nort's map after the pages (cn-v1172)", () => {
     expect(line("- Sales → Leads (/leads)")).toContain("The Sales badge is the number on this list plus the Closing estimates that need a person now");
   });
 });
+
+/**
+ * EVERYTHING BILLABLE (cn-v1181): the job page's money tile on a fixed-price job was Left to Bill; the
+ * owner renamed it and asked that it hold all the billing data. Nort says the new name and what it holds,
+ * held to the catalog the tile reads its words from.
+ */
+describe("Nort's map names the job's Everything Billable tile", () => {
+  const job = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Jobs → one job:"))!;
+  it("the new name, what is in it, and its buttons, in the tile's own words; never Left to Bill", () => {
+    const en = dict("en");
+    expect(NORT_PRODUCT_MAP).not.toContain("Left to Bill");
+    expect(job).toContain(`${en.jb_ebTitle} $X`);
+    expect(job).toContain("estimates plus approved change orders less the discounts given on sent bills");
+    expect(job).toContain(`with ${en.jb_ebBilled} and ${en.jb_ebStillToBill} under it`);
+    for (const k of ["jb_ebPartOfEstimate", "jb_ebBillChangeOrders", "jb_ebRequestNext"]) expect(job).toContain(en[k]);
+    expect(job).toContain("A paid bill does not finish a fixed-price job while anything is Still to Bill");
+  });
+});

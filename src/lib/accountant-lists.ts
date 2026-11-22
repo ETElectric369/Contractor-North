@@ -95,7 +95,8 @@ export type AccountantInputs = {
   /** Live bills (not set aside). */
   bills: { id: string; supplier: string | null; bill_number: string | null; bill_date: string | null; created_at: string | null; job_id: string | null; amount: unknown; category: string | null; on_shelf?: boolean | null }[];
   /** Their lines. */
-  lines: (BillLine & { id: string; bill_id: string })[];
+  /** `returned` (0417): the line went back to the supplier. Absent on a database before 0417. */
+  lines: (BillLine & { id: string; bill_id: string; returned?: boolean | null })[];
   jobs: { id: string; job_number: string | null; name: string | null }[];
   /** Non-void invoice lines that claim a bill (source_ids / import_key), with the invoice number. */
   claims: { source_ids: string[] | null; import_key: string | null; invoice_number: string | null }[];
@@ -267,6 +268,8 @@ export function toolsList(inp: AccountantInputs, w: Window, tz: string): CsvTabl
     // included. A line billed to the customer in full is on the report-only list, not here.
     for (const l of lines) {
       if (!isToolsLine(l) || !(billLineCost(l) > 0)) continue;
+      // A line that went back to the supplier is not a tool the company kept (skeptic #84, M1).
+      if ((l as { returned?: unknown }).returned === true) continue;
       const cost = cents(b.job_id ? shelfLotCost(l, lines) : ownCostWithTax(l, lines));
       if (!(cost > 0)) continue;
       total += cost;
@@ -382,12 +385,15 @@ export async function readAccountantInputs(supabase: Sb, orgId: string): Promise
   const claims: AccountantInputs["claims"] = [];
   for (let i = 0; i < ids.length; i += 200) {
     const chunk = ids.slice(i, i + 200);
-    const [ls, cs] = await Promise.all([
-      all<any>("bill_line_items", "id, bill_id, description, quantity, unit_price, amount, category, billable, billed_amount, sort_order", (q) => q.in("bill_id", chunk)),
+    const lineCols = "id, bill_id, description, quantity, unit_price, amount, category, billable, billed_amount, sort_order";
+    const [first, cs] = await Promise.all([
+      all<any>("bill_line_items", `${lineCols}, returned`, (q) => q.in("bill_id", chunk)),
       all<any>("invoice_items", "id, source_ids, import_key, invoices!inner(invoice_number, status)", (q) =>
         q.neq("invoices.status", "void").overlaps("source_ids", chunk),
       ),
     ]);
+    // A database before 0417 has no `returned`: read as before, the way stock_moves' credit column is.
+    const ls = first.error && isMissingCreditColumn(first.error) ? await all<any>("bill_line_items", lineCols, (q) => q.in("bill_id", chunk)) : first;
     if (ls.error || cs.error) return { ok: false, error: "The receipts couldn't be read just now. Nothing was made; try again." };
     lines.push(...ls.rows);
     for (const c of cs.rows) claims.push({ source_ids: c.source_ids ?? null, import_key: c.import_key ?? null, invoice_number: c.invoices?.invoice_number ?? null });

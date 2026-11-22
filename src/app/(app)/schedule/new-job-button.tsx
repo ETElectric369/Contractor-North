@@ -19,6 +19,7 @@ import {
   type NewJobCustomerOption,
 } from "@/lib/schedule-options";
 import { createJob } from "./actions";
+import { sayTie } from "@/lib/appointments/say-tie";
 import { createParamClaim } from "@/lib/param-claim";
 import { useLang } from "@/components/lang-provider";
 import { translator, fillText } from "@/lib/i18n";
@@ -315,6 +316,9 @@ export function NewJobButton({
         setError(res.error ?? t("ag_rail_somethingWrong"));
         return;
       }
+      // THE VISIT IT TIED, OR COULD NOT (skeptic #84, S6): said, never dropped. The form closes, so each
+      // sentence rides a toast that stays until read.
+      sayTie(toast, res);
       // Saved — drop the draft and reset so reopening doesn't offer a duplicate.
       draft.clear();
       setForm(emptyForm());

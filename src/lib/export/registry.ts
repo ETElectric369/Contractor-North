@@ -302,7 +302,7 @@ export const EXPORT_TABLES: readonly ExportTable[] = [
   {
     table: "bill_line_items",
     order: "id",
-    columns: ["id", "bill_id", "description", "quantity", "unit_price", "amount", "category", "billable", "billed_amount", "is_stock", "sort_order"],
+    columns: ["id", "bill_id", "description", "quantity", "unit_price", "amount", "category", "billable", "billed_amount", "is_stock", "sort_order", "pen_mark", "returned", "returned_credit_bill_id"],
   },
   { table: "bill_supplier_invoices", order: "id", columns: ["id", "bill_id", "supplier_invoice_id", "created_at"] },
   { table: "supplier_accounts", order: "id", columns: ["id", "name", "account_number", "branch_code", "on_account", "open_list_columns", "note", "created_by", "created_at"] },

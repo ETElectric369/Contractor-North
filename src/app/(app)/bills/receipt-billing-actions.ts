@@ -9,7 +9,9 @@ import { putOnShelf, restampLotsForBill, unshelveLot, type ShelfPick } from "@/l
 import { isMissingShelf } from "@/lib/job-cost";
 import { importCostsIntoInvoice } from "@/app/(app)/billing/actions";
 import { BRING_IN_NEW_WORK } from "@/lib/actuals-draw";
-import { round2, splitContradictsReceipt } from "./receipt-billing";
+import { creditExpectedOf, penMarkOf } from "@/lib/pen-marks";
+import { alreadyBilledSentence, readBillClaimants, sentClaimant } from "@/lib/bill-claimants";
+import { decideReceiptLine, round2, splitContradictsReceipt } from "./receipt-billing";
 
 export type Result = { ok: boolean; error?: string; note?: string };
 
@@ -76,12 +78,21 @@ export async function setReceiptLineBillable(lineId: string, billable: boolean):
   // second, independent statement that this row is visible to this org before anything is written.
   const { data: line } = await supabase
     .from("bill_line_items")
-    .select("id, bill_id, bills(job_id)")
+    .select("id, bill_id, bills(job_id, po_id)")
     .eq("id", lineId)
     .maybeSingle();
   if (!line) return { ok: false, error: "Couldn't find that receipt line. Reload the page and try again." };
   const rolled = await liveRollOnLine(supabase, ctx.orgId, lineId);
   if (rolled) return { ok: false, error: rolled };
+  // A RETURNED LINE IS NOT SWITCHED BACK ON HERE (skeptic #84, M3): 0417 refuses a line that is both
+  // returned and billed, and its check's words are not a person's. Kept is the way back. A database
+  // before 0417 has no such line (the column is missing), so the switch goes on as it always did.
+  if (billable) {
+    const said = await returnedRefusal(supabase, ctx.orgId, lineId);
+    if (said) return { ok: false, error: said };
+  }
+  const sent = await customerAlreadyBilled(supabase, line as LineOnBill);
+  if (sent) return { ok: false, error: sent };
 
   // org_id rides on the WRITE as well as the read. RLS already scopes this table, but a rule at
   // one read path is a convention, not a boundary (0173) — money columns get the explicit filter.
@@ -97,6 +108,116 @@ export async function setReceiptLineBillable(lineId: string, billable: boolean):
   const note = await restampAfterLineWrite(supabase, ctx.orgId, (line as { bill_id?: string | null }).bill_id);
   revalidatePath("/bills");
   if (jobId) revalidatePath(`/jobs/${jobId}`);
+  return note ? { ok: true, note } : { ok: true };
+}
+
+const CREDIT_FILED =
+  "The supplier's credit for this line is already filed, so it stays returned. To change it, delete that credit memo's bill first.";
+
+type LineOnBill = { bill_id?: string | null; bills?: { po_id?: string | null } | { po_id?: string | null }[] | null };
+
+/**
+ * A LINE THE CUSTOMER WAS ALREADY BILLED FOR IS NOT FLIPPED HERE (skeptic #84, S2), in both doors and
+ * before any write. While an invoice that went to the customer bills this bill or the order it
+ * delivered, the importer never reads the bill again, so a switch here moves no dollar the customer
+ * holds; and a line marked returned would then be closed by the credit memo with nothing credited to
+ * the customer. The card hides these doors on such a bill; this is the boundary for a stale page, a
+ * second tab or a caller yet to come. Read the one way every door reads it (lib/bill-claimants); a
+ * failed read refuses.
+ */
+async function customerAlreadyBilled(supabase: any, line: LineOnBill): Promise<string | null> {
+  const billId = String(line.bill_id ?? "");
+  const billRow = Array.isArray(line.bills) ? (line.bills[0] ?? null) : (line.bills ?? null);
+  const claims = await readBillClaimants(supabase, billId, billRow?.po_id ?? null);
+  if ("error" in claims) return `Couldn't check which invoices already bill this receipt, so nothing was changed: ${claims.error}`;
+  const held = sentClaimant(claims.rows);
+  return held ? alreadyBilledSentence(held.number, held.via === "po" ? "the order this receipt delivered" : "this receipt") : null;
+}
+
+const RETURNED_USE_KEPT = "This line went back to the supplier, so it can't be billed as it is. Press Kept on it if it was kept after all.";
+
+/** The returned line's one sentence for the Bill switch, or null. A failed read refuses. */
+async function returnedRefusal(supabase: any, orgId: string | null | undefined, lineId: string): Promise<string | null> {
+  let q = supabase.from("bill_line_items").select("id, returned").eq("id", lineId);
+  if (orgId) q = q.eq("org_id", orgId);
+  const { data, error } = await q.maybeSingle();
+  if (error) return (error as { code?: string }).code === "42703" ? null : `Couldn't read that line, so nothing was changed: ${dbError(error)}`;
+  return data?.returned === true ? RETURNED_USE_KEPT : null;
+}
+
+/**
+ * KEPT OR RETURNED: A PERSON'S ANSWER ON A BILL'S LINE (cn-v1181, lib/pen-marks; 0417).
+ *
+ * The reader marks a line it saw crossed out by hand, a quantity written over, or a mark it could not
+ * be sure of (`unclear`, held off the customer's bill and asked). This is the one door that answers it
+ * or changes the answer, beside setReceiptLineBillable and with that door's guards: staff only, a
+ * roll in stock on the line refuses, `org_id` on the write, read back, the rolls re-costed, the pages
+ * revalidated.
+ *
+ * RETURNED: off the customer's bill (`billable` false, `billed_amount` cleared) and, where the
+ * supplier owes a credit for it (creditExpectedOf: the paper's tender when there is a paper, else the
+ * bill), `returned` true until a credit memo closes it. An `unclear` mark becomes `struck`.
+ * KEPT: `returned` false, an `unclear` mark is cleared, and `billable` goes back to what the line
+ * would be with nothing stored (decideReceiptLine: a snack stays off).
+ * A line whose credit is already filed (`returned_credit_bill_id`) is never changed here.
+ */
+export async function setReceiptLineReturned(lineId: string, returned: boolean): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  if (!lineId) return { ok: false, error: "Couldn't tell which receipt line you meant." };
+
+  let lineRead = supabase
+    .from("bill_line_items")
+    .select("id, bill_id, description, category, billable, pen_mark, returned, returned_credit_bill_id")
+    .eq("id", lineId);
+  if (ctx.orgId) lineRead = lineRead.eq("org_id", ctx.orgId);
+  const { data: line, error: lineErr } = await lineRead.maybeSingle();
+  if (lineErr) return { ok: false, error: `Couldn't read that line, so nothing was changed: ${dbError(lineErr)}` };
+  if (!line) return { ok: false, error: "Couldn't find that receipt line. Reload the page and try again." };
+  if (line.returned_credit_bill_id) return { ok: false, error: CREDIT_FILED };
+  const rolled = await liveRollOnLine(supabase, ctx.orgId, lineId);
+  if (rolled) return { ok: false, error: rolled };
+
+  // IS A CREDIT TRACKED: the paper this bill was made from says how it was paid; with no paper, the
+  // bill says. A failed read refuses: guessing would track a credit nobody owes, or lose one.
+  let billRead = supabase.from("bills").select("id, job_id, po_id, status, supplier_account_id").eq("id", String(line.bill_id ?? ""));
+  if (ctx.orgId) billRead = billRead.eq("org_id", ctx.orgId);
+  const { data: bill, error: billErr } = await billRead.maybeSingle();
+  if (billErr) return { ok: false, error: `Couldn't read the bill this line is on, so nothing was changed: ${dbError(billErr)}` };
+  if (!bill) return { ok: false, error: "Couldn't find the bill this line is on. Reload the page and try again." };
+  const sent = await customerAlreadyBilled(supabase, { bill_id: String(bill.id), bills: { po_id: bill.po_id ?? null } });
+  if (sent) return { ok: false, error: sent };
+  let paperRead = supabase.from("organized_items").select("id, payment").eq("bill_id", String(bill.id));
+  if (ctx.orgId) paperRead = paperRead.eq("org_id", ctx.orgId);
+  const { data: papers, error: paperErr } = await paperRead.limit(1);
+  if (paperErr) return { ok: false, error: `Couldn't read the paper this bill came from, so nothing was changed: ${dbError(paperErr)}` };
+  const creditExpected = creditExpectedOf({
+    paperPayment: (papers as { payment?: string | null }[] | null)?.[0]?.payment ?? null,
+    billStatus: bill.status ?? null,
+    hasSupplierAccount: !!bill.supplier_account_id,
+  });
+
+  const pen = penMarkOf(line.pen_mark);
+  const patch = returned
+    ? { returned: creditExpected, billable: false, billed_amount: null, pen_mark: pen === "unclear" ? "struck" : pen }
+    : {
+        returned: false,
+        pen_mark: pen === "unclear" ? null : pen,
+        billable: decideReceiptLine(line.description, line.category, undefined).billable,
+      };
+
+  // The filter repeats the refusal above at the write: a credit filed between the read and this
+  // write leaves the line as it is, and the zero rows are said.
+  let write = supabase.from("bill_line_items").update(patch).eq("id", lineId).is("returned_credit_bill_id", null);
+  if (ctx.orgId) write = write.eq("org_id", ctx.orgId);
+  const { data, error } = await write.select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!data || data.length === 0) return { ok: false, error: "That line wasn't changed. Reload the page and try again." };
+
+  const note = await restampAfterLineWrite(supabase, ctx.orgId, String(line.bill_id ?? ""));
+  revalidatePath("/bills");
+  if (bill.job_id) revalidatePath(`/jobs/${bill.job_id}`);
   return note ? { ok: true, note } : { ok: true };
 }
 
@@ -281,8 +402,9 @@ export async function putRestOnShelf(input: ShelfPick): Promise<ReceiptLineUsage
    *     after the shelving (below), so it bills what the job used and nothing that went on the shelf.
    *     A line on it the office changed by hand never follows an import, so that draft refuses.
    */
-  const claims = await claimantsOfBill(ctx.supabase, billId, bill?.po_id ?? null);
-  if ("error" in claims) return { ok: false, error: claims.error };
+  const claims = await readBillClaimants(ctx.supabase, billId, bill?.po_id ?? null);
+  if ("error" in claims)
+    return { ok: false, error: `Couldn't check which invoices already bill this receipt, so nothing went into stock: ${claims.error}` };
   const held = claims.rows.find((c) => c.status !== "draft");
   if (held)
     return {
@@ -331,45 +453,4 @@ export async function takeRollOffShelf(lotId: string): Promise<Result> {
   const res = await unshelveLot(String(lotId ?? ""));
   if (!res.ok) return { ok: false, error: res.error };
   return { ok: true };
-}
-
-type BillClaimant = { invoiceId: string; number: string; status: string; edited: boolean; via: "bill" | "po" };
-
-/**
- * Every live invoice line that bills this receipt, or the purchase order it delivered: by the
- * source_ids claim (0255) or the older bill:/po: import key. A failed read refuses (never "no one").
- */
-async function claimantsOfBill(supabase: any, billId: string, poId: string | null): Promise<{ rows: BillClaimant[] } | { error: string }> {
-  if (!billId) return { error: "Couldn't tell which receipt this line is on. Reload and try again." };
-  const cols = "id, edited, invoice_id, invoices!inner(id, invoice_number, status)";
-  const reads: { via: "bill" | "po"; q: any }[] = [
-    { via: "bill", q: supabase.from("invoice_items").select(cols).contains("source_ids", [billId]).neq("invoices.status", "void").limit(200) },
-    { via: "bill", q: supabase.from("invoice_items").select(cols).like("import_key", `bill:${billId}%`).neq("invoices.status", "void").limit(200) },
-  ];
-  if (poId) {
-    reads.push(
-      { via: "po", q: supabase.from("invoice_items").select(cols).contains("source_ids", [poId]).neq("invoices.status", "void").limit(200) },
-      { via: "po", q: supabase.from("invoice_items").select(cols).like("import_key", `po:${poId}%`).neq("invoices.status", "void").limit(200) },
-    );
-  }
-  const answers = await Promise.all(reads.map((r) => r.q));
-  const rows: BillClaimant[] = [];
-  const seen = new Set<string>();
-  for (let i = 0; i < answers.length; i++) {
-    const { data, error } = answers[i] as { data: any[] | null; error: unknown };
-    if (error) return { error: `Couldn't check which invoices already bill this receipt, so nothing went into stock: ${dbError(error)}` };
-    for (const it of data ?? []) {
-      if (!it?.id || seen.has(String(it.id))) continue;
-      seen.add(String(it.id));
-      const inv = it.invoices ?? {};
-      rows.push({
-        invoiceId: String(it.invoice_id ?? inv.id),
-        number: String(inv.invoice_number || "An invoice"),
-        status: String(inv.status ?? ""),
-        edited: it.edited === true,
-        via: reads[i].via,
-      });
-    }
-  }
-  return { rows };
 }

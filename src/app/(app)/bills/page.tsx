@@ -90,6 +90,8 @@ import {
   updateSupplierAccount,
 } from "./supplier-actions";
 import { stopWaitingOnCredit } from "./waiting-credit-actions";
+import { penMarkOf } from "@/lib/pen-marks";
+import { paperOfBillForCard } from "./receipt-billing";
 
 export const dynamic = "force-dynamic";
 // Read Now and Read Again on a card read a paper inside this page's server actions: a 12-page CED
@@ -114,7 +116,7 @@ export const maxDuration = 300;
  * as billed, which is what the column defaults to; a bill that comes back with no account reads as
  * unfiled, which is what every bill was the day before 0270.
  */
-type BillColumns = { billable: boolean; supplierAccount: boolean; supersede: boolean; corrects: boolean; bothReal: boolean };
+type BillColumns = { billable: boolean; supplierAccount: boolean; supersede: boolean; corrects: boolean; bothReal: boolean; pen?: boolean };
 
 /** The one error shape a column the database hasn't got yet makes. Matched on the code first,
  *  because the message wording is PostgREST's to change; the names are the fallback for a proxy
@@ -125,7 +127,7 @@ function isMissingColumn(err: unknown): boolean {
   return (
     code === "42703" ||
     /does not exist/i.test(message) ||
-    /\b(billable|supplier_account_id|supplier_invoice_number|is_statement|superseded_by_bill_id|pricing_provisional|corrects_bill_id|amount_paid|both_real_at)\b/i.test(
+    /\b(billable|supplier_account_id|supplier_invoice_number|is_statement|superseded_by_bill_id|pricing_provisional|corrects_bill_id|amount_paid|both_real_at|pen_mark|returned_credit_bill_id)\b/i.test(
       message,
     )
   );
@@ -137,7 +139,7 @@ function isMissingColumn(err: unknown): boolean {
  *  the part of the job somebody had set. */
 async function readBills(supabase: Awaited<ReturnType<typeof createClient>>) {
   const columns = (o: BillColumns) =>
-    `id, supplier, bill_number, amount, status, bill_date, created_at, job_id, po_id, category, notes, scope_category${o.supplierAccount ? ", supplier_account_id, supplier_invoice_number, is_statement" : ""}${o.supersede ? ", superseded_by_bill_id, pricing_provisional" : ""}${o.corrects ? ", corrects_bill_id, amount_paid" : ""}${o.bothReal ? ", both_real_at" : ""}, jobs(job_number, name), bill_line_items(id, description, quantity, unit_price, amount, category${o.billable ? ", billable, billed_amount, is_stock" : ""}, sort_order)`;
+    `id, supplier, bill_number, amount, status, bill_date, created_at, job_id, po_id, category, notes, scope_category${o.supplierAccount ? ", supplier_account_id, supplier_invoice_number, is_statement" : ""}${o.supersede ? ", superseded_by_bill_id, pricing_provisional" : ""}${o.corrects ? ", corrects_bill_id, amount_paid" : ""}${o.bothReal ? ", both_real_at" : ""}, jobs(job_number, name), bill_line_items(id, description, quantity, unit_price, amount, category${o.billable ? ", billable, billed_amount, is_stock" : ""}${o.pen ? ", pen_mark, returned, returned_credit_bill_id" : ""}, sort_order)`;
   /**
    * BY THE DAY ON THE PAPER, NEWEST FIRST (Erik, 2026-10-04: "everything has a date and should be
    * filtered that way anyway, that makes the newest bills on top of the list and oldest at the
@@ -177,7 +179,10 @@ async function readBills(supabase: Awaited<ReturnType<typeof createClient>>) {
     { billable: false, supplierAccount: false, supersede: false, corrects: false, bothReal: false },
   ];
   let rung = 0;
-  let attempt = await read(ladder[0]);
+  // THE PEN MARKS (0417, cn-v1181) ride above the top rung: the receipt card reads them. A database
+  // behind the deploy drops them first, and the ladder below goes on as it always has.
+  let attempt = await read({ ...ladder[0], pen: true });
+  if (attempt.error && isMissingColumn(attempt.error)) attempt = await read(ladder[0]);
   while (rung + 1 < ladder.length && attempt.error && isMissingColumn(attempt.error)) {
     rung += 1;
     attempt = await read(ladder[rung]);
@@ -342,7 +347,7 @@ export default async function BillsPage({
     // lists only the files no bill holds yet (W1-32).
     supabase
       .from("organized_items")
-      .select("id, kind, category, bill_id, tied_bill_id, file_url, document_id")
+      .select("id, kind, category, bill_id, tied_bill_id, file_url, document_id, payment")
       .eq("org_id", orgId)
       .or("bill_id.not.is.null,tied_bill_id.not.is.null")
       .not("file_url", "is", null)
@@ -557,8 +562,17 @@ export default async function BillsPage({
     // it (the customer paid for the delivery through the PO line), so its lines are as settled as
     // a claimed receipt's, and Put the Rest on the Shelf on it would put a paid-for coil on the shelf.
     billedOn: billedOn.get(String(b.id)) ?? (b.po_id ? billedOn.get(String(b.po_id)) ?? null : null),
+    // PEN MARKS (cn-v1181): how the bill was bought words the card's Returned button (the server
+    // decides what is written), and a bill a paper made offers Read Again.
+    status: b.status ?? null,
+    hasSupplierAccount: !!b.supplier_account_id,
+    // The paper's own word on tender words Returned / Not Billed, as the server decides it (F11).
+    ...paperOfBillForCard(String(b.id), billTies as { bill_id?: string | null; payment?: string | null }[]),
     lines: (b.line_items ?? []).map((l: any) => ({
       id: String(l.id),
+      pen: penMarkOf(l.pen_mark),
+      returned: l.returned === true,
+      creditBillId: l.returned_credit_bill_id ?? null,
       description: String(l.description ?? ""),
       quantity: Number(l.quantity) || 0,
       amount: Number(l.amount) || 0,
