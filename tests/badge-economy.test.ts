@@ -172,7 +172,8 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
 
   it("the dock's chrome badge display-caps at 9+", () => {
     const dockSrc = src("components/app-shell/dock.tsx");
-    expect(dockSrc).toContain('badge > 9 ? "9+" : badge');
+    // One drawing for the rail and the phone's bar since cn-v1180 (TileBadge, tileBadgeText).
+    expect(dockSrc).toContain('badge > 0 ? (badge > 9 ? "9+" : String(badge)) : null');
   });
 
   it("the morning digest never writes the pool cut itself: it calls THE shared one, so the push can't drift from the card", () => {
@@ -215,8 +216,10 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(digestSrc).toMatch(/notifyPeople\(\s*org\.id,\s*\[personId\],\s*"day_ahead",/);
     expect(digestSrc).not.toContain("sendPushToProfiles(");
     expect(digestSrc).not.toContain("scheduledJobIds");
-    // The decisions headline is the card's own name: "Needs You: 3", never "Needs action: 3 items".
-    expect(digestSrc).toContain("title: `Needs You: ${decisions}`");
+    // The decisions headline is the card's own name, never "Needs action: 3 items"; and no number
+    // (cn-v1180, audit C41): its head-count was a different set from the board's own total.
+    expect(digestSrc).toContain('title: "Needs You",');
+    expect(digestSrc).not.toContain("Needs You: ${");
     expect(digestSrc).not.toContain("Needs action:");
   });
 

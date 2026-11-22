@@ -25,16 +25,25 @@ const ENGLISH: Words = translator("en");
  */
 export async function markLeadNotSold(
   lead: { id: string; name: string; status: string },
-  deps: { setStatus: (id: string, status: string) => Promise<{ ok: boolean; error?: string }>; toast: Toast; refresh: () => void; t?: Words },
+  deps: {
+    setStatus: (id: string, status: string, opts?: { withUndo?: boolean }) => Promise<{ ok: boolean; error?: string; note?: string }>;
+    toast: Toast;
+    refresh: () => void;
+    t?: Words;
+  },
 ): Promise<void> {
   const t = deps.t ?? ENGLISH;
   const was = lead.status;
-  const res = await deps.setStatus(lead.id, "lost");
+  // This door offers the Undo, so the server's sentence may say what Undo cannot bring back (skeptic #83, S6).
+  const res = await deps.setStatus(lead.id, "lost", { withUndo: true });
   if (!res?.ok) {
     deps.toast(res?.error ?? t("ld_couldntMarkLost"), "error");
     return;
   }
-  deps.toast(fillText(t("ld_markedLost"), { name: lead.name }), "success", {
+  // The server's note rides on the same toast (cn-v1180): a pick-a-time link Not Sold withdrew, which
+  // is the one part its Undo cannot put back, and the sentence says so.
+  const said = [fillText(t("ld_markedLost"), { name: lead.name }), res.note].filter(Boolean).join(". ");
+  deps.toast(said, "success", {
     label: t("ld_btn_undo"),
     onClick: () => {
       void (async () => {

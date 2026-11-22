@@ -389,6 +389,53 @@ describe("activeRowHref — one lit row, or none", () => {
   it("a route nothing owns still lights nothing rather than guess", () => {
     expect(activeRowHref(rows("invoices", true), "/work-orders/abc", "/work-orders/abc")).toBeUndefined();
   });
+
+  // cn-v1180, audit C2: a list's own detail pages lit the tile and no row (a lead's file, an
+  // estimate's page and New, a customer's page). Rule 5 lights the ONE query-less row the route sits
+  // under. The table walks every row family that has detail pages; a visit's page is told by its page.
+  it("a list's detail pages light that list's row (path -> lit row)", () => {
+    const staff = visibleDock({ isStaff: true });
+    const lit = (current: string) => {
+      const { section, rowHref } = activeNav({ pathname: basePath(current), current }, staff);
+      return `${section?.key ?? "-"}>${rowHref ?? "-"}`;
+    };
+    const table: [string, string][] = [
+      ["/leads/abc123", "sales>/leads"],
+      ["/quotes/abc123", "sales>/quotes"],
+      ["/quotes/new", "sales>/quotes"],
+      ["/quotes/new?capture=abc123", "sales>/quotes"],
+      ["/crm/abc123", "invoices>/crm"],
+      ["/billing/abc123", "invoices>/billing"],
+      ["/forms/abc123", "office>/forms"],
+      ["/analytics/accountant", "invoices>/analytics"],
+      // A job's page lights All, the one query-less row; the statuses carry a query and never claim it.
+      ["/jobs/abc123", "jobs>/jobs"],
+      // An `owns` claim is asked first and still answers.
+      ["/purchasing/abc123", "invoices>/bills"],
+      ["/timeclock/pay", "invoices>/timeclock"],
+      ["/tasks/site-prep", "today>/planner"],
+      // The rows themselves are unchanged.
+      ["/leads", "sales>/leads"],
+      ["/inspections", "sales>/inspections"],
+      ["/closing", "sales>/closing"],
+      ["/jobs?status=on_hold", "jobs>/jobs?status=on_hold"],
+      // A visit's page is told by the page; a route no row sits over lights nothing.
+      ["/appointments/abc123", "->-"],
+      ["/work-orders/abc123", "->-"],
+    ];
+    for (const [path, want] of table) expect(lit(path), path).toBe(want);
+  });
+
+  it("two rows that could claim a detail route light nothing rather than guess", () => {
+    const rowsTwo = [
+      { id: "a", label: "A", icon: rows("jobs", true)[0].icon, href: "/x" },
+      { id: "b", label: "B", icon: rows("jobs", true)[0].icon, href: "/x/y" },
+    ];
+    // /x/y/z sits under both /x and /x/y.
+    expect(activeRowHref(rowsTwo, "/x/y/z", "/x/y/z")).toBeUndefined();
+    // /x/q sits under /x alone.
+    expect(activeRowHref(rowsTwo, "/x/q", "/x/q")).toBe("/x");
+  });
 });
 
 describe("the section nav must be REACHABLE at every width (cn-v660 regression)", () => {
@@ -724,7 +771,8 @@ describe("activeNav — the pathname first, then the home the page declared, els
 
   it("a pathname that matches a cluster IGNORES the declared home", () => {
     for (const home of ["sl-inspections", "s-week", "t-day", "m-inv", "no-such-row"]) {
-      expect(lit(at("/billing/abc123", home)), home).toBe("invoices>-");
+      // An invoice's own page lights Invoices by its URL (cn-v1180, rule 5), whatever is declared.
+      expect(lit(at("/billing/abc123", home)), home).toBe("invoices>/billing");
       expect(lit(at("/billing", home)), home).toBe("invoices>/billing");
       expect(lit(at("/jobs", home, "/jobs?status=in_progress")), home).toBe("jobs>/jobs?status=in_progress");
       expect(lit(at("/inspections", home)), home).toBe("sales>/inspections");

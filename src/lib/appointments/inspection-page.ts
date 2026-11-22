@@ -87,6 +87,13 @@ export type HeaderStep = "mark_done" | "start_estimate" | "open_estimate" | null
  *   completed, no outcome, Estimates on, none live, no job start_estimate the Inspector's own door
  *   anything else                                       null
  *
+ * THE ESTIMATE STEPS ARE A SALES VISIT'S ONLY (cn-v1180, audit C12). The city's FINAL inspection is an
+ * inspection by type (statuses isInspectionType), so a done one with no job was handed Start the
+ * Estimate, a price for the authority's own visit. It is asked by isWonVisitType now, the one rule the
+ * Won door, the server and the lists read for "a visit that can be sold": a final inspection keeps Mark
+ * Inspection Done while it is booked (the page draws no other done door for an inspection) and is
+ * offered nothing after it.
+ *
  * A COMPLETED INSPECTION WITH A JOB and no live estimate gets no boxed step. The Inspections list
  * (lib/inspections bucketInspections) files such a visit as settled: "a visit whose work went straight
  * to a JOB was answered better than any estimate could", and the owner's report was that list
@@ -109,6 +116,8 @@ export type HeaderStep = "mark_done" | "start_estimate" | "open_estimate" | null
 export function inspectionHeaderStep(f: {
   isStaff: boolean;
   isInspection: boolean;
+  /** appointments.type: the estimate steps ask isWonVisitType of it (a sales visit, never a final inspection). */
+  type: string | null;
   status: string | null;
   outcome: string | null;
   estimatesOn: boolean;
@@ -120,6 +129,7 @@ export function inspectionHeaderStep(f: {
   if (!f.isStaff || !f.isInspection) return null;
   if (f.status === "scheduled" || f.status === "proposed") return "mark_done";
   if (f.status !== "completed" || f.outcome || !f.estimatesOn) return null;
+  if (!isWonVisitType(f.type)) return null;
   if (f.estimate?.live) return "open_estimate";
   return f.hasJob || f.leadHasEstimate ? null : "start_estimate";
 }

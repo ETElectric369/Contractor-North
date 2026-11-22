@@ -12,6 +12,7 @@ import { DayField } from "@/components/day-field";
 import { createInspectionNow } from "../appointments/actions";
 import { convertInquiry, suggestVisitSlots } from "./actions";
 import { useLang } from "@/components/lang-provider";
+import { useToast } from "@/components/toast";
 import { translator, fillText } from "@/lib/i18n";
 
 /** A sentence with one person's name (or a number) set in it as a node: ONE key, its {slot} split. */
@@ -83,6 +84,7 @@ export function LeadScheduleSheet({
   const lang = useLang();
   const t = translator(lang);
   const router = useRouter();
+  const toast = useToast();
   const [inspectDate, setInspectDate] = useState(defaultInspectDate());
   const [mode, setMode] = useState<"book" | "pick" | "now">("book");
   const [slots, setSlots] = useState(defaultSlots);
@@ -111,6 +113,9 @@ export function LeadScheduleSheet({
         setBusy(null);
         return;
       }
+      // A pick-a-time link sent earlier was withdrawn (or could not be): said, never silent (cn-v1180).
+      if (res.warning) toast(res.warning, "error");
+      else if (res.note) toast(res.note, "info");
       router.push(`/appointments/${res.id}`);
       return;
     }
@@ -129,6 +134,7 @@ export function LeadScheduleSheet({
       return;
     }
     if (res.ok && res.redirect) {
+      if (res.note) toast(res.note, res.pickLink === "notWithdrawn" ? "error" : "info");
       router.push(res.redirect);
       return;
     }

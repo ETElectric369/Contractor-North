@@ -74,12 +74,13 @@ function pickRanOut(visit: Pick<LeadVisitRow, "status" | "starts_at">, nowMs: nu
  * or done and not yet written up. It does not stand once it is cancelled or has an ending. A status or
  * an ending the rule has not been taught stands for nothing (see the header: offered, never hidden).
  *
- * WON IS AN ENDING, AND IT DOES NOT STAND (cn-v1171, skeptic #74). The win is finished by picking its
- * job, which converts the lead, and a converted lead is on no list whatever its visits say. A visit
- * marked Won with no job picked (the ending card closed early, or the assistant's outcome door) left
- * its lead open, kept off the Leads list by this rule and filed off the Inspections list by its
- * ending: on no list at all. Now that lead is back on the Leads list, named in `wonPending` so its row
- * can say what is left to do. In doubt a lead is offered, never hidden.
+ * WON IS AN ENDING, AND IT DOES NOT STAND (cn-v1171, skeptic #74), with one exception since cn-v1175:
+ * a SALES visit (an inspection, an estimate visit) marked Won with no job picked stands, because it is
+ * on the Inspections list asking for its job, and its lead waits with it (one list per person). Any
+ * other win does not stand: a call or a meeting marked Won, or a visit marked Won that has its job. A
+ * win is finished by its job converting the lead, and a converted lead is on no list whatever its
+ * visits say; a lead still open behind such a win is back on the Leads list, named in `wonPending`
+ * (see visitWasWon for what that set holds today). In doubt a lead is offered, never hidden.
  *
  * A VISIT WAITING ON THE CUSTOMER'S PICK STANDS ONLY UNTIL THE FIRST TIME OFFERED GOES BY (skeptic
  * #73). While the customer has times to choose from there is nothing for the office to do, so the
@@ -113,8 +114,16 @@ export function visitStands(
   return visitSettled({ type: visit.type, starts_at: visit.starts_at, inquiry_id: null, job_id: visit.job_id ?? null, outcome: visit.outcome }) === null;
 }
 
-/** A visit on the books that was marked Won: what `wonPending` collects. Its lead is converted when
- *  the job is picked; until then nothing else would say the win is unfinished. */
+/**
+ * A visit on the books that was marked Won: what `wonPending` collects among visits that do NOT stand.
+ * WHAT THAT IS TODAY (cn-v1180, A7): a Won sales visit with no job stands (visitStands), so its lead is
+ * never in the set; what is left is a call or a meeting marked Won, and a visit marked Won that has its
+ * job while its lead was not converted (the job's stamp on the lead did not land). Each leaves an open
+ * lead behind a win, and the Leads row says so (ld_wonPending: "A call or visit from this lead was
+ * marked Won …"), never "its inspection … no job was picked", which stopped being true in cn-v1175.
+ * The set is KEPT, not narrowed: lib/leads/not-sold reads it too, so that one visit's Not Sold never
+ * marks a lead Not Sold when another of its visits was won ("unused is not useless").
+ */
 export function visitWasWon(visit: Pick<LeadVisitRow, "status" | "outcome">): boolean {
   return STANDING_STATUSES.has(String(visit.status ?? "")) && visit.outcome === "won";
 }
@@ -165,8 +174,8 @@ export type StandingRead = {
   /** Leads with nothing standing whose pick-a-time request ran out unanswered: on the list, and
    *  their row says the times were sent. */
   pickPending: ReadonlySet<string>;
-  /** Leads with nothing standing that have a visit marked Won: on the list (they are still open, so
-   *  no job was picked), and their row says so. */
+  /** Leads with nothing standing that have a visit marked Won (a call or a meeting, or a visit with its
+   *  job: see visitWasWon): on the list, since they are still open, and their row says so. */
   wonPending: ReadonlySet<string>;
 };
 
@@ -250,7 +259,7 @@ export type NewIntake<T> = {
   unread: ReadonlySet<string>;
   /** Ids in `leads` whose pick-a-time request ran out unanswered (see `visitStands`). */
   pickPending: ReadonlySet<string>;
-  /** Ids in `leads` that have a visit marked Won and no job picked (see `visitStands`). */
+  /** Ids in `leads` that have a visit marked Won that does not stand (see `visitWasWon`). */
   wonPending: ReadonlySet<string>;
   /** The lead read's own failure. `leads` is then empty and the caller must say it could not load:
    *  an empty list and a failed read are not the same answer. */

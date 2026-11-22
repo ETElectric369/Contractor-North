@@ -6,7 +6,8 @@ import { AFFORDANCES, KIND_GROUP, appointmentAffordances, sortActionItems, waiti
 import { QUOTE_EXPIRY_SOON_DAYS, dueClock, levelOf, summarize, withoutMoneyForTech } from "./needs-you-rule";
 import { isOlder, splitKeptCount } from "./older";
 import { loadCarriedOver, needsYouWithoutCarried } from "@/lib/schedule/carried-over";
-import { bucketInspections, inspectionLabel } from "@/lib/inspections";
+import { bucketInspections, captureQuoteId, inspectionLabel } from "@/lib/inspections";
+import { readAllPages } from "@/lib/read-all-pages";
 import { SALES_VISIT_TYPES, VISIT_CLOSED_JOB_STATUSES, leadClosedAtFrom, visitSettled } from "@/lib/appointments/visit-settled";
 import { leadRidesItsWriteUp, lessRidden } from "./lead-rides-its-writeup";
 import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES, visitTitle } from "@/lib/statuses";
@@ -526,6 +527,31 @@ async function buildActionItems(ctx: {
       ? inChunks(ids, (chunk) => supabase.from("jobs").select("inquiry_id, created_at").in("inquiry_id", chunk).limit(1000) as PromiseLike<Read>)
       : { data: [], error: null };
   });
+  // THE "WRITTEN UP" SIGNAL — an estimate linked to the lead, the job, or (for a lead-less Inspect-now)
+  // the capture's own quote id — read for THE VISITS IN PLAY ONLY (cn-v1180, audit E5). It was every
+  // estimate of the company, unordered, cut at 2,000: past that, a visit whose estimate fell outside the
+  // cut asked to be written up here while the Inspections page, which reads its links whole, filed it.
+  // Now `in` on those visits' leads, jobs and capture ids, chunked, each chunk read through every page
+  // (lib/read-all-pages), so nothing is cut in silence. A failed read is filed and links nothing: the
+  // visit is offered, never hidden on a guess.
+  const inspQuoteP: Promise<Read> = inspP.then(async (r) => {
+    const visits = (r.data ?? []) as any[];
+    const by = (column: "inquiry_id" | "job_id" | "id", ids: string[]) =>
+      inChunks(ids, async (chunk) => {
+        const all = await readAllPages<unknown>((from, to) =>
+          supabase.from("quotes").select("id, inquiry_id, job_id").in(column, chunk).order("id").range(from, to) as PromiseLike<{ data: unknown[] | null; error: unknown }>,
+        );
+        return { data: all.rows, error: all.error };
+      });
+    const [byLead, byJob, byId] = await Promise.all([
+      by("inquiry_id", visits.map((a) => (a?.inquiry_id ? String(a.inquiry_id) : ""))),
+      by("job_id", visits.map((a) => (a?.job_id ? String(a.job_id) : ""))),
+      by("id", visits.map((a) => captureQuoteId(a?.capture) ?? "")),
+    ]);
+    const error = byLead.error ?? byJob.error ?? byId.error ?? null;
+    if (error) reportError("action-items.writeUp.estimateLinks", error);
+    return { data: [...(byLead.data ?? []), ...(byJob.data ?? []), ...(byId.data ?? [])], error };
+  });
   // ── Service calls / job-days that HAPPENED and have no bill — THE NORA HOLE — and THE JOB-SHAPED
   // NORA HOLE (a job flipped to complete through the status dropdown earned money the visits never
   // show). READ WHOLE (0371, done-not-billed.ts): public.needs_you_done_not_billed tests billed-or-not
@@ -832,9 +858,8 @@ async function buildActionItems(ctx: {
           .limit(50)
       : empty,
     inspP,
-    // The "written up" signal — an estimate linked to the lead, the job, or (for a lead-less
-    // Inspect-now) the capture's own quote id.
-    isStaff && feederOn("inspection_writeup", features) ? supabase.from("quotes").select("id, inquiry_id, job_id").limit(2000) : empty,
+    // The "written up" signal (inspQuoteP above): the estimates linked to these visits only.
+    inspQuoteP,
     // MONEY IS AN OUTCOME (0205): a job carrying real billing is finished. Draft invoices don't
     // count — a draft is work in progress, not a decision. (Also: an estimate draft whose job has
     // real billing is no longer an estimate to send.) Done, Not Billed asks this in SQL now (0371);
@@ -1920,8 +1945,10 @@ async function buildActionItems(ctx: {
       const until = j.hold_until ? String(j.hold_until).slice(0, 10) : null;
       const state = heldJobState(until, todayStr);
       const reason = String(j.hold_reason ?? "").trim();
+      // No reason saved: a key the fold says in the reader's language (whyKey, cn-v1180), the way the Now
+      // row's textKey does; `why` keeps the English for every other reader of the row.
       if (withDay && state === "later") {
-        const row = waitingRow({ id: `onhold-${j.id}`, kind: "job_on_hold", title: jobWords(j), why: reason || "No reason saved", backOn: until, href: `/jobs/${j.id}` });
+        const row = waitingRow({ id: `onhold-${j.id}`, kind: "job_on_hold", title: jobWords(j), why: reason || "No reason saved", ...(reason ? {} : { whyKey: "ny_w_noReason" }), backOn: until, href: `/jobs/${j.id}` });
         if (row) {
           waiting.push(row);
           continue;
@@ -1931,7 +1958,7 @@ async function buildActionItems(ctx: {
       // (types.ts waitingRowNoDay, whose only caller this is). The legacy read (no hold-day columns)
       // never comes here: it cannot tell "no day" from "no column", so its rows stay on Now as before.
       if (withDay && state === "no_day") {
-        const row = waitingRowNoDay({ id: `onhold-${j.id}`, kind: "job_on_hold", title: jobWords(j), why: reason || "No reason saved", href: `/jobs/${j.id}` });
+        const row = waitingRowNoDay({ id: `onhold-${j.id}`, kind: "job_on_hold", title: jobWords(j), why: reason || "No reason saved", ...(reason ? {} : { whyKey: "ny_w_noReason" }), href: `/jobs/${j.id}` });
         if (row) {
           waiting.push(row);
           continue;

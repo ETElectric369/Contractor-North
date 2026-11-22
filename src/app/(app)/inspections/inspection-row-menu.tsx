@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { MoveToDay, type MoveToDayResult } from "@/components/move-to-day";
 import { RowMoreSheet, SHEET_ROW, SheetLink } from "@/components/row-more-sheet";
 import { moveVisitToDay } from "../planner/agenda-move";
-import { rescheduleAppointment, setAppointmentOutcome, setAppointmentStatus, wontHappenAppointment } from "../appointments/actions";
+import { putVisitBackOnSchedule, rescheduleAppointment, setAppointmentOutcome, setAppointmentStatus, wontHappenAppointment } from "../appointments/actions";
 import type { ListRow, MenuDoor } from "./list-rows";
 import { VisitOfferAsk, tieVisitToJob } from "./visit-offer-button";
 import { fillText } from "@/lib/i18n";
@@ -147,7 +147,7 @@ export async function markItHappened(
 export async function markItLost(
   id: string,
   io: DoorIo,
-  deps: { setOutcome: typeof setAppointmentOutcome; setStatus?: typeof setAppointmentStatus } = { setOutcome: setAppointmentOutcome, setStatus: setAppointmentStatus },
+  deps: { setOutcome: typeof setAppointmentOutcome; putBack?: typeof putVisitBackOnSchedule } = { setOutcome: setAppointmentOutcome, putBack: putVisitBackOnSchedule },
 ): Promise<void> {
   let res: Awaited<ReturnType<typeof setAppointmentOutcome>>;
   try {
@@ -160,7 +160,9 @@ export async function markItLost(
   io.close();
   const a = notSoldAnswer(res);
   // A visit answered Not Sold before its day came off the schedule (cn-v1175, R8): the Undo puts it back
-  // by the visit page's one rule (wontHappenUndo: a pick-a-time link withdrawn stays withdrawn).
+  // through the visit page's own door back (putVisitBackOnSchedule): a day still ahead keeps its day; a
+  // visit that was waiting on the customer's pick had no agreed day and comes back waiting for one, never
+  // Scheduled on a time nobody picked (skeptic #83, S1). Where it went is said.
   const off = res.offSchedule ?? null;
   const undo = {
     label: io.t("ag_btn_undo"),
@@ -168,18 +170,19 @@ export async function markItLost(
       void deps
         .setOutcome(id, null)
         .then(async (r) => {
-          if (r.ok && off && deps.setStatus) {
-            const back = await deps.setStatus(id, wontHappenUndo(off.previousStatus, io.lang, io.t).status);
+          if (r.ok && off && deps.putBack) {
+            const back = await deps.putBack(id, { previousStatus: off.previousStatus });
             if (!back.ok) return { ...r, warning: back.error ?? io.t("vp_thatDidntSave") };
+            return { ...r, where: back.message };
           }
           return r;
         })
         .then(
-        (r) => {
+        (r: Awaited<ReturnType<typeof setAppointmentOutcome>> & { where?: string }) => {
           if (!r.ok) io.toast(r.error ?? io.t("vp_thatDidntSave"), "error");
           else {
             const k = undoneKey(r);
-            io.toast(k ? io.t(k) : io.t("ip_backWhereItWas"), "success");
+            io.toast(`${k ? io.t(k) : io.t("ip_backWhereItWas")}${r.where ? ` ${r.where}` : ""}`, "success");
             if (r.warning) io.toast(r.warning, "error");
           }
           io.refresh();
@@ -190,7 +193,10 @@ export async function markItLost(
   };
   io.toast(io.t(a.said), "success", undo);
   if (a.warning) io.toast(a.warning, "error");
-  if (off?.note) io.toast(off.note, "info", undefined, { sticky: true });
+  // The visit's own withdrawn link and, when its lead went Not Sold with it, the lead's other links
+  // (skeptic #83, S9): one sticky note, kept until it is read.
+  const links = [off?.note, res.note].filter(Boolean).join(" ");
+  if (links) io.toast(links, "info", undefined, { sticky: true });
   io.refresh();
 }
 

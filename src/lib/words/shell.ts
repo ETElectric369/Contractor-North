@@ -127,6 +127,8 @@ export const words: WordCatalog = {
     "sh_dock_lp-accountant": "Download for Your Accountant",
     "sh_dock_lp-export": "Download Everything",
     sh_home: "Home",
+    // A tile's badge, said (dock.tsx tileName, cn-v1180): the rail and the phone bar read the same words.
+    sh_tileOpen: "{tile}, {n} open",
     sh_sectionPages: "{section} pages",
     sh_close: "Close",
 
@@ -498,6 +500,7 @@ export const words: WordCatalog = {
     "sh_dock_lp-accountant": "Descargar para Tu Contador",
     "sh_dock_lp-export": "Descargar Todo",
     sh_home: "Inicio",
+    sh_tileOpen: "{tile}, {n} pendientes",
     sh_sectionPages: "Páginas de {section}",
     sh_close: "Cerrar",
 

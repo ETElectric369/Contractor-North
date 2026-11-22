@@ -178,18 +178,26 @@ export function NotSoldRow({ id }: { id: string }) {
                 void (async () => {
                   const r = await setAppointmentOutcome(id, null);
                   let failed = r.ok ? null : (r.error ?? t("vp_thatDidntSave"));
+                  let where: string | undefined;
                   if (r.ok && off) {
-                    const back = await setAppointmentStatus(id, wontHappenUndo(off.previousStatus, lang, t).status);
+                    // The visit page's own door back (putVisitBackOnSchedule): a day still ahead keeps its day; a
+                    // visit that was waiting on the customer's pick had no agreed day, so it comes back waiting
+                    // for one, never Scheduled on a time the customer never picked (skeptic #83, S1). Said.
+                    const back = await putVisitBackOnSchedule(id, { previousStatus: off.previousStatus });
                     if (!back.ok) failed = back.error ?? t("vp_couldntPutItBack");
+                    else where = back.message;
                   }
-                  toast(failed ?? t(undoneKey(r) ?? "vp_answerCleared"), failed ? "error" : "success");
+                  toast(failed ?? `${t(undoneKey(r) ?? "vp_answerCleared")}${where ? ` ${where}` : ""}`, failed ? "error" : "success");
                   if (r.ok && r.warning) toast(r.warning, "error");
                   router.refresh();
                 })();
               },
             });
             if (a.warning) toast(a.warning, "error");
-            if (off?.note) toast(off.note, "info", undefined, { sticky: true });
+            // The visit's own withdrawn link (off.note) and, when its lead went Not Sold with it, the
+            // lead's other links (res.note, skeptic #83 S9): one sticky note, kept until it is read.
+            const links = [off?.note, res.note].filter(Boolean).join(" ");
+            if (links) toast(links, "info", undefined, { sticky: true });
             router.refresh();
           })
         }

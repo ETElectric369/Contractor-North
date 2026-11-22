@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { createInspectionNow } from "./actions";
 import { useLang } from "@/components/lang-provider";
 import { translator } from "@/lib/i18n";
+import { useToast } from "@/components/toast";
 
 /**
  * THE shared "new inspection" affordance (Erik: "sometimes we're onsite already — too many
@@ -31,6 +32,7 @@ export function NewInspectionButton({
   variant?: "outline";
 }) {
   const router = useRouter();
+  const toast = useToast();
   const t = translator(useLang());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +46,11 @@ export function NewInspectionButton({
       setBusy(false);
       return;
     }
+    // THE LEAD'S PICK-A-TIME LINK WENT WITH THIS (cn-v1180): starting the inspection now is the lead
+    // getting its time another way, so the server withdrew any link still out. Said before the page
+    // changes (the toast outlives the navigation); a link that could NOT be withdrawn is an error.
+    if (res.warning) toast(res.warning, "error");
+    else if (res.note) toast(res.note, "info");
     // Straight to the capture surface — busy stays on until the nav lands.
     router.push(`/appointments/${res.id}`);
   }

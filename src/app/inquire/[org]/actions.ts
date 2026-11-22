@@ -42,7 +42,7 @@ export interface PublicInquiryPayload {
 export async function submitPublicInquiry(
   orgId: string,
   payload: PublicInquiryPayload,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; leadId?: string } | { ok: false; error: string }> {
   if (payload?.hp) return { ok: true }; // bot trap — pretend success, write nothing
 
   const name = String(payload?.name ?? "").trim().slice(0, 120);
@@ -82,8 +82,55 @@ export async function submitPublicInquiry(
   });
   if (error) return { ok: false, error: "Couldn't send that — please try again." };
 
-  void notifyNewInquiry(org);
-  return { ok: true };
+  // THE LEAD THIS SUBMIT WROTE (cn-v1180, audit A6 and A2). submit_inquiry returns nothing, so the
+  // row is read back: this company, this door, the last two minutes, and the exact values this call
+  // just sent (the function's own trims). Its id goes back to THIS browser, the one key its "Request
+  // a Site Visit" tap attaches by, and the office alert opens that lead's own file.
+  const mine = await readBackLead(sb, org, {
+    name,
+    email: email || null,
+    phone: phone || null,
+    // As the database stored it: left(btrim(x), 2000) counts CHARACTERS, where a JS slice counts UTF-16
+    // units, so a long message with an emoji in it never matched (skeptic #83, S8).
+    message: Array.from(String(payload?.message ?? "").trim()).slice(0, 2000).join("") || null,
+  });
+  void notifyNewInquiry(org, mine);
+  return mine ? { ok: true, leadId: mine.id } : { ok: true };
+}
+
+type WrittenLead = { id: string; name: string | null; message: string | null; created_at: string | null };
+
+/**
+ * The row submit_inquiry just wrote, or null. Matched in JS (nothing typed is built into a filter),
+ * newest first, among this company's public-form leads of the last two minutes. Two identical
+ * submissions in the same two minutes are the same words from the same door: either id is theirs.
+ */
+async function readBackLead(
+  sb: ReturnType<typeof createServiceClient>,
+  orgId: string,
+  sent: { name: string; email: string | null; phone: string | null; message: string | null },
+): Promise<WrittenLead | null> {
+  try {
+    const { data } = await sb
+      .from("inquiries")
+      .select("id, name, email, phone, message, created_at")
+      .eq("org_id", orgId)
+      .eq("source", "public_form")
+      .gte("created_at", new Date(Date.now() - 120_000).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(25);
+    const norm = (v: unknown) => String(v ?? "").trim() || null;
+    const hit = ((data ?? []) as (WrittenLead & { email: string | null; phone: string | null })[]).find(
+      (r) =>
+        norm(r.name) === norm(sent.name.slice(0, 200)) &&
+        norm(r.email) === norm(sent.email) &&
+        norm(r.phone) === norm(sent.phone) &&
+        norm(r.message) === norm(sent.message),
+    );
+    return hit ? { id: hit.id, name: hit.name, message: hit.message, created_at: hit.created_at } : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -98,17 +145,25 @@ export async function submitPublicInquiry(
  * 2-minute window after any real inquiry, anyone holding the action id could re-fire the push to
  * that tenant's whole office, once per request. It has exactly one caller, right above.
  */
-async function notifyNewInquiry(orgId: string): Promise<void> {
+async function notifyNewInquiry(orgId: string, written: WrittenLead | null): Promise<void> {
   try {
     if (!orgId) return;
     const sb = createServiceClient();
-    const { data: inq } = await sb
-      .from("inquiries")
-      .select("id, name, message, created_at")
-      .eq("org_id", orgId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // The row this submit wrote when it was read back; otherwise the company's newest, as before.
+    const inq =
+      written ??
+      ((
+        await sb
+          .from("inquiries")
+          .select("id, name, message, created_at")
+          .eq("org_id", orgId)
+          // At least THIS door's own rows (skeptic #83, S8): the bell must never name an office lead or
+          // another door's, which are not what this alert announces.
+          .eq("source", "public_form")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      ).data as WrittenLead | null);
     if (!inq?.created_at) return;
     if (Date.now() - new Date(inq.created_at).getTime() > 120_000) return;
 
@@ -121,7 +176,8 @@ async function notifyNewInquiry(orgId: string): Promise<void> {
     await notifyPeople(orgId, await orgStaffIds(orgId), "inquiry", {
       title: "New inquiry",
       body: snippet ? `${who}: ${snippet}` : `${who} sent a new request`,
-      url: requestHref(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).features),
+      // Leads on: the lead's own file (cn-v1180, audit A2), the one this submit wrote.
+      url: requestHref(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).features, written?.id),
     });
   } catch {
     /* best-effort — never surface to the public form */

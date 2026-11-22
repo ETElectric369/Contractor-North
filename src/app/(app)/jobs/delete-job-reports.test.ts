@@ -19,7 +19,15 @@ vi.mock("@/lib/observe", () => ({ reportError: state.reportError }));
 import { deleteJob } from "./actions";
 
 const JOB = "22222222-2222-4222-8222-222222222900";
-const COUNTED = ["contracts", "insurance_claims", "payment_milestones", "documents", "permits", "change_orders"];
+// cn-v1180: the confirm also counts what goes with the job (tasks, its materials list) and what stays
+// with no job (estimates, work orders, clocked hours; invoices are read above). delete-job-confirm.test
+// holds those counts on a stand-in that honours filters; here they are all none.
+// skeptic #83 (S10): and the job's blocks on the schedule, its panel map, its supplier bills, purchase
+// orders and visits.
+const COUNTED = [
+  "contracts", "insurance_claims", "payment_milestones", "documents", "permits", "change_orders", "tasks", "material_lists", "quotes", "work_orders", "time_entries",
+  "job_schedule_segments", "job_panels", "bills", "purchase_orders", "appointments",
+];
 
 function fake(reports: { count?: number; error?: unknown }, requests: { count?: number; error?: unknown } = {}, lang: string | null = null) {
   const deletes: string[] = [];
@@ -28,6 +36,7 @@ function fake(reports: { count?: number; error?: unknown }, requests: { count?: 
       const chain: any = {
         select: () => chain,
         eq: () => chain,
+        is: () => chain,
         in: () => chain,
         limit: () => chain,
         delete: () => {

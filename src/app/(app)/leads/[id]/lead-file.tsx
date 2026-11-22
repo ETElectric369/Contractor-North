@@ -69,7 +69,7 @@ export function LeadFile(p: LeadFileProps) {
   const standingVisit = (p.visits ?? []).find((v) => visitStands(v, p.nowMs)) ?? null;
   // Times were sent, the first went by with no pick, and nothing else stands: say so by the doors.
   const pickPending = !standingVisit && (p.visits ?? []).some((v) => pickWentUnanswered(v, p.nowMs));
-  // An inspection marked Won and no job picked, nothing else standing (cn-v1171, skeptic #74).
+  // A call or visit marked Won that does not stand, nothing else standing (lib/leads/new-intake visitWasWon).
   const wonPending = !standingVisit && (p.visits ?? []).some((v) => visitWasWon(v));
   const stageBadge = leadStageWords(stage, { convertedTo: lead.converted_to, standingVisit, tz, lang, t });
 

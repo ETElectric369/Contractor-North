@@ -39,6 +39,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_JOB_MINUTES } from "@/lib/schedule/job-block";
 import { putBackPlan, wontHappenVerdict } from "@/lib/appointments/wont-happen";
 import { markLeadNotSoldFromVisit, reopenNotSold } from "@/lib/leads/not-sold";
+import { withdrawLeadPicks, withdrewAnything } from "@/lib/leads/withdraw-picks";
 import { addCaptureItemsToJobList, canonicalMaterialListId } from "../materials/actions";
 import { reportError } from "@/lib/observe";
 import { visitWork } from "@/lib/appointments/visit-work";
@@ -315,7 +316,7 @@ async function dropReplacedCustomer(ws: Said, appointmentId: string, leadId: str
  *  collecting field data. One tap from lead → capturing. */
 export async function createInspectionNow(
   opts: { inquiryId?: string | null } = {},
-): Promise<Result> {
+): Promise<Result & { note?: string }> {
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const ws = wordsOf(ctx.supabase, ctx.userId);
@@ -397,6 +398,8 @@ export async function createInspectionNow(
   // Same engaged-not-closed stamp as the booked-inspection path: the lead stays OPEN (converted_at
   // untouched), Contacted, and no follow-up day (gone everywhere, cn-v1170): its standing visit
   // takes it off the Leads list until the visit ends.
+  let note: string | undefined;
+  let warning: string | undefined;
   if (inq) {
     await supabase
       .from("inquiries")
@@ -407,13 +410,25 @@ export async function createInspectionNow(
       })
       .eq("id", inq.id);
     revalidatePath("/leads");
+    /* START NOW CLOSES THE LINK IT REPLACES (cn-v1180, C7): the lead's one rule (lib/leads/withdraw-picks),
+       through this file's own status door, the visit just started left as it is. A link sent earlier
+       stayed live beside this visit, and the customer's later tap booked a second one. */
+    const picks = await withdrawLeadPicks(
+      supabase,
+      { orgId: ctx.orgId, inquiryId: inq.id, exceptVisitId: appt.id },
+      (visitId) => setAppointmentStatus(visitId, "cancelled"),
+    );
+    if (picks.error || picks.failed.length) {
+      reportError("appointments:inspectNow:withdrawPicks", picks.error ?? new Error("a proposed visit was not cancelled"), { leadId: inq.id });
+      warning = await ws.say("ld_srv_pickLinkNotWithdrawn");
+    } else if (withdrewAnything(picks)) note = await ws.say("ld_srv_pickLinkWithdrawn");
   }
 
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections");
   revalidatePath("/quotes"); // its top list, Inspections to Estimate, reads the same visits (cn-v1172)
-  return { ok: true, id: appt.id };
+  return { ok: true, id: appt.id, ...(note ? { note } : {}), ...(warning ? { warning } : {}) };
 }
 
 /**
@@ -1555,7 +1570,7 @@ export async function setAppointmentOutcome(
    *  Not Sold row, the Inspections row's Not Sold). Every other caller, the assistant's appointment.setOutcome
    *  among them, records the outcome and cancels nothing (skeptic #78: that route has no confirm and no Undo). */
   opts?: { offSchedule?: boolean },
-): Promise<Result & { leadMarked?: boolean; leadReopened?: boolean; offSchedule?: { previousStatus: string; note?: string } }> {
+): Promise<Result & { leadMarked?: boolean; leadReopened?: boolean; offSchedule?: { previousStatus: string; note?: string }; note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const ws = wordsOf(ctx.supabase, ctx.userId);
@@ -1580,12 +1595,30 @@ export async function setAppointmentOutcome(
   let leadMarked = false;
   let leadReopened = false;
   let warning: string | undefined;
+  let note: string | undefined;
   if (inquiryId && (outcome === "lost" || outcome === "no_bid")) {
     const m = await markLeadNotSoldFromVisit(ctx.supabase, inquiryId);
     leadMarked = m.marked;
     if (m.error) {
       reportError("appointments:outcome:leadNotSold", m.error, { appointmentId: id, leadId: inquiryId });
       warning = await ws.say("ag_srv_leadNotMarked");
+    }
+    /* THE LEAD'S ENDING IS THE LEAD'S ENDING, WHEREVER IT IS SAID (skeptic #83, S9). A visit's Not Sold
+       that marks its LEAD Not Sold ends the lead the way the lead's own Not Sold does, so it asks the
+       lead's one rule (lib/leads/withdraw-picks): another `proposed` visit of the lead loses its live
+       link. The visit being answered is left to this door (its own off-schedule step below). Said in the
+       leads' sentences; the doors that pass offSchedule carry an Undo, which cannot bring a link back. */
+    if (leadMarked) {
+      const picks = await withdrawLeadPicks(
+        ctx.supabase,
+        { orgId: ctx.orgId, inquiryId, exceptVisitId: id },
+        (visitId) => setAppointmentStatus(visitId, "cancelled"),
+      );
+      if (picks.error || picks.failed.length) {
+        reportError("appointments:outcome:withdrawPicks", picks.error ?? new Error("a proposed visit was not cancelled"), { appointmentId: id, leadId: inquiryId });
+        warning = warning ?? (await ws.say("ld_srv_pickLinkNotWithdrawn"));
+      } else if (withdrewAnything(picks))
+        note = await ws.say(opts?.offSchedule === true ? "ld_srv_pickLinkWithdrawnUndo" : "ld_srv_pickLinkWithdrawn");
     }
   } else if (inquiryId && (outcome === null || outcome === "won")) {
     const r = await reopenNotSold(ctx.supabase, inquiryId);
@@ -1606,7 +1639,11 @@ export async function setAppointmentOutcome(
   const row = data[0] as { status?: string | null; starts_at?: string | null };
   if (opts?.offSchedule === true && (outcome === "lost" || outcome === "no_bid")) {
     const at = row.starts_at ? Date.parse(row.starts_at) : NaN;
-    const ahead = !row.starts_at || (Number.isFinite(at) && at > Date.now());
+    /* A VISIT WAITING ON THE CUSTOMER'S PICK HAS NO AGREED TIME (cn-v1180, A3). Its starts_at is only
+       the FIRST time offered, so once that went by this read it as "its day has gone", kept it, and its
+       link stayed live: the customer's later tap booked a visit answered Not Sold. Whatever its first
+       time, a `proposed` visit has not happened, and Not Sold takes it off. */
+    const ahead = row.status === "proposed" || !row.starts_at || (Number.isFinite(at) && at > Date.now());
     if ((row.status === "scheduled" || row.status === "proposed") && ahead) {
       const off = await setAppointmentStatus(id, "cancelled");
       if (off.ok) offSchedule = { previousStatus: off.previousStatus ?? String(row.status), ...(off.note ? { note: off.note } : {}) };
@@ -1625,6 +1662,7 @@ export async function setAppointmentOutcome(
     ...(leadMarked ? { leadMarked: true } : {}),
     ...(leadReopened ? { leadReopened: true } : {}),
     ...(offSchedule ? { offSchedule } : {}),
+    ...(note ? { note } : {}),
     ...(warning ? { warning } : {}),
   };
 }
@@ -2373,7 +2411,14 @@ export async function wontHappenAppointment(
  * none, comes back WAITING FOR A DAY (starts_at and ends_at cleared, 0368), on the rail rather than
  * sitting on a past day. Only a cancelled visit: anything else is said, never quietly re-stamped.
  */
-export async function putVisitBackOnSchedule(id: string): Promise<Result & { message?: string }> {
+export async function putVisitBackOnSchedule(
+  id: string,
+  /** What the visit was before the deed being undone (the Not Sold doors' Undo hands it over). A visit
+   *  that was `proposed` never had an agreed day: its starts_at was only the FIRST time offered, which
+   *  the customer never picked (skeptic #83, S1). It comes back waiting for a day, whether that offered
+   *  time is past or still ahead, never Scheduled on it, and never `proposed` with a link that is gone. */
+  opts?: { previousStatus?: string | null },
+): Promise<Result & { message?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const ws = wordsOf(ctx.supabase, ctx.userId);
@@ -2385,7 +2430,7 @@ export async function putVisitBackOnSchedule(id: string): Promise<Result & { mes
 
   const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
   const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
-  const startsAt = (row as { starts_at?: string | null }).starts_at ?? null;
+  const startsAt = opts?.previousStatus === "proposed" ? null : ((row as { starts_at?: string | null }).starts_at ?? null);
   // The sentence it answers with (lib/appointments/wont-happen putBackPlan) in the caller's language:
   // the visit page's PutBackRow says it as received (vp_backOnScheduleFor and its two siblings).
   const lang = await ws.lang();

@@ -9,9 +9,10 @@
  * raw answers + the configurator estimate ({total, lines}) plus the triage reason, so the
  * office Leads row and the one-click convert→draft-quote path both read what they need.
  */
-import { classifyLead, type LeadIntake, type LeadTriage } from "@/lib/lead-triage";
+import { classifyLead, leadBucketWords, projectTypeLabel, type LeadBucket, type LeadIntake, type LeadTriage } from "@/lib/lead-triage";
 import { getOrgSettings } from "@/lib/org-settings";
-import { requestHref } from "@/lib/feature-doors";
+import { requestHref, requestOpensLead } from "@/lib/feature-doors";
+import { formatCurrency } from "@/lib/utils";
 import { todayStrInTz, tzLocalHourUtc } from "@/lib/tz";
 import { createNotifications } from "@/lib/notifications";
 import { STAFF_ROLES } from "@/lib/actions/perms";
@@ -63,6 +64,22 @@ export interface CreateTriagedInquiryInput {
 const MAX_AUTOBOOK_PER_DAY = 10;
 
 /**
+ * A PUBLIC DOOR BOOKS NO INSPECTION BY ITSELF (cn-v1180; the owner, 2026-11-22: "stop the auto
+ * booking until that feature is turned on in each account when there are inspection days set and
+ * calendar can corroborate open times and specified days").
+ *
+ * The hold below put a big web lead on the company's real calendar at 9 AM two days out: a time
+ * nobody agreed to, on a calendar nobody looked at, with nobody telling the customer. It also took
+ * the lead off the Leads list (a standing visit does) while the alert said "new lead". It is OFF for
+ * every company. The lead still lands, flagged as needing a site inspection, and still alerts; the
+ * office books it or sends times. The branch is kept, not deleted: it comes back as a per-company
+ * feature that books only on the days a company marked as inspection days, at a time its calendar
+ * shows open. Until that is built this stays false; it is NOT a switch to flip by itself, because
+ * what it would turn back on is the blind hold.
+ */
+const AUTO_BOOK_FROM_PUBLIC_DOORS: boolean = false;
+
+/**
  * ONE PERSON, ONE LEAD (audit v921).
  *
  * Every submit inserted a fresh row, so the deck configurator — where changing a railing and
@@ -84,8 +101,9 @@ const TERMINAL_LEAD_STATUSES = ["won", "lost", "archived", "declined", "spam"];
 /** How long a submitter is still "the same lead coming back" (a duration, not a calendar day —
  *  ms arithmetic is correct here; no day boundary is being decided). */
 const REPEAT_WINDOW_MS = 30 * 86_400_000;
-/** A repeat this soon after the last touch is a double-submit, not news: the office is already
- *  looking at the alert it fired minutes ago, so the row updates in silence. */
+/** A repeat this soon after the last touch MAY be a double-submit, not news: the office is already
+ *  looking at the alert it fired minutes ago. It is quiet only when nothing the office reads changed
+ *  and nothing new was typed (repeatIsQuiet, cn-v1180); otherwise it alerts like any lead coming back. */
 const REPEAT_QUIET_MS = 60 * 60 * 1000;
 
 type OpenLead = {
@@ -103,7 +121,119 @@ type OpenLead = {
   city: string | null;
   state: string | null;
   zip: string | null;
+  // What the office reads off a lead, compared with the new submission (repeatIsQuiet): the read
+  // that finds the lead must carry them, or every repeat would look changed (or none would).
+  project_type: string | null;
+  lead_bucket: string | null;
+  estimate_total: number | string | null;
+  site_inspection_required: boolean | null;
+  priority: number | null;
 };
+
+/** What a submission says the office reads: the five columns the triage writes. */
+export type LeadAnswer = {
+  project_type: string | null;
+  lead_bucket: string | null;
+  estimate_total: number | string | null;
+  site_inspection_required: boolean | null;
+  priority: number | null;
+};
+
+/** A figure in cents; no figure and zero are the same "no estimate" (the write stores `|| null`). */
+const cents = (v: unknown): number => {
+  const n = Number(v ?? 0);
+  return Number.isFinite(n) ? Math.round(n * 100) : 0;
+};
+
+/**
+ * DID ANYTHING THE OFFICE READS CHANGE? (cn-v1180, audit A4). The newest submission replaces the
+ * lead's triage and estimate (audit v921, kept), and the quiet hour hid that from everybody: anyone
+ * with a person's phone or e-mail could rewrite their open lead and nobody was told. A repeat that
+ * moves the project type, the bucket, the estimate to the cent, the site-inspection flag or the
+ * priority is news, whenever it lands.
+ */
+export function answerChanged(before: LeadAnswer, after: LeadAnswer): boolean {
+  return (
+    (before.project_type ?? null) !== (after.project_type ?? null) ||
+    (before.lead_bucket ?? null) !== (after.lead_bucket ?? null) ||
+    cents(before.estimate_total) !== cents(after.estimate_total) ||
+    siteTurnedOn(before, after) ||
+    Number(before.priority ?? 0) !== Number(after.priority ?? 0)
+  );
+}
+
+/**
+ * THE SITE-VISIT FLAG ONLY EVER TURNS ON (skeptic #83, S3). The site-visit tap stamps it true too
+ * (public-schedule), and a later configurator repeat whose triage computes false read that stamp as
+ * "changed" on every press, a true double-submit included. So it is news only when THIS submission
+ * turns it on (false or none, to true), and the repeat's write never turns a true flag back off.
+ */
+function siteTurnedOn(before: LeadAnswer, after: LeadAnswer): boolean {
+  return !before.site_inspection_required && !!after.site_inspection_required;
+}
+
+/**
+ * QUIET IS ONLY A TRUE DOUBLE-SUBMIT (cn-v1180): inside the hour of the last touch, AND nothing the
+ * office reads changed, AND no new words. Words already at the end of the lead's message are the
+ * same press again, not new text.
+ */
+export function repeatIsQuiet(opts: { sinceLastTouchMs: number; changed: boolean; said: string; priorMessage: string | null }): boolean {
+  const newWords = !!opts.said && !String(opts.priorMessage ?? "").trimEnd().endsWith(opts.said);
+  return opts.sinceLastTouchMs < REPEAT_QUIET_MS && !opts.changed && !newWords;
+}
+
+/**
+ * BOTH HALVES WHERE THE OFFICE ALREADY READS (cn-v1180): the lead's message. One English line with
+ * the earlier and the new answer, the type and the figure; `previous` in the intake is read by no
+ * screen, so it is not where the office would find the half that was replaced.
+ */
+export function answerLine(before: LeadAnswer, after: LeadAnswer): string {
+  // THE LINE NAMES WHAT MOVED (skeptic #83, S3): a repeat that moved only the readiness bucket, the
+  // priority or the site-visit flag printed two identical halves. When type and figure are the same
+  // in both, each of those that differs is said in both halves; an ordinary change (the priority
+  // follows the figure) still reads as type and figure alone.
+  const sameHead =
+    (before.project_type ?? null) === (after.project_type ?? null) && cents(before.estimate_total) === cents(after.estimate_total);
+  const bucketMoved = sameHead && (before.lead_bucket ?? null) !== (after.lead_bucket ?? null);
+  const priorityMoved = sameHead && Number(before.priority ?? 0) !== Number(after.priority ?? 0);
+  const siteMoved = sameHead && siteTurnedOn(before, after);
+  const bucketWords = (b: string | null) =>
+    b === "A" || b === "B" || b === "C" ? leadBucketWords(b as LeadBucket).label : "no readiness bucket";
+  const half = (a: LeadAnswer) => {
+    const type = a.project_type ? projectTypeLabel(a.project_type) : "no project type";
+    const money = cents(a.estimate_total) ? formatCurrency(Number(a.estimate_total)) : "no estimate";
+    return [
+      type,
+      money,
+      ...(bucketMoved ? [bucketWords(a.lead_bucket ?? null)] : []),
+      ...(priorityMoved ? [a.priority == null ? "no priority" : `priority ${Number(a.priority)}`] : []),
+      ...(siteMoved ? [a.site_inspection_required ? "site visit needed" : "no site visit"] : []),
+    ].join(", ");
+  };
+  return `Earlier answer: ${half(before)}. New answer: ${half(after)}.`;
+}
+
+/** How many "Came back" blocks a lead's message keeps, and the most it may hold in all. */
+export const CAME_BACK_KEEP = 5;
+export const MESSAGE_MAX = 6000;
+const CAME_BACK_SPLIT = /\n\n(?=— Came back \d{4}-\d{2}-\d{2} —\n)/;
+
+/**
+ * A LEAD'S MESSAGE CANNOT BE GROWN WITHOUT LIMIT FROM A PUBLIC FORM (skeptic #83, S4). Every changed
+ * repeat appends a divider and a line, and anyone with a lead's phone or e-mail can press again
+ * (5 a minute). The FIRST submission's own words are never dropped; the newest five "Came back"
+ * blocks are kept, older ones go; and the whole stays under MESSAGE_MAX by dropping the oldest blocks
+ * first (the last block standing is cut only if it alone would still be over).
+ */
+export function boundedMessage(prior: string | null, block: string | null): string | null {
+  const parts = String(prior ?? "").split(CAME_BACK_SPLIT).filter((p) => p !== "");
+  const head = parts.length && !parts[0].startsWith("— Came back ") ? parts.shift()! : "";
+  const blocks = [...parts, ...(block ? [block] : [])].slice(-CAME_BACK_KEEP);
+  const join = () => [head, ...blocks].filter(Boolean).join("\n\n");
+  while (blocks.length > 1 && Array.from(join()).length > MESSAGE_MAX) blocks.shift();
+  const out = Array.from(join());
+  return (out.length > MESSAGE_MAX ? out.slice(0, MESSAGE_MAX) : out).join("") || null;
+}
 
 /** The open lead this submission belongs to, or null when it is genuinely new. */
 async function openLeadFor(
@@ -118,7 +248,9 @@ async function openLeadFor(
   // "5305551212"), so a column comparison would miss the very duplicates this exists to catch.
   const { data } = await supabase
     .from("inquiries")
-    .select("id, name, email, phone, message, status, converted_at, updated_at, created_at, intake, address, city, state, zip")
+    .select(
+      "id, name, email, phone, message, status, converted_at, updated_at, created_at, intake, address, city, state, zip, project_type, lead_bucket, estimate_total, site_inspection_required, priority",
+    )
     .eq("org_id", orgId) // explicit org scope — this runs on the service client, which has no RLS
     .gte("created_at", new Date(Date.now() - REPEAT_WINDOW_MS).toISOString())
     .order("created_at", { ascending: false })
@@ -174,8 +306,18 @@ export async function createTriagedInquiry(
     const { previous: priorChain, ...priorAnswers } = priorIntake;
     const prior = Array.isArray(priorChain) ? (priorChain as unknown[]) : [];
     const said = String(input.message ?? "").trim();
-    const message =
-      [repeat.message, said ? `— Came back ${dayStr} —\n${said}` : ""].filter(Boolean).join("\n\n") || null;
+    const after: LeadAnswer = {
+      project_type: input.intake.projectType ?? null,
+      lead_bucket: triage.bucket,
+      estimate_total: input.intake.estimateTotal || null,
+      site_inspection_required: triage.siteInspectionRequired,
+      priority: triage.priority,
+    };
+    // NEVER SILENT (cn-v1180, audit A4): when the answer the office reads moved, the divider is
+    // written even if the visitor typed nothing, with the earlier and the new answer under it.
+    const changed = answerChanged(repeat, after);
+    const cameBackNote = [changed ? answerLine(repeat, after) : "", said].filter(Boolean).join("\n");
+    const message = boundedMessage(repeat.message, cameBackNote ? `— Came back ${dayStr} —\n${cameBackNote}` : null);
     const { data: hit, error: uErr } = await supabase
       .from("inquiries")
       .update({
@@ -187,12 +329,10 @@ export async function createTriagedInquiry(
         ...(repeat.address || !input.address ? {} : { address: input.address, city: input.city ?? null, state: input.state ?? null, zip: input.zip ?? null }),
         message,
         // Derived from THIS submission — an old $9k bucket on a lead that just priced $40k is
-        // worse than no triage at all.
-        project_type: input.intake.projectType ?? null,
-        lead_bucket: triage.bucket,
-        estimate_total: input.intake.estimateTotal || null,
-        site_inspection_required: triage.siteInspectionRequired,
-        priority: triage.priority,
+        // worse than no triage at all. The site-visit flag only ever turns on (siteTurnedOn): a
+        // site-visit request the visitor tapped is not undone by a later form's triage.
+        ...after,
+        site_inspection_required: !!repeat.site_inspection_required || !!after.site_inspection_required,
         // THE UPLOADED FILES MUST STAY AT THE TOP LEVEL (audit v921 review blocker). Every reader
         // — intakePaths (lib/playbook/uploads), carryForInquiry, the quote builder, the signed-URL
         // door on /leads — looks ONLY at intake.intake_answers, and NOTHING reads `previous`. So
@@ -214,6 +354,7 @@ export async function createTriagedInquiry(
         updated_at: stamp,
       })
       .eq("id", repeat.id)
+      .eq("org_id", orgId) // the service client: the company named by hand on the write too
       .select("id");
     // THE SILENT-WRITE LAW: a zero-row update is a 204 — if the lead vanished between the read
     // and here, fall through and file the submission as a new lead rather than losing it.
@@ -221,7 +362,7 @@ export async function createTriagedInquiry(
       cameBack = true;
       id = repeat.id;
       const lastTouch = Date.parse(repeat.updated_at || repeat.created_at || "") || 0;
-      quiet = Date.now() - lastTouch < REPEAT_QUIET_MS;
+      quiet = repeatIsQuiet({ sinceLastTouchMs: Date.now() - lastTouch, changed, said, priorMessage: repeat.message });
     }
   }
 
@@ -263,6 +404,8 @@ export async function createTriagedInquiry(
     id = data.id as string;
   }
 
+  // OFF SINCE cn-v1180 (AUTO_BOOK_FROM_PUBLIC_DOORS, above): what follows is the old hold, kept for
+  // the feature that replaces it. As it was written:
   // A >$20k lead flagged for a site inspection gets one AUTO-BOOKED onto the Schedule, so a big
   // inbound lead never sits with no scheduled action. Service client → org_id explicit (no auth
   // session for the set_org_id trigger). Best-effort: a booking failure must not stop the lead.
@@ -271,6 +414,7 @@ export async function createTriagedInquiry(
   //   · a per-org/day ceiling — bounds a flood from ANY door, whatever its IP.
   // Either guard failing only skips the HOLD; the lead itself always lands and always alerts.
   const mayAutoBook =
+    AUTO_BOOK_FROM_PUBLIC_DOORS &&
     triage.siteInspectionRequired &&
     input.autoBookInspection !== false &&
     // A lead that came back must not stack a SECOND hold on top of the one its first submission
@@ -310,8 +454,8 @@ export async function createTriagedInquiry(
     }
   }
 
-  // A double-submit minutes after the last touch alerts nobody a second time; a real return does.
-  if (!quiet) await notifyNewLead(supabase, orgId, input, { cameBack });
+  // A true double-submit alerts nobody a second time; a real return, or a changed answer, does.
+  if (!quiet) await notifyNewLead(supabase, orgId, input, { cameBack, leadId: id });
   return { id, triage };
 }
 
@@ -326,12 +470,12 @@ export async function createTriagedInquiry(
  */
 /**
  * THE ALERT'S WORDS FOLLOW WHERE IT LANDS (the switch board, 0352). With Leads on it is a lead and
- * opens the lead list, word for word as always. With Leads off it opens My Day, where the card
+ * opens the lead (its own file since cn-v1180; the list when no id is known), word for word as always. With Leads off it opens My Day, where the card
  * reads "New Request from …", so the bell, the push and the email call it a request and the
  * email's button names My Day instead of a lead list that isn't there.
  */
-export function requestAlertWords(lands: "/leads" | "/planner", cameBack = false) {
-  const lead = lands === "/leads";
+export function requestAlertWords(lands: string, cameBack = false) {
+  const lead = requestOpensLead(lands);
   const noun = lead ? "lead" : "request";
   const Noun = lead ? "Lead" : "Request";
   const headline = cameBack ? `${Noun} came back` : `New ${noun}`;
@@ -348,7 +492,7 @@ async function notifyNewLead(
   supabase: SupabaseClient,
   orgId: string,
   input: CreateTriagedInquiryInput,
-  opts: { cameBack?: boolean } = {},
+  opts: { cameBack?: boolean; leadId?: string } = {},
 ): Promise<void> {
   try {
     const [{ data: staff }, { data: orgRow }] = await Promise.all([
@@ -365,7 +509,9 @@ async function notifyNewLead(
     const staffIds = ((staff ?? []) as { id: string }[]).map((s) => s.id);
     // LEADS OFF, THE REQUEST STILL LANDS (rule d): the bell, the push and the email open My Day,
     // where it waits as "New Request from …" with Call Back, instead of the switched-off list.
-    const url = requestHref(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).features);
+    // Leads on: THE LEAD'S OWN FILE (cn-v1180, audit A2) — an auto-booked inspection takes a lead
+    // off the Leads list, so the list was the one place the alert could not find it.
+    const url = requestHref(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).features, opts.leadId);
     const money = input.intake.estimateTotal
       ? `est. $${Math.round(input.intake.estimateTotal).toLocaleString()}`
       : "quote request";

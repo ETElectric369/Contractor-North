@@ -155,13 +155,14 @@ describe("A. the row: who, how to reach them, the Scope, the doors (cn-v1170)", 
     expect(es).toContain("Se enviaron los horarios y no ha elegido ninguno.");
   });
 
-  it("an inspection marked Won with no job picked: the row says where to finish it (cn-v1171, skeptic #74)", () => {
-    expect(row(lead(), { wonPending: true })).toContain("Its inspection was marked Won and no job was picked. Open the inspection to pick the job.");
-    expect(row(lead())).not.toContain("no job was picked");
+  it("a call or visit marked Won with the lead still open: the row says where to look (cn-v1171; words true since cn-v1180, A7)", () => {
+    expect(row(lead(), { wonPending: true })).toContain("A call or visit from this lead was marked Won, and the lead is still open. Open that visit from the lead&#x27;s file.");
+    expect(row(lead(), { wonPending: true })).not.toContain("no job was picked");
+    expect(row(lead())).not.toContain("was marked Won");
     const es = renderToStaticMarkup(
       createElement(LangProvider, { lang: "es", children: createElement(InquiryRow, { inquiry: lead(), tz: "America/Los_Angeles", nowMs: ARRIVED_MS, wonPending: true }) }),
     );
-    expect(es).toContain("Abre la inspección para elegir el trabajo.");
+    expect(es).toContain("Abre esa visita desde el archivo del prospecto.");
   });
 
   it("kept from the old row: the bucket's mark and the customer's own Needs a Visit", () => {
@@ -224,11 +225,14 @@ describe("C. Not Sold and Reopen", () => {
     const refresh = vi.fn();
     await markLeadNotSold({ id: "lead-1", name: "Rita Moss", status: "contacted" }, { setStatus, toast, refresh });
     expect(calls).toEqual([["lead-1", "lost"]]);
+    // This door offers the Undo, and says so to the server (skeptic #83, S6); the Undo's own write does not.
+    expect(setStatus.mock.calls[0]).toEqual(["lead-1", "lost", { withUndo: true }]);
     expect(toast.mock.calls[0][0]).toBe("Marked Rita Moss Not Sold");
     expect(toast.mock.calls[0][2].label).toBe("Undo");
     toast.mock.calls[0][2].onClick();
     await vi.waitFor(() => expect(calls).toEqual([["lead-1", "lost"], ["lead-1", "contacted"]]));
     await vi.waitFor(() => expect(toast).toHaveBeenLastCalledWith("Put back.", "success"));
+    expect(setStatus.mock.calls[1]).toEqual(["lead-1", "contacted"]);
   });
 
   it("a refusal shows the server's own sentence, and nothing else happens", async () => {

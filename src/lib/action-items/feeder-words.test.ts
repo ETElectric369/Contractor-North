@@ -80,6 +80,8 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fakeClient()
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
 
 import { getActionItems } from "./query";
+import { waitingLine } from "@/components/action-items/waiting-fold";
+import { translator } from "@/lib/i18n";
 import { FEEDER_SAY_KEYS } from "./feeder-keys";
 import { inquiryActionItem } from "./switches";
 import { supplierDeskFailedItem, supplierPaperActionItem } from "./supplier-paper-item";
@@ -433,7 +435,11 @@ describe("the build: each row's who, what and amount (table A2)", () => {
     expect(byId(rows, "onhold-j6")).toMatchObject({ clock: dayAgo(1), level: "soon" });
     // The hold with no day waits in the fold, with no day, and is no row of the board.
     expect([...rows, ...rows.flatMap((x) => x.children ?? [])].some((r) => r.id === "onhold-j7")).toBe(false);
-    expect(all.waiting).toContainEqual({ id: "onhold-j7", kind: "job_on_hold", title: "Bayberry Porch · J-072", why: "No reason saved", backOn: null, href: "/jobs/j7" });
+    // cn-v1180: no reason saved is a KEY the fold says in the reader's language, never English to all.
+    expect(all.waiting).toContainEqual({ id: "onhold-j7", kind: "job_on_hold", title: "Bayberry Porch · J-072", why: "No reason saved", whyKey: "ny_w_noReason", backOn: null, href: "/jobs/j7" });
+    const j7 = all.waiting.find((w) => w.id === "onhold-j7")!;
+    expect(waitingLine(j7, "es", translator("es"))).toBe("Bayberry Porch · J-072 · sin motivo guardado · Sin Día");
+    expect(waitingLine(j7, "en", translator("en"))).toBe("Bayberry Porch · J-072 · no reason saved · No Day Set");
     // A job needing a day has no clock at all: every day it holds is a day the office's paper was born.
     expect([byId(rows, "j5").clock ?? null, byId(rows, "j5").level]).toEqual([null, "none"]);
   });

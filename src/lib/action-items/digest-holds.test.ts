@@ -72,7 +72,7 @@ describe("the morning push", () => {
   it("a morning with only holds back still pushes, and the line leads", async () => {
     const db = fake({ organizations: { data: [ORG] }, jobs: { count: 2 }, invoices: { count: 0 }, inquiries: { count: 0 }, tasks: { data: [] } });
     expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 1, already: 0, failed: 0, lapsed_skipped: 0 });
-    expect(notifyPeople).toHaveBeenCalledWith("org-1", ["owner-1"], "day_ahead", { title: "Needs You: 2", body: "2 Holds Are Back", url: "/planner" });
+    expect(notifyPeople).toHaveBeenCalledWith("org-1", ["owner-1"], "day_ahead", { title: "Needs You", body: "2 Holds Are Back", url: "/planner" });
     // Filtered to this company by hand; on hold; back today or earlier, never a hold with no day.
     const jobs = db.filters.jobs;
     expect(jobs).toContainEqual(["eq", "org_id", "org-1"]);
@@ -91,10 +91,27 @@ describe("the morning push", () => {
     });
     await sendDayAheadDigests(db);
     expect(notifyPeople).toHaveBeenCalledWith("org-1", ["owner-1"], "day_ahead", {
-      title: "Needs You: 6",
+      title: "Needs You",
       body: "3 Holds Are Back · Invoice INV-071 overdue · +2 more",
       url: "/planner",
     });
+  });
+
+  // cn-v1180, audit C41: the title's head-count was holds + late invoices + leads, a different set from
+  // the board's own total, so the push and the board said two numbers. The title carries none now.
+  it("the decisions push is titled Needs You with no number; the named lines say what is there", async () => {
+    const db = fake({
+      organizations: { data: [ORG] },
+      jobs: { count: 4 },
+      invoices: { data: [{ invoice_number: "INV-971" }], count: 3 },
+      inquiries: { data: [{ id: "l-1", name: "Sam Tillery" }] },
+      tasks: { data: [] },
+    });
+    await sendDayAheadDigests(db);
+    const sent = (notifyPeople.mock.calls[0] as unknown as [string, string[], string, { title: string; body: string }])[3];
+    expect(sent.title).toBe("Needs You");
+    expect(sent.title).not.toMatch(/\d/);
+    expect(sent.body).toBe("4 Holds Are Back · Invoice INV-971 overdue · +3 more");
   });
 
   // cn-v1170: the lead line is the Leads list (lib/leads/new-intake), the rule Needs You and the
@@ -118,7 +135,7 @@ describe("the morning push", () => {
     // The visits are read for this company too (a service client), and the booked lead is off.
     expect(db.filters.appointments).toContainEqual(["eq", "org_id", "org-1"]);
     expect(notifyPeople).toHaveBeenCalledWith("org-1", ["owner-1"], "day_ahead", {
-      title: "Needs You: 2",
+      title: "Needs You",
       body: "New lead: Casey Loam · New lead: Dana Rook",
       url: "/planner",
     });
@@ -174,7 +191,7 @@ describe("the morning push and a failed read", () => {
     });
     expect(await sendDayAheadDigests(db)).toEqual({ orgs: 2, pushed: 1, already: 0, failed: 1, lapsed_skipped: 0 });
     expect(notifyPeople).toHaveBeenCalledTimes(1);
-    expect(notifyPeople).toHaveBeenCalledWith("org-2", ["owner-1"], "day_ahead", { title: "Needs You: 2", body: "2 Holds Are Back", url: "/planner" });
+    expect(notifyPeople).toHaveBeenCalledWith("org-2", ["owner-1"], "day_ahead", { title: "Needs You", body: "2 Holds Are Back", url: "/planner" });
     expect(reportError).toHaveBeenCalledWith("cron-day-ahead", boom, { orgId: "org-1" });
   });
 });

@@ -36,4 +36,7 @@ export type EstimateResult = {
   total?: number;
   lines?: EstimateLine[];
   assumptions?: string[];
+  /** The lead this submit wrote or came back to (cn-v1180): the one key the same browser's
+   *  "Request a Site Visit" tap attaches by. Never another lead's: only what this call returned. */
+  leadId?: string;
 };

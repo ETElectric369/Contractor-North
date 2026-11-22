@@ -118,8 +118,9 @@ export async function submitEstimateLead(handle: string, payload: EstimatePayloa
   };
 
   let triage;
+  let leadId: string | undefined;
   try {
-    ({ triage } = await createTriagedInquiry(supabase, orgId, {
+    ({ triage, id: leadId } = await createTriagedInquiry(supabase, orgId, {
       name,
       email: email || null,
       phone: phone || null,
@@ -154,5 +155,7 @@ export async function submitEstimateLead(handle: string, payload: EstimatePayloa
     // Only itemize when we're actually showing a firm number.
     lines: triage.showInstantPrice ? est.lines : [],
     assumptions: triage.showInstantPrice ? est.assumptions : [],
+    // The id the same browser's site-visit tap attaches by (cn-v1180, audit A6).
+    ...(leadId ? { leadId } : {}),
   };
 }

@@ -334,7 +334,11 @@ export function PlacementProvider({
           const withdrew = apptResults.some((r) => !!r.note);
           toast(msg.text, msg.tone, { label: t("ag_btn_undo"), onClick: () => undoPlace(priors, visits, withdrew) });
         } else {
-          toast(msg.text, msg.tone);
+          // A LEAD BOOKED FROM THE RAIL MAY HAVE HAD A PICK-A-TIME LINK OUT (cn-v1180). The server
+          // withdrew it with the booking and says so; the sentence rides this toast after the count,
+          // because a link that quietly stopped working is the customer calling to ask why.
+          const leadNote = res.ok && "note" in res && res.note ? ` ${res.note}` : "";
+          toast(msg.text + leadNote, msg.tone);
         }
 
         /* KEEP EXACTLY WHAT DIDN'T LAND — which is what the old comment claimed and the old code

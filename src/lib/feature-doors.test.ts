@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { ALL_ON, FEATURE_KEYS, type FeatureMap } from "@/lib/features";
 import { DOCK, basePath } from "@/lib/dock";
-import { FEATURE_ROUTES, countTeammates, featureForPath, requestHref, shellDoors } from "@/lib/feature-doors";
+import { FEATURE_ROUTES, countTeammates, featureForPath, requestHref, requestOpensLead, shellDoors } from "@/lib/feature-doors";
 
 /**
  * THE SHELL'S DOORS (the switch board, 0352): the map the shell draws from, where a new request
@@ -111,6 +111,26 @@ describe("requestHref — where a new request's bell and push land (rule d)", ()
 
   it("Leads off: My Day, where the request waits as a card with Call Back", () => {
     expect(requestHref(off("leads"))).toBe("/planner");
+    expect(requestHref(off("leads"), "lead-1")).toBe("/planner");
+  });
+
+  it("Leads on with the lead's id: THE LEAD'S OWN FILE (cn-v1180, audit A2), never the list it may not be on", () => {
+    expect(requestHref(ALL_ON, "1a1a1a1a-0000-4000-8000-000000000011")).toBe("/leads/1a1a1a1a-0000-4000-8000-000000000011");
+    expect(requestHref(null, "lead-1")).toBe("/leads/lead-1");
+    expect(requestHref(ALL_ON, "")).toBe("/leads");
+    expect(requestOpensLead("/leads/lead-1")).toBe(true);
+    expect(requestOpensLead("/leads")).toBe(true);
+    expect(requestOpensLead("/planner")).toBe(false);
+    expect(requestOpensLead("/leadsx")).toBe(false);
+  });
+
+  it("every sender hands it the lead's id", () => {
+    const pins: [string, string][] = [
+      ["src/lib/inquiries/create-triaged-inquiry.ts", ".features, opts.leadId)"],
+      ["src/app/inquire/[org]/actions.ts", ".features, written?.id)"],
+      ["src/lib/actions/public-schedule.ts", "requestHref(settings.features, inquiry.id)"],
+    ];
+    for (const [rel, pin] of pins) expect(readFileSync(join(process.cwd(), rel), "utf8"), rel).toContain(pin);
   });
 
   it("the three service-client senders all ask it, and none still hard-codes /leads", () => {

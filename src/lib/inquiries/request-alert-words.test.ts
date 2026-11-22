@@ -24,6 +24,8 @@ describe("requestAlertWords", () => {
     });
     expect(requestAlertWords("/leads", true).head).toBe("🔁 Lead came back");
     expect(requestAlertWords("/leads", true).subject).toBe("Lead came back");
+    // The lead's own file (cn-v1180) is still a lead, word for word.
+    expect(requestAlertWords("/leads/lead-1")).toEqual(requestAlertWords("/leads"));
   });
 
   it("Leads off: a request, and the button names where it opens", () => {
@@ -45,7 +47,7 @@ describe("requestAlertWords", () => {
 
   it("the site-visit alert and the morning digest follow the same switch", () => {
     const sched = readFileSync(join(process.cwd(), "src/lib/actions/public-schedule.ts"), "utf8");
-    expect(sched).toContain('(url === "/leads" ? "Open the lead to send time options." : "Open My Day to send time options.")');
+    expect(sched).toContain('(requestOpensLead(url) ? "Open the lead to send time options." : "Open My Day to send time options.")');
     const digest = readFileSync(join(process.cwd(), "src/lib/action-items/digest.ts"), "utf8");
     expect(digest).toContain('featureOn(getOrgSettings(org.settings).features, "leads") ? "New lead" : "New request"');
   });

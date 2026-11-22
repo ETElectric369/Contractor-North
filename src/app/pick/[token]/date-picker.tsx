@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { pickErrorSaid } from "./pick-error";
 
 type Slot = string | { date: string; time?: string };
 const norm = (s: Slot): { date: string; time?: string } => (typeof s === "string" ? { date: s } : s);
@@ -53,7 +54,7 @@ export function DatePicker({
         body: JSON.stringify({ token }),
       }).catch(() => {});
     } catch (e: any) {
-      setError(e?.message ?? "Something went wrong — try again.");
+      setError(pickErrorSaid(e?.message));
     } finally {
       setBusy(null);
     }

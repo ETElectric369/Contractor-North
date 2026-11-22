@@ -5,7 +5,7 @@ import Link from "next/link";
 import { activeNav, dockTiles, rowBadge, tileBadge, visibleDock } from "@/lib/dock";
 import { useNavAt } from "@/components/app-shell/use-nav-at";
 import { dockLabel, dockTileLabel } from "@/lib/dock-words";
-import { translator } from "@/lib/i18n";
+import { fillText, translator } from "@/lib/i18n";
 import { useLang } from "@/components/lang-provider";
 import { isStaffRole } from "@/lib/actions/perms";
 import { Turned } from "@/components/turned";
@@ -89,6 +89,31 @@ export function RowCount({ count, active = false }: { count: number; active?: bo
 /** Never hand the renderer anything but a plain count map. */
 export function plainBadges(v: unknown): Badges {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Badges) : {};
+}
+
+/**
+ * A TILE'S BADGE, ONE DRAWING FOR BOTH BARS (cn-v1180, audit C40). The rail drew the number and the
+ * phone's bottom bar drew nothing, so a person on a phone never saw that Sales had something open. Both
+ * now draw THIS, from the one number (lib/dock tileBadge): nothing at zero, capped at 9+ per the badge
+ * invariant (action-items/types.ts: past 9 the exact figure is noise, the list is the source of truth).
+ * The figure is hidden from a screen reader because the tile's own name says it (tileName below).
+ */
+export function tileBadgeText(badge: number): string | null {
+  return badge > 0 ? (badge > 9 ? "9+" : String(badge)) : null;
+}
+function TileBadge({ badge, className }: { badge: number; className: string }) {
+  const text = tileBadgeText(badge);
+  if (!text) return null;
+  return (
+    <span aria-hidden="true" data-tile-badge="" className={`absolute z-10 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-amber-400 px-1 text-[9px] font-bold text-amber-900 ${className}`}>
+      {text}
+    </span>
+  );
+}
+/** The tile's name for a screen reader: the label, and the badge's figure when there is one. */
+export function tileName(tile: string, badge: number, t: (key: string) => string): string {
+  const text = tileBadgeText(badge);
+  return text ? fillText(t("sh_tileOpen"), { tile, n: text }) : tile;
 }
 
 /**
@@ -176,6 +201,7 @@ function DockInner({ branding, role, badges: badgesProp, features, lapsed = fals
                   // the same name; the spotlight takes whichever is visible.
                   data-tour={`dock-${s.key}`}
                   title={tile}
+                  aria-label={tileName(tile, badge, t)}
                   className={`group relative flex min-h-[44px] w-[74px] flex-col items-center justify-center gap-0.5 rounded-2xl px-1 py-1.5 transition-transform ${
                     on ? "seaglass-active" : "hover:scale-[1.05]"
                   }`}
@@ -184,13 +210,7 @@ function DockInner({ branding, role, badges: badgesProp, features, lapsed = fals
                     <Icon className="h-[21px] w-[21px]" />
                   </span>
                   <span className={`relative z-10 text-[10px] font-medium leading-none ${on ? "" : "text-slate-600"}`}>{s.short ?? tile}</span>
-                  {badge > 0 && (
-                    <span className="absolute right-1 top-1 z-10 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-amber-400 px-1 text-[9px] font-bold text-amber-900">
-                      {/* Display-capped per the badge invariant (action-items/types.ts):
-                          past 9 the exact figure is noise — the list is the source of truth. */}
-                      {badge > 9 ? "9+" : badge}
-                    </span>
-                  )}
+                  <TileBadge badge={badge} className="right-1 top-1" />
                 </Link>
               );
             })}
@@ -266,6 +286,8 @@ function DockInner({ branding, role, badges: badgesProp, features, lapsed = fals
           const Icon = s.icon;
           const onRoute = s.key === active?.key;
           const tile = dockTileLabel(s, lang);
+          // The same number the rail draws (lib/dock tileBadge), on the phone's tile too (cn-v1180).
+          const badge = tileBadge(badges, s);
           return (
             <Link
               key={s.key}
@@ -285,7 +307,7 @@ function DockInner({ branding, role, badges: badgesProp, features, lapsed = fals
                 // Icon+label carry `relative z-10` to sit above the gloss sheen.
                 onRoute ? "seaglass-active" : "text-slate-600"
               }`}
-              aria-label={tile}
+              aria-label={tileName(tile, badge, t)}
             >
               {/* Upright this wrapper has no box at all, so the tile is byte for byte what it is today.
                   `region="the chrome"`: a tile stands up whenever the phone is turned at all, whatever
@@ -294,6 +316,7 @@ function DockInner({ branding, role, badges: badgesProp, features, lapsed = fals
                 <Icon className="relative z-10 h-5 w-5 shrink-0" />
                 <span className="relative z-10 whitespace-nowrap leading-none">{s.short ?? tile}</span>
               </Turned>
+              <TileBadge badge={badge} className="right-1 top-0.5" />
             </Link>
           );
         })}

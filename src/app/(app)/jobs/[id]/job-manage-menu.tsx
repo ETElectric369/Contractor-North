@@ -4,11 +4,26 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MoreHorizontal, Loader2, Trash2 } from "lucide-react";
 import { GLASS_MENU_CLASS, useGlassMenuPlacement } from "@/components/ui/glass-menu";
+import { useLang } from "@/components/lang-provider";
+import { fillText, translator } from "@/lib/i18n";
 
 /** The one menu-row style — shared with the modal-owning items (Edit / Finish) composed in as
  *  children, so every row in the panel looks identical. 44px rows (min-h-11): every tap target. */
 export const MANAGE_ROW_CLS =
   "relative z-10 flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15 disabled:opacity-50";
+
+/**
+ * THE SECOND CONFIRM'S WORDS (cn-v1180): the lines the server counted, under their two headings, in
+ * the reader's language. A group with no line draws no heading.
+ */
+export function deleteJobConfirmText(jobNumber: string, destroys: string[], stays: string[], t: (key: string) => string): string {
+  const list = (lines: string[]) => lines.map((d) => `  • ${d}`).join("\n");
+  const parts: string[] = [];
+  if (destroys.length) parts.push(`${fillText(t("jb_delGoesHead"), { job: jobNumber })}\n\n${list(destroys)}`);
+  if (stays.length) parts.push(`${t("jb_delStaysHead")}\n\n${list(stays)}`);
+  parts.push(t("jb_delAnyway"));
+  return parts.join("\n\n");
+}
 
 /**
  * The job hub's "Manage ⋯" menu — THREE ROWS FOR THE OFFICE (W1-17): Edit Job, Finish Job (both
@@ -42,12 +57,14 @@ export function JobManageMenu({
     error?: string;
     needsConfirm?: boolean;
     destroys?: string[];
+    stays?: string[];
   }>;
   triggerClassName?: string;
   /** Staff modal-owning menu items (JobEditButton, FinishJobButton with `menuItem`). */
   children?: React.ReactNode;
 }) {
   const router = useRouter();
+  const t = translator(useLang());
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -84,16 +101,15 @@ export function JobManageMenu({
     // copy stopped here and claimed nothing was lost — untrue: contracts, lien records,
     // permits, change orders and every job photo CASCADE away. So the server itemizes
     // the real damage and we put THAT in front of the user before anything is deleted.
-    if (!confirm(`Delete job ${jobNumber}? Time entries, estimates, and invoices keep their data but lose the job link.`)) return;
+    if (!confirm(fillText(t("jb_delFirstConfirm"), { job: jobNumber }))) return;
     setErr(null);
     setBusy("delete");
     try {
       let res = await deleteJob();
-      if (res.needsConfirm && res.destroys?.length) {
-        const list = res.destroys.map((d) => `  • ${d}`).join("\n");
-        const agreed = confirm(
-          `Deleting job ${jobNumber} also permanently deletes:\n\n${list}\n\nThis cannot be undone. Delete anyway?`,
-        );
+      // BOTH GROUPS, counted by the server in the reader's language (cn-v1180, audit C5): what goes with
+      // the job, and what stays on the books with no job. Either one alone still asks.
+      if (res.needsConfirm && (res.destroys?.length || res.stays?.length)) {
+        const agreed = confirm(deleteJobConfirmText(jobNumber, res.destroys ?? [], res.stays ?? [], t));
         if (!agreed) {
           setBusy(null);
           return;

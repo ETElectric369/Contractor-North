@@ -16,8 +16,8 @@ import { clientIp, rateLimited } from "@/lib/rate-limit";
  *     set_org_id triggers)
  *
  * What it does (Erik's call — no more auto-offering the calendar "just whenever"):
- * finds the caller's just-created inquiry (or creates one so the tap is never
- * orphaned), stamps it as a site-inspection REQUEST (site_inspection_required —
+ * finds the lead THIS BROWSER just sent, by the id its own submit returned (or creates
+ * one so the tap is never orphaned), stamps it as a site-inspection REQUEST (site_inspection_required —
  * the cn-v377 triage flag the leads row already badges 🚩), resurfaces the lead
  * today, and pings office staff — bell + push — to send the customer time options.
  * The office reply half already exists: the leads convert-menu "Let them pick"
@@ -28,13 +28,15 @@ import { clientIp, rateLimited } from "@/lib/rate-limit";
  * but for now a human decides which times get offered.
  *
  * Guard rail: an inspection a HUMAN already scheduled (created_by set) is never
- * re-requested — the customer gets "you're on the schedule" instead of the
- * office being asked to offer times over a real booking.
+ * re-requested — nothing is stamped and the office is not asked to offer times over a
+ * real booking. The BROWSER IS NOT TOLD WHICH (cn-v1180, audit A6): it reads one sentence
+ * that is true either way, because an answer that differs by whether a booking exists tells
+ * a stranger something about somebody else's lead.
  */
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
-import { requestHref } from "@/lib/feature-doors";
+import { requestHref, requestOpensLead } from "@/lib/feature-doors";
 import { createNotifications } from "@/lib/notifications";
 import { orgStaffIds, sendPushToProfiles } from "@/lib/push";
 
@@ -53,14 +55,25 @@ export interface PublicScheduleInput {
   message?: string;
   /** Honeypot — filled means bot. */
   hp?: string;
+  /**
+   * The lead THIS BROWSER'S submit just returned (submitPublicInquiry, submitEstimateLead). The
+   * only key the tap attaches by: read by id AND company, touched in the last 24 hours. A typed
+   * phone or e-mail is never a key here (cn-v1180, audit A6): anyone can type somebody's phone.
+   */
+  leadId?: string | null;
 }
 
+/**
+ * ONE ANSWER EITHER WAY (cn-v1180, audit A6): `ok` and nothing about whether the lead was already
+ * booked. The browser's sentence is true in both cases.
+ */
 export interface PublicScheduleResult {
   ok: boolean;
   error?: string;
-  /** An office-made inspection already exists — "you're on the schedule". */
-  already?: boolean;
 }
+
+/** How long after its own submit a browser's lead id still attaches a tap. */
+const LEAD_ID_WINDOW_MS = 24 * 3600_000;
 
 const clampStr = (v: unknown, max: number): string | null => {
   const s = String(v ?? "").trim().slice(0, max);
@@ -86,8 +99,8 @@ export async function publicScheduleInspection(
   // ── THE RATE LIMIT THIS DOOR NEVER HAD ────────────────────────────────────────────────────
   // Every sibling public door limits (site/actions.ts contact form, the estimate lead form) and
   // this one — a service-client write that fans out a notification AND a push to every office
-  // phone on each call — did not. The 24h dedup below suppresses only the extra INSERT, never the
-  // notify, and it reads just the newest rows, so past a busy day even the INSERT fires again.
+  // phone on each call — did not. Attaching to the browser's own lead suppresses only the extra
+  // INSERT, never the notify.
   // Anyone with a tenant's public handle or org uuid (both are URL path segments) could have run
   // every office phone flat.
   const ip = clientIp(await headers());
@@ -124,28 +137,33 @@ export async function publicScheduleInspection(
     return { ok: false, error: "Too many requests — please try again later." };
   const settings = getOrgSettings(org.settings);
 
-  // Find the inquiry this request belongs to: the most recent lead from the
-  // SAME contact in the last 24h (both surfaces create one just before this
-  // runs). Matched in JS on normalized phone digits / lowercased email — no
-  // string-built .or() filters with user input.
-  const digits = (s: string | null) => (s ?? "").replace(/\D/g, "");
-  const wantPhone = digits(phone);
-  const wantEmail = (email ?? "").toLowerCase();
-  const { data: recent } = await supabase
-    .from("inquiries")
-    .select("id, name, phone, email, address, message")
-    .eq("org_id", orgId)
-    .gte("created_at", new Date(Date.now() - 24 * 3600_000).toISOString())
-    .order("created_at", { ascending: false })
-    .limit(25);
-  let inquiry = ((recent ?? []) as any[]).find(
-    (i) =>
-      (wantPhone && digits(i.phone) && digits(i.phone) === wantPhone) ||
-      (wantEmail && (i.email ?? "").toLowerCase() === wantEmail),
-  ) as { id: string; name: string; address: string | null; message: string | null } | undefined;
+  // THE LEAD THIS BROWSER JUST SENT (cn-v1180, audit A6). The tap used to attach to the newest lead
+  // whose phone or e-mail equalled what was TYPED, so a stranger with somebody's phone filed a
+  // request under that person, pinged the office with their name and street, and was told whether
+  // they were booked. Now the only key is the id the same browser's submit returned, read by id AND
+  // company (the service client has no RLS), touched in the last 24 hours. Nothing typed is a key.
+  // The lead's OWN contact rides with it (skeptic #83, S2): the office's ping is built from the lead's
+  // row, never from what was typed, so an id held by somebody else cannot tell the office to send
+  // that person's times to the stranger who typed. On a new lead its own contact IS what was typed.
+  type Lead = { id: string; name: string; address: string | null; message: string | null; phone: string | null; email: string | null };
+  let inquiry: Lead | undefined;
+  const leadId = String(input?.leadId ?? "");
+  if (UUID_RE.test(leadId)) {
+    const { data: mine } = await supabase
+      .from("inquiries")
+      .select("id, name, address, message, phone, email, created_at, updated_at")
+      .eq("org_id", orgId)
+      .eq("id", leadId)
+      .maybeSingle();
+    const row = mine as (Lead & { created_at: string | null; updated_at: string | null }) | null;
+    const touched = Math.max(Date.parse(row?.created_at ?? "") || 0, Date.parse(row?.updated_at ?? "") || 0);
+    if (row && Date.now() - touched <= LEAD_ID_WINDOW_MS)
+      inquiry = { id: row.id, name: row.name, address: row.address, message: row.message, phone: row.phone, email: row.email };
+  }
 
-  // No match (request tap without a submitted form) → land a lead so the tap
-  // is never orphaned. Plain insert, same clamps as submit_inquiry.
+  // No id, or no such lead of this company in the window (request tap without a submitted form, or
+  // an id that is not this browser's) → land a lead so the tap is never orphaned. Plain insert,
+  // same clamps as submit_inquiry.
   if (!inquiry) {
     const { data: created, error: cErr } = await supabase
       .from("inquiries")
@@ -163,7 +181,7 @@ export async function publicScheduleInspection(
         status: "new",
         type: "residential",
       })
-      .select("id, name, address, message")
+      .select("id, name, address, message, phone, email")
       .single();
     if (cErr || !created) return { ok: false, error: "Couldn't submit — please call us instead." };
     inquiry = created as typeof inquiry;
@@ -179,8 +197,9 @@ export async function publicScheduleInspection(
     .eq("inquiry_id", inquiry.id)
     .eq("type", "inspection")
     .eq("status", "scheduled");
+  // The same answer as the stamped path below, byte for byte: the browser is not told which.
   if ((existing ?? []).some((a: any) => a.created_by)) {
-    return { ok: true, already: true };
+    return { ok: true };
   }
 
   // Stamp the request. No follow-up day (gone everywhere, cn-v1170): an open lead with no standing
@@ -191,19 +210,22 @@ export async function publicScheduleInspection(
       site_inspection_required: true,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", inquiry.id);
+    .eq("id", inquiry.id)
+    .eq("org_id", orgId) // the company by hand on the write too
+    .select("id");
 
   // Tell the office — bell (always works) + push (if the recipient enabled it),
   // the same dual channel as quote-accept.
   const staff = await orgStaffIds(orgId);
   // Leads switched off (0352, rule d): My Day, where the request waits with Call Back, and the
   // words name where it opens.
-  const url = requestHref(settings.features);
+  // Leads on: the lead's own file (cn-v1180, audit A2), not a list it may not be on.
+  const url = requestHref(settings.features, inquiry.id);
   const payload = {
     title: `${inquiry.name || name} wants an inspection — send them times`,
     body:
-      [phone ?? email, inquiry.address ?? address].filter(Boolean).join(" · ") ||
-      (url === "/leads" ? "Open the lead to send time options." : "Open My Day to send time options."),
+      [inquiry.phone ?? inquiry.email, inquiry.address].filter(Boolean).join(" · ") ||
+      (requestOpensLead(url) ? "Open the lead to send time options." : "Open My Day to send time options."),
     url,
   };
   await createNotifications(orgId, staff, { type: "inquiry", ...payload });

@@ -63,6 +63,20 @@ export const words: WordCatalog = {
     // CORE (cn-v1170): Not Sold waits for its visit; Reopen.
     ld_srv_visitStands: "A visit from this lead is still on the books. Open the visit and mark it Not Sold there.",
     ld_srv_notNotSold: "This lead isn't Not Sold any more. Reload to see where it is.",
+    // cn-v1180 (A3, C7): a lead's ending takes its pick-a-time link with it (lib/leads/withdraw-picks).
+    ld_srv_pickLinkWithdrawn: "Their pick-a-time link was withdrawn, so the times sent earlier can't book a second visit.",
+    ld_srv_pickLinkWithdrawnUndo: "Their pick-a-time link was withdrawn; Undo can't bring it back.",
+    ld_srv_pickLinkNotWithdrawn: "Their pick-a-time link couldn't be withdrawn. Open their visit on the Schedule and cancel it.",
+    ld_srv_pickLinksWithdrawnOne: "The pick-a-time link sent earlier to one of these was withdrawn.",
+    ld_srv_pickLinksWithdrawnMany: "The pick-a-time links sent earlier to {count} of these were withdrawn.",
+    ld_srv_pickLinksNotWithdrawn: "Pick-a-time links that couldn't be withdrawn: {count}. Open those visits on the Schedule and cancel them.",
+    // cn-v1180 (C6): Lead to Job takes back what it made when the lead's stamp fails.
+    ld_srv_stampFailed: "This lead couldn't be marked converted, so nothing was made. Try again.",
+    ld_srv_stampFailedJobLeft: "This lead couldn't be marked converted, and the job made for it couldn't be removed — delete job {id} by hand.",
+    ld_srv_stampFailedCustomerLeft: "This lead couldn't be marked converted, and the customer card made for it couldn't be removed. Find Duplicates shows it.",
+    ld_srv_duplicateCustomerLeft: "This lead was already converted, and the customer card made for it just now couldn't be removed. Find Duplicates shows it.",
+    // cn-v1180 (C9): New Lead from a customer's page when that customer could not be read.
+    ld_srv_postedCustomerUnread: "That customer couldn't be read; the lead was saved without them.",
   },
   es: {
     ld_srv_leadNotFound: "Prospecto no encontrado.",
@@ -106,5 +120,17 @@ export const words: WordCatalog = {
     // CORE (cn-v1170).
     ld_srv_visitStands: "Una visita de este prospecto sigue en la agenda. Abre la visita y márcala como no vendida ahí.",
     ld_srv_notNotSold: "Este prospecto ya no está como no vendido. Recarga para ver dónde está.",
+    // cn-v1180.
+    ld_srv_pickLinkWithdrawn: "Se retiró su enlace para elegir hora, así que las horas que se enviaron antes ya no pueden agendar una segunda visita.",
+    ld_srv_pickLinkWithdrawnUndo: "Se retiró su enlace para elegir hora; Deshacer no lo puede traer de vuelta.",
+    ld_srv_pickLinkNotWithdrawn: "No se pudo retirar su enlace para elegir hora. Abre su visita en la Agenda y cancélala.",
+    ld_srv_pickLinksWithdrawnOne: "Se retiró el enlace para elegir hora que se envió antes a uno de estos.",
+    ld_srv_pickLinksWithdrawnMany: "Se retiraron los enlaces para elegir hora que se enviaron antes a {count} de estos.",
+    ld_srv_pickLinksNotWithdrawn: "Enlaces para elegir hora que no se pudieron retirar: {count}. Abre esas visitas en la Agenda y cancélalas.",
+    ld_srv_stampFailed: "No se pudo marcar este prospecto como convertido, así que no se creó nada. Inténtalo de nuevo.",
+    ld_srv_stampFailedJobLeft: "No se pudo marcar este prospecto como convertido, y el trabajo creado para él no se pudo quitar — borra el trabajo {id} a mano.",
+    ld_srv_stampFailedCustomerLeft: "No se pudo marcar este prospecto como convertido, y la tarjeta de cliente creada para él no se pudo quitar. Buscar Duplicados la muestra.",
+    ld_srv_duplicateCustomerLeft: "Este prospecto ya se convirtió, y la tarjeta de cliente creada para él hace un momento no se pudo quitar. Buscar Duplicados la muestra.",
+    ld_srv_postedCustomerUnread: "No se pudo leer ese cliente; el prospecto se guardó sin él.",
   },
 };

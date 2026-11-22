@@ -7,6 +7,7 @@ import { classifyLead, PROJECT_TYPES, type LeadIntake, type ProjectType } from "
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { publicScheduleInspection } from "@/lib/actions/public-schedule";
 import { submitEstimateLead } from "./actions";
+import { SITE_VISIT_REQUESTED } from "@/app/inquire/site-visit-words";
 import type { EstimateResult, Qualifying } from "./types";
 
 const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
@@ -377,7 +378,7 @@ interface ScheduleContact {
  *  raise their hand now. Calendly when the org set one, else the built-in request
  *  flow: flag the lead + ping the office to text a few time options (the office
  *  picks which times to offer — no auto-proposed slots). */
-function ScheduleVisitCta({ handle, calendlyUrl, contact, brand }: { handle: string; calendlyUrl: string; contact: ScheduleContact; brand: string }) {
+function ScheduleVisitCta({ handle, calendlyUrl, contact, brand, leadId }: { handle: string; calendlyUrl: string; contact: ScheduleContact; brand: string; leadId?: string }) {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null); // confirmation copy once the request lands
   const [error, setError] = useState<string | null>(null);
@@ -408,13 +409,11 @@ function ScheduleVisitCta({ handle, calendlyUrl, contact, brand }: { handle: str
     setError(null);
     setBusy(true);
     try {
-      const res = await publicScheduleInspection({ handle, ...contact });
+      // The lead THIS browser's submit returned is the only key the tap attaches by (cn-v1180).
+      const res = await publicScheduleInspection({ handle, leadId, ...contact });
       if (!res.ok) { setError(res.error ?? "Something went wrong — please call us instead."); return; }
-      setDone(
-        res.already
-          ? "You're on the schedule — we'll confirm your time shortly."
-          : "Request received — we'll text you a few time options shortly.",
-      );
+      // ONE SENTENCE EITHER WAY (cn-v1180, audit A6): true whether a booking exists or not.
+      setDone(SITE_VISIT_REQUESTED);
     } catch {
       setError("Something went wrong — please call us instead.");
     } finally {
@@ -464,7 +463,7 @@ function ResultView({ result, orgName, brand, est, handle, calendlyUrl, contact 
         <>
           <h1 className="mt-4 text-2xl font-extrabold text-slate-900">Thanks — you're on the list</h1>
           <p className="mt-2 text-slate-600">A project this size gets a free on-site visit for an exact price.</p>
-          <ScheduleVisitCta handle={handle} calendlyUrl={calendlyUrl} contact={contact} brand={brand} />
+          <ScheduleVisitCta handle={handle} calendlyUrl={calendlyUrl} contact={contact} brand={brand} leadId={result.leadId} />
         </>
       ) : (
         <>

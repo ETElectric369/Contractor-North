@@ -182,15 +182,22 @@ describe("a pick-a-time request nobody answered (cn-v1170)", () => {
   });
 });
 
-describe("an inspection marked Won with no job picked (cn-v1171, skeptic #74)", () => {
-  const won = visit({ status: "completed", outcome: "won" });
+// cn-v1180 (A7): since cn-v1175 a Won INSPECTION with no job stands (it asks for its job on Inspections),
+// so what the file says this of is a call marked Won, or a visit marked Won that has its job.
+describe("a call or visit marked Won, the lead still open (cn-v1171, words true since cn-v1180)", () => {
+  const wonCall = visit({ type: "call", status: "completed", outcome: "won", job_id: null });
+  const wonWithJob = visit({ status: "completed", outcome: "won", job_id: "j1" });
   it("the lead is back on the list and its file says what is left, in both languages", () => {
-    expect(draw("open", "en", { visits: [won] })).toContain("Its inspection was marked Won and no job was picked. Open the inspection to pick the job.");
-    expect(draw("open", "es", { visits: [won] })).toContain("Su inspección se marcó como Ganada y no se eligió un trabajo.");
+    for (const won of [wonCall, wonWithJob]) {
+      expect(draw("open", "en", { visits: [won] })).toContain("A call or visit from this lead was marked Won, and the lead is still open. Open that visit from the lead&#x27;s file.");
+      expect(draw("open", "es", { visits: [won] })).toContain("Una llamada o visita de este prospecto se marcó como Ganada, y el prospecto sigue abierto.");
+    }
   });
-  it("not while another visit stands, and not without a Won visit", () => {
-    expect(draw("standing", "en", { visits: [won, visit({ id: "v2" })] })).not.toContain("marked Won and no job");
-    expect(draw("open", "en", { visits: [visit({ status: "cancelled" })] })).not.toContain("marked Won and no job");
+  it("never the old sentence; not for a Won inspection with no job (it stands); not while another visit stands; not without a Won visit", () => {
+    expect(draw("open", "en", { visits: [wonCall] })).not.toContain("no job was picked");
+    expect(draw("open", "en", { visits: [visit({ status: "completed", outcome: "won", job_id: null })] })).not.toContain("was marked Won");
+    expect(draw("standing", "en", { visits: [wonCall, visit({ id: "v2" })] })).not.toContain("was marked Won");
+    expect(draw("open", "en", { visits: [visit({ status: "cancelled" })] })).not.toContain("was marked Won");
   });
 });
 

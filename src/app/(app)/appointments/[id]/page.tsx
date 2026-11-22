@@ -397,6 +397,7 @@ export default async function AppointmentCapturePage({
   const stepFacts = {
     isStaff: viewerIsStaff,
     isInspection,
+    type: (a as { type?: string | null }).type ?? null,
     status: a.status ?? null,
     outcome: (a as { outcome?: string | null }).outcome ?? null,
     estimatesOn,
@@ -417,7 +418,12 @@ export default async function AppointmentCapturePage({
   // THE ESTIMATOR'S DOOR, built once: the header's Start the Estimate and the Inspector's own door
   // below hold this same href, so the page says one name and one place for it, top and bottom.
   // Pricing is the office's: nobody else is handed the door to the estimator.
-  const estimateHref = viewerIsStaff && estimatesOn ? `/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}` : null;
+  // A SALES VISIT'S ONLY, ON AN INSPECTION (cn-v1180, C12; skeptic #83): the header step asks
+  // isWonVisitType, and the Inspector's own Start the Estimate holds this same href, so a city's FINAL
+  // inspection (an inspection by type that nobody sells) is handed neither. Any other visit keeps it.
+  const sellsAnEstimate = !isInspection || isWonVisitType(stepFacts.type);
+  const estimateHref =
+    viewerIsStaff && estimatesOn && sellsAnEstimate ? `/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}` : null;
   // WON · START THE JOB (cn-v1176, lib/appointments/inspection-page wonDoorShown): the office's door
   // at the bottom of the Inspector; the sheet it opens asks the server what to show.
   const wonDoor = wonDoorShown({

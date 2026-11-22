@@ -93,8 +93,11 @@ describe("the job's side doors", () => {
     expect(s).toContain("answers: answersWithoutPrices(b.answers)");
     // A why line names a price and a note is the owner's own voice: only the office gets the sheets as written.
     expect(s).toContain("templates={viewerIsStaff ? (sheets ?? []) : sheetsWithoutMoney(sheets ?? [])}");
-    // The estimate's door is the office's, with Estimates on: built once (cn-v1173) and handed on.
-    expect(s).toMatch(/const estimateHref = viewerIsStaff && estimatesOn \?/);
+    // The estimate's door is the office's, with Estimates on, on a visit that SELLS one: built once
+    // (cn-v1173) and handed on. cn-v1180: a city's own final inspection sells nothing, so it is handed
+    // no estimate link at all (the header's step and the Inspector's door read this one question).
+    expect(s).toContain("const sellsAnEstimate = !isInspection || isWonVisitType(");
+    expect(s).toMatch(/const estimateHref =\s*viewerIsStaff && estimatesOn && sellsAnEstimate \?/);
     expect(s).toContain("estimateHref={estimateHref}");
     // The heading names the estimate only for the people who get its door, and never on an inspection
     // (cn-v1173: lib/appointments/inspection-page visitHeading).

@@ -39,8 +39,10 @@ import { reportError } from "@/lib/observe";
  * Guard: an org with no six and no decisions gets no push at all.
  *
  * THE BELL RECORDS IT (notifyPeople, 0366 wave): day_ahead is an opt-in kind, so the line lands
- * only on the bell of someone the push went to. The decisions headline says "Needs You: N", the
- * card's own name on My Day.
+ * only on the bell of someone the push went to. The decisions headline says "Needs You", the card's
+ * own name on My Day, and NO NUMBER (cn-v1180, audit C41): its head-count was holds back + late
+ * invoices + new leads, a different set from the board's own total, so the morning said one number and
+ * the board another. The named lines beneath say what is there, and "+N more" says the rest.
  *
  * HOLDS ARE BACK (Wave 1, lane 5): the first decision line counts every job on hold whose day has
  * come ("3 Holds Are Back"), the same holds My Day's "Holds Back" pile shows. A hold with NO day is not
@@ -196,7 +198,7 @@ export async function sendDayAheadDigests(
                 url: "/planner",
               }
             : {
-                title: `Needs You: ${decisions}`,
+                title: "Needs You",
                 body: decisionLine,
                 url: "/planner",
               },

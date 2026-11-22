@@ -320,6 +320,10 @@ export interface WaitingItem {
   kind: ActionKind;
   title: string;
   why: string;
+  /** A catalog key said IN PLACE of `why`, in the reader's language (cn-v1180): the feeders' own way
+   *  (a key, never a sentence; lib/action-items/feeder-keys). A hold with no saved reason hands
+   *  "ny_w_noReason", which read "No reason saved" in English to a Spanish reader. */
+  whyKey?: string;
   /** The company's day it comes back, yyyy-mm-dd. Null only on a hold with no day (waitingRowNoDay). */
   backOn: string | null;
   href: string;
@@ -339,7 +343,7 @@ const YMD = /^\d{4}-\d{2}-\d{2}$/;
 export function waitingRow(w: Omit<WaitingItem, "backOn"> & { backOn: string | null | undefined }): WaitingItem | null {
   const day = String(w.backOn ?? "").slice(0, 10);
   if (!YMD.test(day) || !Number.isFinite(Date.parse(`${day}T12:00:00Z`))) return null;
-  return { id: w.id, kind: w.kind, title: w.title, why: w.why.trim() || "Waiting", backOn: day, href: w.href };
+  return { id: w.id, kind: w.kind, title: w.title, why: w.why.trim() || "Waiting", ...(w.whyKey ? { whyKey: w.whyKey } : {}), backOn: day, href: w.href };
 }
 
 /**
@@ -349,7 +353,7 @@ export function waitingRow(w: Omit<WaitingItem, "backOn"> & { backOn: string | n
  */
 export function waitingRowNoDay(w: Omit<WaitingItem, "backOn">): WaitingItem | null {
   if (w.kind !== "job_on_hold") return null;
-  return { id: w.id, kind: w.kind, title: w.title, why: w.why.trim() || "Waiting", backOn: null, href: w.href };
+  return { id: w.id, kind: w.kind, title: w.title, why: w.why.trim() || "Waiting", ...(w.whyKey ? { whyKey: w.whyKey } : {}), backOn: null, href: w.href };
 }
 
 /**

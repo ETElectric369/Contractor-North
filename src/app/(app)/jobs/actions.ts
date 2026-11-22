@@ -1242,8 +1242,11 @@ export type DeleteJobResult = {
   error?: string;
   /** The caller must show these to the user and call again with confirmDestructive. */
   needsConfirm?: boolean;
-  /** Plain-English list of what deleting the job PERMANENTLY destroys. */
+  /** What deleting the job PERMANENTLY destroys (the database's cascades), one "<what>: <how many>"
+   *  line each, in the caller's language. */
   destroys?: string[];
+  /** What STAYS with no job (the job link is set to null), the same shape (cn-v1180). */
+  stays?: string[];
 };
 
 /**
@@ -1280,16 +1283,27 @@ export async function deleteJob(
   };
   const [
     { count: signedContracts },
-    { count: liveContracts },
-    { data: lien },
-    { count: claims },
+    liveContractsRead,
+    { data: lien, error: lienErr },
+    claimsRead,
     { count: billedMilestones },
-    { count: milestones },
-    { count: docs },
-    { count: permits },
-    { count: changeOrders },
+    milestonesRead,
+    docsRead,
+    permitsRead,
+    changeOrdersRead,
     reportsRead,
     requestsRead,
+    tasksRead,
+    listsRead,
+    estimatesRead,
+    invoicesRead,
+    workOrdersRead,
+    hoursRead,
+    segmentsRead,
+    panelsRead,
+    billsRead,
+    purchaseOrdersRead,
+    visitsRead,
   ] = await Promise.all([
     headCount("contracts", (q: any) => q.eq("status", "signed")),
     headCount("contracts", (q: any) => q.in("status", ["draft", "sent"])),
@@ -1302,6 +1316,27 @@ export async function deleteJob(
     headCount("change_orders"),
     headCount("daily_reports"),
     headCount("invoices", (q: any) => q.eq("invoice_kind", PREPAYMENT_KIND)),
+    // WHAT ELSE GOES AND WHAT STAYS (cn-v1180, audit C5), each verified against the migrations' keys:
+    // tasks.job_id (0018) and material_lists.job_id (0001) are ON DELETE CASCADE, so they go with the
+    // job (a task's steps cascade through their parent, 0055: the top-level tasks are counted, as the
+    // Tasks tab lists them); quotes, work_orders, time_entries (0001) and invoices (0003) are ON DELETE
+    // SET NULL, so they stay on the books with no job.
+    headCount("tasks", (q: any) => q.is("parent_id", null)),
+    headCount("material_lists"),
+    headCount("quotes"),
+    headCount("invoices"),
+    headCount("work_orders"),
+    headCount("time_entries"),
+    // FIVE MORE, NAMED (skeptic #83, S10), each verified against its key: job_schedule_segments.job_id
+    // (0040) and job_panels.job_id (0333; its circuits cascade with it, 0333) are ON DELETE CASCADE, so
+    // the job's blocks on the schedule and its panel map go with it (a panel already removed is not
+    // counted: nobody sees it); bills (0017), purchase_orders (0002) and appointments (0042) are ON DELETE
+    // SET NULL, so the supplier bills, the purchase orders and the visits stay with no job.
+    headCount("job_schedule_segments"),
+    headCount("job_panels", (q: any) => q.is("removed_at", null)),
+    headCount("bills"),
+    headCount("purchase_orders"),
+    headCount("appointments"),
   ]);
 
   /* ── A DAILY REPORT IS SOMEBODY'S DAY (0411): a report filed for this job keeps its job (the key
@@ -1348,22 +1383,48 @@ export async function deleteJob(
     };
   }
 
-  // ── Tier 2: name what really goes, then require a second, informed confirm ──
+  // ── Tier 2: name what really goes, AND what stays with no job, then require a second, informed confirm ──
+  // In the caller's language (cn-v1180, audit C5): the list counted the tables someone named in July,
+  // and never the job's tasks and materials list, which the database deletes with it, nor the estimates,
+  // invoices, work orders and clocked hours it leaves on the books with no job. A count that could not
+  // be read is SAID on its line ("couldn't be counted just now") and filed, never drawn as zero: a
+  // silent zero is exactly the confirm that promised nothing was lost.
+  const t = translator(await callerLang(supabase, ctx.userId));
   const destroys: string[] = [];
-  if (liveContracts) destroys.push(`${liveContracts} contract${liveContracts > 1 ? "s" : ""}`);
-  if (lien) destroys.push("the lien / preliminary-notice record");
-  if (claims) destroys.push(`${claims} insurance claim${claims > 1 ? "s" : ""}`);
-  if (milestones) destroys.push(`${milestones} payment milestone${milestones > 1 ? "s" : ""}`);
-  if (docs) destroys.push(`${docs} document${docs > 1 ? "s" : ""} / photo${docs > 1 ? "s" : ""}`);
-  if (permits) destroys.push(`${permits} permit${permits > 1 ? "s" : ""}`);
-  if (changeOrders) destroys.push(`${changeOrders} change order${changeOrders > 1 ? "s" : ""}`);
-  if (destroys.length && !opts.confirmDestructive) {
-    return {
-      ok: false,
-      needsConfirm: true,
-      destroys,
-      error: `Deleting this job also permanently deletes ${destroys.join(", ")}.`,
-    };
+  const stays: string[] = [];
+  const line = (into: string[], key: string, read: { count?: number | null; error?: unknown }, table: string) => {
+    if (read.error) {
+      reportError("deleteJob.count", read.error, { jobId: id, table });
+      into.push(`${t(key)}: ${t("jb_delUnread")}`);
+      return;
+    }
+    const n = Number(read.count ?? 0);
+    if (n > 0) into.push(`${t(key)}: ${n}`);
+  };
+  type Counted = { count?: number | null; error?: unknown };
+  line(destroys, "jb_delContracts", liveContractsRead as Counted, "contracts");
+  if (lienErr) {
+    reportError("deleteJob.count", lienErr, { jobId: id, table: "lien_records" });
+    destroys.push(`${t("jb_delLien")}: ${t("jb_delUnread")}`);
+  } else if (lien) destroys.push(t("jb_delLien"));
+  line(destroys, "jb_delClaims", claimsRead as Counted, "insurance_claims");
+  line(destroys, "jb_delMilestones", milestonesRead as Counted, "payment_milestones");
+  line(destroys, "jb_delDocuments", docsRead as Counted, "documents");
+  line(destroys, "jb_delPermits", permitsRead as Counted, "permits");
+  line(destroys, "jb_delChangeOrders", changeOrdersRead as Counted, "change_orders");
+  line(destroys, "jb_delTasks", tasksRead as Counted, "tasks");
+  line(destroys, "jb_delMaterialLists", listsRead as Counted, "material_lists");
+  line(destroys, "jb_delScheduleBlocks", segmentsRead as Counted, "job_schedule_segments");
+  line(destroys, "jb_delPanels", panelsRead as Counted, "job_panels");
+  line(stays, "jb_delEstimates", estimatesRead as Counted, "quotes");
+  line(stays, "jb_delInvoices", invoicesRead as Counted, "invoices");
+  line(stays, "jb_delWorkOrders", workOrdersRead as Counted, "work_orders");
+  line(stays, "jb_delTimeEntries", hoursRead as Counted, "time_entries");
+  line(stays, "jb_delBills", billsRead as Counted, "bills");
+  line(stays, "jb_delPurchaseOrders", purchaseOrdersRead as Counted, "purchase_orders");
+  line(stays, "jb_delVisits", visitsRead as Counted, "appointments");
+  if ((destroys.length || stays.length) && !opts.confirmDestructive) {
+    return { ok: false, needsConfirm: true, destroys, stays, error: t("jb_delNeedsConfirm") };
   }
 
   // BEFORE the row goes (it reads google_event_id off the row). Fire-safe.

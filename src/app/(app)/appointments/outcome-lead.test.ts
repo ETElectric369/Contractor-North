@@ -23,9 +23,20 @@ function builder(table: string) {
   db.calls.push(call);
   const run = (single: boolean) => {
     if (table === "profiles") return { data: { language: "en" }, error: null };
-    if (call.op === "update") return { data: table === "appointments" ? [db.visit] : db.leadUpdated, error: null };
+    // This world holds no pick-a-time links: an update of schedule_proposals touches nothing.
+    if (call.op === "update") return { data: table === "appointments" ? [db.visit] : table === "schedule_proposals" ? [] : db.leadUpdated, error: null };
     if (table === "inquiries") return { data: single ? db.lead : [db.lead], error: null };
-    if (table === "appointments") return { data: db.visits, error: null };
+    // The visits' read honours the filters it names on the columns these rows carry (skeptic #83, S9: the
+    // lead's pick-a-time sweep reads `status = proposed`, and a stand-in blind to it saw a completed
+    // visit as one waiting on a pick). A column the rows do not carry (org_id) is not judged here.
+    if (table === "appointments") {
+      const keep = (r: Row) =>
+        call.filters.every(([m, k, v]) =>
+          !(k in r) ||
+          (m === "eq" ? r[k] === v : m === "neq" ? r[k] !== v : m === "in" ? (v as unknown[]).includes(r[k]) : m === "is" ? (r[k] ?? null) === v : true),
+        );
+      return { data: db.visits.filter(keep), error: null };
+    }
     return { data: single ? null : [], error: null };
   };
   const b: any = {

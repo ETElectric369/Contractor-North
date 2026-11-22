@@ -77,7 +77,7 @@ describe("1. the box: drawn as ever, except the office's inspection with no job,
 
 describe("2. the header's one boxed step, the office's, on an inspection", () => {
   type Facts = Parameters<typeof inspectionHeaderStep>[0];
-  const base: Facts = { isStaff: true, isInspection: true, status: "completed", outcome: null, estimatesOn: true, estimate: null, hasJob: false, leadHasEstimate: false };
+  const base: Facts = { isStaff: true, isInspection: true, type: "inspection", status: "completed", outcome: null, estimatesOn: true, estimate: null, hasJob: false, leadHasEstimate: false };
   const rows: [string, Partial<Facts>, HeaderStep][] = [
     ["scheduled", { status: "scheduled" }, "mark_done"],
     ["proposed", { status: "proposed" }, "mark_done"],
@@ -108,11 +108,24 @@ describe("2. the header's one boxed step, the office's, on an inspection", () =>
     });
   }
 
+  // cn-v1180, audit C12: the city's final inspection is an inspection by type, and a done one with no
+  // job was handed Start the Estimate. The estimate steps ask isWonVisitType; Mark Done stays while booked.
+  it("a final inspection: Mark Inspection Done while booked, and never an estimate step after", () => {
+    const fin = { ...base, type: "final_inspection", isInspection: isInspectionType("final_inspection") };
+    expect(fin.isInspection).toBe(true);
+    expect(inspectionHeaderStep({ ...fin, status: "scheduled" })).toBe("mark_done");
+    expect(inspectionHeaderStep(fin)).toBeNull();
+    expect(inspectionHeaderStep({ ...fin, estimate: { live: true } })).toBeNull();
+    expect(inspectionHeaderStep({ ...fin, estimate: { live: false } })).toBeNull();
+    // The sales inspection beside it is unchanged.
+    expect(inspectionHeaderStep(base)).toBe("start_estimate");
+  });
+
   it("no other visit type gets a step here, office or tech, in any status", () => {
     for (const type of OTHERS) {
       for (const status of STATUSES) {
         for (const isStaff of [true, false]) {
-          expect(inspectionHeaderStep({ ...base, isInspection: isInspectionType(type), status, isStaff }), `${type} ${status}`).toBeNull();
+          expect(inspectionHeaderStep({ ...base, isInspection: isInspectionType(type), type, status, isStaff }), `${type} ${status}`).toBeNull();
         }
       }
     }
@@ -156,6 +169,7 @@ describe("2. the header's one boxed step, the office's, on an inspection", () =>
       const step = inspectionHeaderStep({
         isStaff: true,
         isInspection: true,
+        type: "inspection",
         status: "completed",
         outcome: c.outcome,
         estimatesOn: true,
@@ -272,7 +286,8 @@ describe("the page reads the one file for all three, and hands ONE href to both 
   it("the estimator's href is built once and handed to both doors", () => {
     // Built once in code (the file's header comment names the route as prose; inspection-opens-not-estimates strips comments too).
     expect(page.match(/`\/quotes\/new\?capture=/g)?.length).toBe(1);
-    expect(page).toContain("const estimateHref = viewerIsStaff && estimatesOn ? `/quotes/new?capture=");
+    // skeptic #83: a city's FINAL inspection is handed neither door (the same isWonVisitType the step asks).
+    expect(page).toContain("viewerIsStaff && estimatesOn && sellsAnEstimate ? `/quotes/new?capture=");
     expect(page).toContain("estimateHref={estimateHref}");
     expect(page).toContain("<Link href={estimateHref}>");
   });

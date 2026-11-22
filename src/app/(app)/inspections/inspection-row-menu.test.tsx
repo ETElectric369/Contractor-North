@@ -25,6 +25,7 @@ vi.mock("../appointments/actions", () => ({
   rescheduleAppointment: vi.fn(),
   setAppointmentStatus: vi.fn(),
   setAppointmentOutcome: vi.fn(),
+  putVisitBackOnSchedule: vi.fn(),
   wontHappenAppointment: vi.fn(),
   createAppointment: vi.fn(),
   updateAppointment: vi.fn(),
@@ -256,17 +257,46 @@ describe("It Happened: Write It Up", () => {
 describe("Not Sold (cn-v1170, was Lost)", () => {
   it("cn-v1175 (R8): a visit answered Not Sold before its day came off the schedule; the Undo clears the answer AND puts it back", async () => {
     const setOutcome = vi.fn(async (_id: string, o: string | null) => (o ? { ok: true, offSchedule: { previousStatus: "scheduled" } } : { ok: true }));
-    const setStatus = vi.fn(async () => ({ ok: true }));
+    const putBack = vi.fn(async () => ({ ok: true }));
     const io = rig();
-    await markItLost("a1", io, { setOutcome: setOutcome as any, setStatus: setStatus as any });
+    await markItLost("a1", io, { setOutcome: setOutcome as any, putBack: putBack as any });
     // The person's tap asks for the off-schedule step (skeptic #78): the assistant's route never does.
     expect(setOutcome).toHaveBeenCalledWith("a1", "lost", { offSchedule: true });
     expect(io.log).toEqual(["close", "toast:success:Marked Not Sold.", "refresh"]);
     undoOf(io.toast)();
     await settle();
     expect(setOutcome.mock.lastCall).toEqual(["a1", null]);
-    expect(setStatus).toHaveBeenCalledWith("a1", "scheduled");
+    // Through the visit page's own door back, told what the visit was (skeptic #83, S1).
+    expect(putBack).toHaveBeenCalledWith("a1", { previousStatus: "scheduled" });
     expect(io.toast).toHaveBeenLastCalledWith("Back where it was.", "success");
+  });
+
+  it("skeptic #83 (S1): a visit that was waiting on the customer's pick goes back through the door back, which says where it went", async () => {
+    const setOutcome = vi.fn(async (_id: string, o: string | null) => (o ? { ok: true, offSchedule: { previousStatus: "proposed" } } : { ok: true }));
+    const putBack = vi.fn(async () => ({ ok: true, message: "Back on the schedule, waiting for a day." }));
+    const io = rig();
+    await markItLost("a1", io, { setOutcome: setOutcome as any, putBack: putBack as any });
+    undoOf(io.toast)();
+    await settle();
+    expect(putBack).toHaveBeenCalledWith("a1", { previousStatus: "proposed" });
+    expect(io.toast).toHaveBeenLastCalledWith("Back where it was. Back on the schedule, waiting for a day.", "success");
+  });
+
+  it("skeptic #83 (S9): the lead's other links withdrawn with it are said beside the visit's own, in one sticky note", async () => {
+    const setOutcome = vi.fn(async () => ({
+      ok: true,
+      leadMarked: true,
+      offSchedule: { previousStatus: "scheduled", note: "The visit's link was withdrawn." },
+      note: "Their pick-a-time link was withdrawn; Undo can't bring it back.",
+    }));
+    const io = rig();
+    await markItLost("a1", io, { setOutcome: setOutcome as any });
+    expect(io.toast).toHaveBeenCalledWith(
+      "The visit's link was withdrawn. Their pick-a-time link was withdrawn; Undo can't bring it back.",
+      "info",
+      undefined,
+      { sticky: true },
+    );
   });
 
   it("writes lost, closes, re-reads; the Undo clears the outcome with no option and says the plain sentence", async () => {

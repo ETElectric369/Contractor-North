@@ -109,7 +109,7 @@ describe("the row in Spanish (cn-v1170)", () => {
     expect(html).toContain("Prioridad 7");
     expect(html).toContain("Desde Tu Sitio Web");
     expect(html).toMatch(/aria-label="Esperando 3 d 4 h desde que llegó"[^>]*>3 d 4 h</);
-    for (const w of [">Agendar<", "No Vendido", "Editar Detalles"]) expect(html, w).toContain(w);
+    for (const w of ["Agendar</button>", "No Vendido", "Editar Detalles"]) expect(html, w).toContain(w);
     expect(html).not.toContain("Priority 7");
     expect(html).not.toContain(">Schedule<");
     expect(html).not.toContain("Nuevo · Llámale");
@@ -160,7 +160,16 @@ describe("the Schedule sheet in Spanish", () => {
     const html = es(createElement(LeadScheduleSheet, sheet));
     expect(html).toContain("Agendar una Inspección");
     expect(html).toContain("Pone una inspección para <strong>Ana Larkspur</strong> en tu Agenda");
-    for (const w of ["Agendar", "Que Ellos Elijan", "Empezar Ahora"]) expect(html, w).toContain(w);
+    for (const w of ["Fijar Fecha", "Que Ellos Elijan", "Empezar Ahora"]) expect(html, w).toContain(w);
+  });
+
+  // cn-v1180 (C3): Book It sits INSIDE the Schedule sheet (Agendar), so in Spanish it is its own word.
+  it("Book It is Fijar Fecha, never a second Agendar inside the Agendar sheet; English is unchanged", () => {
+    const html = es(createElement(LeadScheduleSheet, sheet));
+    expect(html).not.toMatch(/>Agendar</);
+    expect(translator("es")("ld_btn_bookIt")).toBe("Fijar Fecha");
+    expect(translator("es")("ld_btn_schedule")).toBe("Agendar");
+    expect(translator("en")("ld_btn_bookIt")).toBe("Book It");
   });
 
   it("the link-ready screen is Spanish, but the text the CUSTOMER gets stays English", () => {

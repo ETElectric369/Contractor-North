@@ -19,7 +19,7 @@ vi.mock("@/lib/rate-limit", () => ({ rateLimited: async () => false, clientIp: (
 vi.mock("@/lib/inquiries/create-triaged-inquiry", () => ({
   createTriagedInquiry: async () => {
     state.triaged++;
-    return { triage: { showInstantPrice: false, siteInspectionRequired: true, bucket: "C" } };
+    return { id: "lead-thistlewood", triage: { showInstantPrice: false, siteInspectionRequired: true, bucket: "C" } };
   },
 }));
 vi.mock("@/lib/supabase/server", () => ({
@@ -74,5 +74,7 @@ describe("the same door for a deck company pricing from its catalog", () => {
     expect(res.ok).toBe(true);
     expect(state.reads).toEqual(["organizations", "price_list_items"]);
     expect(state.triaged).toBe(1);
+    // The id this submit wrote goes back to THIS browser, the one key its site-visit tap uses (cn-v1180).
+    expect(res.leadId).toBe("lead-thistlewood");
   });
 });

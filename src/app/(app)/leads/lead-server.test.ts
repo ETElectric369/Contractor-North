@@ -84,7 +84,9 @@ describe("setInquiryStatus: Not Sold waits for a standing visit", () => {
 
   it("goes through once the visit has ended (Not Sold, cancelled or none)", async () => {
     db.visits = [{ inquiry_id: "l1", status: "completed", outcome: "lost" }];
-    expect(await setInquiryStatus("l1", "lost")).toEqual({ ok: true });
+    // ok, and whatever this stand-in (it ignores filters) let the pick-a-time withdrawal see; what that
+    // withdrawal does is proven on a stand-in that honours them: withdraw-picks.test.ts (cn-v1180).
+    expect(await setInquiryStatus("l1", "lost")).toMatchObject({ ok: true });
     expect(writes("inquiries")[0].patch).toMatchObject({ status: "lost" });
   });
 

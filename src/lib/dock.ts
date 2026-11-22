@@ -464,6 +464,16 @@ export const menuSections = (sections: DockSection[]): DockSection[] => sections
  *      so the strip said the tile's name over nothing. The office's clock now lights Timecards, which is where
  *      their hours turn into money. No new nav entry: the nav doctrine forbids a second door to one
  *      page, and a tech's own /timeclock still lights his Clock tile by rule 2.
+ *   5. else the ONE query-less row whose page this route sits UNDER: a list's own detail pages
+ *      (cn-v1180, audit C2). A lead's file (/leads/<id>) lit the Sales tile and no row, an estimate's
+ *      page and New lit nothing under Estimates, a customer's page nothing under Customers: the strip
+ *      said the tile's name over nothing, the hole rule 4 closed for the clock. Fixed HERE, in the rule,
+ *      and not with an `owns` per row, because every list with detail pages had the same hole (an
+ *      invoice, a form, the accountant's export under Analytics) and a row added later would have it
+ *      again. Query-carrying rows are left out (the Jobs statuses, a tech's /settings?tab=you), so a
+ *      job's page lights All, the one row that is the whole list, and two candidates still light
+ *      nothing. An `owns` claim (rule 4) is asked first: a row never takes a route another row owns.
+ *      A visit's page (/appointments/<id>) sits under no row; its page says where it lives (activeNav).
  */
 export function activeRowHref(rows: DockNode[], pathname: string, current: string): string | undefined {
   const links = rows.filter((c): c is DockNode & { href: string } => !!c.href);
@@ -475,7 +485,10 @@ export function activeRowHref(rows: DockNode[], pathname: string, current: strin
   if (onPage.length === 1) return onPage[0].href;
   const under = (base: string) => pathname === base || pathname.startsWith(base + "/");
   const owner = links.filter((c) => c.owns?.some(under));
-  return owner.length === 1 ? owner[0].href : undefined;
+  if (owner.length === 1) return owner[0].href;
+  if (owner.length > 1) return undefined;
+  const parent = links.filter((c) => !c.href.includes("?") && under(c.href));
+  return parent.length === 1 ? parent[0].href : undefined;
 }
 
 /**

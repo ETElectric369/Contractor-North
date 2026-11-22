@@ -45,12 +45,22 @@ export async function countTeammates(
 }
 
 /**
- * Where a new request's bell entry and push land (rule d). Leads on: the lead list. Leads off:
- * My Day, where the request still arrives as a "New Request from …" card with Call Back (every
- * public request door keeps working with Leads off; only the list is out of the way).
+ * Where a new request's bell entry and push land (rule d). Leads on: THE LEAD'S OWN FILE,
+ * /leads/<id>, when the sender knows which lead it wrote (cn-v1180, audit A2): a big web lead whose
+ * inspection was booked for it has a standing visit, and a standing visit takes a lead off the Leads
+ * list, so an alert that opened the list sent the office to a page where the lead was not. The list
+ * itself only when no id is known. Leads off: My Day, where the request still arrives as a "New
+ * Request from …" card with Call Back (every public request door keeps working with Leads off; only
+ * the list is out of the way). ONE function decides, and every sender hands it the id.
  */
-export function requestHref(features: FeatureMap | null | undefined): "/leads" | "/planner" {
-  return featureOn(features, "leads") ? "/leads" : "/planner";
+export function requestHref(features: FeatureMap | null | undefined, leadId?: string | null): string {
+  if (!featureOn(features, "leads")) return "/planner";
+  return leadId ? `/leads/${encodeURIComponent(leadId)}` : "/leads";
+}
+
+/** Does an alert built by requestHref open a lead (the file or the list), so its words say "lead"? */
+export function requestOpensLead(href: string): boolean {
+  return href === "/leads" || href.startsWith("/leads/");
 }
 
 /**

@@ -13,6 +13,7 @@ import { requireStaff } from "@/lib/staff-guard";
 import { spreadTimes } from "@/lib/schedule/place-by-town";
 import { appointmentTypeFor, bookingTitle, workKind } from "@/lib/schedule/work-shape";
 import { standingFor } from "@/lib/leads/new-intake";
+import { withdrawLeadPicks, withdrewAnything } from "@/lib/leads/withdraw-picks";
 import { reopenNotSold } from "@/lib/leads/not-sold";
 import { closeVisitsBehindLead } from "@/lib/appointments/behind-quote";
 import { carryFromCustomer, type CustomerMatch, type KnownCustomer } from "@/lib/inquiries/known-customer";
@@ -53,6 +54,10 @@ export type Result = {
   /** Save as Contact (target 'customer'): the card the lead now carries, and whether the book
    *  already had them (linked to it) or a new card was made, so the toast says which (W2-07). */
   contact?: { id: string; name: string; existing: boolean };
+  /** Something the person who tapped should hear that is not a refusal (a withdrawn pick-a-time link). */
+  note?: string;
+  /** What this ending did to the lead's pick-a-time link (cn-v1180): the batch rail counts it. */
+  pickLink?: "withdrawn" | "notWithdrawn";
 };
 
 /**
@@ -81,6 +86,34 @@ function wordsOf(supabase: unknown, userId?: string | null): Said {
   const made: Said = { lang, say: async (key, vars) => fillSlots(translator(await lang())(key), vars) };
   if (memo) SAID.set(memo, made);
   return made;
+}
+
+/**
+ * A LEAD'S ENDING TAKES ITS PICK-A-TIME LINK WITH IT (cn-v1180; lib/leads/withdraw-picks has the rule
+ * and why). The one way to cancel a visit is the status door, setAppointmentStatus: it withdraws that
+ * visit's link and reconciles the calendar. It is imported when it is needed because appointments/
+ * actions already imports this file (createInquiry): a cycle between the two modules at load is one
+ * nobody needs. A miss is filed and said, never swallowed: the ending itself has landed.
+ * `withUndo`: the ending carries an Undo, so the sentence says the link is the one part Undo can't put back.
+ */
+async function withdrawPicksOf(
+  ctx: { supabase: SupabaseClient; orgId: string | null; userId: string },
+  inquiryId: string,
+  opts: { exceptVisitId?: string | null; withUndo?: boolean } = {},
+): Promise<{ note?: string; pickLink?: "withdrawn" | "notWithdrawn" }> {
+  const { setAppointmentStatus } = await import("../appointments/actions");
+  const r = await withdrawLeadPicks(
+    ctx.supabase,
+    { orgId: ctx.orgId, inquiryId, exceptVisitId: opts.exceptVisitId ?? null },
+    (visitId) => setAppointmentStatus(visitId, "cancelled"),
+  );
+  const ws = wordsOf(ctx.supabase, ctx.userId);
+  if (r.error || r.failed.length) {
+    reportError("leads:withdrawPicks", r.error ?? new Error("a proposed visit was not cancelled"), { leadId: inquiryId });
+    return { note: await ws.say("ld_srv_pickLinkNotWithdrawn"), pickLink: "notWithdrawn" };
+  }
+  if (!withdrewAnything(r)) return {};
+  return { note: await ws.say(opts.withUndo ? "ld_srv_pickLinkWithdrawnUndo" : "ld_srv_pickLinkWithdrawn"), pickLink: "withdrawn" };
 }
 
 function orNull(s: string): string | null {
@@ -215,6 +248,7 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
   let linkedCustomerId: string | null = null;
   let carried: Record<string, string> = {};
   let link_note: string | undefined;
+  let postedUnread = false;
   try {
     /**
      * THE CUSTOMER'S OWN NEW LEAD (cn-v1173). The owner, 2026-11-19: "i would like to promote the
@@ -225,6 +259,12 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
      * customer who shares a name with another is still the one he started from). The same carry rule
      * fills the empty fields, with the same "Linked to …" sentence. An id that reads nothing (gone,
      * merged away, another company's) is ignored, and the name match runs as before.
+     *
+     * AND IT IS SAID (cn-v1180, C9). When that read found nobody (or failed) and the name match linked
+     * nobody either, the lead saved untied with no word, and he had started it FROM a customer. The lead
+     * still saves (never lose a lead); the answer says the customer couldn't be read and the lead was
+     * saved without them, and the form's toast shows it. A match that did link somebody says who, as it
+     * always has. Both reads' failures are filed (reportError), this one and the book's below.
      */
     const postedId = String(formData.get("customer_id") ?? "").trim();
     let posted: KnownCustomer | null = null;
@@ -238,6 +278,7 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
       // reads nothing.
       if (postedErr) reportError("leads:create:posted-customer", postedErr);
       posted = (row as KnownCustomer | null) ?? null;
+      postedUnread = !posted;
     }
     /**
      * ONLY A SURE MATCH LINKS (cn-v1178, A1). This ran matchKnownCustomer, a name alone: a new caller
@@ -292,6 +333,10 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
     }
   } catch {
     // Never let the convenience break the capture. Fragment-first: the lead saves regardless.
+  }
+  if (postedUnread && !linkedCustomerId) {
+    const unread = await ws.say("ld_srv_postedCustomerUnread");
+    link_note = link_note ? `${unread} ${link_note}` : unread;
   }
 
   const { data, error } = await supabase
@@ -406,7 +451,14 @@ export async function markInquiryContacted(id: string): Promise<Result> {
   return { ok: true };
 }
 
-export async function setInquiryStatus(id: string, status: string): Promise<Result> {
+export async function setInquiryStatus(
+  id: string,
+  status: string,
+  /** Whether the caller offers an Undo beside the answer (skeptic #83, S6): only the lead's own Not Sold
+   *  door does (lead-doors markLeadNotSold). Every other caller, the assistant's inquiry.markLost among
+   *  them, has none, so its sentence never mentions one. */
+  opts: { withUndo?: boolean } = {},
+): Promise<Result> {
   // inquiries.status is free text in the DB, so the spine is the only guard — an
   // unlisted value would vanish from every filtered leads view (same idiom as
   // setJobStatus / updateQuoteStatus).
@@ -457,9 +509,20 @@ export async function setInquiryStatus(id: string, status: string): Promise<Resu
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_leadUnavailable") };
+  /* NOT SOLD TAKES THE LINK WITH IT (cn-v1180, A3). A lead whose times ran out with no pick is back on the
+     list (its visit no longer stands), so Not Sold is allowed, and its link was still live: a later tap
+     booked a Not Sold lead. The lead's ending now withdraws it, after the status has landed. Where the
+     caller's Not Sold carries an Undo (the row's), the link is the one part Undo cannot put back and the
+     sentence says so; elsewhere the plain sentence. */
+  let said: { note?: string; pickLink?: "withdrawn" | "notWithdrawn" } = {};
+  if (status === "lost") {
+    said = await withdrawPicksOf(ctx, id, { withUndo: opts.withUndo === true });
+    revalidatePath("/schedule");
+    revalidatePath("/inspections");
+  }
   revalidatePath("/leads");
   revalidatePath("/planner"); // My Day shows inquiry counts — keep it in sync
-  return { ok: true };
+  return { ok: true, ...said };
 }
 
 /**
@@ -691,7 +754,7 @@ export async function convertInquiry(
     if (!startsAtIso) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_pickValidDay") };
     const carry = await carryForInquiry(supabase, inq);
 
-    const { error: aErr } = await supabase.from("appointments").insert({
+    const { data: booked, error: aErr } = await supabase.from("appointments").insert({
       // ALWAYS AN INSPECTION (cn-v1170), through the helpers a lead with no kind always took; no
       // length and no end from the lead ("Remove how long (will be determined in Inspector)"), so
       // the calendar draws its default block.
@@ -710,8 +773,13 @@ export async function convertInquiry(
       customer_id: opts.customerId || inq.customer_id || null,
       inquiry_id: id, // provenance: the calendar entry knows its lead
       created_by: ctx.userId,
-    });
+    }).select("id").single();
     if (aErr) return { ok: false, error: aErr.message };
+    /* BOOK IT CLOSES THE LINK IT REPLACES (cn-v1180, C7). A lead sent times whose first went by with no
+       pick is back on the list, and Book It (or the rail's batch, which books through here) made a
+       second visit beside the old `proposed` one, whose link stayed live: the customer's later tap
+       turned the old one into a booking too. The visit just made is left exactly as it is. */
+    const said = await withdrawPicksOf(ctx, id, { exceptVisitId: (booked as { id?: string } | null)?.id ?? null });
     // Engaged, not closed: contacted, and NO follow-up day (gone everywhere, cn-v1170). The visit
     // now stands, so the lead is off the Leads list until the visit ends (lib/leads/new-intake).
     await supabase
@@ -729,7 +797,7 @@ export async function convertInquiry(
     // time it never controlled (Nort told Justin "run the questions now" about a visit it had
     // just booked two days out at 9 AM).
     const startTime = /^\d{2}:\d{2}$/.test(opts.startTime ?? "") ? opts.startTime! : "09:00";
-    return { ok: true, redirect: `/schedule?view=day&date=${startDate}`, data: { starts_at: startsAtIso, date: startDate, time: startTime } };
+    return { ok: true, redirect: `/schedule?view=day&date=${startDate}`, data: { starts_at: startsAtIso, date: startDate, time: startTime }, ...said };
   }
 
   // ESTIMATE — the deferred-customer path (Erik's flow: a prospect becomes a saved Contact ONLY when
@@ -802,7 +870,13 @@ export async function convertInquiry(
   if (target === "customer" && inq.customer_id) {
     return { ok: true, id: inq.customer_id, redirect: `/crm/${inq.customer_id}` };
   }
-  let customerId = opts.customerId || null;
+  /* THE LEAD'S OWN TIE COMES FIRST (cn-v1180, A5). This read only the caller's pick, so a lead tied to its
+     customer the day it was made (a lead started from a landlord's page, with the tenant's name and
+     phone typed) was matched again from what was typed, a new card was made for a stranger, the job went
+     under it, and the lead was re-stamped onto it. The caller's explicit pick, else the lead's own
+     customer, else the match as before; and a tied lead is never re-stamped (the stamp below). */
+  const leadTie = (inq as { customer_id?: string | null }).customer_id ?? null;
+  let customerId = opts.customerId || leadTie || null;
   let mintedFromLead = false; // the card was made from this lead's own name/company/type just now
   // The name on the card the lead lands on, when the book already had them (Save as Contact says
   // "Linked To <name>", never a silent link to somebody else's card).
@@ -935,7 +1009,8 @@ export async function convertInquiry(
   const stampQuery = supabase
     .from("inquiries")
     .update({
-      customer_id: customerId,
+      // A lead already tied to a customer keeps that tie, whatever card the job went under (A5).
+      ...(leadTie ? {} : { customer_id: customerId }),
       updated_at: new Date().toISOString(),
       ...(isContactOnly
         ? {}
@@ -945,16 +1020,45 @@ export async function convertInquiry(
   const { data: stamped, error: uErr } = isContactOnly
     ? await stampQuery.select("id")
     : await stampQuery.is("converted_at", null).select("id");
-  if (uErr) return { ok: false, error: uErr.message };
-  if (!isContactOnly && !stamped?.length) {
+  /* ONE CLEAN-UP FOR BOTH FAILURES (cn-v1180, C6). A stamp that FAILED returned the database's English
+     and kept the job and the card it had just made, so a retry made another; only the lost race (zero
+     rows) cleaned up, and its delete was not read back. Both take back what this call made now: the job,
+     then a card made from this lead just now (nothing else points at either), each delete read back.
+     What could not be taken back is named, never left unsaid. */
+  const takeBack = async (): Promise<{ jobLeft: boolean; customerLeft: boolean }> => {
+    let jobLeft = false;
+    let customerLeft = false;
     if (mintedJobId) {
-      const { error: cleanupErr } = await supabase.from("jobs").delete().eq("id", mintedJobId);
-      if (cleanupErr) {
-        // NOTHING SILENT: a leftover twin job is worse unnamed than named.
-        return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_duplicateJobLeft", { id: mintedJobId }) };
+      const { data: gone, error: jobDelErr } = await supabase.from("jobs").delete().eq("id", mintedJobId).select("id");
+      if (jobDelErr || !gone?.length) {
+        jobLeft = true;
+        reportError("leads:convert:takeBackJob", jobDelErr ?? new Error("job delete touched nothing"), { leadId: id, jobId: mintedJobId });
       }
     }
-    return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_alreadyConverted") };
+    if (mintedFromLead && customerId && !jobLeft) {
+      const { data: gone, error: custDelErr } = await supabase.from("customers").delete().eq("id", customerId).select("id");
+      if (custDelErr || !gone?.length) {
+        customerLeft = true;
+        reportError("leads:convert:takeBackCustomer", custDelErr ?? new Error("customer delete touched nothing"), { leadId: id, customerId });
+      }
+    }
+    return { jobLeft, customerLeft };
+  };
+  if (uErr) {
+    reportError("leads:convert:stamp", uErr, { leadId: id });
+    const back = await takeBack();
+    const ws = wordsOf(ctx.supabase, ctx.userId);
+    if (back.jobLeft) return { ok: false, error: await ws.say("ld_srv_stampFailedJobLeft", { id: mintedJobId ?? "" }) };
+    if (back.customerLeft) return { ok: false, error: await ws.say("ld_srv_stampFailedCustomerLeft") };
+    return { ok: false, error: await ws.say("ld_srv_stampFailed") };
+  }
+  if (!isContactOnly && !stamped?.length) {
+    const back = await takeBack();
+    const ws = wordsOf(ctx.supabase, ctx.userId);
+    // NOTHING SILENT: a leftover twin job is worse unnamed than named.
+    if (back.jobLeft) return { ok: false, error: await ws.say("ld_srv_duplicateJobLeft", { id: mintedJobId ?? "" }) };
+    if (back.customerLeft) return { ok: false, error: await ws.say("ld_srv_duplicateCustomerLeft") };
+    return { ok: false, error: await ws.say("ld_srv_alreadyConverted") };
   }
 
   // ONE DOOR OPENS, THE LAST ONE CLOSES (cn-v1175, R2): a lead turned into a job takes its earlier visits
@@ -1065,7 +1169,7 @@ export async function scheduleLeadsOnDay(
   leadIds: string[],
   date: string,
   opts: { startTime?: string; stepMinutes?: number; times?: string[] } = {},
-): Promise<{ ok: boolean; error?: string; booked: number; failures: { id: string; error: string }[] }> {
+): Promise<{ ok: boolean; error?: string; booked: number; failures: { id: string; error: string }[]; note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error, booked: 0, failures: [] };
   const ws = wordsOf(ctx.supabase, ctx.userId);
@@ -1108,6 +1212,9 @@ export async function scheduleLeadsOnDay(
       : spreadTimes(ids.length, opts.startTime ?? "09:00", opts.stepMinutes ?? 90);
   const failures: { id: string; error: string }[] = [];
   let booked = 0;
+  // What the bookings did to links sent earlier (cn-v1180): said once, for the whole batch.
+  let linksWithdrawn = 0;
+  let linksLeft = 0;
   // Sequential on purpose: each booking reads its lead and carries its intake answers, and firing
   // them in parallel would race the same org's numbering and revalidation for no real gain at
   // the sizes this is used at (a day is a handful of stops, not a hundred).
@@ -1120,11 +1227,17 @@ export async function scheduleLeadsOnDay(
     const res = await convertInquiry(ids[i], "inspection", { startDate: date, startTime: times[i] });
     if (res.ok) booked++;
     else failures.push({ id: ids[i], error: res.error ?? (await ws.say("ld_srv_couldntBook")) });
+    if (res.pickLink === "withdrawn") linksWithdrawn++;
+    if (res.pickLink === "notWithdrawn") linksLeft++;
   }
   revalidatePath("/leads");
   revalidatePath("/schedule");
   revalidatePath("/planner");
-  return { ok: booked > 0, booked, failures, error: booked ? undefined : failures[0]?.error };
+  const notes = [
+    linksWithdrawn === 1 ? await ws.say("ld_srv_pickLinksWithdrawnOne") : linksWithdrawn > 1 ? await ws.say("ld_srv_pickLinksWithdrawnMany", { count: linksWithdrawn }) : "",
+    linksLeft ? await ws.say("ld_srv_pickLinksNotWithdrawn", { count: linksLeft }) : "",
+  ].filter(Boolean);
+  return { ok: booked > 0, booked, failures, error: booked ? undefined : failures[0]?.error, ...(notes.length ? { note: notes.join(" ") } : {}) };
 }
 
 /**

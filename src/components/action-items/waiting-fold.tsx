@@ -60,7 +60,9 @@ export function WaitingFold({ items }: { items: WaitingItem[] }) {
 
 /** "Tupelo Panel · J-934 · Waiting on the permit · Back Oct 3": the day said in the reader's language.
  *  A hold with no day: "Larkspur Deck · J-041 · Waiting on the permit · No Day Set". */
-export function waitingLine(w: Pick<WaitingItem, "title" | "why" | "backOn">, lang: Lang = "en", words: Words = EN): string {
+export function waitingLine(w: Pick<WaitingItem, "title" | "why" | "whyKey" | "backOn">, lang: Lang = "en", words: Words = EN): string {
   const day = w.backOn ? fillSlots(words("ag_btn_backOn"), { day: shortDay(w.backOn, lang) }) : words("ny_btn_noDaySet");
-  return [w.title, w.why, day].filter(Boolean).join(" · ");
+  // A key the feeder handed (a hold with no reason saved) is said in the reader's language (cn-v1180).
+  const why = w.whyKey ? words(w.whyKey) : w.why;
+  return [w.title, why, day].filter(Boolean).join(" · ");
 }

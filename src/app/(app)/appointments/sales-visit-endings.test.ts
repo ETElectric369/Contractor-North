@@ -30,7 +30,12 @@ describe("the visit page's endings", () => {
     // The person's tap asks for the off-schedule step (it carries the Undo); the assistant's route never does.
     expect(row).toContain('await setAppointmentOutcome(id, "lost", { offSchedule: true })');
     expect(row).toContain("await setAppointmentOutcome(id, null)");
-    expect(row).toContain("wontHappenUndo(off.previousStatus, lang, t).status");
+    // The Undo goes back through the visit page's own door back, told what the visit was: a visit that
+    // was waiting on the customer's pick comes back waiting for a day (skeptic #83, S1).
+    expect(row).toContain("await putVisitBackOnSchedule(id, { previousStatus: off.previousStatus })");
+    expect(row).not.toContain("wontHappenUndo(off.previousStatus");
+    // The lead's other links withdrawn with it (skeptic #83, S9) are said beside the visit's own.
+    expect(row).toContain('const links = [off?.note, res.note].filter(Boolean).join(" ");');
     expect(row).not.toMatch(/\bconfirm\(/);
     expect(row).toContain('t("vp_btn_lost")');
   });
@@ -38,13 +43,28 @@ describe("the visit page's endings", () => {
   it("Not Sold before its day takes it off the schedule by the status door, and says what it was", () => {
     const fn = actions.slice(actions.indexOf("export async function setAppointmentOutcome"), actions.indexOf("export async function setAppointmentStatus"));
     expect(fn).toContain('.select("id, inquiry_id, status, starts_at")');
-    expect(fn).toMatch(/const ahead = !row\.starts_at \|\| \(Number\.isFinite\(at\) && at > Date\.now\(\)\);/);
+    // cn-v1180 (A3): a visit waiting on the customer's pick has no agreed time, so it is always ahead.
+    expect(fn).toMatch(/const ahead = row\.status === "proposed" \|\| !row\.starts_at \|\| \(Number\.isFinite\(at\) && at > Date\.now\(\)\);/);
     expect(fn).toContain('(row.status === "scheduled" || row.status === "proposed") && ahead');
     expect(fn).toContain('await setAppointmentStatus(id, "cancelled")');
     // Only Not Sold (or the old no_bid) does it: a win or a cleared answer never moves the calendar.
     // And only when the caller asked (skeptic #78): the two person-tapped doors, never the assistant.
     expect(fn).toContain('if (opts?.offSchedule === true && (outcome === "lost" || outcome === "no_bid")) {\n    const at');
     expect(fn).toContain("opts?: { offSchedule?: boolean },");
+  });
+});
+
+describe("a city's FINAL inspection is handed no estimator door (skeptic #83; C12)", () => {
+  it("the one href both the header step and the Inspector's own Start the Estimate hold is null on one", async () => {
+    const { isWonVisitType } = await import("@/lib/appointments/won-sheet");
+    expect(isWonVisitType("final_inspection")).toBe(false);
+    expect(isWonVisitType("inspection")).toBe(true);
+    // Asked of the visit's type by the same rule the header step asks (inspectionHeaderStep).
+    expect(page).toContain("const sellsAnEstimate = !isInspection || isWonVisitType(stepFacts.type);");
+    expect(page).toMatch(/const estimateHref =\s+viewerIsStaff && estimatesOn && sellsAnEstimate \?/);
+    // The Inspector is handed that one href, never one of its own.
+    expect(page.match(/estimateHref=\{estimateHref\}/g)).toHaveLength(1);
+    expect(page.match(/`\/quotes\/new\?capture=/g)).toHaveLength(1);
   });
 });
 

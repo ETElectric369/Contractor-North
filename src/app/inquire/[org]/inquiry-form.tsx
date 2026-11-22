@@ -5,6 +5,7 @@ import { CalendarClock, CheckCircle2, ExternalLink, Loader2 } from "lucide-react
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { publicScheduleInspection } from "@/lib/actions/public-schedule";
 import { submitPublicInquiry } from "./actions";
+import { SITE_VISIT_REQUESTED } from "../site-visit-words";
 
 export function InquiryForm({
   org,
@@ -30,6 +31,8 @@ export function InquiryForm({
   const [hp, setHp] = useState(""); // honeypot
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  // The lead THIS submit wrote (cn-v1180): the only key the site-visit tap attaches by.
+  const [leadId, setLeadId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Post-submit "request a site visit" (the built-in office-in-the-loop flow:
   // no auto-offered slots — the office texts time options).
@@ -43,14 +46,12 @@ export function InquiryForm({
     try {
       const res = await publicScheduleInspection({
         orgId: org,
-        name, phone, email, address, city, state: stateName, zip, message, hp,
+        name, phone, email, address, city, state: stateName, zip, message, hp, leadId,
       });
       if (!res.ok) { setSchedError(res.error ?? "Something went wrong — please call us instead."); return; }
-      setSchedDone(
-        res.already
-          ? "You're on the schedule — we'll confirm your time shortly."
-          : "Request received — we'll text you a few time options shortly.",
-      );
+      // ONE SENTENCE EITHER WAY (cn-v1180, audit A6): the server no longer says whether a booking
+      // exists, so the words are true whether it does or not.
+      setSchedDone(SITE_VISIT_REQUESTED);
     } catch {
       setSchedError("Something went wrong — please call us instead.");
     } finally {
@@ -82,6 +83,7 @@ export function InquiryForm({
         ref: refId, // referral attribution — validated org-side, never blocks the lead
       });
       if (!res.ok) { setError(res.error); return; }
+      setLeadId(res.leadId ?? null);
       setDone(true);
     } catch (err: any) {
       setError(err?.message ?? "Something went wrong. Please call us instead.");

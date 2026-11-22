@@ -33,8 +33,8 @@ import type { WordCatalog } from "./types";
  *
  * WORDS COINED HERE (builder B, cn-v1146, the screens): Follow Up = Seguimiento (nv_desc_leads said "dar
  * seguimiento" until cn-v1172); Follow-Ups Due = Seguimientos Pendientes; Mark Contacted / Mark Lost = Marcar Como
- * Contactado / Perdido; Referral tally = Conteo de referidos; Referrer = Referente; Book It = Agendar and
- * Let Them Pick = Que Ellos Elijan; Not Sure Yet = Aún No Sé; Arrival window = Ventana de llegada; Zip =
+ * Contactado / Perdido; Referral tally = Conteo de referidos; Referrer = Referente; Book It = Agendar (Fijar Fecha since
+ * cn-v1180: it sits inside the Schedule sheet, whose button is Agendar) and Let Them Pick = Que Ellos Elijan; Not Sure Yet = Aún No Sé; Arrival window = Ventana de llegada; Zip =
  * Código postal; State = Estado (EE. UU.); Town = Ciudad (agenda's); Schedule (the page) = Agenda, Schedule (the verb) = Agendar.
  * The text Text It hands the CUSTOMER (convert-menu's smsBody) stays English; leads-spanish.test pins it.
  * cn-v1147: in Spanish the function words (a, de, la, y…) stay lowercase after the first word ("Lista de
@@ -267,7 +267,9 @@ export const words: WordCatalog = {
     // cn-v1171 (CUST)
     ld_btn_fileVisitCancelled: "Cancelled",
     // cn-v1171 (fixer, skeptic #74)
-    ld_wonPending: "Its inspection was marked Won and no job was picked. Open the inspection to pick the job.",
+    // cn-v1180 (A7): since cn-v1175 a Won inspection with no job stands on Inspections, so what is left
+    // here is a call or a meeting marked Won, or a visit marked Won whose job did not convert the lead.
+    ld_wonPending: "A call or visit from this lead was marked Won, and the lead is still open. Open that visit from the lead's file.",
     // cn-v1172 (EST): the Not Sold fold's second kind (fixer: one word for an ending, Not Sold)
     ld_notSoldByEstimate: "Estimate Not Sold",
     // cn-v1172 (fixer): the estimates' part of the fold could not be read; the hand-marked still are
@@ -322,7 +324,8 @@ export const words: WordCatalog = {
     ld_btn_bookAnInspection: "Agendar una Inspección",
     ld_btn_done: "Hecho",
     ld_btn_createLink: "Crear Enlace",
-    ld_btn_bookIt: "Agendar",
+    // cn-v1180 (C3): Book It sits INSIDE the Schedule sheet, whose button is Agendar; two doors, one word.
+    ld_btn_bookIt: "Fijar Fecha",
     ld_btn_letThemPick: "Que Ellos Elijan",
     ld_linkReady: "Enlace listo — envíaselo por mensaje a {name}. La visita se confirma en tu calendario en cuanto toquen una hora.",
     ld_btn_copied: "Copiado",
@@ -463,7 +466,7 @@ export const words: WordCatalog = {
     // cn-v1171 (CUST)
     ld_btn_fileVisitCancelled: "Cancelada",
     // cn-v1171 (fixer, skeptic #74)
-    ld_wonPending: "Su inspección se marcó como Ganada y no se eligió un trabajo. Abre la inspección para elegir el trabajo.",
+    ld_wonPending: "Una llamada o visita de este prospecto se marcó como Ganada, y el prospecto sigue abierto. Abre esa visita desde el archivo del prospecto.",
     // cn-v1172 (EST): the Not Sold fold's second kind (fixer: one word for an ending, Not Sold)
     ld_notSoldByEstimate: "Presupuesto No Vendido",
     // cn-v1172 (fixer): the estimates' part of the fold could not be read; the hand-marked still are
