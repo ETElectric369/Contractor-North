@@ -37,6 +37,8 @@ import { NowTasks } from "./now-tasks";
 import { QuickCostButton } from "@/components/quick-cost-button";
 import { MarkReportReviewedButton } from "./mark-report-reviewed-button";
 import type { DailyReportSummary } from "../timeclock/actions";
+import { asksForDailyReport, reportJobName, reportLanding } from "@/lib/daily-report-rule";
+import { OPEN_TASK_JOB, isMissingColumn, whereJobTaskOpen } from "@/lib/job-tasks";
 import { loadShiftChains } from "@/lib/shift-chain";
 import { reportError } from "@/lib/observe";
 import { featureOn, offFeatureKey } from "@/lib/features";
@@ -61,8 +63,13 @@ const QUOTE_COUNT = 34;
 /** A job as an agenda row reads it: its block (start, end, size), its crew, where it is. */
 const AGENDA_JOB_COLS = "id, job_number, name, status, address, city, scheduled_start, scheduled_end, planned_minutes, assigned_to";
 
-export default async function PlannerPage({ searchParams }: { searchParams: Promise<{ view?: string; week?: string }> }) {
-  const { view: viewRaw, week: weekRaw } = await searchParams;
+/** A daily report as the Daily Reports card draws it (who, which day, the two answers, the day story). */
+const REPORT_COLS = "id, profile_id, report_date, did_today, materials_tomorrow, gps_summary, status, profiles:profile_id(full_name)";
+
+export default async function PlannerPage({ searchParams }: { searchParams: Promise<{ view?: string; week?: string; report?: string }> }) {
+  const { view: viewRaw, week: weekRaw, report: reportRaw } = await searchParams;
+  // THE BELL'S LINK (/planner?report=<id>, timeclock/actions reportBellUrl): the report it is about.
+  const reportParam = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reportRaw ?? "") ? (reportRaw as string) : null;
   const view = viewRaw === "week" ? "week" : "day";
   // Tech week paging (?week= signed offset from this week). Staff never render
   // a week here — they're redirected to THE week at /schedule below.
@@ -249,15 +256,11 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // page owns that view now; the office/else DOOR links left too, so the only
   // count consumers below are the Tasks & Reminders card's Grab-One gate + its progress marks,
   // which count the DAY's own total, not a six.)
-  //
-  // The daily-report window: 14 ORG-local days back from today (lib/tz, never the
-  // UTC server's day — a Pacific evening debrief must not fall out of the window a
-  // day early).
-  const reportsSince = todayStrInTz(tz, new Date(Date.now() - 14 * 86_400_000));
+
   // (An open punch with NO job reads no job list here: the Now card's Pick the Job opens the
   // clock's own "Which Job Are You On?" sheet, which loads its list when it opens: the job he
   // punched last, today's schedule, the jobs in progress. One list at every door.)
-  const [crewR, curJobRes, poolR, restCountR, doneTodayR, dailyReportsR] = await Promise.all([
+  const [crewR, curJobRes, poolR, restCountR, doneTodayR, dailyReportsR, leadR] = await Promise.all([
     crewP,
     openEntry?.job_id
       ? supabase.from("jobs").select("id, job_number, name, status, address, customers(name, address, city, state, zip)").eq("id", openEntry.job_id).maybeSingle()
@@ -287,24 +290,49 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         .gte("completed_at", dayStart.toISOString())
         .lt("completed_at", dayEnd.toISOString()),
     ),
-    // Crew-lead daily reports (staff only) — the clock-out debriefs Nort filed, and
-    // the surface the daily_report bell/push (url "/planner") lands on. Last 14
-    // ORG-LOCAL days, newest first: this card used to show TODAY only and sent the
-    // office to /timecards for the rest, but the review list moved here (cn-v958),
-    // so yesterday's report has to be reachable on this page or the link is a dead
-    // end. PROJECTION: gps_summary + status ride along because the card classifies
-    // on them (the day story, and the filed→reviewed check-off). Fails soft (empty)
-    // until migration 0128 lands.
+    // Crew-lead daily reports (staff only) STILL WAITING FOR REVIEW, whatever their day, newest first
+    // (cn-v1174; the owner: "should only show up on the My Day if one has been submitted as we need to
+    // clear up the clutter"). A reviewed report leaves My Day and is read in its job's file (the job
+    // page's Time tab); the bell's link to one still lands (reportLanding, below). No day window: a
+    // report waiting three weeks is still waiting. PROJECTION: gps_summary + status ride along because
+    // the card draws them. Fails soft (empty) until migration 0128 lands.
+    // Each row names its job (two reports may wait for one day, one per job): job_id is 0411's and its
+    // job rides along; a database without the column yet is read again without it (no job named).
     isStaff
-      ? supabase
-          .from("daily_reports")
-          .select("id, profile_id, report_date, did_today, materials_tomorrow, gps_summary, status, created_at, profiles:profile_id(full_name)")
-          .gte("report_date", reportsSince)
-          .order("report_date", { ascending: false })
-          .order("created_at", { ascending: false })
+      ? (async () => {
+          const waiting = (cols: string) =>
+            supabase
+              .from("daily_reports")
+              .select(cols)
+              .eq("status", "filed")
+              .order("report_date", { ascending: false })
+              .order("created_at", { ascending: false });
+          const first: { data: unknown; error: unknown } = await waiting(`${REPORT_COLS}, created_at, job_id, report_job:job_id(name, job_number)`);
+          return first.error && isMissingColumn(first.error) ? waiting(`${REPORT_COLS}, created_at`) : first;
+        })()
       : Promise.resolve({ data: [] as any[] }),
+    // Is this person asked for the end-of-day report when he clocks out on the Now card? Read on its
+    // own, as the Time Clock page does, so a database without 0128's column never fails the profile read.
+    supabase.from("profiles").select("crew_lead").eq("id", user?.id ?? "").maybeSingle(),
   ]);
-  const dailyReports = (((dailyReportsR as any)?.data ?? []) as any[]).map((r) => ({
+  const asksReport = asksForDailyReport((leadR as any)?.data?.crew_lead, features);
+  // THE BELL'S LINK NEVER LANDS ON NOTHING. A report the address names that is not on the card (it was
+  // reviewed) is read by id: one with a job goes to its job's file (the Time tab's Daily Reports), one
+  // with no job is drawn on the card below, folded like a reviewed row. job_id is 0411's: a database
+  // without it yet is read again without it (the report then has no job and is drawn here).
+  const waitingRows = ((dailyReportsR as any)?.data ?? []) as any[];
+  let focusRow: any = null;
+  if (isStaff && reportParam && !waitingRows.some((r) => r.id === reportParam)) {
+    const one = (cols: string) => supabase.from("daily_reports").select(cols).eq("id", reportParam).maybeSingle();
+    let read: { data: unknown; error: unknown } = await one(`${REPORT_COLS}, job_id, report_job:job_id(name, job_number)`);
+    if (read.error && isMissingColumn(read.error)) read = await one(REPORT_COLS);
+    if (read.error) reportError("planner-report-link", read.error, { reportId: reportParam });
+    focusRow = read.error ? null : read.data;
+    // Only while the switch is on: the job page draws its Daily Reports section only then.
+    const landing = reportLanding(focusRow, featureOn(features, "daily_reports"));
+    if (landing.kind === "job") redirect(landing.href);
+  }
+  const dailyReports = [...waitingRows, ...(focusRow ? [focusRow] : [])].map((r: any) => ({
     id: r.id as string,
     report_date: r.report_date as string,
     did_today: (r.did_today ?? null) as string | null,
@@ -312,9 +340,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     gps: (r.gps_summary ?? null) as DailyReportSummary | null,
     status: (r.status ?? "filed") as string,
     name: (r.profiles?.full_name ?? t("md_crewMember")) as string,
+    // The frozen summary's name for that job, else the job's own; no job says nothing extra.
+    jobName: reportJobName(r, Array.isArray(r.report_job) ? r.report_job[0] : r.report_job),
   }));
   const reportsToReview = dailyReports.filter((r) => r.status !== "reviewed").length;
-  const reportsOn = featureOn(features, "daily_reports");
   const isOwner = (me as any)?.role === "owner";
   const currentJob = ((curJobRes as any)?.data as any) ?? undefined;
   // Navigate target for the Now card: structured address → customer address → job
@@ -374,13 +403,16 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       : Promise.resolve({ data: [] as any[] }),
     // THE CLOCKED-IN JOB'S TASKS for the Now card (0358): how many are left and the next three,
     // in the list's order. Off the clock (no currentJob) there is nothing to read. A head count and
-    // three rows, one query; a lost read shows no Tasks line rather than a wrong "0 left".
+    // three rows, one query; a lost read shows no Tasks line rather than a wrong "0 left". OPEN IS THE
+    // ONE RULE (lib/job-tasks whereJobTaskOpen, the twin of open-counts isOpenTask, cn-v1174): a punch
+    // still on a finished or cancelled job counts none of its tasks.
     currentJob
-      ? supabase
-          .from("tasks")
-          .select("id, title", { count: "exact" })
-          .eq("job_id", currentJob.id)
-          .eq("status", "open")
+      ? whereJobTaskOpen(
+          supabase
+            .from("tasks")
+            .select(`id, title, ${OPEN_TASK_JOB}`, { count: "exact" })
+            .eq("job_id", currentJob.id),
+        )
           .order("created_at", { ascending: true })
           .limit(3)
       : Promise.resolve({ data: [] as any[], count: 0, error: null }),
@@ -938,6 +970,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           below render here, on the server. */}
       <NowCard
         userId={user?.id ?? null}
+        asksReport={asksReport}
         crew={crewForCard(crewR, user?.id ?? null, tz, todayStr)}
         open={
           openEntry
@@ -1020,29 +1053,28 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           slot 2, straight under the Now card: the debrief is the other end of the same shift, and
           it has to be read BEFORE today's agenda, not after it — the materials line is what
           changes the morning.
-          The footer link to /timecards is gone with the move: this IS the review list now, so
-          the 14-day window lives here and a daily_report bell/push (url "/planner") lands on
-          the report it is about.
+          The footer link to /timecards is gone with the move: this IS the review list now.
+          ONLY WHAT WAITS (cn-v1174): the card holds the reports still waiting for review and is not
+          drawn when none waits; a reviewed report is read in its job's file. The one exception is
+          the bell's link to a reviewed report with no job: that one report is drawn here, folded.
           KNOWN GAP, unchanged by the move (audit 2026-07-16): 0128's design says "filed for
           office EDITING" and the update RLS grants staff that write, but no UI anywhere edits a
           report's did_today/materials_tomorrow — this is read + check-off only. Build the edit
           affordance here if the office ever needs to correct a filed report. */}
       {/* DAILY REPORTS SWITCHED OFF (0352): the card stays while a filed report still waits to be
           reviewed (it is somebody's end-of-day, already sent), with the Off line on top; once
-          they're all checked off it goes with the switch. */}
-      {isStaff && dailyReports.length > 0 && (reportsOn || reportsToReview > 0) && (
+          they're all checked off it goes, as it does with the switch on. */}
+      {isStaff && dailyReports.length > 0 && (
         <Card className="mb-4 overflow-hidden">
           <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
             <div className="flex items-center gap-2">
               <ClipboardList className="h-4 w-4 text-slate-400" />
               <span className="text-sm font-semibold text-slate-800">{t("md_dailyReports")}</span>
             </div>
-            {/* NOTHING SILENT: the right-hand line says what is left to do AND what window
-                this list covers, so "only three" is never mistaken for "only three exist". */}
-            <span className="shrink-0 text-xs font-medium text-slate-500">
-              {reportsToReview > 0 ? fillText(t("md_toReview"), { n: String(reportsToReview) }) : ""}
-              {t("md_last14Days")}
-            </span>
+            {/* NOTHING SILENT: the right-hand line says how many still wait (every one of them is listed). */}
+            {reportsToReview > 0 && (
+              <span className="shrink-0 text-xs font-medium text-slate-500">{fillText(t("md_toReview"), { n: String(reportsToReview) })}</span>
+            )}
           </div>
           <FeatureOffLine feature="daily_reports" features={features} isOwner={isOwner} className="mx-5 mt-3" />
           <ul className="divide-y divide-slate-100">
@@ -1077,16 +1109,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                   )}
                 </>
               );
-              // A REVIEWED REPORT HAS ALREADY DONE ITS JOB. Moving this card to the page Erik
-              // opens every morning only helps if it does not rebuild the wall it left: 14 days
-              // of debriefs rendered whole (did-today and materials are whitespace-pre-line and
-              // uncapped) is a dozen full-height blocks standing between the clock and today's
-              // agenda on a 375px phone, most of them already checked off. So an unreviewed
-              // report stays open — it is the thing that still needs him — and a reviewed one
-              // shrinks to its identity row.
-              // NOT A DEAD END, and nothing silent: the row is a <details> disclosure, so the
-              // debrief is one tap away in place (no page, no fetch, no client JS), the header
-              // still counts "N to review · last 14 days", and the 14-day reach is untouched.
+              // A REVIEWED REPORT HAS ALREADY DONE ITS JOB. The card lists only what waits, so a
+              // reviewed row is here only when the bell's link named it and it has no job's file to
+              // go to (above): it shrinks to its identity row, a <details> disclosure one tap from
+              // the debrief in place (no page, no fetch, no client JS).
               if (reviewed) {
                 return (
                   <li key={r.id}>
@@ -1097,6 +1123,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                         <div className="min-w-0 flex-1 truncate text-sm">
                           <span className="font-semibold text-slate-900">{r.name}</span>
                           <span className="ml-2 text-slate-500">{formatDate(r.report_date, tz, lang)}</span>
+                          {r.jobName && <span className="ml-2 text-slate-500">· {r.jobName}</span>}
                         </div>
                         <Badge tone="green" className="shrink-0">{t("md_reviewed")}</Badge>
                       </summary>
@@ -1111,6 +1138,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                     <div className="min-w-0 text-sm">
                       <span className="font-semibold text-slate-900">{r.name}</span>
                       <span className="ml-2 text-slate-500">{formatDate(r.report_date, tz, lang)}</span>
+                      {r.jobName && <span className="ml-2 text-slate-500">· {r.jobName}</span>}
                     </div>
                     <MarkReportReviewedButton id={r.id} />
                   </div>

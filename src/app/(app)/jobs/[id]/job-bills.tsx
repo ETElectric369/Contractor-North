@@ -105,6 +105,7 @@ export function JobBills({
   handsNote,
   papers = null,
   correctionsReady = false,
+  billWhat = null,
 }: {
   jobId: string;
   bills: Bill[];
@@ -125,6 +126,9 @@ export function JobBills({
   papers?: Record<string, BillPaper[]> | null;
   /** The page read bills.corrects_bill_id (0381 is on the database): Correct This Bill is drawn. */
   correctionsReady?: boolean;
+  /** Bill id → one line of what was bought on it (the page's paper-summary rule: its line
+   *  descriptions, then "+N more"). A bill no line describes says nothing. */
+  billWhat?: Record<string, string> | null;
 }) {
   const [editBill, setEditBill] = useState<Bill | null>(null);
   // DOES THIS JOB HAVE PARTS AT ALL (item C1)? On a job whose estimate is broken into Framing and
@@ -196,6 +200,7 @@ export function JobBills({
       <Link href={`/bills#bill-${b.id}`} className="flex min-h-11 items-center gap-3 rounded-md hover:bg-slate-50">
         <div className="min-w-0 flex-1">
           <div className="font-medium text-slate-900">{b.supplier}</div>
+          {billWhat?.[b.id] && <div className="truncate text-xs text-slate-600">{billWhat[b.id]}</div>}
           <div className="text-xs text-slate-400">
             {b.bill_number ? `#${b.bill_number} · ` : ""}{b.bill_date ? formatDate(b.bill_date) : ""}
             {b.po_id && poNumberById.has(b.po_id)

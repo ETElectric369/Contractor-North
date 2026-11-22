@@ -1,4 +1,4 @@
-import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
+import { ACTIVE_JOB_STATUSES, isEndedJob } from "@/lib/job-status";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { isStillOwed } from "@/lib/supplier-owed";
 
@@ -20,6 +20,24 @@ import { isStillOwed } from "@/lib/supplier-owed";
  *  cancelled). The job-status spine's own ACTIVE set. */
 export function isOpenJob(status: string | null | undefined): boolean {
   return (ACTIVE_JOB_STATUSES as readonly string[]).includes(String(status ?? ""));
+}
+
+/**
+ * A TASK STILL TO DO (cn-v1174; Erik, 2026-11-21: "ones that close out with the job should already be
+ * closed out right? and it says 3 above and there are a bunch down there so how is this number getting
+ * calculated?").
+ *
+ * Open is its status open AND either no job (a Reminder) or a job that is not over: finished and
+ * called off end a job's tasks, ON HOLD does not (the job is coming back, and so is its work). `job` is
+ * the task's job as read with it (its status), or null for a task with no job. Steps count as they
+ * always have: a step is a task. Every count and every list of open tasks reads this, or its query
+ * twin in lib/job-tasks (whereJobTaskOpen / whereReminderOpen) when the database does the cut, so a
+ * number over a list is the list's own length: the job page's Tasks badge and its "X of Y done", My
+ * Day's Now card "Tasks: N left", Nort's list_tasks, its schedule read and its bulk sweeps.
+ */
+export function isOpenTask(task: { status?: string | null }, job: { status?: string | null } | null): boolean {
+  if (String(task.status ?? "") !== "open") return false;
+  return !job || !isEndedJob(job.status);
 }
 
 /** An estimate someone still owes a move on: a draft to finish and send, or one sent and waiting on

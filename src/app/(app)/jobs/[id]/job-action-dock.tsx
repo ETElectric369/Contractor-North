@@ -58,6 +58,7 @@ export function JobActionDock({
   templates,
   taskPhotos = false,
   lang = "en",
+  asksReport = false,
 }: {
   job: any;
   viewerIsStaff: boolean;
@@ -78,6 +79,8 @@ export function JobActionDock({
   templates: { id: string; name: string }[];
   /** The database holds photos on tasks (0358): the Photo slot's toast then offers Make It a Task. */
   taskPhotos?: boolean;
+  /** The viewer is asked for the end-of-day report at clock-out (lib/daily-report-rule, cn-v1174). */
+  asksReport?: boolean;
 }) {
   // Same lifecycle gate the old header row used for Finish job.
   const schedulable = job.status !== "complete" && job.status !== "invoiced" && job.status !== "cancelled";
@@ -100,6 +103,7 @@ export function JobActionDock({
           openEntry={openEntry}
           techs={techs}
           defaultProfileId={defaultProfileId}
+          asksReport={asksReport}
         />
         <JobPhotoQuick orgId={job.org_id} jobId={job.id} className={ICON_BTN} taskDoor={taskPhotos} />
         {customerPhone && (

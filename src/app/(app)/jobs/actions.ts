@@ -21,7 +21,8 @@ import { todayStrInTz } from "@/lib/tz";
 import { jobNameFrom } from "@/lib/job-name";
 import { customerMaterialMarkupForJob } from "@/lib/labor-billing";
 import { reportError } from "@/lib/observe";
-import { translator } from "@/lib/i18n";
+import { fillText, translator } from "@/lib/i18n";
+import { closeJobTasks, countOpenJobTasks, isMissingColumn } from "@/lib/job-tasks";
 import { callerLang } from "@/lib/lang-of";
 import { isCostableCategory, NOT_A_COST_CATEGORY, type PaperTie } from "@/lib/job-photos";
 import { RECEIPT_TIE_COLUMNS, receiptsNotOnABill, tieReadFilters, type ReceiptDoc } from "@/lib/action-items/receipts-not-on-a-bill";
@@ -737,6 +738,16 @@ export async function setJobStatus(
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!data || !data.length) return { ok: false, error: "Job not found." };
+  // A JOB CALLED OFF TAKES ITS TASKS WITH IT (cn-v1174): its open tasks are checked off, the same deed
+  // a finish does (lib/job-tasks closeJobTasks), and the answer says how many. NEVER ON HOLD: a held
+  // job is coming back, and so is its work. A close that fails is said and the cancel stands.
+  //
+  // REOPENING A JOB DOES NOT REOPEN ITS TASKS. Moving a finished or cancelled job back to a status in
+  // flight comes through here too, and nothing below touches its tasks: a task carries no mark that
+  // says the job closed it (tasks.status is open or done, 0018), so a reopen cannot tell the tasks the
+  // finish closed from the ones a person checked off by hand, and none is added. Whatever is still to
+  // do is reopened by hand on the job's Tasks tab (its Done fold), or added again.
+  const said = status === "cancelled" ? await tasksClosedSaid(supabase, id, ctx.userId) : {};
   // Google reconcile (fire-safe): leaving the active set deletes the event,
   // re-activating a scheduled job re-pushes it.
   await pushCalendarItem("job", id);
@@ -744,7 +755,33 @@ export async function setJobStatus(
   revalidatePath("/jobs");
   revalidatePath("/planner"); // a status/finish change moves a job on/off today's My Day
   revalidatePath("/schedule"); // and on/off the calendar (the deleted schedule copy did this)
-  return { ok: true };
+  return { ok: true, ...said };
+}
+
+/**
+ * THE DEED'S SENTENCE (cn-v1174): close the job's open tasks (lib/job-tasks closeJobTasks) and say it
+ * in the person's language. Above zero: `speak` says how many. Zero: nothing to say. A failed close:
+ * `warning` says it and names the one way through; nothing is undone.
+ */
+async function tasksClosedSaid(supabase: SupabaseClient, jobId: string, by: string | null | undefined): Promise<{ speak?: string; warning?: string }> {
+  const res = await closeJobTasks(supabase, jobId, by ?? null);
+  if (res.ok && res.closed === 0) return {};
+  const t = translator(await callerLang(supabase, by ?? undefined));
+  if (!res.ok) {
+    reportError("closeJobTasks", res.error, { jobId });
+    return { warning: t("jb_tasksNotClosed") };
+  }
+  return { speak: res.closed === 1 ? t("jb_tasksClosedOne") : fillText(t("jb_tasksClosedMany"), { n: String(res.closed) }) };
+}
+
+/** A finish's answer with the deed's sentence put after it: the count on `speak`, a failure on `warning`. */
+function withTasksSaid(res: FinishJobResult, said: { speak?: string; warning?: string }): FinishJobResult {
+  if (!res.ok) return res;
+  return {
+    ...res,
+    ...(said.speak ? { speak: res.speak ? `${res.speak} ${said.speak}` : said.speak } : {}),
+    ...(said.warning ? { warning: res.warning ? `${res.warning} ${said.warning}` : said.warning } : {}),
+  };
 }
 
 export type FinishJobResult = {
@@ -855,6 +892,20 @@ export async function finishJob(
   // by a draft for set amounts (finalBlocked). Only that case honors it.
   opts: { importLabor?: boolean; importCosts?: boolean; sendInvoice?: boolean; withoutBilling?: boolean },
 ): Promise<FinishJobResult> {
+  // THE DEED CLOSES THE JOB'S TASKS (cn-v1174): every path below that marks the job complete goes
+  // through `complete`, which checks its open tasks off once the status is written; the answer then
+  // says how many (or that the close failed: the finish stands either way).
+  const closing: { said: { speak?: string; warning?: string } | null } = { said: null };
+  const res = await finishJobBilling(jobId, opts, closing);
+  return closing.said ? withTasksSaid(res, closing.said) : res;
+}
+
+/** finishJob's body: bill what a finish has to bill, then mark the job complete (`complete`). */
+async function finishJobBilling(
+  jobId: string,
+  opts: { importLabor?: boolean; importCosts?: boolean; sendInvoice?: boolean; withoutBilling?: boolean },
+  closing: { said: { speak?: string; warning?: string } | null },
+): Promise<FinishJobResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -874,6 +925,7 @@ export async function finishJob(
     const { data, error } = await supabase.from("jobs").update(finishedJobFields()).eq("id", jobId).select("id");
     if (error) return { ok: false, error: dbError(error) };
     if (!data?.length) return { ok: false, error: "Job not found." };
+    closing.said = await tasksClosedSaid(supabase, jobId, ctx.userId);
     await pushCalendarItem("job", jobId); // finished job leaves Google (fire-safe)
     revalidatePath(`/jobs/${jobId}`);
     revalidatePath("/jobs");
@@ -1049,6 +1101,8 @@ export type FinishJobPreview = {
   finalDoc?: "final" | "invoice" | null;
   /** The draft in the way when finalBlocked: the modal's "Open INV-0xx". */
   finalDraft?: { id: string; number: string | null } | null;
+  /** The job's tasks still open by the one rule, which finishing checks off (cn-v1174). null = unread. */
+  openTasks?: number | null;
 };
 
 /**
@@ -1058,7 +1112,14 @@ export type FinishJobPreview = {
 export async function finishJobPreview(jobId: string): Promise<FinishJobPreview> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  const supabase = ctx.supabase;
+  // THE TASKS FINISHING CLOSES (cn-v1174), counted by the one rule (lib/job-tasks countOpenJobTasks),
+  // beside the billing it reads; a count that couldn't be read is null, and the window says that too.
+  const [billing, openTasks] = await Promise.all([finishBillingPreview(ctx.supabase, jobId), countOpenJobTasks(ctx.supabase, jobId)]);
+  return { ...billing, openTasks };
+}
+
+/** The billing half of the Finish window's truth: the same reads finishJob acts on. */
+async function finishBillingPreview(supabase: SupabaseClient, jobId: string): Promise<FinishJobPreview> {
   // A T&M job with work not on a bill: the Final finishing builds, said from the plan the press runs.
   const plan = await finishBillingStep(supabase, jobId, { kind: "staff" });
   if (plan.kind === "error") return { ok: false, error: plan.error };
@@ -1154,6 +1215,7 @@ export async function deleteJob(
     { count: docs },
     { count: permits },
     { count: changeOrders },
+    reportsRead,
   ] = await Promise.all([
     headCount("contracts", (q: any) => q.eq("status", "signed")),
     headCount("contracts", (q: any) => q.in("status", ["draft", "sent"])),
@@ -1164,7 +1226,25 @@ export async function deleteJob(
     headCount("documents"),
     headCount("permits"),
     headCount("change_orders"),
+    headCount("daily_reports"),
   ]);
+
+  /* ── A DAILY REPORT IS SOMEBODY'S DAY (0411): a report filed for this job keeps its job (the key
+     is a plain reference, no on-delete action, because nulling it would collide with the same
+     person's no-job report that day), so the delete is refused here first, in one sentence, before
+     the database refuses it in a raw one. A database without 0411's column reads as none. */
+  const reportsErr = (reportsRead as { error?: unknown }).error;
+  if (reportsErr && !isMissingColumn(reportsErr)) {
+    reportError("deleteJob.dailyReports", reportsErr, { jobId: id });
+    return { ok: false, error: "Couldn't check this job's daily reports just now, so nothing was deleted. Try again." };
+  }
+  const reports = reportsErr ? 0 : Number((reportsRead as { count?: number | null }).count ?? 0);
+  if (reports > 0) {
+    return {
+      ok: false,
+      error: `This job has ${reports} daily report${reports > 1 ? "s" : ""} filed on it, and a report stays with its job, so set the job to Cancelled instead of deleting it.`,
+    };
+  }
 
   // ── Tier 1: legal records that a delete must never be able to take with it ──
   const prelimServed = !!(lien as { prelim_sent_at: string | null } | null)?.prelim_sent_at;

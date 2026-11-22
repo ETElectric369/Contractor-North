@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1174", date: "2026-11-21", line: "Share opens on the first tap. A daily report is asked at clock-out for one job and kept in that job's Time tab. Finishing a job checks off its tasks. A job's papers say what they are and their total." },
   { version: "cn-v1173", date: "2026-11-20", line: "The + menu is Snap or Note, the measuring tools and New Lead. An inspection's page leads with one next step: Mark Inspection Done, then Start the Estimate. A customer's Requests tab has New Lead." },
   { version: "cn-v1172", date: "2026-11-19", line: "Estimates has two parts: Inspections to Estimate on top, All Estimates below. A sent estimate waits on the new Closing page until it is answered. Customers moved to the top of Admin (was Money)." },
   { version: "cn-v1171", date: "2026-11-19", line: "Inspections is one list of who needs one, with Start Inspection. A customer's page now keeps their requests and inspections, and New Customer checks your list before it makes a duplicate." },

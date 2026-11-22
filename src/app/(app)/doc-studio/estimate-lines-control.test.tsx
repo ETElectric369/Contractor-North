@@ -67,7 +67,8 @@ const WORDS: Record<EstimateFormat, { en: string; es: string }> = {
   detailed: { en: "Every Part", es: "Cada Pieza" },
   grouped: { en: "One Materials Line", es: "Una Línea de Materiales" },
 };
-const HEADING = { en: "Labor and Parts on Estimates", es: "Mano de Obra y Piezas en Presupuestos" };
+/** ONE NAME FOR ONE THING (cn-v1174): the company default wears the estimate switch's own name (qt_laborPartsOnPaper). */
+const HEADING = { en: "Estimate Visibility", es: "Visibilidad del Presupuesto" };
 
 beforeEach(() => {
   seen.props = [];
@@ -81,13 +82,13 @@ describe("three segments, in both languages", () => {
       { id: "detailed", label: "Every Part" },
       { id: "grouped", label: "One Materials Line" },
     ]);
-    expect(text(html)).toBe("Labor and Parts on Estimates Hidden Every Part One Materials Line");
+    expect(text(html)).toBe("Estimate Visibility Hidden Every Part One Materials Line");
   });
 
-  it("Spanish: the house words (Mano de Obra, Piezas, Presupuestos), and no English left on the control", () => {
+  it("Spanish: the house words (Visibilidad, Presupuesto), and no English left on the control", () => {
     const { html, pill } = draw("es");
     expect(pill.items.map((i) => i.label)).toEqual(["Oculto", "Cada Pieza", "Una Línea de Materiales"]);
-    expect(text(html)).toBe("Mano de Obra y Piezas en Presupuestos Oculto Cada Pieza Una Línea de Materiales");
+    expect(text(html)).toBe("Visibilidad del Presupuesto Oculto Cada Pieza Una Línea de Materiales");
   });
 
   it("every segment and the heading are Title Case in both languages; 'Una' opens its own name, so it is capital", () => {
@@ -95,6 +96,8 @@ describe("three segments, in both languages", () => {
       for (const item of draw(lang).pill.items) expect(titleCaseIn(item.label, lang), `${lang}: "${item.label}"`).toBe(true);
       expect(titleCaseIn(HEADING[lang], lang), `${lang}: "${HEADING[lang]}"`).toBe(true);
       expect(dict(lang).qt_estimateLines).toBe(HEADING[lang]);
+      // The same words as the estimate page's control of the same setting: one name for one thing.
+      expect(dict(lang).qt_estimateLines).toBe(dict(lang).qt_laborPartsOnPaper);
     }
     // The rule, said on these labels: a function word is lowercase after the first word and capital as the first.
     expect(titleCaseIn("Una Línea de Materiales", "es")).toBe(true);
@@ -236,7 +239,7 @@ describe("three segments: a list below lg, one line from lg up", () => {
   it("below lg the control takes the bar's whole width, so a row of the list is as wide as the bar; from lg up it is the plain box it was", () => {
     const { html } = draw("en");
     // The wrapper is the first thing drawn: the language provider draws nothing of its own.
-    expect(html.startsWith('<div class="max-lg:w-full"><label class="mb-1.5 block text-sm font-medium text-slate-700">Labor and Parts on Estimates</label>')).toBe(true);
+    expect(html.startsWith('<div class="max-lg:w-full"><label class="mb-1.5 block text-sm font-medium text-slate-700">Estimate Visibility</label>')).toBe(true);
     // Take the below-lg classes away (a screen from lg up does not have them in force) and the wrapper
     // has no class left that could move it: the cn-v1157 control was a bare <div> around the same two.
     expect(html.replace(/ ?max-lg:[^\s"]+/g, "").startsWith('<div class=""><label')).toBe(true);

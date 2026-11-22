@@ -368,3 +368,55 @@ describe("a paid bill never ends a job with its work off every bill", () => {
     expect(early.log.some((l) => l.table === "payment_milestones")).toBe(false);
   });
 });
+
+/**
+ * THE DEED CLOSES THE JOB'S TASKS THROUGH THIS DOOR TOO (cn-v1174). A job paid in full is complete,
+ * so its open tasks are checked off as Finish Job's are, and the bell's one sentence says how many
+ * (or that the close failed). The job stays complete either way. Another job's tasks are untouched.
+ */
+describe("a job paid in full closes its tasks (cn-v1174)", () => {
+  beforeEach(() => {
+    calls.reported.length = 0;
+    work.rows = null;
+    work.throws = false;
+    work.lump = 0;
+  });
+
+  const tasks = () => [
+    { id: "t1", job_id: JOB, status: "open" },
+    { id: "t2", job_id: JOB, status: "open" },
+    { id: "t3", job_id: JOB, status: "done" },
+    { id: "t4", job_id: "job-other", status: "open" },
+  ];
+
+  it("checks this job's open tasks off and says how many in the bell's sentence", async () => {
+    const db = fakeDb({ invoices: [paidStandard()], jobs: [{ id: JOB, status: "in_progress", job_number: "J-900", name: "Larkspur Rewire" }], tasks: tasks() });
+    const r = await completeJobWhenPaid(db, "inv-1", { kind: "staff" });
+    expect(r.completed).toBe(true);
+    expect(db.tables.tasks.map((t: any) => t.status)).toEqual(["done", "done", "done", "open"]);
+    expect(r.say).toMatch(/is finished\. Its 2 open tasks are checked off\.$/);
+    expect(r.sayTitle).toBe("Job finished");
+    const close = db.log.find((l) => l.table === "tasks" && l.verb === "update");
+    expect(close?.payload).toMatchObject({ status: "done", done_by: null });
+  });
+
+  it("nothing open: nothing is added to what the door says", async () => {
+    const db = fakeDb({ invoices: [paidStandard()], jobs: [{ id: JOB, status: "in_progress" }], tasks: [{ id: "t3", job_id: JOB, status: "done" }] });
+    expect(await completeJobWhenPaid(db, "inv-1", { kind: "staff" })).toEqual({ completed: true, jobId: JOB });
+  });
+
+  it("a close that fails is said and reported, and the job stays complete", async () => {
+    const db = fakeDb({ invoices: [paidStandard()], jobs: [{ id: JOB, status: "in_progress" }], tasks: tasks() }, { failing: ["tasks"] });
+    const r = await completeJobWhenPaid(db, "inv-1", { kind: "staff" });
+    expect(r.completed).toBe(true);
+    expect(db.tables.jobs[0].status).toBe("complete");
+    expect(r.say).toMatch(/Its open tasks couldn't be checked off: check them off on its Tasks tab\.$/);
+    expect(calls.reported).toContain("completeJobWhenPaid:tasks");
+  });
+
+  it("a job that is not completed closes nothing", async () => {
+    const db = fakeDb({ invoices: [paidStandard()], jobs: [{ id: JOB, status: "scheduled" }], tasks: tasks() });
+    expect((await completeJobWhenPaid(db, "inv-1", { kind: "staff" })).completed).toBe(false);
+    expect(db.log.some((l) => l.table === "tasks")).toBe(false);
+  });
+});

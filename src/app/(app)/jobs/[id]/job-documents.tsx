@@ -9,7 +9,7 @@ import { Fold } from "@/components/why-fold";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Badge } from "@/components/ui/badge";
-import { formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate } from "@/lib/utils";
 import { MediaLightbox } from "@/components/media-lightbox";
 import { ModelViewer, modelKind } from "@/components/model-viewer";
 import { prettyBytes, readReceiptDocument, type ReceiptTone } from "@/lib/receipt-capture";
@@ -127,6 +127,7 @@ export function JobDocuments({
   nortOn = true,
   photoTabIds = null,
   billOf = null,
+  facts = null,
   looseIds = null,
   tieNote = null,
   bills = null,
@@ -147,6 +148,10 @@ export function JobDocuments({
   photoTabIds?: readonly string[] | null;
   /** Document id → the bill on this job it made, in words ("the CED bill #8802-1106969"). */
   billOf?: Record<string, string> | null;
+  /** Document id → what the paper is, in one line, and what it came to (cn-v1174, the page's
+   *  paper-summary rule: the bill it is on, else the receipt reader's record, else nothing). A paper
+   *  with no entry says nothing and shows no figure. The office only. */
+  facts?: Record<string, { what: string | null; total: number | null }> | null;
   /** Receipts and bills tied to no bill at all (never an Invoice: nothing reads one into a bill, so
    *  its flag would have no Record as Cost). null = not known (the ties weren't read): nothing is
    *  claimed, and Record as Cost stays on every receipt, as before. */
@@ -281,6 +286,7 @@ export function JobDocuments({
 
   const row = (d: Doc) => {
     const n = billMsg[d.id];
+    const fact = facts?.[d.id] ?? null;
     // Record as Cost is for a receipt no bill holds: when the ties were read, one that made a bill
     // has nothing left to record (the reader would only answer "already recorded").
     const recordable = COSTABLE(d.category) && !n?.done && (!loose || loose.has(d.id));
@@ -299,6 +305,8 @@ export function JobDocuments({
           </button>
           <button onClick={() => open(d)} className="min-w-0 flex-1 text-left">
             <div className="truncate text-sm font-medium text-slate-900 hover:text-brand">{d.name}</div>
+            {/* WHAT IT IS (cn-v1174): one line, clamped here, never cut in the data. */}
+            {fact?.what && <div className="truncate text-xs text-slate-600">{fact.what}</div>}
             <div className="text-xs text-slate-400">
               {formatDate(d.created_at, undefined, lang)}
               {d.size_bytes ? ` · ${prettyBytes(d.size_bytes)}` : ""}
@@ -321,6 +329,8 @@ export function JobDocuments({
               {t("jb_recordAsCost")}
             </button>
           )}
+          {/* WHAT IT CAME TO (cn-v1174), ahead of the kind chip; as recorded, never a $0 guess. */}
+          {fact && fact.total !== null && <span className="shrink-0 text-sm font-medium text-slate-800">{formatCurrency(fact.total)}</span>}
           {d.category && <Badge tone="blue">{d.category}</Badge>}
           <button
             onClick={() => openEdit(d)}

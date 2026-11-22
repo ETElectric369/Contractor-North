@@ -31,6 +31,11 @@ const state = vi.hoisted(() => ({
   emailInvoice: vi.fn(),
   /** The materials import, so a test can hand back the money warning a real one raises. */
   importCosts: vi.fn(),
+  /** The job's tasks the deed checks off (cn-v1174): the rows the close writes, or its refusal. */
+  tasksClosed: [] as { id: string }[],
+  tasksCloseFails: false,
+  /** The open-task head count the Finish window reads (cn-v1174); null = the read fails. */
+  openTaskCount: 0 as number | null,
 }));
 
 vi.mock("@/lib/staff-guard", () => ({
@@ -80,6 +85,7 @@ function fake() {
         if (verb !== "select") {
           state.writes.push({ table, payload });
           if (table === "jobs" && verb === "update") return [{ id: JOB }];
+          if (table === "tasks" && verb === "update") return state.tasksClosed;
           return [];
         }
         if (table === "jobs" && cols === "billing_type") return { billing_type: state.billingType };
@@ -99,7 +105,18 @@ function fake() {
         insert(p: any) { verb = "insert"; payload = p; return chain; },
         maybeSingle() { return Promise.resolve({ data: answer(true), error: null }); },
         single() { return Promise.resolve({ data: answer(true), error: null }); },
-        then(res: any) { return res({ data: answer(false), error: null }); },
+        then(res: any) {
+          // The deed's close (cn-v1174): the rows it checked off, or a refusal.
+          if (table === "tasks" && verb === "update" && state.tasksCloseFails) {
+            state.writes.push({ table, payload });
+            return res({ data: null, error: { message: "permission denied for table tasks" } });
+          }
+          // The Finish window's open-task head count.
+          if (table === "tasks" && verb === "select") {
+            return res(state.openTaskCount === null ? { data: null, count: null, error: { message: "read failed" } } : { data: null, count: state.openTaskCount, error: null });
+          }
+          return res({ data: answer(false), error: null });
+        },
       };
       for (const m of ["eq", "neq", "in", "is", "order", "limit", "not"]) chain[m] = () => chain;
       return chain;
@@ -125,7 +142,13 @@ beforeEach(() => {
   state.emailInvoice.mockReset();
   state.importCosts.mockReset();
   state.importCosts.mockResolvedValue({ ok: false, empty: true });
+  state.tasksClosed = [];
+  state.tasksCloseFails = false;
+  state.openTaskCount = 0;
 });
+
+/** The deed's write (cn-v1174): the job's open tasks checked off, by the person who finished it. */
+const CLOSE_TASKS = { table: "tasks", payload: { status: "done", completed_at: expect.any(String), done_by: "user-1" } };
 
 describe("finishJob on a FIXED-PRICE job billed with progress payments (unchanged)", () => {
   it("finishes, bills nothing, and NAMES the 19.5 h off a bill as a warning", async () => {
@@ -137,7 +160,8 @@ describe("finishJob on a FIXED-PRICE job billed with progress payments (unchange
     );
     expect(res.speak).toMatch(/^Job finished\. 19\.5 h/);
     // The only write is the job's status: no invoice is written, sent or promoted.
-    expect(state.writes.map((w) => w.table)).toEqual(["jobs"]);
+    // The job's status, then its open tasks checked off with it (cn-v1174).
+    expect(state.writes.map((w) => w.table)).toEqual(["jobs", "tasks"]);
     expect(state.writes[0].payload).toEqual({ status: "complete", hold_reason: null });
     expect(state.drawDoor).not.toHaveBeenCalled();
   });
@@ -180,7 +204,7 @@ describe("finishJob on a TIME & MATERIAL job: the Final is built as a draft, not
     // Nothing is sent, even when asked: a draft goes out only when a person sends it.
     expect(state.emailInvoice).not.toHaveBeenCalled();
     // This action's own writes: the job's status, after the draft existed.
-    expect(state.writes).toEqual([{ table: "jobs", payload: { status: "complete", hold_reason: null } }]);
+    expect(state.writes).toEqual([{ table: "jobs", payload: { status: "complete", hold_reason: null } }, CLOSE_TASKS]);
   });
 
   it("the draft can't be built → the job is NOT marked complete, and the reason is said", async () => {
@@ -249,7 +273,7 @@ describe("finishJob on a TIME & MATERIAL job: the Final is built as a draft, not
     expect(res.final).toBeUndefined();
     expect(res.warning).toBe("$2,437.50 of work is not on a bill. INV-090 is still a draft for set amounts: send it (or delete it), then bill the work.");
     expect(state.drawDoor).not.toHaveBeenCalled();
-    expect(state.writes).toEqual([{ table: "jobs", payload: { status: "complete", hold_reason: null } }]);
+    expect(state.writes).toEqual([{ table: "jobs", payload: { status: "complete", hold_reason: null } }, CLOSE_TASKS]);
   });
 
   it("Finish Without Billing when the draft is no longer in the way: nothing is done, never a bill that wasn't asked for", async () => {
@@ -282,7 +306,7 @@ describe("finishJob on a TIME & MATERIAL job: the Final is built as a draft, not
     );
     expect(res.warning).toMatch(/\$7,562\.50 more than the work/);
     expect(state.drawDoor).not.toHaveBeenCalled();
-    expect(state.writes).toEqual([{ table: "jobs", payload: { status: "complete", hold_reason: null } }]);
+    expect(state.writes).toEqual([{ table: "jobs", payload: { status: "complete", hold_reason: null } }, CLOSE_TASKS]);
   });
 
   it("a plain T&M job (no draws) keeps the standard invoice - the card's Create Invoice - never a draw", async () => {
@@ -328,7 +352,7 @@ describe("Finish & Send Invoice on a plain fixed-price job", () => {
     expect(res.sent).toBe(false);
     expect(res.warning).toContain("pick which job it belongs to on Reconcile before you send this");
     // The job is still finished and the draft still exists: nothing is lost, Send is one press away.
-    expect(state.writes).toEqual([{ table: "jobs", payload: { status: "complete", hold_reason: null } }]);
+    expect(state.writes).toEqual([{ table: "jobs", payload: { status: "complete", hold_reason: null } }, CLOSE_TASKS]);
   });
 
   it("an import that could not be pulled in is not sent either — every money warning holds the send", async () => {
@@ -511,5 +535,95 @@ describe("Finish & Send Invoice reads the review switch (cn-v1155)", () => {
     const dock = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-action-dock.tsx"), "utf8");
     expect(page).toContain("sendWithoutReview={getOrgSettings((org as any)?.settings).send_without_review}");
     expect(dock).toContain("sendWithoutReview={sendWithoutReview}");
+  });
+});
+
+/**
+ * THE DEED CLOSES THE JOB'S TASKS (cn-v1174; Erik, 2026-11-21: "ones that close out with the job should
+ * already be closed out right?"). Finishing and cancelling check the job's open tasks off and say how
+ * many; on hold does not; a close that fails is said and the finish stands. The Finish window says the
+ * count before the press.
+ */
+describe("a job's tasks close with it (cn-v1174)", () => {
+  it("finishing checks the open tasks off and the answer says how many, after what the billing said", async () => {
+    state.billingType = "fixed";
+    state.tasksClosed = [{ id: "t1" }, { id: "t2" }, { id: "t3" }];
+    const res = await finishJob(JOB, {});
+    expect(res.ok).toBe(true);
+    expect(state.writes.at(-1)).toEqual(CLOSE_TASKS);
+    expect(res.speak).toMatch(/^Job finished\. .* The job's 3 open tasks are checked off\.$/);
+  });
+
+  it("one task: the sentence for one; none: nothing is added to the answer", async () => {
+    state.billingType = "fixed";
+    state.tasksClosed = [{ id: "t1" }];
+    expect((await finishJob(JOB, {})).speak).toMatch(/The job's open task is checked off\.$/);
+    state.tasksClosed = [];
+    expect((await finishJob(JOB, {})).speak).not.toContain("checked off");
+  });
+
+  it("a close that fails is said as a warning, and the job stays finished", async () => {
+    state.billingType = "fixed";
+    state.tasksCloseFails = true;
+    const res = await finishJob(JOB, {});
+    expect(res.ok).toBe(true);
+    expect(state.writes[0]).toEqual({ table: "jobs", payload: { status: "complete", hold_reason: null } });
+    expect(res.warning).toContain(dict("en").jb_tasksNotClosed);
+    expect(state.writes.filter((w) => w.table === "jobs")).toHaveLength(1); // nothing undone
+  });
+
+  it("a finish that never marks the job complete closes nothing", async () => {
+    state.billingType = "tm";
+    state.drawDoor.mockResolvedValue({ ok: false, error: "Couldn't start the Final." });
+    state.tasksClosed = [{ id: "t1" }];
+    const res = await finishJob(JOB, {});
+    expect(res.ok).toBe(false);
+    expect(state.writes).toEqual([]);
+  });
+
+  it("cancelling checks them off and says how many; on hold and every other status touch no task", async () => {
+    state.tasksClosed = [{ id: "t1" }, { id: "t2" }];
+    const res = await setJobStatus(JOB, "cancelled");
+    expect(res).toEqual({ ok: true, speak: "The job's 2 open tasks are checked off." });
+    expect(state.writes).toEqual([{ table: "jobs", payload: { status: "cancelled", hold_reason: null } }, CLOSE_TASKS]);
+    state.writes = [];
+    expect(await setJobStatus(JOB, "on_hold", "waiting on the permit")).toEqual({ ok: true });
+    expect(state.writes.map((w) => w.table)).toEqual(["jobs"]);
+    state.writes = [];
+    expect(await setJobStatus(JOB, "in_progress")).toEqual({ ok: true });
+    expect(state.writes.map((w) => w.table)).toEqual(["jobs"]);
+  });
+
+  it("a cancel whose close fails: ok, with the failure as a warning", async () => {
+    state.tasksCloseFails = true;
+    const res = await setJobStatus(JOB, "cancelled");
+    expect(res).toEqual({ ok: true, warning: dict("en").jb_tasksNotClosed });
+  });
+
+  it("the Finish window counts the open tasks before the press, and says when it couldn't", async () => {
+    state.billingType = "fixed";
+    state.openTaskCount = 4;
+    expect((await finishJobPreview(JOB)).openTasks).toBe(4);
+    state.openTaskCount = null;
+    expect((await finishJobPreview(JOB)).openTasks).toBeNull();
+    expect(state.writes).toEqual([]); // read-only
+  });
+
+  it("source: one close, at the one place a finish writes the status, and on cancel only; the reopen comment", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/actions.ts"), "utf8");
+    expect(src.match(/closeJobTasks\(/g)).toHaveLength(1);
+    expect(src.match(/tasksClosedSaid\(supabase, /g)).toHaveLength(2);
+    expect(src).toContain('const said = status === "cancelled" ? await tasksClosedSaid(supabase, id, ctx.userId) : {};');
+    expect(src).toContain("REOPENING A JOB DOES NOT REOPEN ITS TASKS.");
+    const button = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/finish-job-button.tsx"), "utf8");
+    expect(button).toContain('t("jb_finishTasksUnread")');
+    expect(button).toContain('fillText(t("jb_finishClosesTasksMany"), { n: String(preview.openTasks) })');
+  });
+
+  it("the words, in both languages", () => {
+    expect(dict("en").jb_finishClosesTasksMany).toBe("{n} tasks are still open on this job. Finishing checks them off.");
+    expect(dict("es").jb_finishClosesTasksMany).toBe("{n} tareas siguen abiertas en este trabajo. Al terminarlo, quedan marcadas como hechas.");
+    expect(dict("es").jb_tasksClosedMany).toBe("Las {n} tareas abiertas del trabajo quedaron marcadas como hechas.");
+    expect(dict("es").jb_tasksNotClosed).toContain("Tareas");
   });
 });

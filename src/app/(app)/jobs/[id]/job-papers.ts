@@ -196,12 +196,14 @@ export async function readJobPapers(supabase: any, orgId: string, jobId: string,
   const waiting = waitingOnCreditIds(docs, since, day, tz);
   const mine = papersNamingJob(jobId, docs, mark);
   // WAITING ON A CREDIT IS HONORED HERE TOO (audit v1018, class 4): the row says who from and since
-  // when, and offers no Record (job-paper-list). The supplier's short name is read only then; a
-  // lost read leaves "the supplier", a word, never a figure.
-  const waitingAccounts = Array.from(new Set(mine.filter((d) => waiting.has(d.id) && d.accountId).map((d) => String(d.accountId))));
+  // when, and offers no Record (job-paper-list). EVERY ROW SAYS WHOSE PAPER IT IS (cn-v1174, the
+  // owner: "receipts and papers need to show a summary"): the same one read of the suppliers' short
+  // names, now for every paper on the list, not only a waiting one. A lost read leaves no name on the
+  // row and "the supplier", a word, in the waiting sentence, never a figure.
+  const paperAccounts = Array.from(new Set(mine.filter((d) => d.accountId).map((d) => String(d.accountId))));
   const names = new Map<string, string>();
-  if (waitingAccounts.length) {
-    const { data: accts } = await supabase.from("supplier_accounts").select("id, name").eq("org_id", orgId).in("id", waitingAccounts);
+  if (paperAccounts.length) {
+    const { data: accts } = await supabase.from("supplier_accounts").select("id, name").eq("org_id", orgId).in("id", paperAccounts);
     for (const a of (accts ?? []) as { id: string; name: string | null }[]) names.set(String(a.id), shortSupplierName(a.name));
   }
   return mine.map((d) => ({
@@ -209,6 +211,6 @@ export async function readJobPapers(supabase: any, orgId: string, jobId: string,
     onNeedsYou: onCards.has(d.id),
     waitingOnCredit: waiting.has(d.id),
     waitingSince: waiting.has(d.id) ? (creditWait(d, day, tz)?.since ?? null) : null,
-    supplier: waiting.has(d.id) ? (names.get(String(d.accountId ?? "")) ?? null) : null,
+    supplier: names.get(String(d.accountId ?? "")) ?? null,
   }));
 }

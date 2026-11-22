@@ -1,5 +1,7 @@
 import { todayStrInTz } from "@/lib/tz";
 import { buyMaterialsCounts, type BuyMaterials } from "@/lib/materials-checklist";
+import { ENDED_JOB_STATUSES } from "@/lib/job-status";
+import { isOpenTask } from "@/lib/open-counts";
 
 /**
  * A JOB'S TASKS: ONE LIST, THE JOB'S (0358).
@@ -114,13 +116,19 @@ export async function readJobTasks(supabase: { from: (t: string) => any }, jobId
 }
 
 /** Open tasks in the list's order (sort_order, then the order they were added); done tasks newest
- *  first, the ones with no done time last. Never mutates the input. */
-export function splitJobTasks(rows: JobTaskRow[]): { open: JobTaskRow[]; done: JobTaskRow[] } {
+ *  first, the ones with no done time last. Never mutates the input.
+ *
+ *  OPEN IS THE ONE RULE (lib/open-counts isOpenTask, cn-v1174), asked with the job's status: on a job
+ *  that is over, a task still stored open (one left from before finishing closed them) is not open
+ *  work, so it sits in the Done fold with its box unticked, where a tap still closes it. `jobStatus`
+ *  omitted = a job in flight. */
+export function splitJobTasks(rows: JobTaskRow[], jobStatus?: string | null): { open: JobTaskRow[]; done: JobTaskRow[] } {
+  const job = { status: jobStatus ?? null };
   const open = rows
-    .filter((t) => t.status !== "done")
+    .filter((t) => isOpenTask(t, job))
     .sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at));
   const done = rows
-    .filter((t) => t.status === "done")
+    .filter((t) => !isOpenTask(t, job))
     .sort((a, b) => {
       if (!a.completed_at && !b.completed_at) return b.created_at.localeCompare(a.created_at);
       if (!a.completed_at) return 1;
@@ -141,10 +149,76 @@ export function tasksHeader(total: number, done: number): string {
  * "Tasks: N left"): the row is ONE task, open while anything on the materials list is left to buy
  * and done once it's all bought; no row, no task. `open` is the Tasks badge (0 = no badge).
  */
-export function jobTaskTally(rows: readonly { status: string }[], buy: BuyMaterials): { total: number; done: number; open: number } {
+export function jobTaskTally(
+  rows: readonly { status: string }[],
+  buy: BuyMaterials,
+  /** The job's status: on a job that is over no task is open (lib/open-counts isOpenTask). Omitted = in flight. */
+  jobStatus?: string | null,
+): { total: number; done: number; open: number } {
   const m = buyMaterialsCounts(buy);
-  const done = rows.filter((t) => t.status === "done").length;
-  return { total: rows.length + m.total, done: done + m.done, open: rows.length - done + m.open };
+  const job = { status: jobStatus ?? null };
+  const open = rows.filter((t) => isOpenTask(t, job)).length;
+  return { total: rows.length + m.total, done: rows.length - open + m.done, open: open + m.open };
+}
+
+/**
+ * THE QUERY TWIN OF isOpenTask (lib/open-counts), for a read where the database does the cut: a JOB
+ * task is open while its status is open and its job is not over. The select must carry the job as
+ * OPEN_TASK_JOB (an inner embed named `jobs`, so a task is kept only with its job, and the job's
+ * status is what the filter reads). A count and the rows under it come from this one call.
+ */
+export const OPEN_TASK_JOB = "jobs!inner(status)";
+export function whereJobTaskOpen<Q>(q: Q): Q {
+  return (q as any).eq("status", "open").not("jobs.status", "in", `(${ENDED_JOB_STATUSES.join(",")})`) as Q;
+}
+/** …and its other half: a Reminder (no job) is open while its status is. */
+export function whereReminderOpen<Q>(q: Q): Q {
+  return (q as any).eq("status", "open").is("job_id", null) as Q;
+}
+
+/** How many of a job's tasks are open by the rule (the Finish window says it before the press).
+ *  null = the count couldn't be read, which the window says too. Never throws. */
+export async function countOpenJobTasks(supabase: { from: (t: string) => any }, jobId: string): Promise<number | null> {
+  try {
+    const { count, error } = await whereJobTaskOpen(
+      supabase.from("tasks").select(`id, ${OPEN_TASK_JOB}`, { count: "exact", head: true }).eq("job_id", jobId),
+    );
+    return error ? null : (count ?? 0);
+  } catch {
+    return null;
+  }
+}
+
+export type CloseJobTasks = { ok: true; closed: number } | { ok: false; error: unknown };
+
+/**
+ * THE DEED CLOSES THEM (cn-v1174; Erik, 2026-11-21: "ones that close out with the job should already be
+ * closed out right?"). When a job becomes complete (finishJob, completeJobWhenPaid) or is cancelled
+ * (setJobStatus), every task of it still open is checked off: status done, completed_at now, done_by
+ * the person when there is one (an RLS client's own check-off is stamped by 0358's stamp_task_who; the
+ * paid-in-full webhook has no person and leaves it empty). Steps are tasks of the job too, so they
+ * close with it. NEVER on hold: a held job is coming back.
+ *
+ * The write selects what it wrote and the count is its rows (zero is a true answer: nothing was
+ * open). A failure is handed back, never thrown, so the caller says it and the finish stands: closing
+ * tasks is not worth un-finishing a job over.
+ *
+ * REOPENING A JOB DOES NOT REOPEN THEM: a task carries no mark that says the job closed it (status is
+ * open or done, 0018), so a reopen cannot tell these from tasks checked off by hand. See setJobStatus.
+ */
+export async function closeJobTasks(supabase: { from: (t: string) => any }, jobId: string, by?: string | null): Promise<CloseJobTasks> {
+  try {
+    const { data, error } = await supabase
+      .from("tasks")
+      .update({ status: "done", completed_at: new Date().toISOString(), done_by: by ?? null })
+      .eq("job_id", jobId)
+      .eq("status", "open")
+      .select("id");
+    if (error) return { ok: false, error };
+    return { ok: true, closed: (data ?? []).length };
+  } catch (e) {
+    return { ok: false, error: e };
+  }
 }
 
 const fmt = (tz: string, o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-US", { timeZone: tz, ...o });

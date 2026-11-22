@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { dbError } from "@/lib/db-error";
+import { isEndedJob } from "@/lib/job-status";
 import type { Lang } from "@/lib/locale";
 import { say, type Words } from "@/lib/lang-words";
 import { bornTasks, dismissalEntry, dismissalKey, dismissalTitle, partsFromLines, tasksFromLines, type BornTask, type LineRow } from "./born-with-tasks";
@@ -362,6 +363,8 @@ export interface SyncResult {
   twice: string[];
   /** Orphans a linked-but-unaccepted estimate still holds (the shield): untouched, by name. */
   leftAlone?: string[];
+  /** Wanted tasks NOT added because the job is over (finished or cancelled, cn-v1174), by name. */
+  notAdded?: string[];
   /** True when this call moved jobs.planned_minutes to the estimate's new figure (sizeNow). */
   sizeSet: boolean;
   sizeNow?: number | null;
@@ -402,7 +405,7 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho, lang: Lang 
   const otherTitle = new Map(others.map((t) => [t.id, t.title]));
 
   // The job itself: the keys he dismissed by hand, and the length box as it stands right now.
-  let jq = sb.from("jobs").select("planned_minutes, dismissed_task_keys").eq("id", who.jobId);
+  let jq = sb.from("jobs").select("planned_minutes, dismissed_task_keys, status").eq("id", who.jobId);
   if (who.orgId) jq = jq.eq("org_id", who.orgId);
   const { data: job, error: jErr } = await jq.maybeSingle();
   if (jErr) return { ...NONE, error: dbError(jErr) };
@@ -521,9 +524,18 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho, lang: Lang 
     if (data?.length) timed++; // zero rows: a figure typed between the read and the write wins
   }
 
+  // NO NEW OPEN TASK ON A JOB THAT IS OVER (cn-v1174): finishing or cancelling a job checked its tasks
+  // off (lib/job-tasks closeJobTasks), so an estimate accepted, pinned or rebuilt on it afterwards adds
+  // nothing to its list, and the sentence says which tasks were not added, on a line of its own. What
+  // the plan does to tasks already there (match, keep, remove) is not adding, and still runs. On hold
+  // is not over.
+  const over = isEndedJob((job as { status?: string | null }).status);
+  const notAdded = over ? plan.insert.map((t) => t.title) : [];
   // The birth's own insert: same row shape, dedupe by key, silent-write counts. Size left to the rule below.
-  const born = await bornTasks(sb, { jobId: who.jobId, orgId: who.orgId, createdBy: who.createdBy }, { tasks: plan.insert, plannedMinutes: null, parts: [] });
-  if (born.error) return { ...NONE, rekeyed, removed, kept, keptNames, timed, error: born.error };
+  const born = over
+    ? { inserted: 0 }
+    : await bornTasks(sb, { jobId: who.jobId, orgId: who.orgId, createdBy: who.createdBy }, { tasks: plan.insert, plannedMinutes: null, parts: [] });
+  if ("error" in born && born.error) return { ...NONE, rekeyed, removed, kept, keptNames, timed, error: born.error };
 
   const done: SyncResult = {
     inserted: born.inserted,
@@ -537,6 +549,7 @@ export async function syncJobTasks(sb: SupabaseClient, who: SyncWho, lang: Lang 
     sizeSet: false,
     ...(hoursStay.length ? { hoursStay } : {}),
     ...(plan.leftAlone.length ? { leftAlone: plan.leftAlone } : {}),
+    ...(notAdded.length ? { notAdded } : {}),
   };
   if (who.sizeBefore !== undefined && est.minutes !== who.sizeBefore) {
     // The box still holds the estimate's figure (or nothing yet): it follows — compare-and-set on the value
@@ -621,5 +634,21 @@ export function syncWords(r: SyncResult, lead?: string, lang: Lang = "en", words
   if (r.hoursStay?.length) bits.push(n(r.hoursStay.length, "qs_lib_tasksHoursStay", `${r.hoursStay.length} kept ${r.hoursStay.length === 1 ? "its" : "their"} hours${few(r.hoursStay)} — set on the job`, { names: few(r.hoursStay) }));
   if (r.sizeSet) bits.push(say(lang, words, "qs_lib_sizeSet", `the job's length is now ${hoursWords(r.sizeNow ?? null)}`, { hours: hours(r.sizeNow ?? null) }));
   if (r.sizeStays) bits.push(say(lang, words, "qs_lib_sizeStays", `the job's length stays at ${hoursWords(r.sizeStays.box)} (the estimate now says ${hoursWords(r.sizeStays.estimate)})`, { box: hours(r.sizeStays.box), estimate: hours(r.sizeStays.estimate) }));
-  return bits.length ? `${head}: ${bits.join(" · ")}.` : null;
+  // The job is over: what was not added is its own sentence (cn-v1174), never folded into the list's.
+  const list = bits.length ? `${head}: ${bits.join(" · ")}.` : null;
+  return [list, notAddedWords(r.notAdded, lang, words)].filter(Boolean).join(" ") || null;
+}
+
+/** THE JOB IS OVER (cn-v1174): the sync's sentence for the tasks it did not add, on its own — the office's
+ *  doors say it inside syncWords, the customer's Accept link says it in the office's bell. null = none. */
+export function notAddedWords(names: readonly string[] | undefined, lang: Lang = "en", words?: Words): string | null {
+  if (!names?.length) return null;
+  const list = [...names];
+  return say(
+    lang,
+    words,
+    `qs_lib_tasksNotAdded${list.length === 1 ? "One" : "Many"}`,
+    `${plural(list.length, "task", "tasks")} not added${few(list)}: the job is over, so it takes no new tasks.`,
+    { n: list.length, names: few(list) },
+  );
 }

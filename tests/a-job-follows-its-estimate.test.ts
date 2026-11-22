@@ -151,7 +151,8 @@ describe("a task he deleted by hand stays gone", () => {
     expect(fn).toContain("dismissalEntry(key,");
     expect(fn).toContain('reportError("deleteTask:dismissKey"');
     const rule = src("src/lib/estimate/sync-job-tasks.ts");
-    expect(rule).toContain('select("planned_minutes, dismissed_task_keys")');
+    // …and the job's status with them (cn-v1174): a job that is over takes no new task from the sync.
+    expect(rule).toContain('select("planned_minutes, dismissed_task_keys, status")');
     expect(rule).toContain("planLineSync(wanted, have, dismissed, others, shield)");
   });
 });

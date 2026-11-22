@@ -241,7 +241,7 @@ export const words: WordCatalog = {
     qt_reviseAsk: "A revision replaces {number} when it is accepted, and {number} stops counting. For separate work, like a second unit, use Duplicate.",
     qt_btn_makeTheRevision: "Make the Revision",
     qt_btn_duplicateInstead: "Duplicate Instead",
-    qt_laborPartsOnPaper: "Labor and Parts on the Paper",
+    qt_laborPartsOnPaper: "Estimate Visibility",
     // ONE CONTROL, FOUR SEGMENTS (cn-v1158; Erik, 2026-11-10: "an option to list out all the materials shown as it is
     // now and an option to group the materials into one materials line"). The first says what the company's default
     // is today, by the word Document Studio stored ('detailed' / 'grouped' / 'tasks'); the other three are the
@@ -266,7 +266,7 @@ export const words: WordCatalog = {
     // ── Document Studio's control for the company's default (doc-studio/estimate-lines-control). Its three choices are
     // the three state names above. Its heading was "Estimate Lines", which reads wrongly over a choice called Hidden
     // (hidden lines?), so it says what the choice is about, as the estimate's own switch does: the labor and the parts ──
-    qt_estimateLines: "Labor and Parts on Estimates",
+    qt_estimateLines: "Estimate Visibility",
 
     // ── Add Line Items (components/add-line-items; also drawn on billing) ──
     qt_addFromPriceList: "Add from Price List — tap to browse, or search…",
@@ -302,6 +302,11 @@ export const words: WordCatalog = {
     qt_btn_markSentAndShare: "Mark Sent and Share",
     qt_btn_notYet: "Not Yet",
     qt_sharingIsSending: "Sharing the link is sending it, so this marks it sent and opens your share sheet in the same motion. You can still change it afterwards.",
+    // cn-v1174: the Share button's name while its link is fetched ahead (the button waits, the tap never does),
+    // and the two plain sentences when one half of Mark Sent and Share does not land.
+    qt_btn_gettingTheLink: "Getting the Link…",
+    qt_shareNotMarkedSent: "It isn't marked sent, so the link won't open for them yet. Tap Share to try again.",
+    qt_markedSentShareAgain: "Marked sent, but the share sheet didn't open. Tap Share once more.",
 
     // ── The Email and Text chips (the old components/email-button, gone in cn-v1155: Send now opens components/send-sheet). The texting-not-set-up refusal is lib/sms-readiness's own constant and stays English with it ──
     qt_couldntSendTryAgain: "Couldn't send — try again.",
@@ -495,7 +500,7 @@ export const words: WordCatalog = {
     qt_reviseAsk: "Una revisión reemplaza a {number} cuando se acepta, y {number} deja de contar. Para un trabajo aparte, como una segunda unidad, usa Duplicar.",
     qt_btn_makeTheRevision: "Crear la Revisión",
     qt_btn_duplicateInstead: "Mejor Duplicar",
-    qt_laborPartsOnPaper: "Mano de Obra y Piezas en el Papel",
+    qt_laborPartsOnPaper: "Visibilidad del Presupuesto",
     // The four segments (cn-v1158): pieza, as the catalog says a part; "Una" opens its own name, and its segment after
     // the dot, so it is capital in both. ONE name per format, the same three keys in all three places: Cada Pieza,
     // Una Línea de Materiales, Oculto (the word the first segment's "· Oculto" already used).
@@ -507,7 +512,7 @@ export const words: WordCatalog = {
     qt_btn_hidden: "Oculto",
     qt_paperFormatHelp: "Cambia lo que se imprime debajo de cada tarea, nunca su precio ni su total. Predeterminado de la empresa: Document Studio.",
     // Document Studio's control for the company's default: the heading says what the three names are about.
-    qt_estimateLines: "Mano de Obra y Piezas en Presupuestos",
+    qt_estimateLines: "Visibilidad del Presupuesto",
 
     // ── Add Line Items (components/add-line-items; also drawn on billing) ──
     qt_addFromPriceList: "Agregar de la Lista de Precios — toca para ver, o busca…",
@@ -540,6 +545,9 @@ export const words: WordCatalog = {
     qt_btn_markSentAndShare: "Marcar el Envío y Compartir",
     qt_btn_notYet: "Aún No",
     qt_sharingIsSending: "Compartir el enlace es enviarlo, así que esto marca el envío y abre la hoja para compartir en el mismo paso. Aún puedes cambiarlo después.",
+    qt_btn_gettingTheLink: "Obteniendo el Enlace…",
+    qt_shareNotMarkedSent: "No quedó marcado como enviado, así que el enlace todavía no se abre. Toca Compartir para intentarlo de nuevo.",
+    qt_markedSentShareAgain: "Quedó marcado como enviado, pero la hoja para compartir no se abrió. Toca Compartir una vez más.",
 
     // ── The Email and Text chips (the old components/email-button, gone in cn-v1155: Send now opens components/send-sheet). The texting-not-set-up refusal is lib/sms-readiness's own constant and stays English with it ──
     qt_couldntSendTryAgain: "No se pudo enviar — inténtalo de nuevo.",

@@ -4,6 +4,7 @@ import { STARTED_JOB_STATUSES, finishedJobFields, jobStatusLabel } from "@/lib/j
 import { BILLING_STEP_WRONG_COMPANY, finishBillingStep, paidDoorVerdict, type BillingAccess, type PaidDoorVerdict } from "@/lib/finish-bills-first";
 import { jobSaidLabel } from "@/lib/job-pick-label";
 import { reportError } from "@/lib/observe";
+import { closeJobTasks, type CloseJobTasks } from "@/lib/job-tasks";
 
 /**
  * PAID COMPLETES THE JOB (209451e1, the money half, 2026-09-30).
@@ -86,6 +87,20 @@ export type CompleteWhenPaid =
 
 /** The verdict's sentence and title, as this gate hands them on. */
 const heard = (v: PaidDoorVerdict): JobSaid => (v.say ? { say: v.say, sayTitle: v.title } : {});
+
+/** What the deed did to the job's tasks, in the bell's words (English: a lib reads no word catalog). null = nothing to say. */
+export function tasksClosedLine(closed: CloseJobTasks): string | null {
+  if (!closed.ok) return "Its open tasks couldn't be checked off: check them off on its Tasks tab.";
+  if (closed.closed <= 0) return null;
+  return closed.closed === 1 ? "Its open task is checked off." : `Its ${closed.closed} open tasks are checked off.`;
+}
+
+/** The verdict's sentence with the tasks' line after it; with no verdict sentence, the finish is said first. */
+function withTasksLine(said: JobSaid, line: string | null, jobSaid: string): JobSaid {
+  if (!line) return said;
+  if (said.say) return { say: `${said.say} ${line}`, sayTitle: said.sayTitle };
+  return { say: `${jobSaid} is finished. ${line}`, sayTitle: "Job finished" };
+}
 
 export async function completeJobWhenPaid(
   supabase: any,
@@ -173,8 +188,14 @@ export async function completeJobWhenPaid(
       return { completed: false, why: "the job's status didn't save" };
     }
     if (!done?.length) return { completed: false, why: "the job moved before it could be completed" };
+    // THE DEED CLOSES THE JOB'S TASKS (cn-v1174), as Finish Job's does: its open tasks are checked off
+    // (lib/job-tasks closeJobTasks; no person on this door, so done_by is the database's to stamp or
+    // leave empty). Said the way this door says its outcome, in the bell's one sentence: the count when
+    // above zero, a failed close with the one way through. The job stays complete either way.
+    const closed = await closeJobTasks(supabase, jobId, null);
+    if (!closed.ok) reportError("completeJobWhenPaid:tasks", closed.error, { invoiceId, jobId });
     await touch(jobId);
-    return { completed: true, jobId, ...heard(verdict) };
+    return { completed: true, jobId, ...withTasksLine(heard(verdict), tasksClosedLine(closed), jobSaid) };
   } catch (e) {
     reportError("completeJobWhenPaid", e, { invoiceId });
     return { completed: false, why: "something went wrong" };

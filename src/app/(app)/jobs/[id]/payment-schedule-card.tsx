@@ -96,22 +96,11 @@ export function PaymentScheduleCard({
   const status = scheduleStatus(milestones, contractTotal);
   const billingStarted = status.rows.some((r) => r.billed);
 
-  if (billingType === "tm") {
-    return (
-      <Card>
-        <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-              <CalendarClock className="h-4 w-4" /> Time &amp; Material
-            </div>
-            <div className="text-xs text-slate-500">Billed by actual work to date — request the next payment any time.</div>
-            {error && <div className="mt-1 text-sm text-red-600">{error}</div>}
-          </div>
-          <Button onClick={requestNext} disabled={pending}>Request Next Payment</Button>
-        </CardContent>
-      </Card>
-    );
-  }
+  // NO TIME & MATERIAL BOX (cn-v1174): a time and material job has no schedule card at all. Its old
+  // box ("Time & Material", Request Next Payment) only started a progress draw, which New Invoice (Bill
+  // the Work So Far) and the Overview's Not Billed Yet card already offer the right way round; the page
+  // does not mount this card for such a job, and this answer holds for any other caller.
+  if (billingType === "tm") return null;
 
   const hasSchedule = status.rows.length > 0;
   // Both of setPaymentSchedule's refusals in one place, so the Edit link and the Set Up button

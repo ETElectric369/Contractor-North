@@ -38,7 +38,7 @@ const NARROW_UNSHARED = "max-lg:flex-none";
  *
  * `stack` (cn-v1158) is for a set that cannot fit one line. The estimate's paper switch has four
  * segments ("Company Default · Every Part", "Every Part", "One Materials Line", "Hidden") in a
- * card that is narrow on every device, and Document Studio's Labor and Parts on Estimates has three
+ * card that is narrow on every device, and Document Studio's Estimate Visibility has three
  * in a bar that is page-wide on a desktop and far narrower on anything smaller.
  *
  *   "always"  a vertical list at every width: one segment per row.

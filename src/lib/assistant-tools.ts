@@ -15,6 +15,8 @@ import { LONG_SHIFT_HOURS, forgottenReason } from "@/lib/long-shift";
 import { loadShiftChains } from "@/lib/shift-chain";
 import { appointmentTypeLabel, ESTIMATE_VISIT_TYPES, visitTitle } from "@/lib/statuses";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
+import { isOpenTask } from "@/lib/open-counts";
+import { whereJobTaskOpen, whereReminderOpen } from "@/lib/job-tasks";
 import { getMoneyPipeline, orgTodayStr } from "@/lib/billing-pipeline";
 import { readSupplierOwed } from "@/lib/supplier-owed-read";
 import { invoiceBalance } from "@/lib/invoice-math";
@@ -353,7 +355,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_tasks",
     description:
-      "List tasks (with their id, title, status, and job). Two kinds: a JOB TASK is on a job's one list (no assignee, no due date — the crew lead hands them out out loud; anyone on the job checks it off), and a REMINDER has no job and is private to whoever made it and whoever it's for (you only ever see the caller's own). Use BEFORE completing or rescheduling a task so you have its id — e.g. 'mark the inspection task done', 'what's left on the Smith job'. Filter by job_id (resolve with list_jobs) for one job's list, by status (open | done), and/or a text search on the title.",
+      "List tasks (with their id, title, status, and job). Two kinds: a JOB TASK is on a job's one list (no assignee, no due date — the crew lead hands them out out loud; anyone on the job checks it off), and a REMINDER has no job and is private to whoever made it and whoever it's for (you only ever see the caller's own). Use BEFORE completing or rescheduling a task so you have its id — e.g. 'mark the inspection task done', 'what's left on the Smith job'. Filter by job_id (resolve with list_jobs) for one job's list, by status (open | done), and/or a text search on the title. Open means still to do: a task on a finished or cancelled job is not open (finishing or cancelling a job closes its tasks; on hold keeps them).",
     input_schema: {
       type: "object",
       properties: {
@@ -2044,30 +2046,54 @@ export async function runDataTool(
       case "list_tasks": {
         const lim = clampLimit(input.limit, 20);
         const s = sanitize(input.search);
-        let q = supabase
-          .from("tasks")
-          .select("id, title, status, due_date, job_id, assignee:assigned_to(full_name), jobs(job_number, name)")
-          .order("due_date", { ascending: true, nullsFirst: false })
-          .limit(lim);
-        const st = String(input.status ?? "");
-        if (st === "open" || st === "done") q = q.eq("status", st);
-        if (s) q = q.ilike("title", `%${escapeLike(s)}%`);
         // One job's list (0358). An id only: a stray string is refused, never read as "no filter".
         const jobFilter = String(input.job_id ?? "").trim();
-        if (jobFilter) {
-          if (!/^[0-9a-f-]{36}$/i.test(jobFilter)) {
-            return JSON.stringify({ error: "job_id must be a job id from list_jobs." });
-          }
-          q = q.eq("job_id", jobFilter);
+        if (jobFilter && !/^[0-9a-f-]{36}$/i.test(jobFilter)) {
+          return JSON.stringify({ error: "job_id must be a job id from list_jobs." });
         }
-        const { data, error } = await q;
-        if (error) throw error;
+        const TASK_COLS = "id, title, status, due_date, job_id, assignee:assigned_to(full_name)";
+        const read = (jobEmbed: string) => {
+          let q = supabase
+            .from("tasks")
+            .select(`${TASK_COLS}, ${jobEmbed}`)
+            .order("due_date", { ascending: true, nullsFirst: false })
+            .limit(lim);
+          if (s) q = q.ilike("title", `%${escapeLike(s)}%`);
+          if (jobFilter) q = q.eq("job_id", jobFilter);
+          return q;
+        };
+        const st = String(input.status ?? "");
+        let rows: any[];
+        if (st === "open") {
+          // OPEN IS THE ONE RULE (lib/open-counts isOpenTask, its query twin in lib/job-tasks, cn-v1174):
+          // a job task on a job not over, and a Reminder, each cut by the database; merged in the
+          // list's order and cut to the limit, so "open" never lists the leftovers of a finished job.
+          const [jt, rem] = await Promise.all([
+            whereJobTaskOpen(read("jobs!inner(job_number, name, status)")),
+            jobFilter ? Promise.resolve({ data: [] as any[], error: null }) : whereReminderOpen(read("jobs(job_number, name, status)")),
+          ]);
+          if (jt.error) throw jt.error;
+          if (rem.error) throw rem.error;
+          const due = (t: any) => (t.due_date ? String(t.due_date) : "\uffff");
+          rows = [...(jt.data ?? []), ...(rem.data ?? [])].sort((a: any, b: any) => due(a).localeCompare(due(b))).slice(0, lim);
+        } else {
+          let q = read("jobs(job_number, name, status)");
+          if (st === "done") q = q.eq("status", st);
+          const { data, error } = await q;
+          if (error) throw error;
+          rows = (data ?? []) as any[];
+        }
         return JSON.stringify({
-          count: data?.length ?? 0,
-          tasks: (data ?? []).map((t: any) => ({
+          count: rows.length,
+          tasks: rows.map((t: any) => ({
             id: t.id, // needed to complete / reschedule the task
             title: t.title,
-            status: t.status,
+            // The rule's word, not the column's: a task left open on a job that is over is not open work.
+            status: isOpenTask(t, t.job_id ? { status: t.jobs?.status ?? null } : null)
+              ? "open"
+              : t.status === "open"
+                ? "left open on a job that is over (not counted as open)"
+                : t.status,
             kind: t.job_id ? "job task" : "reminder",
             due: t.due_date,
             assigned_to: t.assignee?.full_name ?? null,
@@ -2161,10 +2187,13 @@ export async function runDataTool(
             .order("starts_at")
             .limit(SCHED_VISITS_CAP),
           // Tasks due in-window — the WHEN buckets' cargo, so "what's on Friday"
-          // includes the permit deadline, not just the crew's blocks.
+          // includes the permit deadline, not just the crew's blocks. OPEN ONLY, by the one rule
+          // (lib/open-counts isOpenTask, cn-v1174): status open here, and the job's status rides along
+          // so a task left open on a finished or cancelled job is dropped below.
           supabase
             .from("tasks")
-            .select("id, title, status, due_date, assignee:assigned_to(full_name), jobs(job_number, name)")
+            .select("id, title, status, due_date, job_id, assignee:assigned_to(full_name), jobs(job_number, name, status)")
+            .eq("status", "open")
             .gte("due_date", start.slice(0, 10))
             .lt("due_date", end.slice(0, 10))
             .order("due_date")
@@ -2269,7 +2298,7 @@ export async function runDataTool(
             customer: embedName(a.customers),
             job: embedName(a.jobs),
           })),
-          tasks_due: (taskRes.data ?? []).map((t: any) => ({
+          tasks_due: ((taskRes.data ?? []) as any[]).filter((t: any) => isOpenTask(t, t.job_id ? { status: t.jobs?.status ?? null } : null)).map((t: any) => ({
             id: t.id, // pass to task.complete / task.setDue
             title: t.title,
             status: t.status,

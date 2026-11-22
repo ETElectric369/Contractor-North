@@ -82,7 +82,9 @@ describe("four segments, in both languages", () => {
     const { html, pill } = draw("en", { companyDefault: "tasks" });
     expect(pill.items.map((i) => i.label)).toEqual(["Company Default · Hidden", EN.everyPart, EN.oneLine, EN.hidden]);
     const t = text(html);
-    expect(t).toContain("Labor and Parts on the Paper"); // the control keeps its title
+    // The control keeps its title, renamed in cn-v1174 (the owner: "change \"Labor and Parts on the Paper\" to Estimate Visibility").
+    expect(t).toContain("Estimate Visibility");
+    expect(t).not.toContain("Labor and Parts on the Paper");
     expect(t).toContain("Company Default · Hidden Every Part One Materials Line Hidden");
     // The second set of names is gone from the screen: no segment is a verb any more.
     expect(t).not.toMatch(/List Every Part|\bHide\b/);
@@ -95,9 +97,10 @@ describe("four segments, in both languages", () => {
     const { html, pill } = draw("es", { companyDefault: "detailed" });
     expect(pill.items.map((i) => i.label)).toEqual(["Predeterminado de la Empresa · Cada Pieza", ES.everyPart, ES.oneLine, ES.hidden]);
     const t = text(html);
-    expect(t).toContain("Mano de Obra y Piezas en el Papel");
+    expect(t).toContain("Visibilidad del Presupuesto");
+    expect(t).not.toContain("Mano de Obra y Piezas en el Papel");
     expect(t).toContain("Cambia lo que se imprime debajo de cada tarea, nunca su precio ni su total. Predeterminado de la empresa: Document Studio.");
-    expect(t).not.toMatch(/Company Default|Every Part|One Materials Line|\bHidden\b|\bHide\b|Labor and Parts/);
+    expect(t).not.toMatch(/Company Default|Every Part|One Materials Line|\bHidden\b|\bHide\b|Labor and Parts|Estimate Visibility/);
     expect(t).not.toMatch(/Listar Cada Pieza|\bOcultar\b/);
   });
 

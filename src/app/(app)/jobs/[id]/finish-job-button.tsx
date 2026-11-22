@@ -229,6 +229,15 @@ export function FinishJobButton({
               <p className="text-sm text-slate-600">
                 {draftsOne ? t("jb_quickCheckDraft") : t("jb_quickCheck")}
               </p>
+              {/* THE TASKS FINISHING CLOSES (cn-v1174): how many are still open, said before the press.
+                  Plain words, not amber: nothing here is a clock. */}
+              {preview && preview.openTasks === null ? (
+                <p className="text-sm text-slate-600">{t("jb_finishTasksUnread")}</p>
+              ) : preview?.openTasks ? (
+                <p className="text-sm text-slate-600">
+                  {preview.openTasks === 1 ? t("jb_finishClosesTasksOne") : fillText(t("jb_finishClosesTasksMany"), { n: String(preview.openTasks) })}
+                </p>
+              ) : null}
               <div className="space-y-2">
                 <label className={`flex min-h-11 items-start gap-2 rounded-lg border px-3 py-2 text-sm ${timeIn ? "border-slate-200" : "border-amber-300 bg-amber-50"}`}>
                   <input type="checkbox" checked={timeIn} onChange={(e) => setTimeIn(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />

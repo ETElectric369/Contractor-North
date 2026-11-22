@@ -45,7 +45,8 @@ import {
 } from "./close-math";
 import { loadShiftChains, type ShiftInfo } from "@/lib/shift-chain";
 import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS, adoptOpensAtMs } from "./adopt-window";
-import { closedPickable, whichJobLabel, type ChoiceJob } from "./which-job-choices";
+import { WHICH_JOB_COLUMNS, closedPickable, whichJobLabel, type ChoiceJob } from "./which-job-choices";
+import { isReportKeyMissing, reportJobFor } from "@/lib/daily-report-rule";
 import { punchJobLabel, unreadJobLabel, type AppPickSource, type PunchJob } from "./clock-told";
 import { billedPartMoved, claimedMoveRefusal, claimedPersonRefusal, type ClaimHolder, type ClaimIndex } from "./claim-words";
 import { MAX_SHIFT_HOURS, UNDO_PUNCH_MS, ceilingRefusalAskOffice, clockDoorWords, clockedOutWords, isLongOpenShift, longShiftPhrase, plainSpaces, stopProblem, undoPunchSentence } from "@/lib/long-shift";
@@ -3283,18 +3284,91 @@ export type DailyReportSummary = {
 };
 export type DailyReportResult = ClockResult & { summary?: DailyReportSummary };
 
+/** A job the report sheet offers: its id and the Timeclock's own label. Never a price. */
+export type ReportJobOption = { id: string; label: string };
+export type DailyReportJobChoices =
+  | { ok: true; decided: ReportJobOption | null; dayJobs: ReportJobOption[]; otherJobs: ReportJobOption[] }
+  | { ok: false; error: string };
+
+/**
+ * WHICH JOB THE REPORT IS FOR, as the sheet asks it (cn-v1174, lib/daily-report-rule). The jobs the
+ * caller's CLOSED punches of today name come first (`dayJobs`, in the order first punched); when
+ * there is exactly one, the sheet says the report is for it and asks nothing. Then the jobs still
+ * being worked (`otherJobs`, newest first: the same statuses and labels as "Which Job Are You On?"),
+ * for a day that named none or more than one. Every read is on the caller's own session and selects
+ * labels only: a tech's sheet carries no price.
+ */
+export async function dailyReportJobChoices(): Promise<DailyReportJobChoices> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: en("cs_notSignedIn") };
+  const [meR, orgR] = await Promise.all([
+    supabase.from("profiles").select("language").eq("id", user.id).maybeSingle(),
+    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+  ]);
+  const t = translator(asLang((meR.data as { language?: string | null } | null)?.language));
+  const settings = getOrgSettings((orgR.data as { settings?: unknown } | null)?.settings);
+  const { dayStart, dayEnd } = todayBoundsInTz(settings.timezone);
+  // The same day fileDailyReport summarises: the caller's punches that STARTED today.
+  const punchesR = await supabase
+    .from("time_entries")
+    .select("job_id, clock_out, status")
+    .eq("profile_id", user.id)
+    .gte("clock_in", dayStart.toISOString())
+    .lt("clock_in", dayEnd.toISOString())
+    .order("clock_in", { ascending: true });
+  if (punchesR.error) {
+    reportError("timeclock.dailyReportJobChoices", punchesR.error);
+    return { ok: false, error: t("cs_reportJobsDidntLoad") };
+  }
+  // THE ONE RULE (lib/daily-report-rule): one job named by the day's closed punches is the report's;
+  // none or more than one is asked.
+  const answer = reportJobFor((punchesR.data ?? []) as { job_id: string | null; clock_out: string | null; status: string | null }[]);
+  const dayIds = answer.kind === "job" ? [answer.jobId] : answer.dayJobIds;
+  const [dayR, goingR] = await Promise.all([
+    // A day's job is offered whatever its status now (it may have been finished at the end of the day).
+    dayIds.length ? supabase.from("jobs").select(WHICH_JOB_COLUMNS).in("id", dayIds) : Promise.resolve({ data: [], error: null }),
+    supabase.from("jobs").select(WHICH_JOB_COLUMNS).in("status", ACTIVE_JOB_STATUSES).order("created_at", { ascending: false }),
+  ]);
+  if (dayR.error || goingR.error) {
+    reportError("timeclock.dailyReportJobChoices", dayR.error ?? goingR.error);
+    return { ok: false, error: t("cs_reportJobsDidntLoad") };
+  }
+  const codesOn = settings.timeclock_job_codes;
+  const byId = new Map(((dayR.data ?? []) as ChoiceJob[]).map((j) => [j.id, j]));
+  const dayJobs = dayIds.flatMap((id) => {
+    const j = byId.get(id);
+    return j ? [{ id, label: whichJobLabel(j, codesOn) }] : [];
+  });
+  const first = new Set(dayJobs.map((j) => j.id));
+  const otherJobs = ((goingR.data ?? []) as ChoiceJob[]).filter((j) => !first.has(j.id)).map((j) => ({ id: j.id, label: whichJobLabel(j, codesOn) }));
+  // A decided job this session can no longer read (deleted since) is asked instead, never named blind.
+  const decided = answer.kind === "job" ? (dayJobs.find((j) => j.id === answer.jobId) ?? null) : null;
+  return { ok: true, decided, dayJobs, otherJobs };
+}
+
 /**
  * The crew-lead debrief: file (upsert) today's daily report — "what did you do today?"
  * + "what materials do you need tomorrow?" — for the CALLER, stamped with a GPS-derived
  * day summary built from their own time_entries ("GPS tells the story:
- * drive time, miles, arrive at job, time on job"). One report per person per org-local
- * day (re-filing revises it). Confirmed by Nort and filed for office editing; org staff
- * get the bell + a "daily_report" push (the quote-accept dual-channel pattern), never
- * the filer themselves.
+ * drive time, miles, arrive at job, time on job"). Confirmed by Nort and filed for office
+ * editing; org staff get the bell + a "daily_report" push (the quote-accept dual-channel
+ * pattern), never the filer themselves.
+ *
+ * ONE REPORT, ONE JOB (cn-v1174, migration 0411). `job_id` is the job the sheet said or the person
+ * picked; null is a real answer (filed with no job: in no job's file, and the sheet said so). The
+ * job is checked on the caller's OWN session, so another company's job id reads nothing and is
+ * refused in one sentence. The upsert's key is (org, person, org-local day, job), no job counting as
+ * one: filing again the same day for the same job (or again with no job) revises that report, and a
+ * report for another job that day is its own. Code that lands before 0411 says one plain sentence,
+ * never the database's.
  */
 export async function fileDailyReport(input: {
   did_today: string;
   materials_tomorrow: string;
+  job_id?: string | null;
 }): Promise<DailyReportResult> {
   const supabase = await createClient();
   const {
@@ -3324,6 +3398,15 @@ export async function fileDailyReport(input: {
   if (!featureOn(orgS.features, "daily_reports")) return { ok: false, error: featureOffSentence("daily_reports") };
   const tz = orgS.timezone;
   const { dayStart, dayEnd, todayStr } = todayBoundsInTz(tz);
+
+  // THE JOB, checked on the caller's own session: a job his company cannot see reads nothing.
+  const jobId = (input.job_id ?? "").trim() || null;
+  if (jobId) {
+    const uuidish = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId);
+    const { data: jobRow, error: jobErr } = uuidish ? await supabase.from("jobs").select("id").eq("id", jobId).maybeSingle() : { data: null, error: null };
+    if (jobErr) return { ok: false, error: dbError(jobErr) };
+    if (!jobRow) return { ok: false, error: t("cs_reportJobNotYours") };
+  }
 
   // GPS summary — the caller's own day: entries that STARTED today (a split day is several
   // entries, one job each), total net hours, miles, first arrival / last departure, hours per job.
@@ -3390,8 +3473,8 @@ export async function fileDailyReport(input: {
     })),
   };
 
-  // One row per (org, person, day) — re-filing revises. org_id passed explicitly
-  // (belt) on top of the set_org_id stamp trigger (suspenders).
+  // One row per (org, person, day, job) since 0411 — re-filing the same job revises. org_id passed
+  // explicitly (belt) on top of the set_org_id stamp trigger (suspenders).
   const { data: filed, error } = await supabase
     .from("daily_reports")
     .upsert(
@@ -3399,16 +3482,24 @@ export async function fileDailyReport(input: {
         org_id: me.org_id,
         profile_id: user.id,
         report_date: todayStr,
+        job_id: jobId,
         did_today: did || null,
         materials_tomorrow: mats || null,
         gps_summary: summary,
         status: "filed",
       },
-      { onConflict: "org_id,profile_id,report_date" },
+      { onConflict: "org_id,profile_id,report_date,job_id" },
     )
     .select("id")
     .maybeSingle();
-  if (error) return { ok: false, error: dbError(error) };
+  if (error) {
+    // The code landed before 0411: one plain sentence, and the log knows.
+    if (isReportKeyMissing(error)) {
+      reportError("timeclock.fileDailyReport.before0411", error);
+      return { ok: false, error: t("cs_reportNotReadyYet") };
+    }
+    return { ok: false, error: dbError(error) };
+  }
 
   // Tell the office — bell (always works) + push, suppressing the filer.
   // The deep link is "/planner": NO DEAD ENDS — the Daily Reports card (with the
@@ -3426,7 +3517,8 @@ export async function fileDailyReport(input: {
   await createNotifications(me.org_id, staff, { type: "daily_report", ...payload });
   await sendPushToProfiles(staff, "daily_report", payload);
 
-  revalidatePath("/planner"); // THE Daily Reports card — the only page that renders a report
+  revalidatePath("/planner"); // My Day's Daily Reports card, while it waits for review
+  if (jobId) revalidatePath(`/jobs/${jobId}`); // and its job's file, on the Time tab
   return { ok: true, summary };
 }
 
@@ -3442,10 +3534,10 @@ const reportBellUrl = (reportId: string | null | undefined): string => (reportId
 /**
  * Office review: flip a daily report filed → reviewed (the second half of 0128's
  * `status` design — "filed for office editing"). Staff-only; RLS (daily_reports_update:
- * own-or-staff, org-scoped) backstops the guard. Reviewed rows stay visible on My Day's
- * Daily Reports card (the review list since cn-v958), just checked off — so the ONE path
- * to revalidate is /planner. Revalidating it is not optional: a card that still shows
- * "Mark Reviewed" after the tap is a silent write in the user's eyes.
+ * own-or-staff, org-scoped) backstops the guard. A reviewed report LEAVES My Day's Daily Reports
+ * card (cn-v1174: the card holds only what waits for review) and is read in its job's file; its
+ * bell link still lands (planner/page.tsx reportLanding). Revalidating /planner is not optional:
+ * a card that still shows "Mark Reviewed" after the tap is a silent write in the user's eyes.
  */
 export async function markDailyReportReviewed(id: string): Promise<ClockResult> {
   const ctx = await requireStaff();
@@ -3490,7 +3582,7 @@ export async function markDailyReportReviewed(id: string): Promise<ClockResult> 
   } catch (e) {
     reportError("timeclock.reviewReport.bell", e, { reportId: id }); // the review stands either way
   }
-  revalidatePath("/planner"); // the Daily Reports card's reviewed badge + the "N to review" count
+  revalidatePath("/planner"); // the report leaves the Daily Reports card, and the "N to review" count drops
   return { ok: true };
 }
 

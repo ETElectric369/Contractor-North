@@ -277,7 +277,10 @@ export async function textQuote(
  */
 export async function quoteShareText(
   id: string,
-  opts?: { sendIt?: boolean },
+  /** `ahead` (cn-v1174): the Share button's read-ahead, invoiceShareText's twin. It stamps nothing; on
+   *  a draft it answers needsSend with the ask's sentence AND the words and link the estimate will
+   *  carry once sent. A refusal it can know ahead comes back as it always has, without needsSend. */
+  opts?: { sendIt?: boolean; ahead?: boolean },
 ): Promise<{ ok: boolean; error?: string; needsSend?: boolean; title?: string; text?: string; url?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -293,12 +296,28 @@ export async function quoteShareText(
   const token = (quote as { public_token?: string | null }).public_token;
   if (!token) return { ok: false, error: await ws.say(label === "Estimate" ? "qs_shareNoLinkEstimate" : "qs_shareNoLinkQuote") };
 
+  // One org query for both the name and the link base — textQuote's shape, so the link is built
+  // from the ORG's settings (its own domain), never NEXT_PUBLIC_SITE_URL. The same words and link
+  // before the stamp and after it (the stamp does not move the token).
+  const payload = async () => {
+    const { data: org } = await supabase.from("organizations").select("name, settings").maybeSingle();
+    const who = org?.name ?? "Your contractor";
+    const url = orgDocUrl(getOrgSettings((org as { settings?: unknown } | null)?.settings), "q", token, rowPlace(quote));
+    return {
+      title: `${label} ${quote.quote_number} — ${who}`,
+      text: `${who}: ${label} ${quote.quote_number} ($${Number(quote.total).toFixed(2)}). View:`,
+      url,
+    };
+  };
+
   if (String((quote as { status?: string | null }).status ?? "") === "draft") {
     if (!opts?.sendIt) {
       return {
         ok: false,
         needsSend: true,
         error: await ws.say(label === "Estimate" ? "qs_shareMarksSentEstimate" : "qs_shareMarksSentQuote", { number: String(quote.quote_number ?? "") }),
+        // The read-ahead only: what the one tap will hand the sheet. Nothing above was written.
+        ...(opts?.ahead ? await payload() : {}),
       };
     }
     // SILENT-WRITE LAW: a zero-row UPDATE is a 204. Read the row back before handing out a link
@@ -311,17 +330,7 @@ export async function quoteShareText(
     revalidatePath("/closing");
   }
 
-  // One org query for both the name and the link base — textQuote's shape, so the link is built
-  // from the ORG's settings (its own domain), never NEXT_PUBLIC_SITE_URL.
-  const { data: org } = await supabase.from("organizations").select("name, settings").maybeSingle();
-  const who = org?.name ?? "Your contractor";
-  const url = orgDocUrl(getOrgSettings((org as { settings?: unknown } | null)?.settings), "q", token, rowPlace(quote));
-  return {
-    ok: true,
-    title: `${label} ${quote.quote_number} — ${who}`,
-    text: `${who}: ${label} ${quote.quote_number} ($${Number(quote.total).toFixed(2)}). View:`,
-    url,
-  };
+  return { ok: true, ...(await payload()) };
 }
 
 export async function emailQuote(

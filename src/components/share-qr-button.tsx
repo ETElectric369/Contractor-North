@@ -38,7 +38,8 @@ export function ShareQrButton() {
 
   const share = async () => {
     if (!link) return;
-    // Native share sheet where available (iOS PWA has it); clipboard as the fallback.
+    // Native share sheet where available (iOS PWA has it); clipboard as the fallback. The link was
+    // fetched when the modal opened, so nothing is awaited between this tap and the sheet.
     try {
       if (navigator.share) {
         // Written from the COMPANY's own name and trade. This line was hardcoded to "Need
@@ -51,9 +52,11 @@ export function ShareQrButton() {
         await navigator.share({ title: `Request an estimate — ${who}`, text: blurb, url: link.url });
         return;
       }
-    } catch {
-      /* user cancelled the sheet — fall through to nothing */
-      return;
+    } catch (e) {
+      // Closing the sheet without picking is a choice, and the only rejection passed over in silence
+      // (cn-v1174: every rejection used to read as a cancel, so a refused sheet did nothing at all).
+      // Anything else falls through to the clipboard, which says whether it worked.
+      if (e instanceof Error && e.name === "AbortError") return;
     }
     try {
       await navigator.clipboard.writeText(link.url);

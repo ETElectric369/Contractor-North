@@ -29,6 +29,7 @@ export type JobPaperView = {
   waitingOnCredit?: boolean;
   /** The day the wait began, and who the credit is from ("CED"), for its one sentence. */
   waitingSince?: string | null;
+  /** The supplier's short name (job-papers.ts reads it for every row): shown ahead of the number. */
   supplier?: string | null;
 };
 
@@ -141,7 +142,12 @@ function PaperRow({ jobId, paper }: { jobId: string; paper: JobPaperView }) {
     <li className="px-5 py-3 text-sm">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="min-w-0 flex-1">
-          <div className="font-medium text-slate-900">{paper.invoiceNumber}</div>
+          {/* Whose paper it is (cn-v1174): the supplier's short name, when it was read. The waiting
+              row above already names it in its sentence. */}
+          <div className="font-medium text-slate-900">
+            {paper.supplier ? `${paper.supplier} · ` : ""}
+            {paper.invoiceNumber}
+          </div>
           <div className="text-xs text-slate-500">
             {[paper.invoiceDate ? formatDate(paper.invoiceDate) : null, paper.jobNameRaw ? `Job name "${paper.jobNameRaw}"` : null]
               .filter(Boolean)

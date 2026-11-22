@@ -61,13 +61,16 @@ describe("the estimate's cards follow the signed-in person's language", () => {
     expect(c).toContain("Nadie adjunto todavía — se imprime sin nombre hasta que elijas a alguien.");
     expect(c).toContain("Adjuntar Cliente");
     const p = text(es(paper()));
-    expect(p).toContain("Mano de Obra y Piezas en el Papel");
+    // The control's title since cn-v1174 (the owner: "change \"Labor and Parts on the Paper\" to Estimate Visibility").
+    expect(p).toContain("Visibilidad del Presupuesto");
+    expect(p).not.toContain("Mano de Obra y Piezas en el Papel");
     // Four segments since cn-v1158 (the company's default named by what it prints, then the estimate's own
     // three); the old "· Activado" and "Mostrar" went with the three-segment switch. Re-pinned the same
     // release to the ONE name each format has everywhere: Cada Pieza, Una Línea de Materiales, Oculto (the
     // segments were "Listar Cada Pieza" and "Ocultar").
     expect(p).toContain("Predeterminado de la Empresa · Cada Pieza Cada Pieza Una Línea de Materiales Oculto");
     expect(p).not.toMatch(/Activado|Mostrar|Listar Cada Pieza|Ocultar/);
+    expect(p).not.toContain("Estimate Visibility");
     expect(p).not.toContain("Labor and Parts on the Paper");
   });
 
@@ -88,7 +91,8 @@ describe("the estimate's cards follow the signed-in person's language", () => {
     expect(n).toContain("Prepared for Nobody attached yet — it prints without a name until you pick someone.");
     expect(n).toContain("Attach Customer");
     const p = text(en(paper()));
-    expect(p).toContain("Labor and Parts on the Paper");
+    expect(p).toContain("Estimate Visibility"); // the control's title since cn-v1174 (was "Labor and Parts on the Paper")
+    expect(p).not.toContain("Labor and Parts on the Paper");
     // cn-v1158: these three lines are the switch's NEW English (four segments and a why line of 140 characters or
     // fewer); every other line in this case is still the byte-for-byte English from before the catalogs. The
     // segments wear the ONE name each format has everywhere (they were "List Every Part" and "Hide").

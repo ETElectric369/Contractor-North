@@ -5,7 +5,7 @@ import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { createNotifications } from "@/lib/notifications";
 import { revalidatePath } from "next/cache";
 import { reportError } from "@/lib/observe";
-import { estimateLines, syncJobTasks } from "@/lib/estimate/sync-job-tasks";
+import { estimateLines, notAddedWords, syncJobTasks } from "@/lib/estimate/sync-job-tasks";
 import { materialsWords, syncJobMaterials } from "@/lib/estimate/sync-job-materials";
 import { KEEP_BOTH_BELL_HINT, supersedeRevised, supersededWords } from "@/lib/estimate/revision";
 import { FINISH_WINDOW_MS } from "@/lib/estimate/finish-window";
@@ -85,6 +85,8 @@ async function finishPublicAcceptance(token: string): Promise<string | null> {
    *  list"). The office door has always said it under the status; now the link's bell says it first,
    *  with the one way back. English, as the rest of this bell is. */
   let replaced: string | null = null;
+  // The job is over (cn-v1174): the tasks its sync did not add are said to the office in the bell.
+  let notAddedSaid: string | null = null;
   try {
     if (!token) return null;
     const sb = createServiceClient();
@@ -126,6 +128,7 @@ async function finishPublicAcceptance(token: string): Promise<string | null> {
         tasksBefore: before.error ? undefined : before.taskMinutes,
       });
       if (born.error) reportError("finishPublicAcceptance:tasks", new Error(born.error), { quoteId: q.id, jobId });
+      else notAddedSaid = notAddedWords(born.notAdded);
     }
     const wo = await workOrderFromQuote(sb, { quoteId: q.id, orgId: who.orgId, userId: who.userId });
     if (!wo.ok) reportError("finishPublicAcceptance:workOrder", new Error(wo.error ?? "refused"), { quoteId: q.id, jobId });
@@ -159,6 +162,7 @@ async function finishPublicAcceptance(token: string): Promise<string | null> {
     reportError("finishPublicAcceptance", e);
   }
   // What it replaced is said first (it is the news), then what the list did.
+  if (notAddedSaid) listSaid = listSaid ? `${listSaid} ${notAddedSaid}` : notAddedSaid;
   if (replaced) listSaid = listSaid ? `${replaced} ${listSaid}` : replaced;
   return listSaid;
 }

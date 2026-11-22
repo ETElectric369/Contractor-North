@@ -81,7 +81,7 @@ export function PaperFormatSwitch({
 }: {
   /** The estimate's own choice; null = the company default. */
   value: EstimateFormat | null;
-  /** What the company default currently means (Document Studio's Labor and Parts on Estimates). */
+  /** What the company default currently means (Document Studio's Estimate Visibility, the same name since cn-v1174). */
   companyDefault: EstimateFormat;
   onChange: (v: EstimateFormat | null) => void;
   /** While a save is in flight: the pill stays where it is and a tap does nothing. */

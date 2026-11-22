@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
 import { isPinned, ranksToday } from "@/lib/six-rank";
 import { isMissingColumn } from "@/lib/job-tasks";
+import { isEndedJob } from "@/lib/job-status";
 
 export type Result = { ok: boolean; error?: string };
 
@@ -116,9 +117,15 @@ export async function createTask(input: {
   // A JOB TASK NAMES ONE OF THIS COMPANY'S JOBS. 0358 makes the database say it too; this says it on
   // a database without 0358, where the policy only checked the company (the RLS-scoped jobs read
   // returns nothing for another company's id or a stray one).
+  //
+  // NO NEW TASK ON A JOB THAT IS OVER (cn-v1174): finishing or cancelling a job checks its tasks off
+  // (lib/job-tasks closeJobTasks), so a task added after would be open work on a job nobody is coming
+  // back to: the job's list would badge it and nobody would do it. Refused in one sentence with the one
+  // way back (set the job's status back). On hold is not over. A Reminder (no job) is untouched.
   if (input.job_id) {
-    const { data: j } = await supabase.from("jobs").select("id").eq("id", input.job_id).maybeSingle();
+    const { data: j } = await supabase.from("jobs").select("id, status").eq("id", input.job_id).maybeSingle();
     if (!j) return { ok: false, error: await say("tk_jobUnavailable") };
+    if (isEndedJob((j as { status?: string | null }).status)) return { ok: false, error: await say("tk_jobOverNoTask") };
   }
   // A STEP LIVES WHERE ITS TASK LIVES: a step of a job's task is on that job (so the crew sees it),
   // a step of a Reminder is private with it. Unless the caller named the job itself.
@@ -127,6 +134,11 @@ export async function createTask(input: {
     const { data: parent } = await supabase.from("tasks").select("job_id").eq("id", input.parent_id).maybeSingle();
     if (!parent) return { ok: false, error: await say("tk_stepParentNotFound") };
     jobId = (parent.job_id as string | null) ?? null;
+    // A step under a job's task is that job's task too: the same rule.
+    if (jobId) {
+      const { data: pj } = await supabase.from("jobs").select("status").eq("id", jobId).maybeSingle();
+      if (isEndedJob((pj as { status?: string | null } | null)?.status)) return { ok: false, error: await say("tk_jobOverNoTask") };
+    }
   }
 
   // DUP-CHECK (the Nort "PUD follow-up (2nd check)" class): same trimmed title
@@ -389,8 +401,14 @@ export async function updateTask(
     // jobs read returns nothing for a foreign/crafted id) — never a cross-org id.
     let jobId: string | null = patch.job_id || null;
     if (jobId) {
-      const { data: j } = await supabase.from("jobs").select("id").eq("id", jobId).maybeSingle();
+      const { data: j } = await supabase.from("jobs").select("id, status").eq("id", jobId).maybeSingle();
       jobId = j ? jobId : null;
+      // NO TASK MOVES ONTO A JOB THAT IS OVER (cn-v1174): createTask's rule, in its words. A task
+      // already on that job (an edit that hands its own job back) is not a move.
+      if (j && isEndedJob((j as { status?: string | null }).status)) {
+        const { data: cur } = await supabase.from("tasks").select("job_id").eq("id", id).maybeSingle();
+        if ((cur as { job_id?: string | null } | null)?.job_id !== jobId) return { ok: false, error: await say("tk_jobOverNoTask") };
+      }
     }
     clean.job_id = jobId;
   }

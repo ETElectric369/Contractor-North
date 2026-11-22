@@ -123,6 +123,15 @@ describe("open: on the Leads list, with its doors and the running clock", () => 
     expect(html).toContain("A new deck off the back.\nStairs to the yard.");
     expect(html).toContain("Gate code 1234");
     expect(html).toContain('href="/leads"');
+    // cn-v1174 (a user, opened from Inspections: "going back to leads doesn't make sense from here"): the
+    // visit page's BackLink. A cold entry draws Back to Leads (above); with history behind it, Back.
+    expect(html).toContain("Back to Leads");
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/leads/[id]/lead-file.tsx"), "utf8");
+    expect(src).toContain('fallback="/leads"');
+    expect(src).toContain('fallbackLabel={t("ld_btn_fileBackToLeads")}');
+    expect(src).toContain('backLabel={t("sh_back")}');
+    expect(src).toContain('className="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-brand"');
+    expect(src).not.toContain('<Link href="/leads"');
   });
   it("in Spanish", () => {
     const html = draw("open", "es");

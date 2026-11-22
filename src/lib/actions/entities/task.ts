@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createTask, toggleTask, updateTask, deleteTask } from "@/app/(app)/tasks/actions";
 import { createClient } from "@/lib/supabase/server";
 import { resolveJobId, resolveProfileId } from "../resolve-id";
+import { OPEN_TASK_JOB, whereJobTaskOpen, whereReminderOpen } from "@/lib/job-tasks";
 import type { ActionDef, ActionResult } from "../types";
 
 /** Subtasks ride with their parent's assignee (amendment 5c): a child assigned to
@@ -88,22 +89,33 @@ async function matchOpenTasks(f: BulkFilter, opts?: { remindersOnly?: boolean })
   // Parents only (amendment 5b): subtasks never match a sweep on their own — a bulk
   // reschedule would date children the six can never show, and a bulk complete could
   // finish a child under a still-open parent. bulkComplete cascades children itself.
-  let q = supabase.from("tasks").select("id").eq("status", "open").is("parent_id", null);
-  // A reschedule dates Reminders only: a job's task has no due date to move (0358).
-  if (opts?.remindersOnly) q = q.is("job_id", null);
-  // Escape LIKE wildcards so a title with % / _ matches literally, not as a pattern.
-  if (f.title_contains) q = q.ilike("title", `%${f.title_contains.replace(/[\\%_]/g, "\\$&")}%`);
-  // ilike with wildcards escaped = case-insensitive EXACT match — the vocabulary is
-  // user-typed ("Permits" vs "permits" must sweep the same list).
-  if (f.category) q = q.ilike("category", f.category.replace(/[\\%_]/g, "\\$&"));
-  if (f.job_id) q = q.eq("job_id", f.job_id);
-  if (f.due_before) q = q.lt("due_date", f.due_before); // NULL due dates never match — undated_only is the explicit ask
-  if (f.undated_only) q = q.is("due_date", null);
-  const { data, error } = await q.limit(101);
+  // OPEN IS THE ONE RULE (lib/open-counts isOpenTask, its query twin in lib/job-tasks, cn-v1174): a
+  // Reminder while its status is open, a job's task only while its job is not over. Two reads, each
+  // cut by the database, so a sweep never "completes" the leftovers of a finished job.
+  const filtered = (q: any) => {
+    q = q.is("parent_id", null);
+    // Escape LIKE wildcards so a title with % / _ matches literally, not as a pattern.
+    if (f.title_contains) q = q.ilike("title", `%${f.title_contains.replace(/[\\%_]/g, "\\$&")}%`);
+    // ilike with wildcards escaped = case-insensitive EXACT match — the vocabulary is
+    // user-typed ("Permits" vs "permits" must sweep the same list).
+    if (f.category) q = q.ilike("category", f.category.replace(/[\\%_]/g, "\\$&"));
+    if (f.job_id) q = q.eq("job_id", f.job_id);
+    if (f.due_before) q = q.lt("due_date", f.due_before); // NULL due dates never match — undated_only is the explicit ask
+    if (f.undated_only) q = q.is("due_date", null);
+    return q.limit(101);
+  };
+  // A reschedule dates Reminders only: a job's task has no due date to move (0358). A filter naming a
+  // job has no Reminders in it.
+  const [reminders, jobTasks] = await Promise.all([
+    f.job_id ? Promise.resolve({ data: [] as { id: string }[], error: null }) : filtered(whereReminderOpen(supabase.from("tasks").select("id"))),
+    opts?.remindersOnly ? Promise.resolve({ data: [] as { id: string }[], error: null }) : filtered(whereJobTaskOpen(supabase.from("tasks").select(`id, ${OPEN_TASK_JOB}`))),
+  ]);
+  const error = reminders.error ?? jobTasks.error;
   if (error) return { error: dbError(error) };
-  if ((data?.length ?? 0) > 100)
+  const data = [...((reminders.data ?? []) as { id: string }[]), ...((jobTasks.data ?? []) as { id: string }[])];
+  if (data.length > 100)
     return { error: "That filter matches more than 100 open tasks — narrow it (add a title word, category, or job)." };
-  return { ids: (data ?? []).map((t) => t.id as string) };
+  return { ids: data.map((t) => t.id as string) };
 }
 
 function revalidateBulkViews(f: BulkFilter) {

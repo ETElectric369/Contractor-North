@@ -12,6 +12,7 @@ import { ClipboardCheck, ListChecks } from "./job-tab-icons";
 import { arrangeJobTabs } from "./job-tabs";
 import { FeatureOffLine } from "@/components/feature-off-line";
 import { featureOn, type FeatureKey } from "@/lib/features";
+import { asksForDailyReport } from "@/lib/daily-report-rule";
 import { createClient } from "@/lib/supabase/server";
 import { acceptedQuoteTotal, leftToBill, scheduleStatus, type Milestone } from "@/lib/payment-schedule-math";
 import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
@@ -32,6 +33,9 @@ import {
   unitLine,
 } from "@/lib/utils";
 import { JobDocuments } from "./job-documents";
+import { paperSummary, readersForPaper } from "./paper-summary";
+import { readJobDailyReports } from "./daily-reports";
+import { JobDailyReports } from "./job-daily-reports";
 import { JobCostCapture } from "./job-cost-capture";
 import { UnbilledCard, UnbilledDoorButton, type UnbilledView } from "./unbilled-card";
 import { LeftToBillCard } from "./left-to-bill-card";
@@ -313,7 +317,8 @@ export default async function JobDetailPage({
       .eq("job_id", j.id)
       .order("created_at"),
     // `language` rides the role read (cn-v1138): the page's words are the viewer's, no extra round trip.
-    supabase.from("profiles").select("role, language").eq("id", user?.id ?? "").maybeSingle(),
+    // crew_lead (0128) too (cn-v1174): the dock's clock asks a crew lead for the end-of-day report.
+    supabase.from("profiles").select("role, language, crew_lead").eq("id", user?.id ?? "").maybeSingle(),
     // WHICH PAPER MADE WHICH BILL (Erik, 2026-09-27: bills and job photos kept separate): the links
     // the receipt reader, Add Cost and File It write, for this job's papers and this job's bills (a
     // bill moved here keeps its receipt on the old job; its link still names the bill). Rides this
@@ -321,8 +326,14 @@ export default async function JobDetailPage({
     // and the page uses none of them for him).
     supabase
       .from("organized_items")
-      .select("id, kind, category, document_id, bill_id, tied_bill_id, tied_supplier_invoice_id, petty_cash_id, file_url")
+      // title, summary, vendor, amount, item_date and doc_number (cn-v1174): the reader's own record of
+      // what each paper is and what it came to, for the Receipts & Papers row's one line and total
+      // (paper-summary.ts). THE PROJECTION LAW: the row shows only what this select carries.
+      // created_at, newest first: when one paper has several records the newest is the one shown
+      // (readersForPaper, paper-summary.ts; an exact document match still wins over a file match).
+      .select("id, kind, category, document_id, bill_id, tied_bill_id, tied_supplier_invoice_id, petty_cash_id, file_url, title, summary, vendor, amount, item_date, doc_number, created_at")
       .or([`job_id.eq.${j.id}`, ...(liveBillIds.length ? [`bill_id.in.(${liveBillIds})`, `tied_bill_id.in.(${liveBillIds})`] : [])].join(","))
+      .order("created_at", { ascending: false })
       .limit(2000),
   ]);
   const viewerIsStaff = isStaffRole((meRow as any)?.role ?? "");
@@ -936,6 +947,10 @@ export default async function JobDetailPage({
   // What the shelf holds (lib/materials-stock), started here and awaited by the Materials tab: a
   // serial read after the page's big wave was the tab's own latency (skeptic #10).
   const crewShelfP = on("shop_stock") ? shelfForCrew(supabase).catch(() => null) : Promise.resolve(null);
+  // THE JOB'S DAILY REPORTS (cn-v1174, daily-reports.ts): read only while the Daily Reports switch is
+  // on, by daily_reports.job_id = this job; a database still before 0411 reads as absent, never down.
+  // Started here and awaited by the Time tab, like the shelf above.
+  const dailyReportsP = on("daily_reports") ? readJobDailyReports(supabase, j.id) : Promise.resolve(null);
   const laborReadFailed = laborRows === null || jobLevelRate === undefined;
   const billableLabor = laborRows
     ? computeJobLaborBilling(laborRows.jobEntries, defaultLaborRate, jobLevelRate ?? null, laborRows.nonBillableCodes).total
@@ -984,6 +999,8 @@ export default async function JobDetailPage({
   const isDrawBilled = (invoices ?? []).some(
     (i: any) => isDrawKind(i.invoice_kind) && i.status !== "void",
   );
+  /** A time and material job: the Invoices tab draws no payment-schedule card for it (cn-v1174). */
+  const isTmJob = (j as any).billing_type === "tm";
   // THE OVERVIEW'S ONE FIGURE ON A JOB BILLED BY ITS CONTRACT (W1-19): Left to Bill, from the same
   // figures above (the contract, what went out on sent bills) or the schedule's own status, the one
   // PaymentScheduleCard shows. Staff only (the card is never mounted for a tech).
@@ -1100,6 +1117,31 @@ export default async function JobDetailPage({
   const billOfPaper: Record<string, string> = Object.fromEntries(
     Object.entries(paperSort.byBill).flatMap(([billId, ds]) => ds.map((d: any) => [String(d.id), billWords(billId)])),
   );
+  // WHAT EACH PAPER IS AND WHAT IT CAME TO (cn-v1174, paper-summary.ts: the bill first, the receipt
+  // reader's record next, else nothing). Staff only, like the tab: a tech is handed none.
+  const moreWords = (n: number) => fillText(t("jb_nMore"), { n: String(n) });
+  const billOfDoc = new Map<string, string>(
+    Object.entries(paperSort.byBill).flatMap(([billId, ds]) => ds.map((d: any) => [String(d.id), billId] as [string, string])),
+  );
+  const paperFacts: Record<string, { what: string | null; total: number | null }> = {};
+  if (viewerIsStaff) {
+    for (const d of docs as any[]) {
+      const billId = billOfDoc.get(String(d.id));
+      // An exact document match before a file match, the newest first among equals (readersForPaper).
+      const readers = readersForPaper({ id: String(d.id), file_url: d.file_url }, (paperTies ?? []) as any[]);
+      const sum = paperSummary({ bill: billId ? billById.get(billId) : null, readers, more: moreWords });
+      if (sum.what || sum.total !== null) paperFacts[String(d.id)] = { what: sum.what, total: sum.total };
+    }
+  }
+  /** A supplier bill row's one line of what was bought, by the same rule. */
+  const billWhat: Record<string, string> = viewerIsStaff
+    ? Object.fromEntries(
+        ((bills ?? []) as any[]).flatMap((b: any) => {
+          const what = paperSummary({ bill: b, more: moreWords }).what;
+          return what ? [[String(b.id), what]] : [];
+        }),
+      )
+    : {};
   // Each task's photo: the signed URL, or "removed" once the photo was deleted from the job, or
   // "unavailable" when it is still the job's but couldn't be signed just now (lib/job-tasks taskPhoto).
   const jobFiles = new Set(((docRows ?? []) as any[]).map((d: any) => d.file_url).filter(Boolean) as string[]);
@@ -1116,7 +1158,9 @@ export default async function JobDetailPage({
   const materialsOpen = openToBuyCount((canonicalItems ?? []) as { purchased?: boolean; is_tool?: boolean }[]);
   // A tasks read that failed has no count at all (the card says it couldn't read them), never the
   // Buy Materials row alone passed off as the job's open tasks.
-  const openTaskCount = jobTasks.failed ? undefined : jobTaskTally(jobTasks.rows, buy).open;
+  // OPEN IS THE ONE RULE (lib/open-counts isOpenTask, cn-v1174): asked with the job's status, so a job
+  // that is over badges no task, and the list's header below reads the same tally.
+  const openTaskCount = jobTasks.failed ? undefined : jobTaskTally(jobTasks.rows, buy, j.status).open;
   // The Costs chip: Not Billed Yet rows + unrecorded papers naming this job + the job's own receipts
   // on no bill yet. Every one is a ROW the tab draws, so the number can be checked against the tab
   // (fada712a: J-013 had 1 bill and said 3). The hours not billed yet are NOT a count here: they are
@@ -1153,6 +1197,7 @@ export default async function JobDetailPage({
     nowIso: new Date().toISOString(),
     stamps: jobTasks.stamps,
     failed: jobTasks.failed,
+    jobStatus: (j.status ?? null) as string | null,
   };
 
   // WHICH PHOTOS THE CUSTOMER SEES (0300's job_shared_photos): the office's own table, read only
@@ -1236,6 +1281,7 @@ export default async function JobDetailPage({
   // WHAT THE SHELF HOLDS of the job's materials lines (lib/materials-stock; Erik: no pricing on the
   // list, "it could show if stock is available"). Shop Stock on only; a failed read says nothing.
   const crewShelf = await crewShelfP;
+  const jobDailyReports = await dailyReportsP;
   const materialsStock = crewShelf?.ok ? stockForLines(crewShelf.rows, (canonicalItems ?? []) as unknown as { id: string; description?: string | null }[]) : {};
   /** THE TIME TAB'S BADGE: the shifts no invoice has claimed yet (tests/badges-show-open names it). */
   const timeOpen = unbilled?.schemaReady ? unbilled.shifts : 0;
@@ -1651,6 +1697,7 @@ export default async function JobDetailPage({
       // (lib/unbilled-work, `shifts`), never a second count; nothing read = no badge.
       count: timeOpen,
       content: (
+        <div className="space-y-3">
         <Card className="overflow-hidden">
           {/* ONE CLOCK ON A JOB (W1-20). The tab's own Clock In left: the dock's TIME button at the top
               of the job is the one clock (GPS, Switch, backdating, the long-shift guard, the on-hold
@@ -1745,6 +1792,10 @@ export default async function JobDetailPage({
             {(!entries || entries.length === 0) && empty(t("jb_noTimeEntriesYet"))}
           </ul>
         </Card>
+        {/* THE JOB'S DAILY REPORTS (cn-v1174), under the shifts, anchored #daily-reports: drawn only
+            with the switch on and a report naming this job; a failed read is said here. */}
+        <JobDailyReports read={jobDailyReports} lang={lang} />
+        </div>
       ),
     },
     {
@@ -1846,6 +1897,8 @@ export default async function JobDetailPage({
                 billedHours={hoursMarked}
                 handsNote={handsNote}
                 papers={papersByBill}
+                // What was bought on each bill, one line (cn-v1174, paper-summary.ts).
+                billWhat={billWhat}
                 openAside={
                   costGroups && unbilled ? (
                     <div className="space-y-2">
@@ -1900,6 +1953,8 @@ export default async function JobDetailPage({
               nortOn={on("nort")}
               photoTabIds={Array.from(paperSort.photoTabIds)}
               billOf={billOfPaper}
+              // What each paper is and what it came to (cn-v1174, paper-summary.ts). The office only.
+              facts={viewerIsStaff ? paperFacts : null}
               looseIds={paperSort.loose ? paperSort.loose.map((d: any) => String(d.id)) : null}
               tieNote={paperTies ? null : t("jb_couldntCheckPapers")}
               // A loose receipt's Already on a Bill → Tie It (d1ff7c5a): the job's live bills, said
@@ -2091,26 +2146,31 @@ export default async function JobDetailPage({
               <NewInvoiceButton {...newInvoiceProps} />
             </div>
           )}
-          <Card className="overflow-hidden">
-          <ul className="divide-y divide-slate-100">
+          {/* EACH INVOICE IS A CARD OF ITS OWN (cn-v1174, the owner: "bring more attention to the
+              invoices on the top as they blend in to the box below"). The house look the Leads,
+              Inspections and Closing lists use: ul.space-y-3, each li its own rounded-xl border-2
+              card, the number leading in bold (an invoice has no title column). The status word stays the stored word: there is no
+              status-word function for invoices (lib/statuses has estimates, leads and customers). */}
+          {(invoices ?? []).length > 0 ? (
+          <ul className="space-y-3">
             {[...((invoices ?? []) as any[])].sort(newestInvoiceFirst).map((iv: any) => (
-              <li key={iv.id}>
+              <li key={iv.id} className="flex flex-col gap-1.5 rounded-xl border-2 border-slate-200 bg-white px-4 py-3 shadow-sm">
                 {/* The billing board's amount (components/invoice-amount): "$D due of $T" with what
                     is paid beneath. This row used to print the bare TOTAL, so a bill with $6,000
                     paid on it looked the same here as one with nothing paid, and a different size
                     than the same invoice on /billing. */}
-                <Link href={`/billing/${iv.id}`} className="flex items-center justify-between gap-3 px-5 py-3 text-sm hover:bg-slate-50">
+                <Link href={`/billing/${iv.id}`} className="flex items-center justify-between gap-3 text-sm">
                   <span className="min-w-0">
-                    <span className="block truncate font-medium text-slate-900">{iv.invoice_number}{iv.created_at && <span className="ml-2 text-xs font-normal text-slate-500">{formatDateTz(iv.created_at, tz)}</span>}</span>
+                    <span className="block truncate font-bold text-slate-900">{iv.invoice_number}{iv.created_at && <span className="ml-2 text-xs font-normal text-slate-500">{formatDateTz(iv.created_at, tz)}</span>}</span>
                     <InvoiceAmountDetail total={iv.total} paid={iv.amount_paid} status={iv.status} />
                   </span>
                   <span className="flex shrink-0 items-center gap-3"><InvoiceAmount total={iv.total} paid={iv.amount_paid} status={iv.status} /><Badge tone={statusTone(iv.status)}>{iv.status}</Badge></span>
                 </Link>
                 {/* GET PAID, ON THE BILL IT PAYS (W1-24). Record a Payment left this tab with the
                     Progress Payment hub: money is taken on its invoice, whose Get Paid is one sheet
-                    (card first, then every other way). Its own line, so the row never squeezes. */}
+                    (card first, then every other way). Inside its card, so it reads as this bill's. */}
                 {iv.status !== "void" && invoiceBalance(iv.total, iv.amount_paid) > 0.005 && (
-                  <div className="-mt-2 flex justify-end px-3 pb-1">
+                  <div className="-mb-2 flex justify-end">
                     <Link href={`/billing/${iv.id}`} className="inline-flex min-h-11 items-center px-2 text-sm font-medium text-brand hover:underline">
                       {t("jb_getPaid")}
                     </Link>
@@ -2118,16 +2178,25 @@ export default async function JobDetailPage({
                 )}
               </li>
             ))}
-            {(!invoices || invoices.length === 0) && empty(t("jb_noInvoicesYet"))}
           </ul>
-          </Card>
+          ) : (
+            <Card>{empty(t("jb_noInvoicesYet"))}</Card>
+          )}
           {/* CONTRACTS & LIEN RIGHTS OFF (the switch board): the three cards below are its doors, so a
               job with none of them shows none. A job that has a schedule, a contract or a lien record
               keeps its card under the Off line: milestones bill draws, and a sent contract is live. */}
-          {!on("contracts") && ((paymentMilestones ?? []).length > 0 || (contractRows ?? []).length > 0 || !!lienRecord || !!insuranceClaim) && (
+          {!on("contracts") && ((!isTmJob && (paymentMilestones ?? []).length > 0) || (contractRows ?? []).length > 0 || !!lienRecord || !!insuranceClaim) && (
             <FeatureOffLine feature="contracts" features={switches.features} isOwner={switches.isOwner} />
           )}
-          {(on("contracts") || (paymentMilestones ?? []).length > 0) && (
+          {/* NO TIME & MATERIAL BOX (cn-v1174, the owner: "this time and material box seems like it
+              might be unnecessary as that should fold into a new invoice"). Its one button, Request
+              Next Payment, was requestNextPayment, which on a time and material job ignores milestones
+              and always starts a progress draw: on a job with no draw that locked it into draws, the
+              opposite of New Invoice's standard invoice. Everything it offered is still here: New
+              Invoice bills the work so far (a standard invoice, or the next draw on a job already
+              billed in draws: workSoFarDoor), and the Overview's Not Billed Yet card does the same.
+              A fixed-price job's schedule card is unchanged. */}
+          {!isTmJob && (on("contracts") || (paymentMilestones ?? []).length > 0) && (
             <PaymentScheduleCard
               jobId={j.id}
               billingType={(j as any).billing_type ?? "fixed"}
@@ -2339,6 +2408,9 @@ export default async function JobDetailPage({
         openEntry={openEntry}
         techs={techs ?? []}
         defaultProfileId={user?.id ?? ""}
+        /* THE ONE RULE for who is asked for the end-of-day report (lib/daily-report-rule), read the
+           way My Day's Now card reads it: profiles.crew_lead and the Daily Reports switch. */
+        asksReport={asksForDailyReport((meRow as any)?.crew_lead, switches.features)}
         jobAddress={navTarget}
         customerPhone={j.customers?.phone ?? null}
         /* On T&M the estimate is a guide, never the bill: Finish builds the bill from the actuals

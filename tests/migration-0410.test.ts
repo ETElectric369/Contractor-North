@@ -28,9 +28,8 @@ describe("migration 0410: a worker reads his own pay periods", () => {
   const sql = migration("0410_");
   const code = noComments(sql);
 
-  it("is the next migration, named for what it does, and takes its locks with a timeout", () => {
+  it("is the one 0410, named for what it does, and takes its locks with a timeout (what sits past it is the newest migration's own test: migration-0411.test.ts)", () => {
     expect(names.filter((n) => n.startsWith("0410_"))).toEqual(["0410_a_worker_reads_his_own_pay_periods.sql"]);
-    expect(names[names.length - 1]).toBe("0410_a_worker_reads_his_own_pay_periods.sql");
     expect(code).toContain("set local lock_timeout = '3s';");
     expect(code).toContain("set local statement_timeout = '15s';");
     // The same opening 0409 has.

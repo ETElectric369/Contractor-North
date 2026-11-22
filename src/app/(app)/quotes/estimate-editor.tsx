@@ -975,7 +975,14 @@ export function EstimateEditor(props: EstimateEditorProps) {
                 {/* The status is what makes this gate work: past draft the toggle reads as text. */}
                 <QuoteTypeToggle id={savedId} status={status} value={quoteDocType} />
               </div>
-              <ShareIconButton load={(opts) => quoteShareText(savedId, opts)} className="ml-auto shrink-0" />
+              {/* The version moves when the status or the total moves, and when a save lands (it reads
+                  "saving" while a write is on the wire, so it changes again as the write settles):
+                  the copy fetched ahead is then dropped and fetched again, never a stale total. */}
+              <ShareIconButton
+                load={(opts) => quoteShareText(savedId, opts)}
+                version={[status, total.toFixed(2), busy ? "saving" : "saved"].join("|")}
+                className="ml-auto shrink-0"
+              />
             </div>
             {header.title && <p className="mt-1 text-slate-600">{header.title}</p>}
             {/* REVISIONS (0391), both ways. */}

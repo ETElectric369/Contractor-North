@@ -264,10 +264,11 @@ describe("the rate reaches the editor through the one rule", () => {
   });
 });
 
-describe("the paper switch (Labor and Parts on the Paper)", () => {
+describe("the paper switch (Estimate Visibility since cn-v1174; was Labor and Parts on the Paper)", () => {
   it("sits by the totals on both pages, seeded from the row, and goes through the one header write", () => {
     const t = text(builder({ companyEstimateFormat: "tasks" }));
-    expect(t).toContain("Labor and Parts on the Paper");
+    expect(t).toContain("Estimate Visibility");
+    expect(t).not.toContain("Labor and Parts on the Paper");
     // FOUR SEGMENTS SINCE cn-v1158 (re-pinned on purpose: "Company Default · On / Off", Show and Hide became the
     // company's default named by what it prints, then the three formats). RE-PINNED AGAIN the same release: ONE
     // name for each format everywhere, so the segments are Every Part, One Materials Line and Hidden (they were
@@ -303,7 +304,7 @@ describe("the paper switch (Labor and Parts on the Paper)", () => {
     expect(src).toMatch(/onChange=\{\(v\) => \{\s*session\.typeHeader\(\{ estimateFormat: v \}\);\s*commitField\("estimateFormat"\);\s*\}\}/);
     // Only while the estimate is still editable — the lock's own words say why a sent one is not.
     const locked = text(saved({ estimate_format: "grouped" }, [], { lock: { reason: "A signed contract." } }));
-    expect(locked).not.toContain("Labor and Parts on the Paper");
+    expect(locked).not.toContain("Estimate Visibility");
     for (const segment of ["Company Default", "Every Part", "One Materials Line"]) expect(locked, segment).not.toContain(segment);
     // The new page no longer adopts a draft into the browser: a lead's draft is OPENED where it lives.
     const page = read("src/app/(app)/quotes/new/page.tsx");

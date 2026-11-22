@@ -515,7 +515,12 @@ async function publicInvoiceLink(
  */
 export async function invoiceShareText(
   id: string,
-  opts?: { sendIt?: boolean },
+  /** `ahead` (cn-v1174): the Share button's READ-AHEAD, fetched before any tap. It stamps nothing; on a
+   *  bill that needs a send it answers needsSend with the ask's sentence AND the words and link the bill
+   *  will carry once sent, so the one Mark Sent and Share tap can open the sheet with nothing awaited
+   *  while `sendIt` stamps in parallel. A refusal it can know ahead (not staff, not found, no link) comes
+   *  back as it always has, without needsSend, and the tap says it instead of sharing. */
+  opts?: { sendIt?: boolean; ahead?: boolean },
 ): Promise<{ ok: boolean; error?: string; needsSend?: boolean; title?: string; text?: string; url?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -562,6 +567,18 @@ export async function invoiceShareText(
    */
   const isDraft = String((invoice as { status?: string | null }).status ?? "") === "draft";
   const resendNeeded = !isDraft && (await hasUnsentRevision(ctx.supabase, id));
+  /** The words and the link: the same before the stamp and after it (the stamp moves neither the
+   *  token nor the balance), so the read-ahead can hand over what the sent bill will carry. */
+  const payload = async () => {
+    const who = (invoice as { organizations?: { name?: string } }).organizations?.name ?? "Your contractor";
+    const balance = invoiceBalance(invoice.total, invoice.amount_paid);
+    const url = await publicInvoiceLink(ctx.supabase, (invoice as { org_id?: string }).org_id, token, rowPlace(invoice));
+    return {
+      title: `Invoice ${invoice.invoice_number} — ${who}`,
+      text: `${who}: Invoice ${invoice.invoice_number}, balance ${formatCurrency(balance)}. View/pay:`,
+      url,
+    };
+  };
   if (isDraft || resendNeeded) {
     if (!opts?.sendIt) {
       return {
@@ -570,6 +587,8 @@ export async function invoiceShareText(
         error: isDraft
           ? `Sharing marks ${invoice.invoice_number} as sent — the customer link only works on a sent invoice.`
           : `${invoice.invoice_number ?? "This invoice"} has changed since it went out. Sharing the link again records that they have the current one.`,
+        // The read-ahead only: what the one tap will hand the sheet. Nothing above was written.
+        ...(opts?.ahead ? await payload() : {}),
       };
     }
     // A re-send moves the DATE and nothing else — never the status, or sharing a paid invoice
@@ -593,15 +612,7 @@ export async function invoiceShareText(
     revalidateMoney(id);
   }
 
-  const who = (invoice as { organizations?: { name?: string } }).organizations?.name ?? "Your contractor";
-  const balance = invoiceBalance(invoice.total, invoice.amount_paid);
-  const url = await publicInvoiceLink(ctx.supabase, (invoice as { org_id?: string }).org_id, token, rowPlace(invoice));
-  return {
-    ok: true,
-    title: `Invoice ${invoice.invoice_number} — ${who}`,
-    text: `${who}: Invoice ${invoice.invoice_number}, balance ${formatCurrency(balance)}. View/pay:`,
-    url,
-  };
+  return { ok: true, ...(await payload()) };
 }
 
 /** A refused field from the review sheet, as one plain sentence the sheet can show. */

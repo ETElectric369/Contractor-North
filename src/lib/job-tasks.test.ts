@@ -2,6 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   canDeleteTask,
   checkedOffWords,
+  closeJobTasks,
+  countOpenJobTasks,
+  jobTaskTally,
+  OPEN_TASK_JOB,
+  whereJobTaskOpen,
+  whereReminderOpen,
   doneWhenWords,
   doneWords,
   isMissingColumn,
@@ -17,6 +23,7 @@ import {
   undoneWords,
   type JobTaskRow,
 } from "./job-tasks";
+import { isOpenTask } from "./open-counts";
 
 /**
  * THE JOB'S ONE TASK LIST (0358): the words the Done fold says, the order, the delete rule said before
@@ -274,5 +281,125 @@ describe("a check-off's Undo, after the check-off closed open steps with it (the
       "j1",
     );
     expect(thrown).toEqual({ ok: false, say: { text: "Couldn't reopen the task. Try again.", tone: "error" } });
+  });
+});
+
+/**
+ * ONE RULE, ONE FUNCTION (cn-v1174; Erik, 2026-11-21: "it says 3 above and there are a bunch down there
+ * so how is this number getting calculated?"). A task is OPEN when its status is open and it has no job,
+ * or its job is neither complete nor cancelled; a job on hold keeps its tasks open. The rule lives in
+ * lib/open-counts; its query twin, the split, the tally and the deed that closes a job's tasks live here.
+ */
+describe("isOpenTask: the rule's table", () => {
+  const cases: Array<[string, { status: string }, { status: string | null } | null, boolean]> = [
+    ["a Reminder (no job), open", { status: "open" }, null, true],
+    ["a Reminder (no job), done", { status: "done" }, null, false],
+    ["a job task, job to be scheduled", { status: "open" }, { status: "to_be_scheduled" }, true],
+    ["a job task, job scheduled", { status: "open" }, { status: "scheduled" }, true],
+    ["a job task, job in progress", { status: "open" }, { status: "in_progress" }, true],
+    ["a job task, job ON HOLD (coming back)", { status: "open" }, { status: "on_hold" }, true],
+    ["a job task, job complete", { status: "open" }, { status: "complete" }, false],
+    ["a job task, job cancelled", { status: "open" }, { status: "cancelled" }, false],
+    ["a job task, job's status unknown", { status: "open" }, { status: null }, true],
+    ["a done job task on a job in progress", { status: "done" }, { status: "in_progress" }, false],
+  ];
+  for (const [name, task, job, open] of cases) it(name, () => expect(isOpenTask(task, job)).toBe(open));
+});
+
+describe("the job's list and its count read the rule with the job's status", () => {
+  const rows = [row({ id: "a", status: "open" }), row({ id: "b", status: "open" }), row({ id: "c", status: "done", completed_at: NOW.toISOString() })];
+
+  it("a job in flight (or no status given): as before", () => {
+    expect(jobTaskTally(rows, null)).toEqual({ total: 3, done: 1, open: 2 });
+    expect(jobTaskTally(rows, null, "on_hold")).toEqual({ total: 3, done: 1, open: 2 });
+    expect(splitJobTasks(rows, "in_progress").open.map((t) => t.id)).toEqual(["a", "b"]);
+  });
+
+  it("a job that is over: no task is open, the header reads all of them done, and the rows sit in the Done fold", () => {
+    for (const s of ["complete", "cancelled"]) {
+      expect(jobTaskTally(rows, null, s)).toEqual({ total: 3, done: 3, open: 0 });
+      const { open, done } = splitJobTasks(rows, s);
+      expect(open).toEqual([]);
+      expect(done.map((t) => t.id).sort()).toEqual(["a", "b", "c"]);
+    }
+  });
+
+  it("the badge and the header are one tally: open + done is the total, whatever the status", () => {
+    for (const s of ["scheduled", "on_hold", "complete", "cancelled", null]) {
+      const t = jobTaskTally(rows, { open: 2, lines: [] }, s);
+      expect(t.open + t.done).toBe(t.total);
+      expect(splitJobTasks(rows, s).open.length + 1).toBe(t.open); // + the live Buy Materials row
+    }
+  });
+});
+
+/** A builder that records every call, for the query twins and the close. */
+function recorder(result: { data?: unknown; error?: unknown; count?: number | null } = {}) {
+  const calls: Array<[string, ...unknown[]]> = [];
+  const q: any = {};
+  for (const m of ["from", "select", "update", "eq", "not", "is", "in", "order", "limit"]) {
+    q[m] = (...a: unknown[]) => {
+      calls.push([m, ...a]);
+      return q;
+    };
+  }
+  q.then = (res: (v: unknown) => unknown) => res({ data: result.data ?? null, error: result.error ?? null, count: result.count ?? null });
+  return { q, calls };
+}
+
+describe("the query twin: the database cuts by the same rule", () => {
+  it("a job task: status open, and its job (an inner embed named jobs) not complete or cancelled", () => {
+    expect(OPEN_TASK_JOB).toBe("jobs!inner(status)");
+    const { q, calls } = recorder();
+    whereJobTaskOpen(q);
+    expect(calls).toEqual([
+      ["eq", "status", "open"],
+      ["not", "jobs.status", "in", "(complete,cancelled)"],
+    ]);
+  });
+
+  it("a Reminder: status open and no job", () => {
+    const { q, calls } = recorder();
+    whereReminderOpen(q);
+    expect(calls).toEqual([
+      ["eq", "status", "open"],
+      ["is", "job_id", null],
+    ]);
+  });
+
+  it("the Finish window's count reads the twin, head only; a failed read is null, never 0", async () => {
+    const ok = recorder({ count: 4 });
+    expect(await countOpenJobTasks(ok.q, "j1")).toBe(4);
+    expect(ok.calls).toContainEqual(["select", `id, ${OPEN_TASK_JOB}`, { count: "exact", head: true }]);
+    expect(ok.calls).toContainEqual(["eq", "job_id", "j1"]);
+    expect(ok.calls).toContainEqual(["not", "jobs.status", "in", "(complete,cancelled)"]);
+    expect(await countOpenJobTasks(recorder({ error: { message: "down" } }).q, "j1")).toBeNull();
+  });
+});
+
+describe("closeJobTasks: the deed closes a job's open tasks", () => {
+  it("checks off only this job's OPEN tasks, selects what it wrote, and counts it", async () => {
+    const { q, calls } = recorder({ data: [{ id: "t1" }, { id: "t2" }] });
+    const res = await closeJobTasks(q, "j1", "u1");
+    expect(res).toEqual({ ok: true, closed: 2 });
+    expect(calls[0]).toEqual(["from", "tasks"]);
+    expect(calls[1][0]).toBe("update");
+    expect(calls[1][1]).toEqual({ status: "done", completed_at: expect.any(String), done_by: "u1" });
+    expect(calls).toContainEqual(["eq", "job_id", "j1"]);
+    expect(calls).toContainEqual(["eq", "status", "open"]);
+    expect(calls.at(-1)).toEqual(["select", "id"]);
+  });
+
+  it("nothing open is a true zero; no person leaves done_by empty", async () => {
+    const { q, calls } = recorder({ data: [] });
+    expect(await closeJobTasks(q, "j1")).toEqual({ ok: true, closed: 0 });
+    expect((calls[1][1] as { done_by: unknown }).done_by).toBeNull();
+  });
+
+  it("a failed write is handed back to be said, never thrown", async () => {
+    const err = { message: "permission denied" };
+    expect(await closeJobTasks(recorder({ error: err }).q, "j1")).toEqual({ ok: false, error: err });
+    const throws: any = { from: () => { throw new Error("offline"); } };
+    expect((await closeJobTasks(throws, "j1")).ok).toBe(false);
   });
 });

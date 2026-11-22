@@ -12,6 +12,7 @@ import { MediaLightbox } from "@/components/media-lightbox";
 import { useToast } from "@/components/toast";
 import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
+import { isEndedJob } from "@/lib/job-status";
 import {
   canDeleteTask,
   checkedOffWords,
@@ -88,6 +89,7 @@ export function JobTaskList({
   failed = false,
   doneOpen = false,
   materials = null,
+  jobStatus = null,
 }: {
   jobId: string;
   orgId: string;
@@ -107,6 +109,9 @@ export function JobTaskList({
   doneOpen?: boolean;
   /** The job's materials list, as the live Buy Materials row (null: nothing on it to buy). */
   materials?: BuyMaterials;
+  /** The job's status: on a job that is over no task is open (lib/open-counts isOpenTask), so the
+   *  header, the open rows and the page's Tasks badge are one tally (cn-v1174). */
+  jobStatus?: string | null;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -119,8 +124,8 @@ export function JobTaskList({
   const [foldOpen, setFoldOpen] = useState(doneOpen);
   const now = new Date(nowIso);
 
-  const { open, done } = splitJobTasks(tasks);
-  const tally = jobTaskTally(tasks, materials);
+  const { open, done } = splitJobTasks(tasks, jobStatus);
+  const tally = jobTaskTally(tasks, materials, jobStatus);
   const total = tally.total;
   const buyOpen = !!materials && materials.open > 0;
   const isDone = (t: JobTaskRow) => override.get(t.id) ?? t.status === "done";
@@ -300,7 +305,12 @@ export function JobTaskList({
       {!failed && total > 0 && tally.open === 0 && (
         <p className="px-4 py-3 text-sm text-slate-500">{t("jb_everythingDone")}</p>
       )}
-      {!failed && <AddTaskLine jobId={jobId} orgId={orgId} photoDoor={stamps} bordered={total > 0} />}
+      {/* A JOB THAT IS OVER TAKES NO NEW TASK (cn-v1174): createTask refuses every add on a complete or
+          cancelled job, so the Add line is not drawn there; one quiet line says why and what to do. */}
+      {!failed && !isEndedJob(jobStatus) && <AddTaskLine jobId={jobId} orgId={orgId} photoDoor={stamps} bordered={total > 0} />}
+      {!failed && isEndedJob(jobStatus) && (
+        <p className={`px-4 py-3 text-sm text-slate-500${total > 0 ? " border-t border-slate-100" : ""}`}>{t("tk_jobOverNoTask")}</p>
+      )}
       {!failed && tally.done > 0 && (
         <div className="border-t border-slate-100">
           <button

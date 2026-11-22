@@ -141,7 +141,8 @@ describe("the saved page's doors, on the editor", () => {
     // drawn in one place now, inside the notice of an accepted estimate that a signed contract or a
     // billed scheduled payment has locked (quotes/revise-door.test.tsx renders every state).
     expect(t).not.toContain("Revise");
-    expect(html).toContain('aria-label="Share"');
+    // Share's first draw waits for its link, fetched ahead of the tap (cn-v1174, share-icon-button.test.tsx).
+    expect(html).toContain('aria-label="Getting the Link…"');
     expect(html).toContain('aria-label="Actions"');
     // The status select offers the statuses, sent chosen.
     expect(html).toMatch(/<option value="sent" selected="">/);
@@ -205,7 +206,7 @@ describe("the saved page's doors, on the editor", () => {
     expect(html).not.toContain('placeholder="hours?"');
     expect(t).not.toContain("Add a Task");
     expect(t).not.toContain("Draft with Estimator");
-    expect(t).not.toContain("Labor and Parts on the Paper");
+    expect(t).not.toContain("Estimate Visibility"); // the paper switch's title (cn-v1174; was "Labor and Parts on the Paper")
     expect(html).toContain('id="title"');
     expect(t).toContain("Install transfer switch");
     expect(t).toContain("$290.00");

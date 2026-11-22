@@ -438,8 +438,14 @@ export default async function InvoicePage({
               app's marketing blurb and a login URL. It rides the RIGHT END OF THE TITLE LINE, not
               the verb row (Erik 2026-09-11: "super tiny box with arrow icon… positioned
               intuitively"): on a phone the verb row wraps under the title, so this corner is the
-              page's true top-right, where every phone already puts Share. */}
-          <ShareIconButton load={invoiceShareText.bind(null, inv.id)} className="ml-auto" />
+              page's true top-right, where every phone already puts Share. The version is what the
+              copy fetched ahead says: when the money or the status moves, the copy in hand is
+              dropped and fetched again, so the customer is never sent the old balance. */}
+          <ShareIconButton
+            load={invoiceShareText.bind(null, inv.id)}
+            version={[inv.status, inv.total, inv.amount_paid, revisedAt ?? "", sentAt ?? ""].join("|")}
+            className="ml-auto"
+          />
         </div>
         <div className="flex flex-wrap items-center gap-3 text-sm text-slate-400">
           {inv.title && <span className="text-slate-600">{inv.title}</span>}

@@ -200,6 +200,24 @@ describe("what the customer reads stays English under a Spanish caller", () => {
     // Nothing above was a refusal or a note, so the caller's language was never read.
     expect(db.profileReads).toBe(0);
   });
+  it("the Share button's read-ahead (cn-v1174): a draft answers the ask AND the words and link it will carry, and stamps nothing", async () => {
+    const { revalidatePath } = await import("next/cache");
+    db.rows = { quotes: { ...quote, status: "draft" }, organizations: { id: "org-1", name: "Snowbell Electric", settings: {} } };
+    vi.mocked(revalidatePath).mockClear();
+    const ahead = await quoteShareText("q1", { ahead: true });
+    expect(ahead).toMatchObject({ ok: false, needsSend: true, title: "Estimate E-7 — Snowbell Electric", text: "Snowbell Electric: Estimate E-7 ($100.00). View:" });
+    expect(ahead.error).toBeTruthy(); // the ask's own sentence, as before
+    expect(ahead.url).toMatch(/\/q\//);
+    expect(revalidatePath).not.toHaveBeenCalled(); // nothing was written, so nothing was revalidated
+    // Without the read-ahead the ask is as it always was: no payload rides on it.
+    const plain = await quoteShareText("q1");
+    expect(plain).toMatchObject({ ok: false, needsSend: true });
+    expect(plain.url).toBeUndefined();
+    // The stamp's payload is the same link the read-ahead handed over.
+    const sent = await quoteShareText("q1", { sendIt: true });
+    expect(sent).toMatchObject({ ok: true, title: ahead.title, text: ahead.text, url: ahead.url });
+    expect(revalidatePath).toHaveBeenCalled();
+  });
   it("a refusal on the same door is the caller's", async () => {
     db.rows = { quotes: { ...quote, customers: { ...quote.customers, phone: null } }, organizations: { id: "org-1", name: "Snowbell Electric", settings: {} } };
     expect(await textQuote("q1")).toEqual({

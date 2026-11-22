@@ -116,7 +116,7 @@ describe("one door: the ⋯'s Preview / Print row is gone, and the different ver
   });
 
   it("Share (the customer's own link) stays on the title line: a different verb, not a second Preview", () => {
-    expect(page).toContain('<ShareIconButton load={invoiceShareText.bind(null, inv.id)} className="ml-auto" />');
+    expect(page).toMatch(/<ShareIconButton\s+load=\{invoiceShareText\.bind\(null, inv\.id\)\}\s+version=\{[^\n]+\}\s+className="ml-auto"\s+\/>/);
   });
 
   it("the older-copy notice's Send in the body is not the header and grows no Preview", () => {

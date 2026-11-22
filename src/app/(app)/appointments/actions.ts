@@ -8,12 +8,12 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { MAX_PHOTOS, PHOTOS_FULL, mergeCaptureSections, parseInspectorCapture, type CapturePatch } from "@/lib/inspection/capture";
 import { bornTasks } from "@/lib/estimate/born-with-tasks";
-import { taskTitleKey } from "@/lib/estimate/sync-job-tasks";
+import { notAddedWords, taskTitleKey } from "@/lib/estimate/sync-job-tasks";
 import { plainRowHalf } from "@/lib/estimate/take-off-from-quote";
 import { isMissingRpc, keepStoredPhotos, readViaView } from "@/lib/inspection/inspection-access";
 import { inspectionDbWords } from "@/lib/inspection/db-refusal";
 import { formatFullAddress, formatPhone } from "@/lib/utils";
-import { jobStatusLabel } from "@/lib/job-status";
+import { isEndedJob, jobStatusLabel } from "@/lib/job-status";
 import { stampLeadWonByJob } from "@/lib/appointments/lead-won";
 import { emptyToNull } from "@/lib/forms";
 import { pushCalendarItem, deleteCalendarItem } from "@/lib/calendar-sync";
@@ -646,7 +646,7 @@ export async function linkAppointmentTo(
   // real address rather than a string somebody has to re-parse later (0177).
   let parts: { city: string | null; state: string | null; zip: string | null } | null = null;
   // The job linked (kind "job"), for the carry below: its number and name for the sentence.
-  let jobRow: { id: string; job_number?: string | null; name?: string | null } | null = null;
+  let jobRow: { id: string; job_number?: string | null; name?: string | null; status?: string | null } | null = null;
 
   if (kind === "lead") {
     const { data: r } = await supabase
@@ -678,7 +678,7 @@ export async function linkAppointmentTo(
   } else {
     const { data: r } = await supabase
       .from("jobs")
-      .select("id, job_number, name, address, city, state, zip, customer_id")
+      .select("id, job_number, name, status, address, city, state, zip, customer_id")
       .eq("id", targetId)
       .maybeSingle();
     if (!r) return { ok: false, error: await ws.say("ag_srv_jobNotFound") };
@@ -788,7 +788,7 @@ async function tasksAndParts(ws: Said, tasks: number, parts: number): Promise<st
  */
 async function carryVisitWork(
   supabase: SupabaseClient,
-  w: { appointmentId: string; job: { id: string; job_number?: string | null; name?: string | null }; orgId: string | null; createdBy: string },
+  w: { appointmentId: string; job: { id: string; job_number?: string | null; name?: string | null; status?: string | null }; orgId: string | null; createdBy: string },
 ): Promise<{ note?: string; warnings: string[] }> {
   const ws = wordsOf(supabase);
   const short = jobShort(w.job);
@@ -814,16 +814,25 @@ async function carryVisitWork(
       const after = had.reduce((m, t) => Math.max(m, (t.sort_order ?? -1) + 1), 0);
       const fresh = work.birth.tasks.filter((t) => !titles.has(taskTitleKey(t.title)));
       sameTitle = tasks - fresh.length;
-      const born = await bornTasks(
-        supabase,
-        { jobId: w.job.id, orgId: w.orgId, createdBy: w.createdBy },
-        { ...work.birth, tasks: fresh.map((t) => ({ ...t, sort_order: after + t.sort_order })), plannedMinutes: null },
-      );
-      if (born.error) warnings.push(await ws.say("ag_srv_linkedTasksUnlisted", { why: born.error }));
-      else {
-        tasksLanded = true;
-        inserted = born.inserted;
-        tasksLeftOff = born.leftOff;
+      if (isEndedJob(w.job.status)) {
+        // THE JOB IS OVER (cn-v1174): a complete or cancelled job takes no new open task, so the
+        // visit's tasks are not added, said in the estimate sync's own words. Their parts stay off
+        // with them (tasksLanded stays false: a task's parts with no task are parts of nothing).
+        const lang = await ws.lang();
+        const said = notAddedWords(fresh.map((t) => t.title), lang, translator(lang));
+        if (said) warnings.push(said);
+      } else {
+        const born = await bornTasks(
+          supabase,
+          { jobId: w.job.id, orgId: w.orgId, createdBy: w.createdBy },
+          { ...work.birth, tasks: fresh.map((t) => ({ ...t, sort_order: after + t.sort_order })), plannedMinutes: null },
+        );
+        if (born.error) warnings.push(await ws.say("ag_srv_linkedTasksUnlisted", { why: born.error }));
+        else {
+          tasksLanded = true;
+          inserted = born.inserted;
+          tasksLeftOff = born.leftOff;
+        }
       }
     }
   }

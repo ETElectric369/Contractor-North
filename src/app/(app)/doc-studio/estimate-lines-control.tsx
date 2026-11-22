@@ -8,7 +8,7 @@ import { translator } from "@/lib/i18n";
 import { FORMAT_NAME } from "../quotes/paper-format-switch";
 
 /**
- * LABOR AND PARTS ON ESTIMATES — HOW A TASK LINE READS, THE COMPANY'S DEFAULT (0386; a third choice
+ * ESTIMATE VISIBILITY — HOW A TASK LINE READS, THE COMPANY'S DEFAULT (0386; a third choice
  * since cn-v1158). Erik: the customer sees the estimate "in a per-company format", and on 2026-11-10:
  * "an option to group the materials into one materials line as im finding that different people
  * require different solutions."
@@ -21,7 +21,8 @@ import { FORMAT_NAME } from "../quotes/paper-format-switch";
  * paper-format-switch FORMAT_NAME): the owner's law is fewer words per door, and these three states
  * used to be Tasks Only, Tasks with Labor and Parts and Labor and One Materials Line here while the
  * switch called them something else. The heading was "Estimate Lines", which reads wrongly over a
- * choice called Hidden, so it says what the choice is about: the labor and the parts.
+ * choice called Hidden, then "Labor and Parts on Estimates"; since cn-v1174 it is the estimate
+ * switch's own name, Estimate Visibility (one name for one thing: the same setting, two doors).
  *
  * Only a line BUILT from a task has a breakdown — the studio's sample has one, with two labor rows,
  * so the choice shows on the page below the moment it is tapped. An estimate may choose for itself

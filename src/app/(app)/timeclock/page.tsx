@@ -1,3 +1,4 @@
+import { asksForDailyReport } from "@/lib/daily-report-rule";
 import { Suspense } from "react";
 import { isStaffRole } from "@/lib/actions/perms";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
@@ -10,7 +11,6 @@ import { NextUp } from "./next-up";
 import { AutoClockoutPrompt } from "./auto-clockout-prompt";
 import { autoClockoutPromptState } from "./close-math";
 import { getOrgSettings } from "@/lib/org-settings";
-import { featureOn } from "@/lib/features";
 import { hoursBetween, formatDuration } from "@/lib/utils";
 import { fillText, localeOf, translator } from "@/lib/i18n";
 import type { JobCode, TimeEntry } from "@/lib/types";
@@ -127,8 +127,9 @@ export default async function TimeclockPage() {
   ]);
   const orgSettings = getOrgSettings((orgRes.data as any)?.settings);
   const crewR = await crewP;
-  // A crew lead files an end-of-day report at clock-out, only while Daily Reports is on (0352).
-  const crewLead = !!(leadRes.data as any)?.crew_lead && featureOn(orgSettings.features, "daily_reports");
+  // A crew lead files an end-of-day report at clock-out, only while Daily Reports is on (0352). The ONE
+  // rule (lib/daily-report-rule), read by My Day's Now card too.
+  const crewLead = asksForDailyReport((leadRes.data as any)?.crew_lead, orgSettings.features);
   // Codes on (default) = today's behavior everywhere. Codes off = no code pickers on
   // any timeclock surface, and job labels lead with customer · street address.
   const jobCodesOn = orgSettings.timeclock_job_codes;

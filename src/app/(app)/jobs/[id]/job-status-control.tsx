@@ -177,6 +177,11 @@ export function JobStatusControl({
         // and its warning (hours or bills still off a bill) has to be READ, so it stays until tapped.
         toast(res.speak ?? t("jb_jobFinished"), "info");
         if (res.warning) toast(res.warning, "error", undefined, { sticky: true });
+      } else {
+        // Any other pick says what came with it: Cancelled checks the job's open tasks off and says how
+        // many, or that it couldn't (cn-v1174). A plain pick has nothing to say.
+        if (res.speak) toast(res.speak, "info");
+        if (res.warning) toast(res.warning, "error", undefined, { sticky: true });
       }
       router.refresh();
     });

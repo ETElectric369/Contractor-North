@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { fakeDb } from "@/test/fake-supabase";
-import { estimateLines, hoursWords, isHisTask, planLineSync, retitleLineTask, syncJobTasks, syncWords, type LineTask, type SyncResult } from "./sync-job-tasks";
+import { estimateLines, hoursWords, isHisTask, notAddedWords, planLineSync, retitleLineTask, syncJobTasks, syncWords, type LineTask, type SyncResult } from "./sync-job-tasks";
+import { translator } from "@/lib/i18n";
 import type { BornTask } from "./born-with-tasks";
 
 /**
@@ -223,7 +224,7 @@ describe("estimateLines — the accepted estimates' task lines, in order", () =>
 });
 
 const db = (
-  over: { tasks?: Record<string, unknown>[]; lines?: Record<string, unknown>[]; planned?: number | null; quotes?: Record<string, unknown>[]; dismissed?: string[] } = {},
+  over: { tasks?: Record<string, unknown>[]; lines?: Record<string, unknown>[]; planned?: number | null; quotes?: Record<string, unknown>[]; dismissed?: string[]; status?: string } = {},
   opts?: Parameters<typeof fakeDb>[1],
 ) =>
   fakeDb(
@@ -231,7 +232,7 @@ const db = (
       quotes: over.quotes ?? [{ id: "q1", job_id: "j1", status: "accepted", created_at: "2026-10-01", accepted_at: "2026-10-01" }],
       quote_line_items: over.lines ?? [taskLine("a", "q1", "Trench", 2, 0), taskLine("b", "q1", "Set the panel", 1, 1)],
       tasks: over.tasks ?? [],
-      jobs: [{ id: "j1", planned_minutes: over.planned === undefined ? null : over.planned, dismissed_task_keys: over.dismissed ?? [] }],
+      jobs: [{ id: "j1", planned_minutes: over.planned === undefined ? null : over.planned, dismissed_task_keys: over.dismissed ?? [], ...(over.status ? { status: over.status } : {}) }],
     },
     opts,
   );
@@ -535,5 +536,44 @@ describe("retitleLineTask — a rename follows only while the task still reads a
     const { sb } = fakeDb({ tasks: tasks() });
     expect(await retitleLineTask(sb, { jobId: "j1", orgId: null, lineId: "a", from: "Trench", to: " Trench " })).toEqual({ renamed: false });
     expect(await retitleLineTask(sb, { jobId: "j1", orgId: null, lineId: "a", from: "Trench", to: "" })).toEqual({ renamed: false });
+  });
+});
+
+/**
+ * NO NEW OPEN TASK ON A JOB THAT IS OVER (cn-v1174). Finishing or cancelling a job checks its tasks off,
+ * so an estimate accepted, pinned or rebuilt on it afterwards adds nothing to its list, and says which
+ * tasks it did not add, on a line of its own. On hold is not over. What the sync does to tasks already
+ * there still runs.
+ */
+describe("syncJobTasks on a job that is over (cn-v1174)", () => {
+  for (const status of ["complete", "cancelled"]) {
+    it(`${status}: inserts nothing and names what it did not add`, async () => {
+      const { sb, tables, inserted } = db({ status });
+      const res = await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1" });
+      expect(res).toEqual(result({ notAdded: ["Trench", "Set the panel"] }));
+      expect(inserted.tasks ?? []).toEqual([]);
+      expect(tables.tasks).toEqual([]);
+      expect(syncWords(res)).toBe("2 tasks not added (Trench, Set the panel): the job is over, so it takes no new tasks.");
+    });
+  }
+
+  it("on hold is not over: the tasks are added as on any job in flight", async () => {
+    const { sb } = db({ status: "on_hold" });
+    expect(await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1" })).toEqual(result({ inserted: 2 }));
+  });
+
+  it("the plan's other moves still run, and the not-added line follows the list's sentence", async () => {
+    const { sb, tables } = db({ status: "complete", tasks: [task({ id: "t2", source_key: "line:gone", title: "Old scope" })] });
+    const res = await syncJobTasks(sb, { jobId: "j1", orgId: null, createdBy: "u1" });
+    expect(res.removed).toBe(1);
+    expect(tables.tasks).toEqual([]);
+    expect(syncWords(res)).toBe("The job's list follows the estimate: 1 removed. 2 tasks not added (Trench, Set the panel): the job is over, so it takes no new tasks.");
+  });
+
+  it("the sentence in Spanish, one and many", () => {
+    const es = translator("es");
+    expect(notAddedWords(["Trench"], "es", es)).toBe("1 tarea no se agregó (Trench): el trabajo ya terminó, así que no acepta tareas nuevas.");
+    expect(notAddedWords(["Trench", "Set the panel"], "es", es)).toBe("2 tareas no se agregaron (Trench, Set the panel): el trabajo ya terminó, así que no acepta tareas nuevas.");
+    expect(notAddedWords([])).toBeNull();
   });
 });

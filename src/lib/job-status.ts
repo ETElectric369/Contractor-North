@@ -30,6 +30,13 @@ export const ACTIVE_JOB_STATUSES: JobStatus[] = ["to_be_scheduled", "scheduled",
  *  schedule's Add to Schedule reads these as a place to go back to (lib/schedule/find-for-day). */
 export const ENDED_JOB_STATUSES: JobStatus[] = JOB_STATUSES.filter((s) => !ACTIVE_JOB_STATUSES.includes(s));
 
+/** One status asked the same question: is the job OVER (finished or called off)? A status nobody knows
+ *  (null, a retired word) is not over. The open-task rule (lib/open-counts isOpenTask) and the two
+ *  doors that refuse a new task on an ended job (tasks/actions createTask, the estimate's task sync)
+ *  read this, cn-v1174. */
+export const isEndedJob = (status: string | null | undefined): boolean =>
+  (ENDED_JOB_STATUSES as readonly string[]).includes(String(status ?? ""));
+
 /**
  * WHICH DOOR A STATUS IS WRITTEN THROUGH (M2, Tess J-002).
  *

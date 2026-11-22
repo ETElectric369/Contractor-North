@@ -397,6 +397,19 @@ describe("Won · Pick the Job carries the visit's work onto the job it links (cn
     expect(s.db!.tables.material_list_items.map((i) => i.source_key)).toEqual(["capture:c-1", "capture:c-2"]);
   });
 
+  it.each(["complete", "cancelled"])("a %s job takes no new open task: the visit's tasks are not added, said in the sync's own words (cn-v1174)", async (status) => {
+    const t = tables();
+    t.jobs[0].status = status;
+    plant(t);
+    const res = await linkAppointmentTo("a1", "job", "job-55");
+    expect(res.ok).toBe(true);
+    expect(s.db!.tables.tasks).toHaveLength(0);
+    expect(res.warning).toBe("3 tasks not added (Set the sub panel, Run the feeder, Label the panel): the job is over, so it takes no new tasks.");
+    // The typed take-off still lands; a task's parts stay off with their task.
+    expect(s.db!.tables.material_list_items.map((i) => i.source_key)).toEqual(["capture:c-1", "capture:c-2"]);
+    expect(res.note).toBe("2 parts joined J-055 (12 Larkspur Ln).");
+  });
+
   it("the ending card's picker says the door's sentence (the note as a success toast; a failure stays until read)", () => {
     const picker = src("src/app/(app)/appointments/[id]/link-picker.tsx");
     expect(picker).toContain('if (done.res.note) toast(done.res.note, "success");');

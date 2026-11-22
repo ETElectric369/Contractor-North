@@ -21,6 +21,7 @@ vi.mock("./actions", () => ({
   completeAutoClockOut: vi.fn(),
   joinTimeEntries: vi.fn(),
   fileDailyReport: vi.fn(),
+  dailyReportJobChoices: vi.fn(async () => ({ ok: true, decided: null, dayJobs: [], otherJobs: [] })),
   shiftsOnDay: vi.fn(),
   putShiftOnJob: vi.fn(),
   takeShiftOffJob: vi.fn(),
@@ -35,7 +36,7 @@ import { TimeclockPanel } from "./timeclock-panel";
 import { AutoClockoutPrompt } from "./auto-clockout-prompt";
 import { ClockStartPicker } from "./clock-start-picker";
 import { NewJobInline } from "./new-job-inline";
-import { DailyReportDebrief } from "./daily-report-debrief";
+import { DailyReportDebrief, ReportJobLine, readReportJobs } from "./daily-report-debrief";
 import { esTitleCase, titleCaseIn } from "../../../../tests/title-case-words";
 
 const ROOT = process.cwd();
@@ -239,7 +240,7 @@ describe("New Job, from the clock", () => {
 });
 
 describe("Nort's end-of-day debrief", () => {
-  it("open, in Spanish: the sheet's title, the two questions, the placeholders and the doors", () => {
+  it("open, in Spanish: the sheet's title, the one line and the optional second, the placeholders and the doors", () => {
     const html = inLang("es", createElement(DailyReportDebrief, { open: true, onClose: () => {} }));
     expect(html).toContain("Nort — Reporte del Día");
     expect(html).toContain("¿Qué hiciste hoy?");
@@ -247,7 +248,10 @@ describe("Nort's end-of-day debrief", () => {
     expect(html).toContain('placeholder="Qué se hizo hoy, en palabras sencillas…"');
     expect(html).toContain("Enviar Reporte");
     expect(html).toContain("Omitir");
-    expect(html).toContain("Ya marcaste salida. Antes de irte, dos preguntas rápidas para la oficina.");
+    // ONE LINE LEADS (cn-v1174): no intro box; the jobs are read as the sheet opens.
+    expect(html).not.toContain("dos preguntas rápidas");
+    expect(html).toContain("Leyendo tus trabajos…");
+    expect(html.indexOf("¿Qué hiciste hoy?")).toBeLessThan(html.indexOf("¿Qué materiales necesitas mañana?"));
     expect(html).not.toContain("File Report");
     expect(html).not.toContain("End of Day");
   });
@@ -260,7 +264,120 @@ describe("Nort's end-of-day debrief", () => {
     expect(html).toContain('placeholder="What got done today, in plain words…"');
     expect(html).toContain("File Report");
     expect(html).toContain("Skip");
-    expect(html).toContain("two quick questions for the office");
+    expect(html).not.toContain("two quick questions for the office");
+    expect(html).toContain("Reading your jobs…");
+    // Each answer is one line that grows: no three-row boxes.
+    expect(html.match(/rows="1"/g)?.length).toBe(2);
+    // Filing waits for the job to be read, so a day that decides its job is never filed on none.
+    expect(html).toMatch(/type="button" disabled="">File Report<\/button>/);
+  });
+});
+
+describe("the debrief says which job the report is for, or asks (cn-v1174)", () => {
+  const d = src("src/app/(app)/timeclock/daily-report-debrief.tsx");
+  it("always asked (the day's job preselected when it decided one); the day's jobs before the others; one quiet line for no job", () => {
+    // The sentence alone is gone from the open sheet (skeptic, cn-v1174): it left no way to change the
+    // job or to file with none. tc_reportForJob is read by the filed confirmation only.
+    expect(d).not.toContain('fillText(t("tc_reportForJob"), { job: ready.decided.label })');
+    expect(d).toContain('fillText(t("tc_reportForJob"), { job: jobLabelOf(jobId) as string })');
+    expect(d).toContain("<ReportJobLine choices={choices} jobId={jobId} onPick={setJobId} />");
+    expect(d.indexOf('label={t("tc_todaysJobs")}')).toBeGreaterThan(0);
+    expect(d.indexOf('label={t("tc_todaysJobs")}')).toBeLessThan(d.indexOf('label={t("tc_otherJobs")}'));
+    expect(d).toContain('{!jobId && <p className="mt-1.5 text-xs text-slate-500">{t("tc_reportInNoJobFile")}</p>}');
+    expect(d).toContain("job_id: jobId || null");
+    // Never a key around the open Modal: a new opening resets with state.
+    expect(d).not.toMatch(/<Modal[^>]*\bkey=/);
+    expect(d).toContain("if (open !== wasOpen) {");
+  });
+  it("the words, in both languages", () => {
+    for (const [k, e, sp] of [
+      ["tc_reportForJob", "This report is for {job}.", "Este reporte es para {job}."],
+      ["tc_whichJobReport", "Which job is this report for?", "¿Para qué trabajo es este reporte?"],
+      ["tc_noJobOption", "No Job", "Sin Trabajo"],
+      ["tc_todaysJobs", "Today's Jobs", "Trabajos de Hoy"],
+      ["tc_otherJobs", "Other Jobs", "Otros Trabajos"],
+      ["tc_reportInNoJobFile", "This report won't be in any job's file.", "Este reporte no quedará en el archivo de ningún trabajo."],
+    ]) {
+      expect(en[k], k).toBe(e);
+      expect(es[k], k).toBe(sp);
+    }
+    expect("tc_debriefIntro" in en).toBe(false);
+  });
+});
+
+describe("the report's job line, drawn (skeptic, cn-v1174)", () => {
+  const J1 = { id: "j1", label: "Larkspur Panel" };
+  const J2 = { id: "j2", label: "Snowbell Deck" };
+  const line = (lang: Lang, choices: object, jobId: string) =>
+    inLang(lang, createElement(ReportJobLine, { choices: choices as never, jobId, onPick: () => {} }));
+
+  it("a day that decided its job: the Select is drawn with that job PRESELECTED, No Job still an option, no quiet line", () => {
+    const html = line("en", { state: "ready", decided: J1, dayJobs: [J1], otherJobs: [J2] }, "j1");
+    expect(html).toContain("Which job is this report for?");
+    expect(html).toMatch(/<select [^>]*id="dr-job"/);
+    expect(html).toMatch(/<option value="j1" selected="">Larkspur Panel<\/option>/);
+    expect(html).toContain('<option value="">No Job</option>');
+    expect(html).toContain("Snowbell Deck");
+    expect(html).not.toContain("This report won&#x27;t be in any job&#x27;s file.");
+    expect(html).not.toContain("This report is for");
+  });
+
+  it("No Job chosen: the quiet no-file line shows, in both languages", () => {
+    const decided = { state: "ready", decided: J1, dayJobs: [J1], otherJobs: [] };
+    expect(line("en", decided, "")).toContain("This report won&#x27;t be in any job&#x27;s file.");
+    expect(line("en", decided, "")).toMatch(/<option value="" selected="">No Job<\/option>/);
+    expect(line("es", decided, "")).toContain("Este reporte no quedará en el archivo de ningún trabajo.");
+  });
+
+  it("a day that decided nothing: asked, nothing preselected; a read that failed says so and files with no job", () => {
+    expect(line("en", { state: "ready", decided: null, dayJobs: [J1, J2], otherJobs: [] }, "")).toMatch(/<option value="" selected="">No Job<\/option>/);
+    const failed = line("en", { state: "failed", error: en.tc_reportJobsDidntLoad }, "");
+    expect(failed).toContain(en.tc_reportJobsDidntLoad.replace(/'/g, "&#x27;"));
+    expect(failed).toContain("This report won&#x27;t be in any job&#x27;s file.");
+    expect(failed).not.toContain("<select");
+  });
+});
+
+describe("the report's jobs read never hangs the sheet (skeptic, cn-v1174)", () => {
+  it("a read still out after 8 seconds lands in the didn't-load state, and a later answer is not taken", async () => {
+    vi.useFakeTimers();
+    try {
+      let answer!: (v: unknown) => void;
+      const load = () => new Promise((res) => (answer = res)) as never;
+      const seen: unknown[][] = [];
+      readReportJobs(load, "didn't load", (next, id) => seen.push([next, id]));
+      vi.advanceTimersByTime(7_999);
+      expect(seen).toEqual([]);
+      vi.advanceTimersByTime(1);
+      expect(seen).toEqual([[{ state: "failed", error: "didn't load" }, null]]);
+      answer({ ok: true, decided: { id: "j1", label: "Larkspur Panel" }, dayJobs: [], otherJobs: [] });
+      await vi.runOnlyPendingTimersAsync();
+      await Promise.resolve();
+      expect(seen).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("an answer in time is taken (the decided job handed back to be preselected), and the timer is gone", async () => {
+    vi.useFakeTimers();
+    try {
+      const seen: unknown[][] = [];
+      readReportJobs(async () => ({ ok: true, decided: { id: "j1", label: "L" }, dayJobs: [{ id: "j1", label: "L" }], otherJobs: [] }), "x", (n, id) => seen.push([n, id]));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(seen).toEqual([[{ state: "ready", decided: { id: "j1", label: "L" }, dayJobs: [{ id: "j1", label: "L" }], otherJobs: [] }, "j1"]]);
+      vi.advanceTimersByTime(10_000);
+      expect(seen).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the sheet reads through it, with the catalog's didn't-load sentence", () => {
+    const d = src("src/app/(app)/timeclock/daily-report-debrief.tsx");
+    expect(d).toContain('return readReportJobs(dailyReportJobChoices, t("tc_reportJobsDidntLoad"), (next, decidedId) => {');
+    expect(d).toContain("const REPORT_JOBS_TIMEOUT_MS = 8_000;");
   });
 });
 

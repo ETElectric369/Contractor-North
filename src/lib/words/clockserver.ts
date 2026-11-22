@@ -210,6 +210,10 @@ export const words: WordCatalog = {
     cs_sayWhatYouDidToday: "Say what you did today (or dictate it) before filing.",
     cs_noOrganizationOnProfile: "No organization on your profile.",
     cs_reportNotThere: "That report isn't there any more — My Day is catching up.",
+    // cn-v1174: one report, one job (0411).
+    cs_reportJobNotYours: "That job isn't one your company can see — pick another job.",
+    cs_reportNotReadyYet: "Reports can't be filed for a job until the app finishes updating — try again in a few minutes.",
+    cs_reportJobsDidntLoad: "Your jobs didn't load — you can still file with no job.",
     // ── Which Job: the list and the write ──
     cs_whereYouWorkedLast: "Where you worked last",
     cs_onTodaysSchedule: "On today's schedule",
@@ -468,6 +472,9 @@ export const words: WordCatalog = {
     cs_sayWhatYouDidToday: "Di qué hiciste hoy (o díctalo) antes de enviar.",
     cs_noOrganizationOnProfile: "Tu perfil no tiene una organización.",
     cs_reportNotThere: "Ese reporte ya no está — Mi Día se está actualizando.",
+    cs_reportJobNotYours: "Ese trabajo no es uno que tu empresa pueda ver — elige otro trabajo.",
+    cs_reportNotReadyYet: "Los reportes no se pueden enviar para un trabajo hasta que la app termine de actualizarse — inténtalo de nuevo en unos minutos.",
+    cs_reportJobsDidntLoad: "Tus trabajos no cargaron — aún puedes enviarlo sin trabajo.",
     cs_whereYouWorkedLast: "Donde trabajaste la última vez",
     cs_onTodaysSchedule: "En el calendario de hoy",
     cs_onHoldWhy: "En pausa: elegirlo lo saca de pausa",

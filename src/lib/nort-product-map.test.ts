@@ -112,6 +112,14 @@ describe("Nort's product map after the shell wave", () => {
     expect(NORT_PRODUCT_MAP).not.toMatch(/needs-action|Needs action/i);
   });
 
+  it("says what Tasks & Reminders holds (Reminders: tasks with no job) and where a job's tasks are, and that they close with the job (cn-v1174)", () => {
+    const myDay = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- My Day (/planner)"))!;
+    expect(myDay).toContain("Tasks & Reminders (your Reminders: tasks with no job, the ones you made and the ones made for you;");
+    expect(myDay).toContain("a job's tasks are on that job's Tasks tab, and on the Now card while you are clocked in on it.");
+    expect(myDay).toContain("Finishing or cancelling a job checks its open tasks off, on hold does not, and reopening the job does not reopen them.");
+    expect(myDay).not.toContain("the day's reminders and tasks");
+  });
+
   it("Nort's own instructions say Needs You too, where they name the list", () => {
     const route = readFileSync(join(process.cwd(), "src/app/api/chat/route.ts"), "utf8");
     expect(route).toContain("it saves instantly to Needs You, on their My Day, for later filing.");

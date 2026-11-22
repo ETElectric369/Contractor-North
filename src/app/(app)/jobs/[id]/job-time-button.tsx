@@ -20,6 +20,7 @@ import { clockIn, switchJob, clockOutCurrent, createManualEntry } from "../../ti
 import { switchMovesWholeNow } from "../../timeclock/switch-window";
 import { ClockStartPicker } from "../../timeclock/clock-start-picker";
 import { SameDayShifts } from "../../timeclock/same-day-shifts";
+import { DailyReportDebrief } from "../../timeclock/daily-report-debrief";
 import type { GeoPoint } from "@/lib/types";
 import { useToast } from "@/components/toast";
 
@@ -78,6 +79,7 @@ export function JobTimeButton({
   openEntry,
   techs,
   defaultProfileId,
+  asksReport = false,
 }: {
   jobId: string;
   jobNumber: string;
@@ -86,6 +88,9 @@ export function JobTimeButton({
   openEntry: OpenEntry | null;
   techs: { id: string; full_name: string | null }[];
   defaultProfileId: string;
+  /** A crew lead with Daily Reports on (lib/daily-report-rule asksForDailyReport, decided by the page):
+   *  the end-of-day report opens after his clock-out here, as on the Time Clock and My Day's Now card. */
+  asksReport?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -95,6 +100,8 @@ export function JobTimeButton({
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [startAt, setStartAt] = useState(""); // "" = now; otherwise a chosen ISO
+  // The end-of-day report, opened after a clock-out that ended the shift (cn-v1174).
+  const [reportOpen, setReportOpen] = useState(false);
   // 0 until mounted: the server and the first client render both print the stable placeholder (0:00),
   // and the tick below fills in the real figure after mount (never Date.now() in the first render).
   const [now, setNow] = useState(0);
@@ -198,7 +205,17 @@ export function JobTimeButton({
       },
     );
 
-  const doClockOut = () => run(() => clockOutCurrent({}));
+  // A crew lead owes the office the end-of-day report: asked right after a clock-out that stood (a
+  // punch under two minutes old is taken back, and nothing is asked), as the Time Clock page and My
+  // Day's Now card ask it.
+  const doClockOut = () =>
+    run(
+      () => clockOutCurrent({}),
+      (res) => {
+        if (asksReport && !res.undone) setReportOpen(true);
+        router.refresh();
+      },
+    );
   /** The running clock has gone LONG_SHIFT_HOURS: the out door goes to Timeclock's stop picker. So
    *  does a Switch that would CUT it (a running entry with a job or a code): 0288 closes the old
    *  part at now, the same one-tap mistake, and switchJob refuses it. A re-point closes nothing. */
@@ -410,6 +427,10 @@ export function JobTimeButton({
           )}
         </div>
       </Modal>
+      {/* The report sheet stays mounted whatever the clock's state (the Modal law: never remounted
+          while open, no key): the refresh after the clock-out moves this button to Clock In, and the
+          sheet must not go with it. Portaled out of the dock's glass bar. */}
+      {asksReport ? <DailyReportDebrief open={reportOpen} onClose={() => setReportOpen(false)} portal /> : null}
     </>
   );
 }

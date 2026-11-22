@@ -174,7 +174,9 @@ describe("every tab count in the app is an open count", () => {
 
   it("the job's Tasks chip draws no number when the tasks couldn't be read (never the Buy Materials row alone)", () => {
     const page = read("app/(app)/jobs/[id]/page.tsx");
-    expect(page).toContain("const openTaskCount = jobTasks.failed ? undefined : jobTaskTally(jobTasks.rows, buy).open;");
+    // …and the count is the one open-task rule's, asked with the job's status (cn-v1174): a job that is
+    // over badges no task.
+    expect(page).toContain("const openTaskCount = jobTasks.failed ? undefined : jobTaskTally(jobTasks.rows, buy, j.status).open;");
   });
 });
 
@@ -285,5 +287,57 @@ describe("the chrome's other numbers", () => {
 
   it("the Completed shelf says its size in plain words, not a pill", () => {
     expect(read("app/(app)/jobs/completed-section.tsx")).not.toMatch(/rounded-full[^"]*">\{total\}/);
+  });
+});
+
+/**
+ * ONE OPEN-TASK RULE FOR EVERY COUNT AND EVERY LIST (cn-v1174; Erik, 2026-11-21: "it says 3 above and
+ * there are a bunch down there so how is this number getting calculated?"). lib/open-counts isOpenTask,
+ * or its query twin in lib/job-tasks when the database does the cut: no reader of open tasks keeps a
+ * private "status = open" that a finished job's leftovers slip through.
+ */
+describe("every reader of open tasks reads the one rule (cn-v1174)", () => {
+  it("the job page: the Tasks badge and the list's header are one tally, asked with the job's status", () => {
+    const page = read("app/(app)/jobs/[id]/page.tsx");
+    expect(page).toContain("jobTaskTally(jobTasks.rows, buy, j.status).open");
+    expect(page).toContain("jobStatus: (j.status ?? null) as string | null,");
+    const list = read("app/(app)/jobs/[id]/job-task-list.tsx");
+    expect(list).toContain("const { open, done } = splitJobTasks(tasks, jobStatus);");
+    expect(list).toContain("const tally = jobTaskTally(tasks, materials, jobStatus);");
+  });
+
+  it("My Day's Now card: the count and its rows are one call through the twin", () => {
+    const page = read("app/(app)/planner/page.tsx");
+    expect(page).toMatch(/whereJobTaskOpen\(\s*supabase\s*\.from\("tasks"\)\s*\.select\(`id, title, \$\{OPEN_TASK_JOB\}`, \{ count: "exact" \}\)/);
+  });
+
+  it("Nort's list_tasks (open), its schedule read and its bulk sweeps", () => {
+    const tools = read("lib/assistant-tools.ts");
+    const list = tools.slice(tools.indexOf('case "list_tasks": {'), tools.indexOf('case "get_nort_review": {'));
+    expect(list).toContain('whereJobTaskOpen(read("jobs!inner(job_number, name, status)"))');
+    expect(list).toContain('whereReminderOpen(read("jobs(job_number, name, status)"))');
+    expect(list).toContain("isOpenTask(t, t.job_id ? { status: t.jobs?.status ?? null } : null)");
+    // "done" alone is read by the column: a done task is done whatever its job is.
+    expect(list).toContain('if (st === "done") q = q.eq("status", st);');
+    expect(tools).toContain("tasks_due: ((taskRes.data ?? []) as any[]).filter((t: any) => isOpenTask(t, t.job_id ? { status: t.jobs?.status ?? null } : null))");
+    const entity = read("lib/actions/entities/task.ts");
+    const match = entity.slice(entity.indexOf("async function matchOpenTasks("), entity.indexOf("function revalidateBulkViews("));
+    expect(match).toContain('filtered(whereReminderOpen(supabase.from("tasks").select("id")))');
+    expect(match).toContain("filtered(whereJobTaskOpen(supabase.from(\"tasks\").select(`id, ${OPEN_TASK_JOB}`)))");
+    expect(match).not.toContain('.eq("status", "open")');
+  });
+
+  it("the doors that end a job close its tasks; on hold never does", () => {
+    expect(read("lib/complete-job-when-paid.ts")).toContain("const closed = await closeJobTasks(supabase, jobId, null);");
+    const jobs = read("app/(app)/jobs/actions.ts");
+    expect(jobs).toContain("closing.said = await tasksClosedSaid(supabase, jobId, ctx.userId);");
+    expect(jobs).toContain('status === "cancelled" ? await tasksClosedSaid(supabase, id, ctx.userId) : {}');
+    expect(jobs).not.toMatch(/on_hold[^\n]*tasksClosedSaid/);
+  });
+
+  it("the two doors that add a task refuse a job that is over (and a task moved onto one, cn-v1174's fixer)", () => {
+    // createTask's job and its step's job, and updateTask's move onto a job.
+    expect(read("app/(app)/tasks/actions.ts").match(/isEndedJob\(/g)).toHaveLength(3);
+    expect(read("lib/estimate/sync-job-tasks.ts")).toContain("const over = isEndedJob((job as { status?: string | null }).status);");
   });
 });

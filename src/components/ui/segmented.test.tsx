@@ -295,7 +295,7 @@ describe("who asks to stack", () => {
     expect(one(`{/* stack="always" one day */}<SegmentedControl items={x} />`)).toEqual({ tags: 1, stacks: [], wraps: 0 });
   });
 
-  it("the estimate's paper switch (always: four segments in a narrow card) and Document Studio's Labor and Parts on Estimates (narrow: three in a bar that was sure of room for one line only on a desktop); no other pill in the app changed", () => {
+  it("the estimate's paper switch (always: four segments in a narrow card) and Document Studio's Estimate Visibility (narrow: three in a bar that was sure of room for one line only on a desktop); no other pill in the app changed", () => {
     const all = callers();
     // The scan found the app's pills: it cannot pass by reading nothing.
     expect(all.length).toBeGreaterThanOrEqual(12);

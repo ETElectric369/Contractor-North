@@ -133,6 +133,19 @@ describe("the one list: the one-line answer, every open task, the Add line, the 
     expect(html).not.toContain("<ul");
   });
 
+  it.each(["complete", "cancelled"])("a %s job draws no Add line (every add is refused there): one quiet line says why, in both languages (cn-v1174)", (status) => {
+    const html = office({ jobStatus: status });
+    expect(html).not.toContain("Add a Task");
+    expect(html).toContain("This job is over, so it takes no new tasks: set its status back to In Progress first.");
+    const es = techEs({ jobStatus: status });
+    expect(es).toContain("Este trabajo ya terminó, así que no acepta tareas nuevas: primero regresa su estado a En Curso.");
+    // A job still being worked, or on hold, keeps its Add line.
+    for (const live of ["in_progress", "on_hold", null]) {
+      expect(office({ jobStatus: live })).toContain('placeholder="Add a Task…"');
+      expect(office({ jobStatus: live })).not.toContain("takes no new tasks");
+    }
+  });
+
   it("a list that couldn't be read says so, never 'no tasks'", () => {
     const html = office({ tasks: [], failed: true });
     expect(html).toContain("Couldn’t read this job’s tasks just now. Reload to try again.");

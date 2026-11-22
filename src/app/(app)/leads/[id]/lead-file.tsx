@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { ArrowLeft, Globe, Mail, MapPin, Phone, User } from "lucide-react";
+import { Globe, Mail, MapPin, Phone, User } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
+import { BackLink } from "@/components/back-link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { fillText, type Lang } from "@/lib/i18n";
@@ -74,9 +75,15 @@ export function LeadFile(p: LeadFileProps) {
 
   return (
     <div className="space-y-4">
-      <Link href="/leads" className="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-brand">
-        <ArrowLeft className="h-4 w-4" /> {t("ld_btn_fileBackToLeads")}
-      </Link>
+      {/* BACK WHERE YOU CAME FROM (cn-v1174): the visit page's BackLink. With in-app history behind the
+          reader (Inspections, Closing, a customer's page, Needs You) it says Back and retraces it; on a
+          cold entry it says Back to Leads and goes to /leads. */}
+      <BackLink
+        fallback="/leads"
+        fallbackLabel={t("ld_btn_fileBackToLeads")}
+        backLabel={t("sh_back")}
+        className="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-brand"
+      />
 
       <div>
         <PageHeader title={title} description={business || undefined} />

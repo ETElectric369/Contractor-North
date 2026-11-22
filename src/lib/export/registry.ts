@@ -205,7 +205,7 @@ export const EXPORT_TABLES: readonly ExportTable[] = [
       "absorbed", "blocked_on", "blocked_since", "google_event_id", "created_by", "created_at", "updated_at",
     ],
   },
-  { table: "daily_reports", order: "id", columns: ["id", "profile_id", "report_date", "did_today", "materials_tomorrow", "gps_summary", "status", "created_at"] },
+  { table: "daily_reports", order: "id", columns: ["id", "profile_id", "report_date", "job_id", "did_today", "materials_tomorrow", "gps_summary", "status", "created_at"] },
   {
     table: "tasks",
     order: "id",

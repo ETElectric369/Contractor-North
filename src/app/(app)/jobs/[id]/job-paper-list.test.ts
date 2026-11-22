@@ -59,6 +59,15 @@ describe("Named on a Paper, Not Recorded Yet: a paper waiting on a credit", () =
     expect(waitRow).toMatch(/<a[^>]*min-h-11/);
   });
 
+  it("the supplier is said ONCE on a waiting row: in its sentence, never as a prefix on its title (cn-v1174)", () => {
+    const title = waitRow.match(/<div class="font-medium text-slate-900">([\s\S]*?)<\/div>/)?.[1] ?? "";
+    expect(title).toBe("8802-1107139");
+    expect(text(waitRow).match(/CED/g)).toHaveLength(1);
+    // A paper nobody set aside names its supplier ahead of the number (it has no sentence that does).
+    const plain = renderToStaticMarkup(createElement(JobPaperList, { jobId: "j45", papers: [paper({ supplier: "Northline Supply" })] }));
+    expect(text(plain)).toContain("Northline Supply · 8802-1107139");
+  });
+
   it("a paper nobody set aside keeps its Record It as a Bill", () => {
     expect(openRow).toContain("Record It as a Bill");
   });

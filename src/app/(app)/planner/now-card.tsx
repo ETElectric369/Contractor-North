@@ -18,6 +18,7 @@ import { WhichJobSheet } from "./which-job";
 import { askAfterPunch, type WhichJobAsk } from "../timeclock/which-job-choices";
 import { noticeOnScreen, tellAppChose, type AppChoseNotice } from "../timeclock/clock-told";
 import { AppChoseJobNotice } from "../timeclock/app-chose-notice";
+import { DailyReportDebrief } from "../timeclock/daily-report-debrief";
 import type { CrewPulse } from "@/lib/crew-pulse";
 
 /** Best-effort on-gesture GPS with a short cap (the timeclock panel's race pattern):
@@ -91,6 +92,7 @@ export function NowCard({
   userId,
   children,
   crew,
+  asksReport = false,
 }: {
   open: NowPunch | null;
   /** The job on the open punch, when the page could read it. */
@@ -104,6 +106,9 @@ export function NowCard({
   /** WHO ELSE IS ON THE CLOCK (lib/crew-pulse) — the office's, under its own clock. Undefined for
    *  a tech (not drawn); null when the read failed (said, never a silent "nobody"). */
   crew?: CrewPulse | null;
+  /** THE END-OF-DAY REPORT, asked after a clock-out here as on the Time Clock page (cn-v1174): a crew
+   *  lead with Daily Reports on (lib/daily-report-rule asksForDailyReport, read by the page). */
+  asksReport?: boolean;
 }) {
   const [now, setNow] = useState(() => Date.now());
   const [err, setErr] = useState<string | null>(null);
@@ -123,6 +128,12 @@ export function NowCard({
   // naming the job, with the Change door — never a toast that is gone before the truck. Lives up
   // here with `ask` for the same reason: the card flips branches underneath it.
   const [chose, setChose] = useState<AppChoseNotice | null>(null);
+  // The end-of-day report (the Time Clock's own sheet, one component): opens after a crew lead's
+  // clock-out, after the job question when there is one, so two sheets never stack. Up here for the
+  // same reason as `ask`: the card flips to "not clocked in" underneath it, and the open sheet must
+  // never be remounted.
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportAfterAsk, setReportAfterAsk] = useState(false);
 
   // Replay a held punch the moment the connection returns (or the app is reopened).
   // THE DRAIN MOVED TO THE SHELL (audit 9, OfflineDrain): mounted here it only ran while this
@@ -236,7 +247,14 @@ export function NowCard({
           // one) is said here too, and kept until it is read, as the Timeclock panel does.
           if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
           // Still on no job at the end of it: asked once more (Skip is right there).
-          setAsk(askAfterPunch(res, "out"));
+          const again = askAfterPunch(res, "out");
+          setAsk(again);
+          // A crew lead owes the office the end-of-day report: asked right here, as the Time Clock
+          // page asks it (after the job question, when there is one).
+          if (asksReport) {
+            if (again) setReportAfterAsk(true);
+            else setReportOpen(true);
+          }
         }
       } catch {
         setErr(t("md_offline"));
@@ -405,8 +423,20 @@ export function NowCard({
         </div>
       )}
       {ask && (
-        <WhichJobSheet key={ask.entryId + ask.moment} entryId={ask.entryId} moment={ask.moment} from={ask.from ?? null} onClose={() => setAsk(null)} />
+        <WhichJobSheet key={ask.entryId + ask.moment}
+          entryId={ask.entryId}
+          moment={ask.moment}
+          from={ask.from ?? null}
+          onClose={() => {
+            setAsk(null);
+            if (reportAfterAsk) {
+              setReportAfterAsk(false);
+              setReportOpen(true);
+            }
+          }}
+        />
       )}
+      {asksReport ? <DailyReportDebrief open={reportOpen} onClose={() => setReportOpen(false)} /> : null}
     </Card>
   );
 }

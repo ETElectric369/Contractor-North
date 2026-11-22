@@ -104,6 +104,7 @@ export const words: WordCatalog = {
     tk_couldNotCompleteMany: "Couldn't complete {missed} of the {total} subtasks. Refresh the page and try again.",
     tk_photoAfterMigration: "The photo is on the job's Photos tab. Photos on tasks start after the next database update.",
     tk_taskNotDoneAnymore: "That task isn't checked off any more, so the photo stays on the Photos tab.",
+    tk_jobOverNoTask: "This job is over, so it takes no new tasks: set its status back to In Progress first.",
   },
   es: {
     // ── the page ──
@@ -195,5 +196,6 @@ export const words: WordCatalog = {
     tk_couldNotCompleteMany: "No se pudieron completar {missed} de las {total} subtareas. Recarga la página e inténtalo de nuevo.",
     tk_photoAfterMigration: "La foto está en la pestaña Fotos del trabajo. Las fotos en tareas empiezan después de la próxima actualización de la base de datos.",
     tk_taskNotDoneAnymore: "Esa tarea ya no está marcada como hecha, así que la foto se queda en la pestaña Fotos.",
+    tk_jobOverNoTask: "Este trabajo ya terminó, así que no acepta tareas nuevas: primero regresa su estado a En Curso.",
   },
 };

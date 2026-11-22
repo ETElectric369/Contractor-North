@@ -381,9 +381,41 @@ describe("My Day's cards (structural: the page is a server component over the da
     expect(pageCode).toContain("const textReady = smsReadiness(");
   });
 
-  it("the Daily Reports card stays while a report waits for review, with the Off line on top", () => {
-    expect(page).toContain("(reportsOn || reportsToReview > 0)");
+  it("the Daily Reports card lists only what waits for review and is not drawn when none waits (cn-v1174), with the Off line on top", () => {
+    // The list: every report still filed, no day window; a reviewed one is in its job's file.
+    const read = page.slice(page.indexOf('.from("daily_reports")'), page.indexOf('.from("daily_reports")') + 260);
+    expect(read).toContain('.eq("status", "filed")');
+    expect(page).not.toContain("reportsSince");
+    expect(page).not.toContain("md_last14Days");
+    // The gate: the rows (waiting ones, plus the one report the bell named when it has no job).
+    expect(page).toContain("{isStaff && dailyReports.length > 0 && (");
+    expect(page).not.toContain("(reportsOn || reportsToReview > 0)");
+    expect(page).toContain("const dailyReports = [...waitingRows, ...(focusRow ? [focusRow] : [])]");
     expect(page).toContain('<FeatureOffLine feature="daily_reports"');
+    expect(dict("en").md_toReview).toBe("{n} to review");
+    expect(dict("es").md_toReview).toBe("{n} por revisar");
+  });
+
+  it("the bell's link never lands on nothing: a report not on the card goes to its job's file or is drawn (cn-v1174)", () => {
+    expect(page).toContain("if (isStaff && reportParam && !waitingRows.some((r) => r.id === reportParam))");
+    // To its job's file only while the switch is on (the job page draws the section only then).
+    expect(page).toContain('const landing = reportLanding(focusRow, featureOn(features, "daily_reports"));');
+    expect(page).toContain('if (landing.kind === "job") redirect(landing.href);');
+    // job_id is 0411's: read again without it on a database that does not have it yet.
+    expect(page).toContain("if (read.error && isMissingColumn(read.error)) read = await one(REPORT_COLS);");
+  });
+
+  it("a crew lead is asked for the end-of-day report on the Now card too, by the one rule (cn-v1174)", () => {
+    expect(page).toContain('supabase.from("profiles").select("crew_lead").eq("id", user?.id ?? "").maybeSingle()');
+    expect(page).toContain("const asksReport = asksForDailyReport((leadR as any)?.data?.crew_lead, features);");
+    expect(page).toContain("asksReport={asksReport}");
+    const card = readFileSync(join(process.cwd(), "src/app/(app)/planner/now-card.tsx"), "utf8");
+    expect(card).toContain('import { DailyReportDebrief } from "../timeclock/daily-report-debrief";');
+    expect(card).toContain("{asksReport ? <DailyReportDebrief open={reportOpen} onClose={() => setReportOpen(false)} /> : null}");
+    // After the job question when there is one, so two sheets never stack.
+    expect(card).toContain("if (again) setReportAfterAsk(true);");
+    const clock = readFileSync(join(process.cwd(), "src/app/(app)/timeclock/page.tsx"), "utf8");
+    expect(clock).toContain("const crewLead = asksForDailyReport((leadRes.data as any)?.crew_lead, orgSettings.features);");
   });
 
   it("the 6-field task box is gone from My Day, and Needs You hears every switch", () => {
@@ -394,7 +426,12 @@ describe("My Day's cards (structural: the page is a server component over the da
 
   it("the Now card carries the clocked-in job's tasks, and only on the clock", () => {
     expect(page).toContain("{nowTasks && nowTasks.left > 0 && (");
-    expect(page).toMatch(/currentJob\s*\?\s*supabase\s*\.from\("tasks"\)\s*\.select\("id, title", \{ count: "exact" \}\)\s*\.eq\("job_id", currentJob\.id\)/);
+    // The count and the three rows are ONE call through the open-task rule's query twin (cn-v1174): a
+    // punch still on a finished or cancelled job counts none of its tasks.
+    expect(page).toMatch(
+      /currentJob\s*\?\s*whereJobTaskOpen\(\s*supabase\s*\.from\("tasks"\)\s*\.select\(`id, title, \$\{OPEN_TASK_JOB\}`, \{ count: "exact" \}\)\s*\.eq\("job_id", currentJob\.id\),?\s*\)/,
+    );
+    expect(page).not.toMatch(/\.from\("tasks"\)\s*\.select\("id, title", \{ count: "exact" \}\)/);
   });
 
   it("ONE Now card at the top, for every role: no separate clock card, Now block or Which Job block", () => {

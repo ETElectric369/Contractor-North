@@ -413,6 +413,23 @@ export const words: WordCatalog = {
     jb_actPaperNotThere: "That paper isn't there any more. Reload to see the list as it is.",
     jb_actPaperChanged: "That paper changed a moment ago: it isn't waiting to be recorded any more. Reload to see it.",
     jb_actPaperTiesUnread: "Couldn't check whether that paper is on a bill just now, so it was left as it is. Try again.",
+    // ── cn-v1174: what a paper is (the Costs tab) and the job's daily reports (the Time tab) ──────
+    jb_nMore: "+{n} more",
+    jb_dailyReports: "Daily Reports",
+    jb_drSomeone: "A crew member",
+    jb_drHoursHere: "{hours} on this job",
+    jb_drWhatGotDone: "What got done:",
+    jb_drMaterialsTomorrow: "Materials for tomorrow:",
+    jb_drReviewed: "Reviewed",
+    jb_drWaiting: "Waiting for review",
+    jb_drReadFailed: "Couldn't read this job's daily reports just now. Reload the page to try again.",
+    // ── a job's tasks close with it (cn-v1174): finishing or cancelling checks them off ──
+    jb_tasksClosedOne: "The job's open task is checked off.",
+    jb_tasksClosedMany: "The job's {n} open tasks are checked off.",
+    jb_tasksNotClosed: "The job's open tasks couldn't be checked off: check them off on its Tasks tab.",
+    jb_finishClosesTasksOne: "1 task is still open on this job. Finishing checks it off.",
+    jb_finishClosesTasksMany: "{n} tasks are still open on this job. Finishing checks them off.",
+    jb_finishTasksUnread: "Couldn't read this job's tasks just now. Finishing still checks off any left open.",
   },
   es: {
     // ── shared ─────────────────────────────────────────────────────────────────────────────────
@@ -779,5 +796,22 @@ export const words: WordCatalog = {
     jb_actPaperNotThere: "Ese papel ya no está. Recarga para ver la lista como está.",
     jb_actPaperChanged: "Ese papel cambió hace un momento: ya no está pendiente de registrar. Recarga para verlo.",
     jb_actPaperTiesUnread: "No se pudo revisar si ese papel está en una cuenta ahora, así que se dejó como está. Inténtalo de nuevo.",
+    // ── cn-v1174: qué es un papel (Costos) y los reportes diarios del trabajo (Tiempo) ────────────
+    jb_nMore: "+{n} más",
+    jb_dailyReports: "Reportes Diarios",
+    jb_drSomeone: "Un miembro de la cuadrilla",
+    jb_drHoursHere: "{hours} en este trabajo",
+    jb_drWhatGotDone: "Lo que se hizo:",
+    jb_drMaterialsTomorrow: "Materiales para mañana:",
+    jb_drReviewed: "Revisado",
+    jb_drWaiting: "Esperando revisión",
+    jb_drReadFailed: "No se pudieron leer los reportes diarios de este trabajo ahora. Recarga la página para intentarlo de nuevo.",
+    // ── las tareas de un trabajo se cierran con él (cn-v1174) ──
+    jb_tasksClosedOne: "La tarea abierta del trabajo quedó marcada como hecha.",
+    jb_tasksClosedMany: "Las {n} tareas abiertas del trabajo quedaron marcadas como hechas.",
+    jb_tasksNotClosed: "No se pudieron marcar como hechas las tareas abiertas del trabajo: márcalas en su pestaña Tareas.",
+    jb_finishClosesTasksOne: "1 tarea sigue abierta en este trabajo. Al terminarlo, queda marcada como hecha.",
+    jb_finishClosesTasksMany: "{n} tareas siguen abiertas en este trabajo. Al terminarlo, quedan marcadas como hechas.",
+    jb_finishTasksUnread: "No se pudieron leer las tareas de este trabajo ahora. Al terminarlo, igual se marcan como hechas las que sigan abiertas.",
   },
 };

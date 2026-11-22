@@ -127,8 +127,11 @@ describe("one door: the ⋯'s Print / PDF row is gone, and the different verbs s
   });
 
   it("Share (the customer's own link) stays on the title line: a different verb, not a second Preview", () => {
-    expect(editorSrc).toContain('<ShareIconButton load={(opts) => quoteShareText(savedId, opts)} className="ml-auto shrink-0" />');
+    expect(editorSrc).toMatch(/<ShareIconButton\s+load=\{\(opts\) => quoteShareText\(savedId, opts\)\}\s+version=\{[^}]+\}\s+className="ml-auto shrink-0"\s+\/>/);
     const html = saved({ status: "draft" }, [line]);
-    expect(html).toContain('aria-label="Share"');
+    // cn-v1174: the link is fetched AHEAD of the tap, so the first draw is the button waiting for it,
+    // disabled and saying so; it is named Share once the read-ahead lands (share-icon-button.test.tsx).
+    expect(html).toContain('aria-label="Getting the Link…"');
+    expect(html).not.toContain('aria-label="Share"');
   });
 });

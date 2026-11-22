@@ -7,11 +7,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  */
 
 type Q = { table: string; verb: string; ors: string[]; eqs: [string, unknown][]; iss: [string, unknown][] };
-const state = vi.hoisted(() => ({ client: null as any, queries: [] as any[], dup: null as any }));
+const state = vi.hoisted(() => ({ client: null as any, queries: [] as any[], dup: null as any, jobStatus: "in_progress" as string }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => state.client) }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { createTask, toggleTask } from "./actions";
+import { createTask, toggleTask, updateTask } from "./actions";
+import { dict } from "@/lib/i18n";
 
 function fake() {
   return {
@@ -20,13 +21,24 @@ function fake() {
       const q: Q = { table, verb: "select", ors: [], eqs: [], iss: [] };
       state.queries.push(q);
       const answer = () => {
-        if (table === "jobs") return { data: { id: "job-1" }, error: null };
+        if (table === "jobs") return { data: { id: "job-1", status: state.jobStatus }, error: null };
         if (q.verb === "insert") return { data: { id: "new-task" }, error: null };
+        // A step's parent, a task on job-1.
+        if (table === "tasks" && q.eqs.some(([c, v]) => c === "id" && v === "parent-1")) return { data: { job_id: "job-1" }, error: null };
+        // updateTask's read of the task being moved: on job-1 already, or on another job.
+        if (table === "tasks" && q.eqs.some(([c, v]) => c === "id" && v === "on-job-1")) return { data: { job_id: "job-1" }, error: null };
+        if (table === "tasks" && q.eqs.some(([c, v]) => c === "id" && v === "on-job-2")) return { data: { job_id: "job-2" }, error: null };
         return { data: state.dup, error: null };
       };
       const chain: any = {
         select: () => chain,
         insert: () => ((q.verb = "insert"), chain),
+        // updateTask's write: .update(clean).eq("id", id).select("id"), answered as one row changed.
+        update: () => {
+          q.verb = "update";
+          const w: any = { eq: (c: string, v: unknown) => (q.eqs.push([c, v]), w), select: async () => ({ data: [{ id: "task-1" }], error: null }) };
+          return w;
+        },
         eq: (c: string, v: unknown) => (q.eqs.push([c, v]), chain),
         is: (c: string, v: unknown) => (q.iss.push([c, v]), chain),
         or: (f: string) => (q.ors.push(f), chain),
@@ -47,6 +59,7 @@ describe("createTask's duplicate check", () => {
   beforeEach(() => {
     state.queries = [];
     state.dup = null;
+    state.jobStatus = "in_progress";
     state.client = fake();
   });
 
@@ -206,5 +219,82 @@ describe("toggleTask: a cascaded check-off, and its Undo", () => {
     const res = await toggleTask("P", false, { jobId: "j1", reopenSteps: ["A", "B"] });
     expect(res.ok).toBe(false);
     expect(["P", "A", "B"].map(refused.status)).toEqual(["done", "done", "done"]);
+  });
+});
+
+/**
+ * NO NEW TASK ON A JOB THAT IS OVER (cn-v1174). Finishing or cancelling a job checks its tasks off, so a
+ * task added to it afterwards is refused in ONE sentence naming ONE action, and nothing is written. A
+ * step under one of its tasks is its task too. On hold is not over; a Reminder is untouched.
+ */
+describe("createTask on a job that is over (cn-v1174)", () => {
+  beforeEach(() => {
+    state.queries = [];
+    state.dup = null;
+    state.client = fake();
+  });
+  const inserts = () => state.queries.filter((q) => q.table === "tasks" && q.verb === "insert");
+
+  for (const status of ["complete", "cancelled"]) {
+    it(`${status}: refused in one sentence, nothing written`, async () => {
+      state.jobStatus = status;
+      const res = await createTask({ title: "Hang the panel", job_id: "job-1" });
+      expect(res).toEqual({ ok: false, error: dict("en").tk_jobOverNoTask });
+      expect(inserts()).toEqual([]);
+      state.queries = [];
+      const step = await createTask({ title: "Label it", parent_id: "parent-1" });
+      expect(step).toEqual({ ok: false, error: dict("en").tk_jobOverNoTask });
+      expect(inserts()).toEqual([]);
+    });
+  }
+
+  it("on hold is not over, and a Reminder never asks", async () => {
+    state.jobStatus = "on_hold";
+    expect(await createTask({ title: "Hang the panel", job_id: "job-1" })).toMatchObject({ ok: true, id: "new-task" });
+    state.jobStatus = "complete";
+    expect(await createTask({ title: "Call the inspector" })).toMatchObject({ ok: true, id: "new-task" });
+  });
+
+  it("the sentence is one sentence with one action, in both languages", () => {
+    const en = dict("en").tk_jobOverNoTask;
+    const es = dict("es").tk_jobOverNoTask;
+    expect(en).toBe("This job is over, so it takes no new tasks: set its status back to In Progress first.");
+    expect(es).toBe("Este trabajo ya terminó, así que no acepta tareas nuevas: primero regresa su estado a En Curso.");
+    for (const s of [en, es]) expect(s.match(/[.!?]/g)).toHaveLength(1);
+    // The one action names the status by the words the status menu shows.
+    expect(en).toContain(dict("en").jb_statusInProgress);
+    expect(es).toContain(dict("es").jb_statusInProgress);
+  });
+});
+
+describe("updateTask moving a task onto a job that is over (skeptic, cn-v1174)", () => {
+  beforeEach(() => {
+    state.queries = [];
+    state.dup = null;
+    state.client = fake();
+  });
+  const writes = () => state.queries.filter((q) => q.table === "tasks" && q.verb === "update");
+
+  for (const status of ["complete", "cancelled"]) {
+    it(`${status}: a move from another job is refused with createTask's sentence, nothing written`, async () => {
+      state.jobStatus = status;
+      const res = await updateTask("on-job-2", { job_id: "job-1" });
+      expect(res).toEqual({ ok: false, error: dict("en").tk_jobOverNoTask });
+      expect(writes()).toEqual([]);
+      state.queries = [];
+      // A Reminder (no job yet) moved onto it: the same.
+      expect(await updateTask("reminder-1", { job_id: "job-1" })).toEqual({ ok: false, error: dict("en").tk_jobOverNoTask });
+      expect(writes()).toEqual([]);
+    });
+  }
+
+  it("an edit that hands the task's own job back is not a move; a job still being worked takes the move", async () => {
+    state.jobStatus = "complete";
+    expect(await updateTask("on-job-1", { title: "Hang the panel", job_id: "job-1" })).toEqual({ ok: true });
+    expect(writes()).toHaveLength(1);
+    state.queries = [];
+    state.jobStatus = "on_hold";
+    expect(await updateTask("on-job-2", { job_id: "job-1" })).toEqual({ ok: true });
+    expect(writes()).toHaveLength(1);
   });
 });
