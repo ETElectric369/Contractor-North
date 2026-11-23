@@ -45,6 +45,13 @@ jobs:
 
       - name: Type check
         run: npm run typecheck
+        env:
+          # THE SAME HEAP AS THE BUILD BELOW (cn-v1185). This step runs the same compiler and was left on
+          # Node's default when the build got its 8 GB at cn-v1181. The run for cn-v1185 died here with
+          # "JavaScript heap out of memory" at about 4 GB; nothing in the code was wrong (a full,
+          # uncached check passes on the owner's machine and uses about 5 GB, and the deploy's own
+          # build had passed).
+          NODE_OPTIONS: --max-old-space-size=8192
 
       # The DB suites write (inside rolled-back transactions), so they may only ever reach the TEST
       # database. Until 2026-09 these secrets pointed at production and the suites wrote there. This
