@@ -138,6 +138,8 @@ function fakeDb(tables: Record<string, Row[]>, hooks: Hooks = {}) {
       in: (c: string, vs: unknown[]) => add(c, "in", (x) => vs.includes(x)),
       contains: (c: string, vs: unknown[]) => add(c, "contains", (x) => Array.isArray(x) && vs.every((v) => x.includes(v))),
       like: (c: string, pat: string) => add(c, "like", (x) => typeof x === "string" && x.startsWith(pat.replace(/%$/, ""))),
+      // ILIKE between two %: the text is held, in any case; \% \_ \\ in the pattern are the characters themselves.
+      ilike: (c: string, pat: string) => add(c, "ilike", (x) => typeof x === "string" && x.toLowerCase().includes(pat.replace(/^%|%$/g, "").replace(/\\(.)/g, "$1").toLowerCase())),
       insert(rows: Row | Row[]) {
         mode = "insert";
         pending = (Array.isArray(rows) ? rows : [rows]).map((r) => ({ ...r }));
@@ -243,6 +245,9 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/observe", () => ({ reportError: () => {} }));
 const importCosts = vi.hoisted(() => vi.fn(async (..._a: unknown[]) => ({ ok: true as boolean, error: undefined as string | undefined })));
 vi.mock("@/app/(app)/billing/actions", async (orig) => ({ ...(await orig<Record<string, unknown>>()), importCostsIntoInvoice: importCosts }));
+// cn-v1188: the Reconcile door's own write (a spelling filed on an account), stood in: it has its own tests.
+const linkSpelling = vi.hoisted(() => vi.fn(async (..._a: unknown[]) => ({ ok: true as boolean, error: undefined as string | undefined, message: undefined as string | undefined })));
+vi.mock("@/app/(app)/bills/supplier-actions", async (orig) => ({ ...(await orig<Record<string, unknown>>()), linkBillsBySupplierText: linkSpelling }));
 
 import { creditMemoHome, fileCreditMemoWithItsBill, fileReturnBillWithItsBill, returnBillHome } from "./credit-memo-actions";
 import { billItemisation, type BillForItemisation, type BillLine } from "@/lib/bill-itemisation";
@@ -924,5 +929,275 @@ describe("skeptic #86: the row's door, put right", () => {
     const credit = db.tables.bills.find((b) => b.id === "bill-c")! as Row & BillForItemisation;
     const rows = billItemisation(credit, linesOf("bill-c") as BillLine[], 0);
     expect(Math.round(rows.reduce((s, x) => s + x.quantity * x.unit_price, 0) * 100)).toBe(0);
+  });
+});
+
+// ── cn-v1188: A CREDIT READ UNDER ANOTHER NAME ───────────────────────────────────────────────────
+// The slip's purchases sit on Northline Supply's ACCOUNT; the credit was read as a spelling that is on
+// no supplier. Its own name carries nothing on the job, so the door asks the job's other purchases,
+// one supplier at a time, and a supplier carries the credit only when EVERY part line closes there.
+function misread(over: Row = {}) {
+  const t = slip();
+  for (const b of t.bills) if (b.org_id === "org-1" && b.supplier === "Northline Supply" && b.id !== "bill-c") b.supplier_account_id = "acct-1";
+  Object.assign(t.bills.find((b) => b.id === "bill-c")!, { supplier: "NS Northline Supply - Reno", supplier_account_id: null, ...over });
+  t.supplier_aliases.push({ id: "al-1", org_id: "org-1", alias: "Northline Supply", supplier_account_id: "acct-1" });
+  return t;
+}
+const SPELLING = "NS Northline Supply - Reno";
+const JOIN = { accountId: "acct-1", supplier: "Northline Supply", spelling: SPELLING };
+const SHOWN = { accountId: "acct-1", spelling: SPELLING };
+const JOINED = 'Filed 1 bill under Northline Supply. From now on a receipt that says "NS Northline Supply - Reno" belongs to Northline Supply.';
+const SLIP_FILED =
+  "CM-445: $29.70 back from the supplier. 3 returned lines are closed on T-543, T-576 and T-677 (1/2 in EMT Connector Steel; 3/4 in Rigid Coupling Steel; GFCI Receptacle 20A White): off the customer's bill, credit received. " +
+  "3/4 in Rigid Coupling Steel was split: 2 kept ($14.20), 1 returned ($7.10).";
+const EDIT_IT =
+  "No bill from NS Northline Supply - Reno on this job carries the lines this credit returns, but bills from Northline Supply on this job do. If this credit is from that supplier, set its supplier with Edit, then press File With Its Bill again. Nothing changed.";
+const PRESS_AGAIN =
+  'This credit was read as "NS Northline Supply - Reno", and its lines are on bills from Northline Supply. Press File With Its Bill again to file it with them. Nothing changed.';
+const key = (v: unknown) => String(v ?? "").trim().toLowerCase();
+/** The Reconcile door's write, as it lands (bills/supplier-actions fileSpelling): EVERY unfiled bill of this
+ *  company whose spelling matches, trimmed and in any case, on any job; and the alias. */
+const landSpelling = () =>
+  linkSpelling.mockImplementation(async (...a: unknown[]) => {
+    const input = a[0] as { supplier: string; accountId: string };
+    for (const b of db.tables.bills) if (b.org_id === "org-1" && key(b.supplier) === key(input.supplier) && !b.supplier_account_id) b.supplier_account_id = input.accountId;
+    db.tables.supplier_aliases.push({ id: "al-new", org_id: "org-1", alias: input.supplier, supplier_account_id: input.accountId });
+    return { ok: true, error: undefined, message: JOINED };
+  });
+const billRow = (id: string, over: Row) => ({
+  id, org_id: "org-1", job_id: "job-1", supplier: "Northline Supply", supplier_account_id: null, category: "Bill", scope_category: null, status: "unpaid", amount: 10.5,
+  bill_number: "T-416", supplier_invoice_number: null, bill_date: "2026-11-02", corrects_bill_id: null, superseded_by_bill_id: null, on_shelf: false, created_at: "2026-11-02T00:00:00Z", po_id: null, ...over,
+});
+const lineRow = (id: string, bill: string, sort: number, over: Row) => ({
+  id, org_id: "org-1", bill_id: bill, quantity: 1, unit_price: 0, amount: 0, category: null, billable: true, billed_amount: null, is_stock: false,
+  returned: false, returned_credit_bill_id: null, pen_mark: null, sort_order: sort, ...over,
+});
+
+describe("cn-v1188: a credit read under a name that is on no supplier", () => {
+  beforeEach(() => {
+    linkSpelling.mockReset();
+    landSpelling();
+  });
+
+  it("its own supplier carries it: the old road, and no name is filed", async () => {
+    use(slip());
+    expect((await fileReturnBillWithItsBill("bill-c")).message).toBe(SLIP_FILED);
+    expect(linkSpelling).not.toHaveBeenCalled();
+  });
+
+  it("found by its lines on the ONE supplier account that carries them: the button, and both names; nothing written", async () => {
+    use(misread());
+    expect(await returnBillHome("bill-c")).toEqual({ ok: true, kind: "one", by: "words", candidate: { billId: "bill-c", label: "3 lines on T-543, T-576 and T-677", join: JOIN } });
+    expect(db.writes).toEqual([]);
+    expect(linkSpelling).not.toHaveBeenCalled();
+  });
+
+  it("the tap that was shown that supplier and that name files the NAME first, through the Reconcile door's own write, then the credit", async () => {
+    use(misread());
+    const r = await fileReturnBillWithItsBill("bill-c", SHOWN);
+    expect(linkSpelling.mock.calls).toEqual([[{ supplier: SPELLING, accountId: "acct-1" }]]);
+    expect(r).toEqual({ ok: true, message: `${JOINED} ${SLIP_FILED}` });
+    // The credit keeps the spelling it was scanned with, stays a bill of its own, and this door wrote no bills row.
+    expect(db.tables.bills.find((b) => b.id === "bill-c")).toMatchObject({ supplier: SPELLING, supplier_account_id: "acct-1", corrects_bill_id: null, job_id: "job-1", amount: -29.7 });
+    expect(db.writes.filter((w) => w.table === "bills")).toEqual([]);
+    expect(db.tables.bill_line_items.find((l) => l.id === "p1-a")).toMatchObject({ billable: false, returned: true, returned_credit_bill_id: "bill-c" });
+    expect(db.tables.bill_line_items.find((l) => l.id === "p3-g")).toMatchObject({ billable: false, returned: true, returned_credit_bill_id: "bill-c" });
+    expect(linesOf("bill-c").map((l) => [l.id, l.billable])).toEqual([["c-a", false], ["c-b", false], ["c-g", false], ["c-t", true]]);
+    // Another supplier's line with the same words, and another company's: never touched.
+    for (const id of ["y-a", "xp-a"]) expect(db.tables.bill_line_items.find((l) => l.id === id)).toMatchObject({ returned: false, billable: true, returned_credit_bill_id: null });
+  });
+
+  it("a tap that was NOT shown it files nothing: nothing handed back, another account, another name, or not an object", async () => {
+    const handed: unknown[] = [undefined, null, {}, { accountId: "acct-1" }, { spelling: SPELLING }, { accountId: "acct-2", spelling: SPELLING }, { accountId: "acct-1", spelling: "Northline Supply" }, "acct-1"];
+    for (const h of handed) {
+      use(misread());
+      expect(await fileReturnBillWithItsBill("bill-c", h as never)).toEqual({ ok: false, error: PRESS_AGAIN });
+      expect(db.writes).toEqual([]);
+    }
+    expect(linkSpelling).not.toHaveBeenCalled();
+  });
+
+  it("S1: ONLY a name this one paper carries. Another bill under the same spelling, on any job, filed or not: never offered, Edit is named, nothing moves", async () => {
+    const others: Row[] = [
+      // unfiled, on another job, spelled in another case with a space after it: the name's own write would move it
+      billRow("bill-n1", { job_id: "job-2", supplier: "ns northline supply - reno ", bill_number: "T-417" }),
+      // filed by a person on ANOTHER account under the same spelling
+      billRow("bill-n2", { job_id: "job-2", supplier: SPELLING, supplier_account_id: "acct-7", bill_number: "T-418" }),
+    ];
+    for (const other of others) {
+      const t = misread();
+      t.bills.push(other);
+      use(t);
+      expect(await returnBillHome("bill-c")).toEqual({ ok: true, kind: "none", sentence: EDIT_IT });
+      expect(await fileReturnBillWithItsBill("bill-c", SHOWN)).toEqual({ ok: false, error: EDIT_IT });
+      expect(db.writes).toEqual([]);
+      expect(db.tables.bills.find((b) => b.id === other.id)!.supplier_account_id).toBe(other.supplier_account_id);
+    }
+    // ANOTHER COMPANY'S bill under the same spelling is not this company's: still offered.
+    const t = misread();
+    t.bills.push(billRow("bill-n3", { org_id: "org-2", job_id: "job-9", supplier: SPELLING, bill_number: "T-419" }));
+    use(t);
+    expect(await returnBillHome("bill-c")).toMatchObject({ ok: true, kind: "one", candidate: { join: JOIN } });
+    // A name that only HOLDS the spelling is another name.
+    const u = misread();
+    u.bills.push(billRow("bill-n4", { job_id: "job-2", supplier: `${SPELLING} Yard`, bill_number: "T-420" }));
+    use(u);
+    expect(await returnBillHome("bill-c")).toMatchObject({ ok: true, kind: "one", candidate: { join: JOIN } });
+    expect(linkSpelling).not.toHaveBeenCalled();
+  });
+
+  it("S1: a full page of bills holding the name cannot say the credit is alone: not offered", async () => {
+    const t = misread();
+    for (let i = 0; i < 1000; i++) t.bills.push(billRow(`bill-h${i}`, { job_id: "job-2", supplier: `${SPELLING} Yard ${i}`, bill_number: `T-9${i}` }));
+    use(t);
+    expect(await returnBillHome("bill-c")).toEqual({ ok: true, kind: "none", sentence: EDIT_IT });
+    expect(linkSpelling).not.toHaveBeenCalled();
+  });
+
+  it("S10: a bill of another supplier with no line that names one of the credit's parts is never asked which invoices hold it", async () => {
+    const asks = async (t: Record<string, Row[]>) => {
+      use(t);
+      const real = db.sb.from;
+      let n = 0;
+      db.sb.from = (table: string) => {
+        if (table === "invoice_items") n += 1;
+        return real(table);
+      };
+      expect(await returnBillHome("bill-c")).toMatchObject({ ok: true, kind: "one", candidate: { join: JOIN } });
+      return n;
+    };
+    const withThem = await asks(misread());
+    const without = misread();
+    // INV-900 and INV-901 on the job name none of the credit's parts.
+    without.bills = without.bills.filter((b) => !["bill-1", "bill-2"].includes(b.id));
+    expect(withThem).toBe(await asks(without));
+    expect(withThem).toBeGreaterThan(0);
+  });
+
+  it("S1: that read names the company, and the spelling's own % and _ are characters, not wildcards (source: the stand-in cannot tell)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/organize/credit-memo-actions.ts"), "utf8");
+    expect(src).toMatch(/\.select\("id, supplier"\)\s*\.eq\("org_id", c\.orgId\)\s*\.ilike\("supplier", `%\$\{escapeLike\(spelling\)\}%`\)\s*\.limit\(NAMED_READ_CAP\)/);
+  });
+
+  it("the read of who else carries the name fails: said, and nothing is offered", async () => {
+    const t = misread();
+    use(t);
+    const real = db.sb.from;
+    db.sb.from = (table: string) => {
+      const b = real(table);
+      if (table === "bills") b.ilike = () => ({ limit: async () => ({ data: null, error: { message: "boom" } }) });
+      return b;
+    };
+    const home = await returnBillHome("bill-c");
+    expect(home.ok).toBe(false);
+    expect((home as { error: string }).error).toMatch(/^Couldn't check which other bills carry that name just now: .* Nothing changed\.$/);
+    expect(db.writes).toEqual([]);
+  });
+
+  it("never offered, and the ONE action is said: the credit is on an account already; the supplier that carries it is on none", async () => {
+    use(misread({ supplier_account_id: "acct-9" }));
+    expect(await returnBillHome("bill-c")).toEqual({ ok: true, kind: "none", sentence: EDIT_IT });
+    expect(await fileReturnBillWithItsBill("bill-c", SHOWN)).toEqual({ ok: false, error: EDIT_IT });
+    const t = misread();
+    for (const b of t.bills) b.supplier_account_id = null;
+    t.supplier_aliases = [];
+    use(t);
+    expect(await returnBillHome("bill-c")).toEqual({ ok: true, kind: "none", sentence: EDIT_IT });
+    expect(await fileReturnBillWithItsBill("bill-c", SHOWN)).toEqual({ ok: false, error: EDIT_IT });
+    expect(db.writes).toEqual([]);
+    expect(linkSpelling).not.toHaveBeenCalled();
+  });
+
+  it("two suppliers on the job carry every line: the app does not pick, it names both and the one action", async () => {
+    const t = misread();
+    t.bill_line_items.push(
+      lineRow("y-b", "bill-y", 1, { description: "3/4 in Rigid Coupling Steel", quantity: 3, unit_price: 7.1, amount: 21.3 }),
+      lineRow("y-g", "bill-y", 2, { description: "GFCI Receptacle 20A White", quantity: 1, unit_price: 9.9, amount: 9.9, billable: false, returned: true }),
+    );
+    use(t);
+    const home = await returnBillHome("bill-c");
+    expect(home).toMatchObject({ ok: true, kind: "none" });
+    const sentence = (home as { sentence: string }).sentence;
+    expect(sentence).toMatch(/^No bill from NS Northline Supply - Reno on this job carries the lines this credit returns, but bills from (Northline Supply and Bayberry Lumber|Bayberry Lumber and Northline Supply) on this job do\. /);
+    expect(sentence).toMatch(/If this credit is from one of them, set its supplier with Edit, then press File With Its Bill again\. Nothing changed\.$/);
+    expect(await fileReturnBillWithItsBill("bill-c", SHOWN)).toEqual({ ok: false, error: sentence });
+    expect(db.writes).toEqual([]);
+    expect(linkSpelling).not.toHaveBeenCalled();
+  });
+
+  it("a supplier that carries only SOME of its lines is not it: today's sentence, as before", async () => {
+    const t = misread();
+    t.bills = t.bills.filter((b) => !["bill-p2", "bill-p3"].includes(b.id));
+    use(t);
+    expect(await returnBillHome("bill-c")).toEqual({
+      ok: true,
+      kind: "none",
+      sentence: "No bill from NS Northline Supply - Reno on this job carries the lines this credit returns, so nothing was closed. It stays a credit on the job, as before.",
+    });
+  });
+
+  it("S3: the one supplier that carries its lines does not carry its TAX: the tax refusal at once, no name filed, and no trip through Edit first", async () => {
+    const t = misread();
+    // An untaxed line on one of the tickets: closing would move tax the credit's own tax line does not give back.
+    t.bill_line_items.push(lineRow("p1-u", "bill-p1", 2, { description: "Delivery Charge", quantity: 1, unit_price: 20, amount: 20 }));
+    t.bills.find((b) => b.id === "bill-p1")!.amount = 31.34;
+    use(t);
+    const home = await returnBillHome("bill-c");
+    expect(home.ok).toBe(false);
+    const said = (home as { error: string }).error;
+    expect(said).toMatch(/^This credit's lines are on bills from Northline Supply, but the tax on it \(\$[0-9.]+\) is not the tax those lines carry on T-543 and T-576 \(\$[0-9.]+\), so filing it would change what the customer pays\. It stays a credit on the job, as before\. Nothing changed\.$/);
+    expect(said).not.toMatch(/Edit/);
+    expect(await fileReturnBillWithItsBill("bill-c", SHOWN)).toEqual({ ok: false, error: said });
+    expect(db.writes).toEqual([]);
+    expect(linkSpelling).not.toHaveBeenCalled();
+  });
+
+  it("an invoice that went out billed it under its OWN name: that is the reason said, and the other suppliers are not asked", async () => {
+    const t = misread();
+    // A ticket under the credit's own spelling carries one of its lines, and an invoice that went out holds it.
+    t.bills.push(billRow("bill-z", { supplier: SPELLING }));
+    t.bill_line_items.push(lineRow("z-a", "bill-z", 0, { description: "1/2 in EMT Connector Steel", quantity: 2, unit_price: 5.25, amount: 10.5 }));
+    holds(t, "inv-905", "sent", ["bill-z"]);
+    use(t);
+    const home = await returnBillHome("bill-c");
+    expect(home).toMatchObject({ ok: true, kind: "none" });
+    expect((home as { sentence: string }).sentence).toMatch(/^An invoice that went out, INV-905, already billed what this credit returns/);
+    expect((home as { sentence: string }).sentence).not.toMatch(/Edit|read as/);
+    expect(db.writes).toEqual([]);
+  });
+
+  it("the name's own write refuses: said, and the credit is not filed", async () => {
+    use(misread());
+    const taken = '"NS Northline Supply - Reno" is already saved as a name for Bayberry Lumber, so these bills were left alone.';
+    linkSpelling.mockResolvedValueOnce({ ok: false, error: taken, message: undefined });
+    expect(await fileReturnBillWithItsBill("bill-c", SHOWN)).toEqual({ ok: false, error: `${taken} The credit was not filed.` });
+    expect(db.writes).toEqual([]);
+  });
+
+  it("the name filed but the credit is still not under that supplier: both halves are said, nothing closed", async () => {
+    use(misread());
+    linkSpelling.mockResolvedValueOnce({ ok: true, error: undefined, message: JOINED });
+    expect(await fileReturnBillWithItsBill("bill-c", SHOWN)).toEqual({
+      ok: false,
+      error: `${JOINED} The credit itself was not filed: It is still not under Northline Supply. Reload the page and press File With Its Bill again.`,
+    });
+    expect(db.writes).toEqual([]);
+  });
+
+  it("S2: the name filed, then the credit's tax line can't be marked: the name is said FIRST and it never says nothing changed", async () => {
+    const t = misread();
+    t.bill_line_items.find((l) => l.id === "c-t")!.category = null;
+    use(t, {
+      // The tax line is gone under the door, so marking it writes no row.
+      beforeUpdate: (table, patch) => {
+        if (table === "bill_line_items" && patch.category === "Tax") db.tables.bill_line_items = db.tables.bill_line_items.filter((l) => l.id !== "c-t");
+      },
+    });
+    const r = await fileReturnBillWithItsBill("bill-c", SHOWN);
+    expect(r).toEqual({ ok: false, error: `${JOINED} Sales Tax on the credit couldn't be marked as tax just now. Nothing else changed.` });
+    expect(db.tables.bills.find((b) => b.id === "bill-c")!.supplier_account_id).toBe("acct-1");
+    expect(db.tables.bill_line_items.find((l) => l.id === "p1-a")).toMatchObject({ billable: true, returned: false });
   });
 });

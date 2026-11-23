@@ -5,13 +5,13 @@ import { requireStaff } from "@/lib/staff-guard";
 import { dbError } from "@/lib/db-error";
 import { reportError } from "@/lib/observe";
 import { cleanLines } from "@/lib/paper-lines";
-import { creditMemoNoneSentence, creditMemoReverses, isWaitingCreditMemo, linesPointWithTotal, proposalOf, type PaperProposal } from "@/lib/paperwork";
+import { CREDIT_MEMO_DOOR, creditMemoNoneSentence, creditMemoReverses, isWaitingCreditMemo, linesPointWithTotal, proposalOf, type PaperProposal } from "@/lib/paperwork";
 import { billLabel, billsCarryingNumber, purchasesOf, sameSupplier, type LedgerBill } from "@/lib/same-purchase";
-import { indexSupplierAliases, type SupplierAliasIndex } from "@/lib/supplier-identity";
+import { accountForSupplier, aliasKey, indexSupplierAliases, type SupplierAliasIndex } from "@/lib/supplier-identity";
 import { billLabel as numberLabel, lineWords, purchaseCents } from "@/lib/bill-correction";
 import { restampLotsForBill } from "@/lib/stock-ledger";
 import { BRING_IN_NEW_WORK } from "@/lib/actuals-draw";
-import { formatCurrency } from "@/lib/utils";
+import { escapeLike, formatCurrency } from "@/lib/utils";
 import {
   CLOSES,
   bestHomes,
@@ -36,6 +36,7 @@ import { ALREADY_FILED } from "@/lib/return-bill-door";
 import { readBillClaimants, type BillClaimant } from "@/lib/bill-claimants";
 import { correctBill } from "@/app/(app)/jobs/actions";
 import { importCostsIntoInvoice } from "@/app/(app)/billing/actions";
+import { linkBillsBySupplierText } from "@/app/(app)/bills/supplier-actions";
 import { isMissingColumnError } from "@/app/(app)/organize/paperwork-core";
 
 /**
@@ -50,7 +51,10 @@ import { isMissingColumnError } from "@/app/(app)/organize/paperwork-core";
  */
 
 type Result = { ok: boolean; error?: string; message?: string };
-export type CreditMemoCandidate = { billId: string; label: string };
+/** `join` (cn-v1188): the credit was read under a name that is on no supplier yet, and its lines sit on
+ *  the bills of ONE supplier account on its job. The door says so before the tap, and the tap that
+ *  files the credit files that name on the account too. */
+export type CreditMemoCandidate = { billId: string; label: string; join?: { accountId: string; supplier: string; spelling: string } };
 export type CreditMemoHomeResult =
   /** `by`: "number" when the memo's own printed reversal named the bill (the door files at once);
    *  "words" when its lines matched it best (the door names the bill and files on that tap). */
@@ -61,6 +65,8 @@ export type CreditMemoHomeResult =
 
 const NOT_FILED = "Nothing was filed.";
 const BILLS_READ_CAP = 2000;
+/** cn-v1188: how many bills under one spelling are read before the door stops calling a name "this paper's alone". */
+const NAMED_READ_CAP = 1000;
 const CUT_SENTENCE =
   "Only your newest 2,000 bills were searched, and none of them carries the lines this credit memo returns; the purchase it reverses may be older. Fix Details can still file it on a job, as before.";
 const MEMO_COLUMNS = "id, org_id, status, kind, doc_type, category, vendor, doc_number, amount, item_date, line_items, proposal, bill_id";
@@ -479,10 +485,11 @@ type JobBill = ReturnBill & { bill: LedgerBill; claims: BillClaimant[]; words: s
 /**
  * THE CREDIT'S BILLS: the same supplier's live purchases ON THE CREDIT'S JOB (supplier told the one
  * way: name and account of both bills, through the alias index), each with its lines and whether an
- * invoice that went out holds it. A failed read is said, never "no bill".
+ * invoice that went out holds it. A failed read is said, never "no bill". `whose: "others"` is the
+ * same read turned over: the job's purchases from every other supplier.
  */
-async function readJobBills(c: Ctx, credit: CreditOnJob): Promise<JobBill[] | Fail> {
-  const aliases = await readAliases(c);
+async function readJobBills(c: Ctx, credit: CreditOnJob, whose: "theirs" | "others" = "theirs", index?: SupplierAliasIndex): Promise<JobBill[] | Fail> {
+  const aliases = index ?? (await readAliases(c));
   if ("error" in aliases) return { error: aliases.error };
   const { data: rows, error } = await c.supabase
     .from("bills")
@@ -497,11 +504,16 @@ async function readJobBills(c: Ctx, credit: CreditOnJob): Promise<JobBill[] | Fa
   const theirs = ((rows ?? []) as any[])
     .map(asLedger)
     .filter((b) => b.id !== credit.bill.id && b.job_id === credit.bill.job_id && !b.corrects_bill_id && !b.superseded_by_bill_id && cents(b.amount) > 0)
-    .filter((b) => sameSupplier({ name: credit.bill.supplier, account: credit.bill.supplier_account_id ?? null }, { name: b.supplier, account: b.supplier_account_id ?? null }, aliases));
+    // "others" (cn-v1188): the same job's purchases from every OTHER supplier, for underAnotherName.
+    .filter((b) => (whose === "theirs") === sameSupplier({ name: credit.bill.supplier, account: credit.bill.supplier_account_id ?? null }, { name: b.supplier, account: b.supplier_account_id ?? null }, aliases));
   const lines = await readLines(c, theirs.map((b) => b.id));
   if ("error" in lines) return { error: lines.error };
+  // "others" (skeptic #89, S10): only a bill with a line that names one of the credit's parts can
+  // pair with it, so no other bill is asked which invoices hold it. The same words rule as the pairing.
+  const parts = credit.memoLines.filter((m) => isPartLine(m)).map((m) => lineWords(m.description));
+  const asked = whose === "theirs" ? theirs : theirs.filter((b) => (lines.get(b.id) ?? []).some((l) => !isTaxish(l) && parts.some((w) => sameItemWords(w, lineWords(l.description)))));
   const out: JobBill[] = [];
-  for (const b of theirs) {
+  for (const b of asked) {
     const claimed = await readBillClaimants(c.supabase, b.id, (b as { po_id?: string | null }).po_id ?? null);
     if ("error" in claimed) return { error: `Couldn't check which invoices already bill ${numberLabel(b.bill_number)}: ${claimed.error} ${NOTHING_CHANGED}` };
     out.push({
@@ -520,6 +532,90 @@ async function readJobBills(c: Ctx, credit: CreditOnJob): Promise<JobBill[] | Fa
 type Closing = Extract<BillPairing, { kind: "closeReturned" | "closeWhole" | "split" }>;
 type Before = Extract<BillPairing, { kind: "closedBefore" }>;
 type Plan = { credit: CreditOnJob; bills: JobBill[]; pairs: BillPairing[]; closing: Closing[]; before: Before[] };
+type Join = NonNullable<CreditMemoCandidate["join"]> & { label: string; jobId: string };
+
+/**
+ * A CREDIT READ UNDER ANOTHER NAME (cn-v1188). The owner's credit was read as a spelling that is on no
+ * supplier, while every other paper on the job sat on the supplier's account. This door looked only
+ * at "bills from that name", found none, and said "no bill carries these lines" on every press, with
+ * nothing to do about it, while the line it returns sat on a ticket two rows up.
+ *
+ * WHEN THE CREDIT'S OWN SUPPLIER CARRIES NOTHING, the job's other purchases are asked the same
+ * question, one supplier at a time. A supplier CARRIES the credit when every part line of it closes
+ * on that supplier's bills (the same pairing, to the cent) and none is left over.
+ *   · The credit is on no supplier yet (no account, no saved spelling), exactly ONE supplier carries
+ *     it, that supplier is an account, and NO OTHER BILL IN THE COMPANY carries the credit's spelling:
+ *     OFFERED. The door names the supplier, and the tap that files the credit files the NAME there
+ *     first (bills/supplier-actions linkBillsBySupplierText: the Reconcile door's own write, never a
+ *     second way to do it).
+ *   · ONLY A NAME THIS ONE PAPER CARRIES (skeptic #89, S1). That write moves every unfiled bill of the
+ *     company with the spelling, on any job. From a credit's row a person agrees to file THIS credit
+ *     and to remember its name, nothing wider: a coincidence of one common part at one price must
+ *     never move a year of another supplier's receipts. With another bill under the same spelling,
+ *     the sentence names Edit, which moves this credit alone.
+ *   · The one supplier that carries it does not carry its TAX (S3): the tax refusal is said at once.
+ *     Sending a person to Edit first would only bring them back to it.
+ *   · Anything else that carries it (the credit is on an account already, two suppliers carry it, the
+ *     one that does has no account): ONE sentence naming them and the one action.
+ *   · Nothing carries it: null, and the caller says its own sentence.
+ * THE NAME RULE IS NOT ASKED (supplier-identity matchSupplierNames): it reads initials in front of a
+ * full name with a town after it as a stranger to the full name, which is how this credit got here
+ * and why the Reconcile page lists such a spelling alone. The lines are the evidence, and a person
+ * taps a button that names both.
+ */
+async function underAnotherName(c: Ctx, credit: CreditOnJob): Promise<Fail | { join: Join } | { none: string } | null> {
+  const aliases = await readAliases(c);
+  if ("error" in aliases) return { error: aliases.error };
+  const others = await readJobBills(c, credit, "others", aliases);
+  if ("error" in others) return others;
+  const keyOf = (b: LedgerBill) => {
+    const account = b.supplier_account_id || accountForSupplier(b.supplier, aliases);
+    return account ? `account:${account}` : `name:${aliasKey(b.supplier)}`;
+  };
+  const groups = new Map<string, JobBill[]>();
+  for (const b of others) groups.set(keyOf(b.bill), [...(groups.get(keyOf(b.bill)) ?? []), b]);
+  const carrying: { key: string; bills: JobBill[]; found: (Closing | Before)[]; tax: ReturnType<typeof returnTaxCheck> }[] = [];
+  for (const [key, bills] of groups) {
+    const pairs = pairCreditAcrossBills(credit.memoLines, bills, { creditId: credit.bill.id });
+    const found = pairs.filter((p): p is Closing | Before => CLOSES.has(p.kind as Pairing["kind"]) || p.kind === "closedBefore");
+    if (!found.length || pairs.some((p) => p.kind === "stays")) continue;
+    carrying.push({ key, bills, found, tax: returnTaxCheck({ credit: credit.allMemo, memo: credit.memoLines, pairs, bills }) });
+  }
+  if (!carrying.length) return null;
+  const said = (g: (typeof carrying)[number]) => String(g.bills.find((b) => b.id === g.found[0].billId)?.bill.supplier ?? "").trim() || "another supplier";
+  const wordsOf = (g: (typeof carrying)[number], ids: Iterable<string>) => andList(Array.from(new Set(ids)).map((id) => g.bills.find((b) => b.id === id)?.words ?? "that bill"));
+  const spelling = String(credit.bill.supplier ?? "").trim();
+  const unfiled = !credit.bill.supplier_account_id && !accountForSupplier(credit.bill.supplier, aliases);
+  const one = carrying.length === 1 ? carrying[0] : null;
+  if (one && one.tax.checked && !one.tax.ok) {
+    return {
+      error: `This credit's lines are on bills from ${said(one)}, but the tax on it (${formatCurrency(one.tax.creditTaxCents / 100)}) is not the tax those lines carry on ${wordsOf(one, one.tax.billIds)} (${formatCurrency(one.tax.billsTaxCents / 100)}), so filing it would change what the customer pays. It stays a credit on the job, as before. ${NOTHING_CHANGED}`,
+    };
+  }
+  if (one && unfiled && spelling && one.key.startsWith("account:")) {
+    // Every bill of this company whose supplier holds the spelling, then the exact ones (the way the
+    // name's own write matches: trimmed, any case). A read that fails is said; a full page is "not alone".
+    const { data: named, error: namedErr } = await c.supabase
+      .from("bills")
+      .select("id, supplier")
+      .eq("org_id", c.orgId)
+      .ilike("supplier", `%${escapeLike(spelling)}%`)
+      .limit(NAMED_READ_CAP);
+    if (namedErr) return { error: `Couldn't check which other bills carry that name just now: ${dbError(namedErr)} ${NOTHING_CHANGED}` };
+    const rows = (named ?? []) as { id: string; supplier: string | null }[];
+    const alone = rows.length < NAMED_READ_CAP && !rows.some((b) => String(b.id) !== credit.bill.id && aliasKey(b.supplier) === aliasKey(spelling));
+    if (alone) {
+      const n = one.found.length;
+      return {
+        join: { accountId: one.key.slice("account:".length), supplier: said(one), spelling, label: `${n} ${n === 1 ? "line" : "lines"} on ${wordsOf(one, one.found.map((p) => p.billId))}`, jobId: String(credit.bill.job_id) },
+      };
+    }
+  }
+  const who = andList(Array.from(new Set(carrying.map(said))));
+  return {
+    none: `No bill from ${spelling || "this supplier"} on this job carries the lines this credit returns, but bills from ${who} on this job do. If this credit is from ${carrying.length === 1 ? "that supplier" : "one of them"}, set its supplier with Edit, then press ${CREDIT_MEMO_DOOR} again. ${NOTHING_CHANGED}`,
+  };
+}
 
 /**
  * WHY NOTHING WOULD CLOSE (skeptic #86, S4), from the pairs' own reasons: a line an invoice that went
@@ -545,8 +641,9 @@ function noneSentence(credit: CreditOnJob, bills: JobBill[], pairs: BillPairing[
   return stays.length > invoiced.length ? `${said} ${today}` : said;
 }
 
-/** Both doors' reading: the credit, its job's bills, the pairing, the tax. `none` carries the sentence. */
-async function planReturn(c: Ctx, creditBillId: string): Promise<Plan | Fail | { none: string }> {
+/** Both doors' reading: the credit, its job's bills, the pairing, the tax. `none` carries the sentence;
+ *  `join` is a credit read under another name whose lines one supplier account on the job carries. */
+async function planReturn(c: Ctx, creditBillId: string): Promise<Plan | Fail | { none: string } | { join: Join }> {
   const credit = await readCreditOnJob(c, creditBillId);
   if ("error" in credit) return credit;
   if (credit.allOff) return { none: ALREADY_FILED };
@@ -555,7 +652,15 @@ async function planReturn(c: Ctx, creditBillId: string): Promise<Plan | Fail | {
   const pairs = pairCreditAcrossBills(credit.memoLines, bills, { creditId: credit.bill.id });
   const closing = pairs.filter((p): p is Closing => CLOSES.has(p.kind as Pairing["kind"]));
   const before = pairs.filter((p): p is Before => p.kind === "closedBefore");
-  if (!closing.length && !before.length) return { none: noneSentence(credit, bills, pairs) };
+  if (!closing.length && !before.length) {
+    // ITS OWN SUPPLIER CARRIES NOTHING. Unless an invoice that went out is the reason, the job's
+    // other purchases are asked (cn-v1188): a credit read under another name is found by its lines.
+    if (!pairs.some((p) => p.kind === "stays" && p.why === "invoiced")) {
+      const elsewhere = await underAnotherName(c, credit);
+      if (elsewhere) return elsewhere;
+    }
+    return { none: noneSentence(credit, bills, pairs) };
+  }
   // FILING NEVER CHANGES WHAT THE CUSTOMER PAYS IN TAX (skeptic #86, S1 + S13): checked before any write.
   const tax = returnTaxCheck({ credit: credit.allMemo, memo: credit.memoLines, pairs, bills });
   if (tax.checked && !tax.ok) {
@@ -579,6 +684,10 @@ export async function returnBillHome(creditBillId: string): Promise<CreditMemoHo
   const plan = await planReturn(c, creditBillId);
   if ("error" in plan) return { ok: false, error: plan.error };
   if ("none" in plan) return { ok: true, kind: "none", sentence: plan.none };
+  if ("join" in plan) {
+    const { accountId, supplier, spelling, label } = plan.join;
+    return { ok: true, kind: "one", by: "words", candidate: { billId: String(creditBillId ?? "").trim(), label, join: { accountId, supplier, spelling } } };
+  }
   // A line this credit already closed counts in what it found (S2): a second press repairs it.
   const found = [...plan.closing, ...plan.before];
   const n = found.length;
@@ -596,14 +705,41 @@ export async function returnBillHome(creditBillId: string): Promise<CreditMemoHo
  * the credit's own lines whose pair closed, or that are a fee, off the customer's bill BY LINE ID; the
  * roll in stock re-costed per bill; every draft holding a row of the credit or of a bill closed on
  * brought up to date ONCE. A closing write that fails is said and its credit line keeps crediting;
- * nothing is rolled back. No `bills` row is written.
+ * nothing is rolled back. No `bills` row is written, except the one case of cn-v1188: a credit read
+ * under a name that is on no supplier is first filed, with that name, on the account whose bills carry
+ * its lines (underAnotherName), and only when the tap hands back the account and the name it was shown.
  */
-export async function fileReturnBillWithItsBill(creditBillId: string): Promise<Result> {
+export async function fileReturnBillWithItsBill(creditBillId: string, shown?: { accountId?: string | null; spelling?: string | null } | null): Promise<Result> {
   const c = await staff();
   if ("error" in c) return { ok: false, error: c.error };
-  const plan = await planReturn(c, creditBillId);
-  if ("error" in plan) return { ok: false, error: plan.error };
-  if ("none" in plan) return { ok: false, error: plan.none };
+  const first = await planReturn(c, creditBillId);
+  if ("error" in first) return { ok: false, error: first.error };
+  if ("none" in first) return { ok: false, error: first.none };
+  let plan: Plan;
+  let joined = "";
+  if ("join" in first) {
+    // THE NAME FIRST (cn-v1188), and only on a tap that was SHOWN this supplier and this name: the
+    // account AND the spelling the client hands back must be the ones found here, now (skeptic #89,
+    // S6: a credit renamed between the taps files no name nobody saw). The write is the Reconcile
+    // door's own; once the credit is on the account, everything is read and paired again.
+    const { accountId, supplier, spelling, jobId } = first.join;
+    const handed = shown && typeof shown === "object" ? shown : null;
+    if (String(handed?.accountId ?? "") !== accountId || aliasKey(String(handed?.spelling ?? "")) !== aliasKey(spelling)) {
+      return { ok: false, error: `This credit was read as "${spelling}", and its lines are on bills from ${supplier}. Press ${CREDIT_MEMO_DOOR} again to file it with them. ${NOTHING_CHANGED}` };
+    }
+    const filed = await linkBillsBySupplierText({ supplier: spelling, accountId });
+    if (!filed.ok) return { ok: false, error: `${filed.error ?? "That name didn't file."} The credit was not filed.` };
+    joined = `${filed.message ?? `"${spelling}" is filed under ${supplier}.`} `;
+    // The name landed: whatever happens next, the job's page and the tray are read again (S4).
+    revalidatePath("/organize");
+    revalidatePath(`/jobs/${jobId}`);
+    const notFiled = (why: string): Result => ({ ok: false, error: `${joined}The credit itself was not filed: ${why.replace(NOTHING_CHANGED, "").trim()}` });
+    const again = await planReturn(c, creditBillId);
+    if ("error" in again) return notFiled(again.error);
+    if ("none" in again) return notFiled(again.none);
+    if ("join" in again) return notFiled(`It is still not under ${supplier}. Reload the page and press ${CREDIT_MEMO_DOOR} again.`);
+    plan = again;
+  } else plan = first;
   const { credit, pairs, closing } = plan;
   const creditId = credit.bill.id;
 
@@ -623,7 +759,8 @@ export async function fileReturnBillWithItsBill(creditBillId: string): Promise<R
       .select("id");
     if (taxErr || (taxed ?? []).length !== 1) {
       const why = taxErr ? `: ${dbError(taxErr)}` : "";
-      return { ok: false, error: `${String(l.description ?? "").trim() || "Its tax line"} on the credit couldn't be marked as tax just now${why}. ${wroteAny ? "Nothing else changed." : NOTHING_CHANGED}` };
+      // After the name was filed (cn-v1188) something HAS changed: it is said first (skeptic #89, S2).
+      return { ok: false, error: `${joined}${String(l.description ?? "").trim() || "Its tax line"} on the credit couldn't be marked as tax just now${why}. ${wroteAny || joined ? "Nothing else changed." : NOTHING_CHANGED}` };
     }
     wroteAny = true;
   }
@@ -708,5 +845,5 @@ export async function fileReturnBillWithItsBill(creditBillId: string): Promise<R
     ? ` ${offFailed.join("; ")} on the credit couldn't be taken off the customer's bill; switch ${offFailed.length === 1 ? "it" : "them"} to Not Billed on ${credit.words === "The credit" ? "the credit" : credit.words}.`
     : "";
   const beforeSaid = beforeOff ? ` ${beforeOff} ${beforeOff === 1 ? "line" : "lines"} this credit had already closed: off the customer's bill now.` : "";
-  return { ok: true, message: `${said}${beforeSaid}${offSaid}${rollNotes.join("")}${draftNotes.join("")}` };
+  return { ok: true, message: `${joined}${said}${beforeSaid}${offSaid}${rollNotes.join("")}${draftNotes.join("")}` };
 }
