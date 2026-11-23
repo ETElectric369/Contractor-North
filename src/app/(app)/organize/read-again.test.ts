@@ -347,3 +347,31 @@ describe("readFiledPaperAgain, the server action", () => {
     expect(res).toEqual({ ok: false, error: "Undo said no. Nothing was undone." });
   });
 });
+
+describe("Read Again carries a bill whose lines did not land (cn-v1184, B3)", () => {
+  const LOST = "The bill was recorded at its total, but its lines didn't save. Press Read Again on it.";
+  it("the tray path: File It's sentence is said, and no pen sentence of lines that are not on the bill", async () => {
+    doors.fileTray.mockImplementationOnce(async (id: string) => {
+      const p = db.tables.organized_items.find((r) => r.id === id)!;
+      db.tables.bills.push(BILL({ id: "bill-2", amount: 283 }));
+      Object.assign(p, { status: "filed", bill_id: "bill-2" });
+      return { ok: true, message: `Filed. ${LOST}` };
+    });
+    const res = await run();
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain(LOST);
+    expect(res.message).not.toContain("Pen marks read");
+  });
+
+  it("the job path: Record as Cost's warning is said", async () => {
+    setup([BILL()], [PAPER({ source: "job", document_id: "doc-job" })]);
+    doors.billJob.mockImplementationOnce(async (documentId: string) => {
+      db.tables.bills.push(BILL({ id: "bill-3", amount: 290.5 }));
+      db.tables.organized_items.push(PAPER({ id: "oi-new", source: "job", document_id: documentId, bill_id: "bill-3", line_items: PEN_LINES, payment: "on_account" }));
+      return { ok: true, amount: 290.5, warning: LOST };
+    });
+    const res = await run();
+    expect(res.message).toContain(LOST);
+    expect(res.message).not.toContain("Pen marks read");
+  });
+});

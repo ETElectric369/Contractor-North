@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
 import { dbError } from "@/lib/db-error";
 import { decideReceiptLine } from "@/app/(app)/bills/receipt-billing";
-import { penMarkOf } from "@/lib/pen-marks";
+import { TAX_FOLLOWS_ITEMS, penMarkOf } from "@/lib/pen-marks";
+import { isTaxish } from "@/lib/credit-memo-close";
 
 /**
  * KEPT OR RETURNED, ON A PAPER STILL WAITING IN THE TRAY (cn-v1181, lib/pen-marks).
@@ -50,6 +51,9 @@ export async function setPaperLineReturned(
   const said = String(line?.description ?? "").trim();
   if (!line || typeof line !== "object" || said !== String(expectDescription ?? "").trim())
     return { ok: false, error: "The lines on this paper changed since the page opened. Reload the page and answer again. Nothing changed." };
+  // A TAX LINE IS NEVER RETURNED (cn-v1184): its share comes off with the items marked returned.
+  if (returned && isTaxish({ category: typeof line.category === "string" ? line.category : null, description: said }))
+    return { ok: false, error: TAX_FOLLOWS_ITEMS };
   const pen = penMarkOf(line.pen);
   if (!pen) return { ok: false, error: "That line has no pen mark on it to answer. Nothing changed." };
 

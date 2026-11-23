@@ -141,3 +141,19 @@ describe("cn-v1181 fixer: the tray's stock sheet lists no line that went back (s
     expect(src).not.toContain("lines={shelfRowsOf(item).map(");
   });
 });
+
+describe("a tax line takes no Returned on the tray row (cn-v1184, B1)", () => {
+  it("a marked tax line (the old read's shape) offers Kept, the way out, and no Returned", () => {
+    const TAXED = [LINES[2], { description: "SALES TAX", quantity: 1, unit_price: 21.6, amount: 21.6, category: "Tax", billable: false, pen: "struck", returned: true }];
+    const v = penViewOf({ ...base, line_items: TAXED })!;
+    expect(v.lines.map((l) => [l.index, l.tax])).toEqual([[1, true]]);
+    const html = render({ line_items: TAXED });
+    const group = html.slice(html.indexOf('aria-label="Pen marks"'));
+    const labels = buttonTags(group).map((b) => b.label);
+    expect(labels).toContain(PEN_WORDS.kept);
+    expect(labels).not.toContain(PEN_WORDS.returned);
+  });
+  it("an item line keeps both", () => {
+    expect(penViewOf(base)!.lines.every((l) => l.tax === false)).toBe(true);
+  });
+});

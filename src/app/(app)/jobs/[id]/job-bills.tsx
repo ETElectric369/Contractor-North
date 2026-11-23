@@ -27,6 +27,8 @@ import type { CorrectableBill } from "@/components/correct-bill-modal";
 import { ReadAgainConfirm } from "@/app/(app)/bills/receipt-billing-card";
 import { isStillOwed } from "@/lib/supplier-owed";
 import { useToast } from "@/components/toast";
+import { returnRowLine, rowOffersFileWithItsBill } from "@/lib/return-bill-door";
+import { ReturnBillDoor } from "@/components/return-bill-door";
 
 /**
  * ALREADY BILLED ON THE COSTS TAB (0357). `open`: the Not Billed Yet rows the door can mark (a row
@@ -283,7 +285,17 @@ export function JobBills({
    *  on a phone. THE BILL OPENS (ea2b7172): a bill's detail (its lines, the receipt-billing card) lives
    *  only inside /bills's own fold (#bill-<id>), and this row had no way there, so the supplier line
    *  and an Open the Bill door both land on it, the way a PO row lands on its page. */
-  const billRow = (b: Bill, why: string | undefined, pile: Pile, underIt = false) => (
+  /** FILE WITH ITS BILL on a credit recorded on this job (cn-v1184). `heldBySent`: the row sits in the
+   *  fold of an invoice that went out, so the page knows it is already credited; a draft never hides it. */
+  const creditRow = (b: Bill, pile: Pile, heldBySent: boolean) => ({
+    ready: correctionsReady,
+    bill: { amount: b.amount, job_id: jobId, corrects_bill_id: b.corrects_bill_id ?? null },
+    hasCorrections: (correctionsOf.get(b.id)?.length ?? 0) > 0,
+    lines: b.bill_line_items,
+    heldBySent: pile === "billed" && heldBySent,
+  });
+
+  const billRow = (b: Bill, why: string | undefined, pile: Pile, underIt = false, heldBySent = false) => (
     <li key={b.id} className={underIt ? "border-l-4 border-slate-200 bg-slate-50/40 py-2.5 pl-6 pr-4 text-sm" : "px-4 py-2.5 text-sm"}>
       <Link href={`/bills#bill-${b.id}`} className="flex min-h-11 items-center gap-3 rounded-md hover:bg-slate-50">
         <div className="min-w-0 flex-1">
@@ -302,6 +314,7 @@ export function JobBills({
           {faces.get(b.id) && <div className="text-xs font-medium text-slate-600">{faces.get(b.id)!.words}</div>}
           {why && <div className="text-xs text-slate-500">{why}</div>}
           {billPenNote(b.bill_line_items) && <div className="text-xs text-slate-600">{billPenNote(b.bill_line_items)}</div>}
+          {returnRowLine(creditRow(b, pile, heldBySent)) && <div className="text-xs text-slate-600">{returnRowLine(creditRow(b, pile, heldBySent))}</div>}
         </div>
         <span className="font-medium text-slate-800">{formatCurrency(b.amount)}</span>
       </Link>
@@ -317,6 +330,7 @@ export function JobBills({
           Open the Bill
         </Link>
         {abDoors(b.id, pile)}
+        {rowOffersFileWithItsBill(creditRow(b, pile, heldBySent)) && <ReturnBillDoor billId={b.id} />}
       </div>
     </li>
   );
@@ -376,7 +390,7 @@ export function JobBills({
   // Marked hours on an invoice that holds none of the job's bills: their own line under Billed.
   const hoursLoose = billedHours.filter((h) => !h.invoiceId || !foldIds.has(h.invoiceId));
 
-  const rowsOf = (ids: string[], whyOf?: (id: string) => string | undefined, pile: Pile = "plain") => {
+  const rowsOf = (ids: string[], whyOf?: (id: string) => string | undefined, pile: Pile = "plain", heldBySent = false) => {
     // A correction directly under its original when both are in this list; every other row keeps
     // its place (orders and takes from stock never carry the column).
     const ordered = correctionsUnder(ids.map((id) => ({ id, corrects_bill_id: billById.get(id)?.corrects_bill_id ?? null }))).map((r) => r.id);
@@ -385,7 +399,7 @@ export function JobBills({
       <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
         {ordered.map((id) => {
           const b = billById.get(id);
-          if (b) return billRow(b, whyOf?.(id), pile, !!b.corrects_bill_id && here.has(b.corrects_bill_id));
+          if (b) return billRow(b, whyOf?.(id), pile, !!b.corrects_bill_id && here.has(b.corrects_bill_id), heldBySent);
           const p = poById.get(id);
           if (p) return poRow(p, whyOf?.(id), pile);
           return stockRow(id, whyOf?.(id), pile);
@@ -445,7 +459,7 @@ export function JobBills({
                       <span className="font-medium text-slate-800">{formatCurrency(g.total)}</span>
                     </summary>
                     <div className="border-t border-slate-100 px-3 pb-2 pt-3">
-                      {rowsOf(g.ids, undefined, "billed")}
+                      {rowsOf(g.ids, undefined, "billed", !g.draft)}
                       {hoursIn(g.invoice.id).length > 0 && <div className="mt-2 space-y-2">{hoursIn(g.invoice.id).map(hoursRow)}</div>}
                       <Link
                         href={`/billing/${g.invoice.id}`}

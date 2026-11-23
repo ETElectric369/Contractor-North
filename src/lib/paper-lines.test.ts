@@ -97,3 +97,68 @@ describe("cleanLines reads the pen (cn-v1181)", () => {
     expect(penSummary(once)).toMatchObject({ struck: 4, quantity: 1, unclear: 1 });
   });
 });
+
+describe("a tax line never takes a pen mark (cn-v1184, B1)", () => {
+  const tax = (o: Record<string, unknown> = {}) =>
+    printed({ description: "Sales tax", category: "Tax", quantity: 1, unit_price: 9.6, amount: 9.6, ...o });
+
+  it("the reader's struck tax line beside struck and kept items: the tax comes out ordinary and billable, the items as before", () => {
+    const out = cleanLines([
+      printed({ description: "Struck part", pen: "struck" }),
+      printed({ description: "Kept part" }),
+      printed({ description: "Split part", pen: "quantity", hand_quantity: 4 }),
+      tax({ pen: "struck" }),
+    ]);
+    expect(out).toHaveLength(5);
+    expect(out[0]).toMatchObject({ description: "Struck part", pen: "struck", returned: true, billable: false });
+    expect(out[1]).toEqual({ description: "Kept part", quantity: 10, unit_price: 1.25, amount: 12.5, category: "Materials", billable: true });
+    expect(out[2]).toMatchObject({ pen: "quantity", returned: false, billable: true, quantity: 4 });
+    expect(out[3]).toMatchObject({ pen: "quantity", returned: true, billable: false, quantity: 6 });
+    expect(out[4]).toEqual({ description: "Sales tax", quantity: 1, unit_price: 9.6, amount: 9.6, category: "Tax", billable: true });
+  });
+
+  it("a tax line by its printed words alone, struck or changed by hand or unclear: ordinary", () => {
+    for (const pen of [{ pen: "struck" }, { pen: "unclear" }, { pen: "quantity", hand_quantity: 0 }]) {
+      const [l] = cleanLines([tax({ category: null, description: "TAX", ...pen })]);
+      expect(l).toMatchObject({ description: "TAX", billable: true });
+      expect("pen" in l).toBe(false);
+      expect("returned" in l).toBe(false);
+    }
+  });
+
+  it("the stored shape the old read wrote on a tax line ({pen: struck, returned: true, billable: false}) reads back ordinary", () => {
+    const [l] = cleanLines([tax({ pen: "struck", returned: true, billable: false })]);
+    expect(l).toEqual({ description: "Sales tax", quantity: 1, unit_price: 9.6, amount: 9.6, category: "Tax", billable: true });
+    // returned alone, with the off switch it brought: ordinary too.
+    expect(cleanLines([tax({ returned: true, billable: false })])[0]).toMatchObject({ billable: true });
+  });
+
+  it("a tax line a person switched off with no mark on it stays off", () => {
+    expect(cleanLines([tax({ billable: false })])).toEqual([
+      { description: "Sales tax", quantity: 1, unit_price: 9.6, amount: 9.6, category: "Tax", billable: false },
+    ]);
+    // Crossed off on a receipt paid at purchase ({pen: struck, returned: false, billable: false}) was
+    // the mark's doing, not a person's switch: ordinary and billable.
+    expect(cleanLines([tax({ pen: "struck", returned: false, billable: false })])[0]).toMatchObject({ billable: true });
+  });
+
+  it("IDEMPOTENT over the sweep, with every mark a tax line could carry", () => {
+    const table = [
+      printed({ description: "Struck", pen: "struck" }),
+      printed({ description: "Split", pen: "quantity", hand_quantity: 7, billed_amount: 2 }),
+      printed({ description: "Unclear", pen: "unclear" }),
+      printed({ description: "Answered kept", pen: "struck", returned: false, billable: true }),
+      printed({ description: "Plain" }),
+      tax({ pen: "struck" }),
+      tax({ description: "Sales tax 2", pen: "unclear" }),
+      tax({ description: "Sales tax 3", pen: "quantity", hand_quantity: 0.5 }),
+      tax({ description: "Sales tax 4", pen: "struck", returned: true, billable: false }),
+      tax({ description: "Sales tax 5", billable: false }),
+    ];
+    const once = cleanLines(table);
+    expect(cleanLines(once)).toEqual(once);
+    expect(cleanLines(JSON.parse(JSON.stringify(once)))).toEqual(once);
+    expect(once.filter((l) => l.category === "Tax").map((l) => l.billable)).toEqual([true, true, true, true, false]);
+    expect(once.filter((l) => l.category === "Tax").every((l) => !("pen" in l) && !("returned" in l))).toBe(true);
+  });
+});

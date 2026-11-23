@@ -118,3 +118,21 @@ describe("setPaperLineReturned", () => {
     expect(res.error).not.toMatch(/isn't here/);
   });
 });
+
+describe("a tax line is never returned by hand (cn-v1184, B1)", () => {
+  const TAXED = () => [...LINES(), { description: "SALES TAX", quantity: 1, unit_price: 21.6, amount: 21.6, category: "Tax", billable: false, pen: "struck", returned: true }];
+  it("Returned on a tax line is refused in one sentence, and writes nothing", async () => {
+    const { TAX_FOLLOWS_ITEMS } = await import("@/lib/pen-marks");
+    db = strictDb({ organized_items: [paper({ line_items: TAXED() })] });
+    state.client = db.sb;
+    expect(await setPaperLineReturned("oi-1", 4, true, "SALES TAX")).toEqual({ ok: false, error: TAX_FOLLOWS_ITEMS });
+    expect(db.writes).toEqual([]);
+  });
+
+  it("Kept on a marked tax line stays allowed", async () => {
+    db = strictDb({ organized_items: [paper({ line_items: TAXED() })] });
+    state.client = db.sb;
+    expect((await setPaperLineReturned("oi-1", 4, false, "SALES TAX")).ok).toBe(true);
+    expect(linesOf()[4]).toMatchObject({ returned: false, billable: true });
+  });
+});

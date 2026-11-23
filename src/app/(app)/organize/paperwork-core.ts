@@ -13,6 +13,7 @@ import { indexSupplierAliases, type SupplierAliasIndex } from "@/lib/supplier-id
 import { indexSupplierIdentity, supplierAccountForPaper } from "@/lib/supplier-owed";
 import { openListFromReader } from "@/lib/supplier-open-list";
 import {
+  CREDIT_MEMO_DOOR,
   findSameNumber,
   linesPointWithTotal,
   onPaperWords,
@@ -121,6 +122,21 @@ export function billStatusFromItem(item: { payment?: string | null; category?: s
   return billStatusFor(item.category);
 }
 
+/**
+ * WHEN A BILL'S LINES DID NOT LAND (cn-v1184, B3): the bill stands at its total, and the door that
+ * wrote it says so in one sentence with the one action. On a paper with a picture, Read Again reads
+ * the lines back on; where there is nothing to read again, Edit on the bill is the way.
+ */
+export const LINES_LOST_READ_AGAIN = "The bill was recorded at its total, but its lines didn't save. Press Read Again on it.";
+export const LINES_LOST_EDIT = "The bill was recorded at its total, but its lines didn't save. Open the bill and add its lines with Edit.";
+
+/**
+ * RECORD AS COST ON A CREDIT NAMES THE NEXT DOOR (cn-v1184, B4): a credit recorded from the job page
+ * is a bill of its own below zero, not yet filed under the purchase it returns, so every draft would
+ * list the purchase and then the return. The answer names the door that files it there.
+ */
+export const RECORDED_A_CREDIT = `This is a credit. Press ${CREDIT_MEMO_DOOR} on its row in Costs, and what went back comes off the customer's invoice.`;
+
 /** Insert a bill plus its line items (an itemized receipt → billable cost). */
 export async function insertItemizedBill(
   supabase: any,
@@ -161,7 +177,7 @@ export async function insertItemizedBill(
   /** The job's estimate parts (listJobScopes), so a scope can be held to one it really has. Empty
    *  for a bill with no job, and for a job whose estimate isn't broken into parts. */
   jobScopes: readonly string[] = [],
-): Promise<{ id: string | null; refusal: string | null }> {
+): Promise<{ id: string | null; refusal: string | null; linesLost?: true }> {
   // THE LINES POINT WITH THE TOTAL, HERE WHERE THE BILL IS WRITTEN (audit v994 review). The
   // readers line them up when they read, but the total can change after that (Fix Details, It Is A
   // Charge) and the lines sit in the row as they were read. Every door that writes a bill from a
@@ -227,7 +243,7 @@ export async function insertItemizedBill(
     const partUsed = (l: (typeof lines)[number], pen: { billable: boolean }) =>
       l.billed_amount !== undefined && (!isMarked(l) || pen.billable) ? l.billed_amount : null;
     const anyPartUsed = lines.some((l) => partUsed(l, penColumns(l, creditExpected)) !== null);
-    const { error: lineErr } = await supabase
+    const { data: landed, error: lineErr } = await supabase
       .from("bill_line_items")
       .insert(
         lines.map((l, i) => {
@@ -253,12 +269,19 @@ export async function insertItemizedBill(
       .select("id");
     // A BILL WITH NO LINES IS STILL A NUMBER (silent-write law, same pass as 0278): the cost is
     // kept, and the missing itemisation goes to the ops log instead of passing quietly.
-    if (lineErr) {
-      reportError("organize:insertItemizedBill.lines", lineErr, {
+    // AND TO THE PERSON (cn-v1184, B3): four bills were emptied unseen on one evening because this
+    // told only the ops log and answered as if all went well. The insert is read back; a refusal or
+    // a short count comes back as a fact (`linesLost`), the bill standing at its total (no refusal),
+    // and every door that speaks to a person says LINES_LOST_READ_AGAIN or LINES_LOST_EDIT.
+    const landedCount = Array.isArray(landed) ? landed.length : 0;
+    if (lineErr || landedCount !== lines.length) {
+      reportError("organize:insertItemizedBill.lines", lineErr ?? new Error(`${landedCount} of ${lines.length} lines came back`), {
         billId: data.id,
         supplier: bill.supplier,
         lineCount: lines.length,
+        landed: landedCount,
       });
+      return { id: String(data.id), refusal: null, linesLost: true };
     }
     // NO RESTAMP HERE, AND WHY (Shop Stock, 0304's other half): every bill-line write that can
     // move a roll's cost calls restampLotsForBill (receipt-billing-actions, updateBill), but these

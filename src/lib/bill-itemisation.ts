@@ -398,6 +398,10 @@ export function billItemisation(
   const lines = allLines.filter((l) => stillBills(l) && !isTaxLine(l));
   const billRows: BillItemRow[] = [];
   let emitted = 0;
+  let sells = 0;
+  // Rows shown as qty × unit, with their own exact sell, so a cent of rounding can be re-presented
+  // folded below instead of collapsing the bill into the lump (cn-v1184).
+  const presented: { row: number; sell: number; split: number; qty: number; desc: string }[] = [];
   for (const l of lines) {
     const qty = Number(l.quantity) || 0;
     const fullCost = billLineCost(l);
@@ -407,6 +411,7 @@ export function billItemisation(
     const sell = Math.round(rawAmt * rate * 100) / 100;
     if (!sell) continue;
     const desc = String(l.description || "Materials").slice(0, 300);
+    sells = Math.round((sells + sell) * 100) / 100;
     /**
      * A PARTIAL LINE BILLS ONE ROW, NOT A COUNT — and this is a refusal, not a shortcut.
      *
@@ -429,6 +434,7 @@ export function billItemisation(
     // sub-cent parts) the qty still folds into the description to protect the total.
     const split = Math.round(unitExact * qty * 100) / 100;
     if (qty > 0 && Number.isInteger(qty) && unitExact !== 0 && Math.abs(split - sell) <= 0.5) {
+      presented.push({ row: billRows.length, sell, split, qty, desc });
       billRows.push({ import_key: `bli:${l.id}`, description: desc, quantity: qty, unit: "ea", unit_price: unitExact });
       emitted = Math.round((emitted + split) * 100) / 100;
     } else {
@@ -458,7 +464,30 @@ export function billItemisation(
     if (purchased.length > 0 && !purchased.some(stillBills)) return [];
     return lump();
   }
-  const remainder = Math.round((target - emitted) * 100) / 100;
+  let remainder = Math.round((target - emitted) * 100) / 100;
+
+  /**
+   * A CENT OF ROUNDING IS NOT "MORE THAN THE RECEIPT" (cn-v1184).
+   *
+   * Two lines, 10 pieces at $13.20 and 3 pieces at $60.87, at 15%: each line's own marked-up amount
+   * is $15.18 and $70.00, exactly the bill's $85.18; shown as qty × a unit price rounded to the cent
+   * they come to $15.20 + $69.99 = $85.19, one cent over, and the branch below (written for a scan
+   * that read two documents as one) billed the whole thing as one lump. When the lines' OWN amounts
+   * fit the bill, the rows whose quantity × unit presentation is off from their own amount are shown
+   * folded instead (1 × the line's amount, the count in the words, the form this function already
+   * uses for a split it cannot present), so every row bills exactly its line's amount, the remainder
+   * row carries what is left, and the rows still sum to the target to the cent. Only when the amounts
+   * themselves exceed the bill is it the lump, as before. Import keys do not change.
+   */
+  if (remainder <= -0.01 && Math.round(sells * 100) <= Math.round(target * 100)) {
+    for (const p of presented) {
+      if (Math.round(p.split * 100) === Math.round(p.sell * 100)) continue;
+      const r = billRows[p.row];
+      billRows[p.row] = { ...r, description: p.qty > 1 ? `${p.desc} (${p.qty} ea)` : p.desc, quantity: 1, unit_price: p.sell };
+      emitted = Math.round((emitted - p.split + p.sell) * 100) / 100;
+    }
+    remainder = Math.round((target - emitted) * 100) / 100;
+  }
 
   /**
    * LINES THAT ADD UP TO MORE THAN THE RECEIPT ARE NOT AN ITEMISATION (review, 2026-09-19).

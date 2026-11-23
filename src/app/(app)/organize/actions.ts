@@ -71,6 +71,9 @@ import {
   handTotalOf,
   insertItemizedBill,
   insertPaperRow,
+  LINES_LOST_EDIT,
+  LINES_LOST_READ_AGAIN,
+  RECORDED_A_CREDIT,
   penSaidFor,
   loadBooks,
   loadMarkContext,
@@ -490,7 +493,8 @@ export async function billJobReceipt(
    *  should show it. Nothing silent: a number a person hasn't checked must say so. */
   warning?: string;
   /** WHAT INK WAS READ (lib/pen-marks penSentence), on a field of its own: it is not a warning and
-   *  never draws amber (skeptic #84, S7). Every caller that shows the result shows it, in slate. */
+   *  never draws amber (skeptic #84, S7). Every caller that shows the result shows it, in slate.
+   *  On a credit it also carries the next door, RECORDED_A_CREDIT (cn-v1184, B4). */
   pen?: string;
 }> {
   const ctx = await requireStaff();
@@ -820,16 +824,25 @@ ${PEN_MARKS_PROMPT_RULE}`,
   revalidatePath("/bills");
   revalidatePath("/analytics");
   revalidatePath(`/jobs/${doc.job_id}`);
+  // LINES THAT DIDN'T LAND ARE SAID (cn-v1184, B3): the bill stands at its total. With its link row
+  // in, the bill came from a paper and Read Again is its door; without it, Edit on the bill.
+  const lostWarning = written.linesLost ? (linkMissing ? LINES_LOST_EDIT : LINES_LOST_READ_AGAIN) : null;
+  // A CREDIT NAMES THE NEXT DOOR (cn-v1184, B4): slate, beside the pen sentence (never a warning).
+  // Not when its lines did not land (skeptic #86, S9): that door needs lines, so the lost-lines
+  // sentence stands alone with its one action.
+  const creditSaid = !written.linesLost && Math.round((Number(amount) || 0) * 100) < 0 ? RECORDED_A_CREDIT : null;
+  const slate = [written.linesLost ? null : penSaid, creditSaid].filter(Boolean).join(" ");
   return {
     ok: true,
     amount,
     vendor,
-    lineCount: lines.length,
+    lineCount: written.linesLost ? 0 : lines.length,
     // Both facts or neither: a receipt that did not add up AND did not get linked has two things
     // wrong with it, and hiding one behind the other is how the second one gets found in a month.
-    warning: [check.mismatch ? check.note : null, linkWarning, untieWarning].filter(Boolean).join(" ") || undefined,
+    warning: [check.mismatch ? check.note : null, linkWarning, untieWarning, lostWarning].filter(Boolean).join(" ") || undefined,
     // The pen sentence on its own field (skeptic #84, S7): not a warning, drawn slate by every caller.
-    ...(penSaid ? { pen: penSaid } : {}),
+    // The credit's next door rides on the same slate line, so every caller shows it without a change.
+    ...(slate ? { pen: slate } : {}),
   };
 }
 
@@ -1234,6 +1247,8 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
 
   let documentId: string | null = null;
   let billId: string | null = null;
+  /** The bill stands at its total but its lines didn't save (cn-v1184, B3): said after where it went. */
+  let linesLost = false;
   /** What went on the shelf, said after "Filed" (Shop Stock). */
   let shelfSaid = "";
   let jobId: string | null = null;
@@ -1351,6 +1366,7 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
         named ? await listJobScopes(supabase, dest.jobId) : [],
       );
       billId = written.id;
+      linesLost = written.linesLost === true;
       // The write's own sentence when it has one (a return with no lines, a part this job hasn't got).
       if (!billId)
         return backToTray(
@@ -1361,8 +1377,7 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
     }
   } else if (dest.type === "overhead") {
     category = dest.category;
-    billId = (
-      await insertItemizedBill(
+    const written = await insertItemizedBill(
         supabase,
         {
           job_id: null,
@@ -1378,8 +1393,9 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
         },
         lines,
         billStatusFromItem(item),
-      )
-    ).id;
+      );
+    billId = written.id;
+    linesLost = written.linesLost === true;
     // A business cost IS its bill; there is no copy on a job to show for it.
     if (!billId) return backToTray("The business cost didn't save, so this receipt is back in Needs Review. Try again.");
   } else if (dest.type === "stock") {
@@ -1389,8 +1405,7 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
     // a roll, in one transaction (shelveLines -> 0328). Anything short of that puts the paper back
     // in the tray holding nothing: a shelf ticket with no rolls on it is money in no place.
     category = "Shop Stock";
-    billId = (
-      await insertItemizedBill(
+    const written = await insertItemizedBill(
       supabase,
       {
         job_id: null,
@@ -1407,18 +1422,20 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
       },
       lines,
       billStatusFromItem(item),
-      )
-    ).id;
+      );
+    billId = written.id;
     if (!billId) return backToTray("The ticket didn't save, so it is back in the tray. Try File It again.");
+    // Lines that did not land (written.linesLost, cn-v1184) are caught by this door's own read-back
+    // just below, which puts the paper back in the tray and says so: no roll is made from a lost line.
     const rows = shelfRowsOf(item);
-    const { data: written, error: writtenErr } = await supabase
+    const { data: landed, error: writtenErr } = await supabase
       .from("bill_line_items")
       .select("id, sort_order")
       .eq("bill_id", billId)
       .order("sort_order");
-    if (writtenErr || (written ?? []).length !== rows.length)
+    if (writtenErr || (landed ?? []).length !== rows.length)
       return backToTray("The ticket's lines didn't all save, so nothing went into stock and the paper is back in the tray. Try again.");
-    const idAt = new Map(((written ?? []) as { id: string; sort_order: number }[]).map((w) => [Number(w.sort_order), String(w.id)]));
+    const idAt = new Map(((landed ?? []) as { id: string; sort_order: number }[]).map((w) => [Number(w.sort_order), String(w.id)]));
     const picks: ShelfPick[] = [];
     for (const c of dest.lines) {
       if (c.notStock) continue;
@@ -1503,7 +1520,10 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   const penSaid = billId && isCost
     ? penSaidFor(lines, { amount: total, creditExpected: billStatusFromItem(item) === "unpaid", handTotal: proposalOf(item).penMarks?.handTotal ?? null })
     : null;
-  const penPart = penSaid ? ` ${penSaid}` : "";
+  // LINES THAT DIDN'T LAND ARE SAID (cn-v1184, B3), and before the pen sentence (which read them).
+  // A paper with a picture can be read again; one without is mended with Edit on the bill.
+  const lostPart = billId && linesLost ? ` ${item.file_url ? LINES_LOST_READ_AGAIN : LINES_LOST_EDIT}` : "";
+  const penPart = lostPart || (penSaid ? ` ${penSaid}` : "");
   if (shelfSaid) return { ok: true, message: `Filed in shop stock.${shelfSaid}${linkedSaid}${linkNote}${penPart}` };
   return linkedSaid || linkNote || penPart ? { ok: true, message: `Filed.${linkedSaid}${linkNote}${penPart}` } : { ok: true };
 }

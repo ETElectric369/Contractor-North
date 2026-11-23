@@ -61,6 +61,7 @@ import { addSupplierDocuments, keepPaperwork, updatePaperwork } from "@/app/(app
 import { setPaperLineReturned } from "@/app/(app)/organize/pen-line-actions";
 import { CreditMemoDoor } from "@/components/credit-memo-door";
 import { creditExpectedOf, penMarkOf, penSentence, penSummary, PEN_WORDS, type PenMark } from "@/lib/pen-marks";
+import { isTaxish } from "@/lib/credit-memo-close";
 
 /**
  * THE ROWS THE TRAY'S STOCK SHEET ASKS TO COUNT (skeptic #84, S1): goods that went back are never
@@ -205,6 +206,8 @@ export type PenRowLine = {
   /** "open" = a mark nobody could read, still asked; else what the line is now. */
   state: "open" | "kept" | "returned";
   face: string;
+  /** A tax line (cn-v1184): tax follows the items, so the row offers no Returned on it, only Kept. */
+  tax: boolean;
 };
 
 /**
@@ -230,6 +233,7 @@ export function penViewOf(item: Pick<PaperItem, "line_items" | "payment">): { se
       pen,
       state,
       face: state === "open" ? PEN_WORDS.needsAnswer : state === "kept" ? PEN_WORDS.kept : creditExpected ? PEN_WORDS.creditExpected : PEN_WORDS.crossedOut,
+      tax: isTaxish({ category: typeof l?.category === "string" ? l.category : null, description: String(l?.description ?? "") }),
     });
   });
   return { sentence: penSentence(summary, { creditExpected }), creditExpected, lines };
@@ -894,10 +898,12 @@ export function PaperworkRow({
                         {spin(`pen:${l.index}:kept`) ? <Loader2 className="animate-spin" /> : null}
                         {PEN_WORDS.kept}
                       </Button>
-                      <Button variant="outline" className="min-h-11" aria-pressed={l.state === "returned"} disabled={working || l.state === "returned"} onClick={() => answer(true)}>
-                        {spin(`pen:${l.index}:back`) ? <Loader2 className="animate-spin" /> : null}
-                        {back}
-                      </Button>
+                      {!l.tax && (
+                        <Button variant="outline" className="min-h-11" aria-pressed={l.state === "returned"} disabled={working || l.state === "returned"} onClick={() => answer(true)}>
+                          {spin(`pen:${l.index}:back`) ? <Loader2 className="animate-spin" /> : null}
+                          {back}
+                        </Button>
+                      )}
                     </div>
                   </li>
                 );

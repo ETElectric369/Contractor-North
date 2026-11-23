@@ -9,7 +9,8 @@ import { putOnShelf, restampLotsForBill, unshelveLot, type ShelfPick } from "@/l
 import { isMissingShelf } from "@/lib/job-cost";
 import { importCostsIntoInvoice } from "@/app/(app)/billing/actions";
 import { BRING_IN_NEW_WORK } from "@/lib/actuals-draw";
-import { creditExpectedOf, penMarkOf } from "@/lib/pen-marks";
+import { TAX_FOLLOWS_ITEMS, creditExpectedOf, penMarkOf } from "@/lib/pen-marks";
+import { isTaxish } from "@/lib/credit-memo-close";
 import { alreadyBilledSentence, readBillClaimants, sentClaimant } from "@/lib/bill-claimants";
 import { decideReceiptLine, round2, splitContradictsReceipt } from "./receipt-billing";
 
@@ -176,6 +177,8 @@ export async function setReceiptLineReturned(lineId: string, returned: boolean):
   if (lineErr) return { ok: false, error: `Couldn't read that line, so nothing was changed: ${dbError(lineErr)}` };
   if (!line) return { ok: false, error: "Couldn't find that receipt line. Reload the page and try again." };
   if (line.returned_credit_bill_id) return { ok: false, error: CREDIT_FILED };
+  // A TAX LINE IS NEVER RETURNED (cn-v1184): its share comes off with the items marked returned.
+  if (returned && isTaxish(line)) return { ok: false, error: TAX_FOLLOWS_ITEMS };
   const rolled = await liveRollOnLine(supabase, ctx.orgId, lineId);
   if (rolled) return { ok: false, error: rolled };
 

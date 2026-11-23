@@ -189,6 +189,12 @@ describe("P1: both readers learn ONE rule for ink", () => {
       expect(PEN_MARKS_PROMPT_RULE).toContain(words);
   });
 
+  it("cn-v1184: a stroke over the subtotal, the tax or the total is no line mark, and the tax line's pen is always null", () => {
+    expect(PEN_MARKS_PROMPT_RULE).toContain(
+      "A pen stroke over the subtotal, the tax or the total is not a line mark either: the tax line's \"pen\" is always null (tax follows the items).",
+    );
+  });
+
   it("the tray's reader carries the rule and asks for pen, hand_quantity, hand_total and a credit memo's reverses_number", () => {
     const sys = paperReaderSystem("electrical contractor");
     expect(sys).toContain(PEN_MARKS_PROMPT_RULE);
@@ -245,7 +251,9 @@ describe("P5: the bill is written whole, its marked lines carry the pen (0417)",
   const lines = () => readerFields({ paper_type: "bill", kind: "receipt", amount: 162, line_items: TICKET_LINES }, "t").line_items!;
 
   it("ON ACCOUNT: the struck and returned lines say returned (a credit is expected); the total is the printed one", async () => {
-    state.client = fakeSupabase({ "bills.insert": [{ data: { id: "bill-a" }, error: null }], "bill_line_items.insert": [{ data: [{ id: "l" }], error: null }] }, calls);
+    // Every line comes back from the insert (cn-v1184: a short read-back is a lost line, said).
+    const back = [{ id: "l1" }, { id: "l2" }, { id: "l3" }, { id: "l4" }];
+    state.client = fakeSupabase({ "bills.insert": [{ data: { id: "bill-a" }, error: null }], "bill_line_items.insert": [{ data: back, error: null }] }, calls);
     expect(await insertItemizedBill(state.client, BILL, lines(), "unpaid")).toEqual({ id: "bill-a", refusal: null });
     expect(did("bills", "insert")!.payload.amount).toBe(162);
     const rows = did("bill_line_items", "insert")!.payload as any[];
@@ -474,7 +482,7 @@ describe("P7: the doors that file a paper say what ink was read", () => {
         "organizations.select": [{ data: { settings: {} }, error: null }],
         "supplier_aliases.select": [{ data: [], error: null }],
         "bills.insert": [{ data: { id: "bill-9" }, error: null }],
-        "bill_line_items.insert": [{ data: [{ id: "bli" }], error: null }],
+        "bill_line_items.insert": [{ data: [{ id: "bli1" }, { id: "bli2" }, { id: "bli3" }, { id: "bli4" }], error: null }],
         "organized_items.insert": [{ data: [{ id: "oi" }], error: null }],
       },
       calls,
@@ -520,7 +528,7 @@ describe("P7: the doors that file a paper say what ink was read", () => {
         "organized_items.update": [{ data: [{ id: "oi-1" }], error: null }, { data: [{ id: "oi-1" }], error: null }],
         "documents.insert": [{ data: { id: "doc-2" }, error: null }],
         "bills.insert": [{ data: { id: "bill-3" }, error: null }],
-        "bill_line_items.insert": [{ data: [{ id: "l1" }], error: null }],
+        "bill_line_items.insert": [{ data: [{ id: "l1" }, { id: "l2" }, { id: "l3" }, { id: "l4" }], error: null }],
       },
       calls,
     );
@@ -531,5 +539,142 @@ describe("P7: the doors that file a paper say what ink was read", () => {
         "Filed. Pen marks read: 1 line crossed out, 1 quantity changed. $97.20 comes off the customer's bill. The total is kept as printed. That matches your handwritten total.",
     });
     expect(did("bills", "insert")!.payload).toMatchObject({ amount: 162, status: "paid" });
+  });
+});
+
+describe("B3 (cn-v1184): a bill whose lines did not land is said at the door", () => {
+  const BILL = { job_id: "job-901", supplier: "Northline Supply", amount: 162, bill_date: null, category: "Bill", scope: { kind: "notAsked" } as const, notes: "", created_by: "user-1" };
+  const lines = () => readerFields({ paper_type: "bill", kind: "receipt", amount: 162, line_items: TICKET_LINES }, "t").line_items!;
+
+  it("the write: a refused lines insert, or one that returns fewer rows, comes back as linesLost; the bill stands, no refusal", async () => {
+    state.client = fakeSupabase({ "bills.insert": [{ data: { id: "bill-x" }, error: null }], "bill_line_items.insert": [{ data: null, error: { message: "null value in column", code: "23502" } }] }, calls);
+    expect(await insertItemizedBill(state.client, BILL, lines(), "unpaid")).toEqual({ id: "bill-x", refusal: null, linesLost: true });
+    state.client = fakeSupabase({ "bills.insert": [{ data: { id: "bill-y" }, error: null }], "bill_line_items.insert": [{ data: [{ id: "l1" }, { id: "l2" }], error: null }] }, calls);
+    expect(await insertItemizedBill(state.client, BILL, lines(), "unpaid")).toEqual({ id: "bill-y", refusal: null, linesLost: true });
+    // All four back: nothing to say.
+    state.client = fakeSupabase({ "bills.insert": [{ data: { id: "bill-z" }, error: null }], "bill_line_items.insert": [{ data: [{ id: "1" }, { id: "2" }, { id: "3" }, { id: "4" }], error: null }] }, calls);
+    expect(await insertItemizedBill(state.client, BILL, lines(), "unpaid")).toEqual({ id: "bill-z", refusal: null });
+  });
+
+  const trayScript = (lineAnswer: any, paper: Record<string, unknown> = {}) => ({
+    "organized_items.select": [{ data: { ...PAPER, line_items: lines(), ...paper }, error: null }],
+    "bills.select": [{ data: [], error: null }],
+    "supplier_invoices.select": [{ data: [], error: null }],
+    "supplier_aliases.select": [{ data: [], error: null }],
+    "organized_items.update": [{ data: [{ id: "oi-1" }], error: null }, { data: [{ id: "oi-1" }], error: null }],
+    "documents.insert": [{ data: { id: "doc-2" }, error: null }],
+    "bills.insert": [{ data: { id: "bill-3" }, error: null }],
+    "bill_line_items.insert": [lineAnswer],
+  });
+
+  it("File It to a job: the sentence names Read Again on a paper with a picture, Edit on one without; filed, not sent back", async () => {
+    const { LINES_LOST_READ_AGAIN, LINES_LOST_EDIT } = await import("./paperwork-core");
+    state.client = fakeSupabase(trayScript({ data: null, error: { message: "refused" } }, { file_url: "org-1/organize/t.jpg" }), calls);
+    const res = await fileItem("oi-1", { type: "job", jobId: "job-901" });
+    expect(res).toEqual({ ok: true, message: `Filed. ${LINES_LOST_READ_AGAIN}` });
+    expect(LINES_LOST_READ_AGAIN).toBe("The bill was recorded at its total, but its lines didn't save. Press Read Again on it.");
+
+    state.client = fakeSupabase(trayScript({ data: [{ id: "l1" }], error: null }, { file_url: null }), calls);
+    expect(await fileItem("oi-1", { type: "job", jobId: "job-901" })).toEqual({ ok: true, message: `Filed. ${LINES_LOST_EDIT}` });
+    expect(LINES_LOST_EDIT).toBe("The bill was recorded at its total, but its lines didn't save. Open the bill and add its lines with Edit.");
+  });
+
+  it("File It as a business cost says it too", async () => {
+    const { LINES_LOST_READ_AGAIN } = await import("./paperwork-core");
+    const script = trayScript({ data: [], error: null }, { file_url: "org-1/organize/t.jpg" });
+    delete (script as any)["documents.insert"];
+    state.client = fakeSupabase(script, calls);
+    expect(await fileItem("oi-1", { type: "overhead", category: "Tools & Supplies" })).toEqual({ ok: true, message: `Filed. ${LINES_LOST_READ_AGAIN}` });
+  });
+
+  const jobScript = (lineAnswer: any, amount = 162) => ({
+    "documents.select": [{ data: { id: "doc-7", name: "t.jpg", file_url: "org-1/x/t.jpg", size_bytes: 10, job_id: "job-901" }, error: null }],
+    "organized_items.select": [{ data: null, error: null }],
+    "organizations.select": [{ data: { settings: {} }, error: null }],
+    "supplier_aliases.select": [{ data: [], error: null }],
+    "bills.insert": [{ data: { id: "bill-9" }, error: null }],
+    "bill_line_items.insert": [lineAnswer],
+    "organized_items.insert": [{ data: [{ id: "oi" }], error: null }],
+  });
+
+  it("Record as Cost on the job page: the sentence rides on `warning` (every caller shows it), and no lines are counted", async () => {
+    const { LINES_LOST_READ_AGAIN } = await import("./paperwork-core");
+    ai.parsed = { vendor: "Northline Supply", amount: 12, line_items: [{ description: "Tape", quantity: 1, unit_price: 12, amount: 12 }], payment: "paid_at_purchase" };
+    state.client = fakeSupabase(jobScript({ data: null, error: { message: "refused" } }), calls);
+    const res = await billJobReceipt("doc-7");
+    expect(res.ok).toBe(true);
+    expect(res.warning).toBe(LINES_LOST_READ_AGAIN);
+    expect(res.lineCount).toBe(0);
+    // Fewer rows back is the same fact.
+    ai.parsed = { vendor: "Northline Supply", amount: 162, line_items: TICKET_LINES, payment: "on_account" };
+    state.client = fakeSupabase(jobScript({ data: [{ id: "l1" }], error: null }), calls);
+    expect((await billJobReceipt("doc-7")).warning).toBe(LINES_LOST_READ_AGAIN);
+  });
+});
+
+describe("B4 (cn-v1184): Record as Cost on a credit names File With Its Bill", () => {
+  it("a credit's answer carries the next door on its slate line; a purchase's does not", async () => {
+    const { RECORDED_A_CREDIT } = await import("./paperwork-core");
+    const { CREDIT_MEMO_DOOR } = await import("@/lib/paperwork");
+    expect(RECORDED_A_CREDIT).toBe(
+      `This is a credit. Press ${CREDIT_MEMO_DOOR} on its row in Costs, and what went back comes off the customer's invoice.`,
+    );
+    expect(RECORDED_A_CREDIT).toContain("Press File With Its Bill on its row in Costs");
+    ai.parsed = {
+      vendor: "Northline Supply",
+      amount: -21.6,
+      line_items: [
+        { description: "Weatherproof box", quantity: 2, unit_price: -10, amount: -20 },
+        { description: "Sales tax", quantity: 1, unit_price: -1.6, amount: -1.6, category: "Tax" },
+      ],
+      payment: "on_account",
+    };
+    state.client = fakeSupabase(
+      {
+        "documents.select": [{ data: { id: "doc-8", name: "cm.pdf", file_url: "org-1/x/cm.pdf", size_bytes: 10, job_id: "job-901" }, error: null }],
+        "organized_items.select": [{ data: null, error: null }],
+        "organizations.select": [{ data: { settings: {} }, error: null }],
+        "supplier_aliases.select": [{ data: [], error: null }],
+        "bills.insert": [{ data: { id: "bill-c" }, error: null }],
+        "bill_line_items.insert": [{ data: [{ id: "c1" }, { id: "c2" }], error: null }],
+        "organized_items.insert": [{ data: [{ id: "oi" }], error: null }],
+      },
+      calls,
+    );
+    const res = await billJobReceipt("doc-8");
+    expect(res.ok).toBe(true);
+    expect(res.amount).toBe(-21.6);
+    expect(res.pen).toBe(RECORDED_A_CREDIT);
+    expect(res.warning ?? "").not.toContain(CREDIT_MEMO_DOOR);
+  });
+
+  it("a credit whose lines didn't save: the lost-lines sentence stands alone, no File With Its Bill (skeptic #86, S9)", async () => {
+    const { LINES_LOST_READ_AGAIN } = await import("./paperwork-core");
+    const { CREDIT_MEMO_DOOR } = await import("@/lib/paperwork");
+    ai.parsed = {
+      vendor: "Northline Supply",
+      amount: -21.6,
+      line_items: [
+        { description: "Weatherproof box", quantity: 2, unit_price: -10, amount: -20 },
+        { description: "Sales tax", quantity: 1, unit_price: -1.6, amount: -1.6, category: "Tax" },
+      ],
+      payment: "on_account",
+    };
+    state.client = fakeSupabase(
+      {
+        "documents.select": [{ data: { id: "doc-8", name: "cm.pdf", file_url: "org-1/x/cm.pdf", size_bytes: 10, job_id: "job-901" }, error: null }],
+        "organized_items.select": [{ data: null, error: null }],
+        "organizations.select": [{ data: { settings: {} }, error: null }],
+        "supplier_aliases.select": [{ data: [], error: null }],
+        "bills.insert": [{ data: { id: "bill-c" }, error: null }],
+        "bill_line_items.insert": [{ data: null, error: { message: "refused" } }],
+        "organized_items.insert": [{ data: [{ id: "oi" }], error: null }],
+      },
+      calls,
+    );
+    const res = await billJobReceipt("doc-8");
+    expect(res.ok).toBe(true);
+    expect(res.warning).toBe(LINES_LOST_READ_AGAIN);
+    expect(`${res.pen ?? ""} ${res.warning ?? ""}`).not.toContain(CREDIT_MEMO_DOOR);
   });
 });

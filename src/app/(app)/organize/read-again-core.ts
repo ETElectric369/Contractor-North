@@ -230,7 +230,11 @@ export async function readFiledPaperAgainWith(db: Db, billId: string, doors: Rea
   if ("error" in filing) return { ok: true, message: `Read again and filed the same way. ${filing.error}${doorSaid ? ` ${doorSaid}` : ""}` };
   const now = money(filing.amount);
   const total = old && now && old !== now ? `The total was ${old} and is ${now} now.` : now ? `The total is ${now}, as before.` : "";
-  const pen = filing.pen && !/pen mark/i.test(doorSaid) ? filing.pen : "";
+  // LINES THAT DIDN'T LAND (cn-v1184, B3) are said in the door's own words (doorSaid, File It's
+  // message or Record as Cost's warning) and carried here whole; the pen sentence of lines that are
+  // not on the bill is not said beside it.
+  const linesLost = /lines didn't save/i.test(doorSaid);
+  const pen = filing.pen && !linesLost && !/pen mark/i.test(doorSaid) ? filing.pen : "";
   const paid =
     !isStillOwed({ status: bill.status ?? null, amount: bill.amount, amountPaid: bill.amount_paid ?? null }) &&
     isStillOwed({ status: filing.status, amount: filing.amount })

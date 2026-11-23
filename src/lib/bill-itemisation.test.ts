@@ -564,3 +564,65 @@ describe("shelfLotCost: one line's share, and the parts add up to the receipt's 
     }
   });
 });
+
+describe("a cent of rounding is not more than the receipt (cn-v1184, B2)", () => {
+  const ticket = { id: "t416", supplier: "Northline Supply", bill_number: "T-416", amount: 80.18 };
+  const owners = (): BillLine[] => [
+    { id: "p1", description: "1/2 in EMT connector", quantity: 10, unit_price: 1.32, amount: 13.2, category: "Electrical" },
+    { id: "p2", description: "20A breaker", quantity: 3, unit_price: 20.29, amount: 60.87, category: "Electrical" },
+    { id: "p3", description: "Sales Tax", quantity: 1, unit_price: 6.11, amount: 6.11, category: "Tax", billable: false },
+  ];
+
+  it("the owner's shape: two rows summing to the bill, no lump; the overshooting presentation is folded", () => {
+    const rows = billItemisation(ticket, owners(), 15);
+    expect(rows.some((r) => r.unit === "lot")).toBe(false);
+    expect(rows.map((r) => r.import_key)).toEqual(["bli:p1", "bli:p2"]);
+    expect(sum(rows)).toBe(85.18);
+    expect(rows[0]).toEqual({ import_key: "bli:p1", description: "1/2 in EMT connector (10 ea)", quantity: 1, unit: "ea", unit_price: 15.18 });
+    expect(rows[1]).toEqual({ import_key: "bli:p2", description: "20A breaker (3 ea)", quantity: 1, unit: "ea", unit_price: 70 });
+  });
+
+  it("lines that exceed the bill by dollars are still the lump, as before", () => {
+    const rows = billItemisation({ ...ticket, amount: 60 }, owners(), 15);
+    expect(rows).toEqual([{ import_key: "bill:t416", description: "Materials — Northline Supply (bill #T-416)", quantity: 1, unit: "lot", unit_price: mark(60 - 6.11, 15) }]);
+  });
+
+  it("a bill whose presentation fits is drawn exactly as before (qty × unit, the remainder row)", () => {
+    const lines = owners().map((l) => (l.id === "p3" ? { ...l, billable: true } : l));
+    const rows = billItemisation(ticket, lines, 15);
+    expect(rows[0]).toMatchObject({ quantity: 10, unit_price: 1.52 });
+    expect(rows[rows.length - 1].description).toBe("Supplies & tax — Northline Supply");
+    expect(sum(rows)).toBe(mark(80.18, 15));
+  });
+
+  it("SWEEP: the rows always sum to the target to the cent, and the lump comes only when the lines' own amounts exceed it", () => {
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    let lumps = 0;
+    for (let n = 0; n < 3000; n++) {
+      const count = 1 + Math.floor(rnd() * 4);
+      const lines: BillLine[] = Array.from({ length: count }, (_, i) => {
+        const qty = 1 + Math.floor(rnd() * 12);
+        const amount = Math.round((0.5 + rnd() * 90) * 100) / 100;
+        return { id: `x${i}`, description: `Part ${i}`, quantity: qty, unit_price: Math.round((amount / qty) * 100) / 100, amount, category: "Electrical" };
+      });
+      const items = Math.round(lines.reduce((s, l) => s + Number(l.amount), 0) * 100) / 100;
+      const taxOn = rnd() < 0.5;
+      const taxAmt = Math.round(items * 0.0825 * 100) / 100;
+      lines.push({ id: "tx", description: "Sales Tax", quantity: 1, amount: taxAmt, category: "Tax", billable: taxOn });
+      const markup = [0, 10, 15, 20, 25, 33][Math.floor(rnd() * 6)];
+      const amount = Math.round((items + taxAmt + (rnd() < 0.15 ? -5 : 0)) * 100) / 100;
+      const b = { id: "s", supplier: "Northline Supply", bill_number: null, amount };
+      const rows = billItemisation(b, lines, markup);
+      const target = mark(amount - excludedReceiptCost(lines), markup);
+      if (!(target > 0)) continue; // nothing for the customer: a separate rule, tested above
+      expect(sum(rows)).toBe(target);
+      const sells = Math.round(lines.filter((l) => !isTaxLine(l)).reduce((s, l) => s + mark(Number(l.amount), markup), 0) * 100);
+      // Lines whose own amounts fit the bill are never the lump (a presentation that falls short of
+      // them is today's remainder row, so the converse is not claimed).
+      if (sells <= Math.round(target * 100)) expect(rows.some((r) => r.unit === "lot")).toBe(false);
+      else lumps++;
+    }
+    expect(lumps).toBeGreaterThan(0);
+  });
+});

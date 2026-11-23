@@ -10,6 +10,7 @@ import { useToast } from "@/components/toast";
 import { billedPortion, excludedReceiptCost } from "@/lib/bill-itemisation";
 import { isStillOwed } from "@/lib/supplier-owed";
 import { PEN_WORDS, creditExpectedOf, penSentence, penSummary, type PenMark } from "@/lib/pen-marks";
+import { isTaxish } from "@/lib/credit-memo-close";
 import { readFiledPaperAgain } from "@/app/(app)/organize/read-again-actions";
 import { isFreightLine } from "@/lib/shelf-plan";
 import { formatCurrency } from "@/lib/utils";
@@ -391,6 +392,9 @@ export function ReceiptLines({
         {lines.map((l) => {
           const part = billedPortion(l.amount, l.billedAmount);
           const hint = containerHint(l.description, l.quantity);
+          // A TAX LINE IS NEVER RETURNED (cn-v1184): tax follows the items, so Returned is not drawn
+          // on it (the server refuses it too); Kept on a marked tax line stays, the way out.
+          const tax = isTaxish(l);
           // The nudge is only ever a nudge, and it stands down the moment there is a
           // decision on the row: a suggestion that keeps arguing after he has
           // answered it is noise, and noise is what gets a real warning ignored.
@@ -437,7 +441,7 @@ export function ReceiptLines({
                     >
                       {PEN_WORDS.kept}
                     </button>
-                    {penFaceOf(l) === "needsAnswer" && (
+                    {penFaceOf(l) === "needsAnswer" && !tax && (
                       <button
                         type="button"
                         disabled={penBusy === l.id}
@@ -485,7 +489,7 @@ export function ReceiptLines({
                   to split. */}
               {!locked && l.billable && !l.shelf && (
                 <div className="flex flex-wrap items-center gap-x-2">
-                  {l.pen && creditTracked && (
+                  {l.pen && creditTracked && !tax && (
                     /* A marked line read as kept (or answered Kept): the way to Returned. */
                     <button
                       type="button"
@@ -496,7 +500,7 @@ export function ReceiptLines({
                       {PEN_WORDS.returned}
                     </button>
                   )}
-                  {!l.pen && creditTracked && (
+                  {!l.pen && creditTracked && !tax && (
                     /* AN UNMARKED LINE CAN BE MARKED RETURNED BY HAND (cn-v1181 fixer, F4): the reader
                        will miss a strike some day, and the answer to "do i just need to go back and
                        delete line items?" is this tap, never a delete. Quiet and slate; only where a

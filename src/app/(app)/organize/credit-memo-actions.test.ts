@@ -244,7 +244,7 @@ vi.mock("@/lib/observe", () => ({ reportError: () => {} }));
 const importCosts = vi.hoisted(() => vi.fn(async (..._a: unknown[]) => ({ ok: true as boolean, error: undefined as string | undefined })));
 vi.mock("@/app/(app)/billing/actions", async (orig) => ({ ...(await orig<Record<string, unknown>>()), importCostsIntoInvoice: importCosts }));
 
-import { creditMemoHome, fileCreditMemoWithItsBill } from "./credit-memo-actions";
+import { creditMemoHome, fileCreditMemoWithItsBill, fileReturnBillWithItsBill, returnBillHome } from "./credit-memo-actions";
 import { billItemisation, type BillForItemisation, type BillLine } from "@/lib/bill-itemisation";
 import { returnCreditRows, returnLinesAgainstPurchases } from "@/lib/supplier-returns";
 
@@ -596,5 +596,333 @@ describe("cn-v1181 fixer: what the memo door says", () => {
       expect(r.sentence).toMatch(/Only your newest 2,000 bills were searched/);
       expect(r.sentence).toMatch(/Fix Details/);
     }
+  });
+});
+
+// ── cn-v1184: FILE WITH ITS BILL ON A CREDIT ALREADY ON A JOB ────────────────────────────────────
+// The credit was recorded from the job page (a bill below zero on J-901). Its slip covers goods from
+// THREE invoices on the job: one line returned whole (T-543), one of three pieces of another (T-576),
+// one already marked returned (T-677), and the tax. Never attached: it stays a bill of its own.
+function slip() {
+  const t = books();
+  const L = (id: string, bill: string, org: string, sort: number, over: Row) => ({
+    id, org_id: org, bill_id: bill, quantity: 1, unit_price: 0, amount: 0, category: null, billable: true, billed_amount: null, is_stock: false,
+    returned: false, returned_credit_bill_id: null, pen_mark: null, sort_order: sort, ...over,
+  });
+  const B = (id: string, number: string, date: string, amount: number, over: Row = {}) => ({
+    id, org_id: "org-1", job_id: "job-1", supplier: "Northline Supply", supplier_account_id: null, category: "Bill", scope_category: null, status: "unpaid",
+    amount, bill_number: number, supplier_invoice_number: null, bill_date: date, corrects_bill_id: null, superseded_by_bill_id: null, on_shelf: false,
+    created_at: `${date}T00:00:00Z`, po_id: null, ...over,
+  });
+  t.jobs.push({ id: "job-2", org_id: "org-1", job_number: "J-903", name: "Foxglove" });
+  t.bills.push(
+    B("bill-p1", "T-543", "2026-11-03", 11.34),
+    B("bill-p2", "T-576", "2026-11-05", 39.2),
+    B("bill-p3", "T-677", "2026-11-07", 9.9),
+    B("bill-c", "CM-445", "2026-11-18", -29.7),
+    // Earlier, and with the same lines: another job's bill, and another supplier's on this job. Never touched.
+    B("bill-o", "T-411", "2026-11-01", 10.5, { job_id: "job-2" }),
+    B("bill-y", "T-412", "2026-11-01", 10.5, { supplier: "Bayberry Lumber" }),
+    B("bill-xp", "T-543", "2026-11-03", 11.34, { org_id: "org-2", job_id: "job-9" }),
+  );
+  const emt = (id: string, bill: string, org = "org-1") => L(id, bill, org, 0, { description: "1/2 in EMT Connector Steel", quantity: 2, unit_price: 5.25, amount: 10.5 });
+  t.bill_line_items.push(
+    emt("p1-a", "bill-p1"),
+    L("p1-t", "bill-p1", "org-1", 1, { description: "Sales Tax", category: "Tax", unit_price: 0.84, amount: 0.84 }),
+    L("p2-b", "bill-p2", "org-1", 0, { description: "3/4 in Rigid Coupling Steel", quantity: 3, unit_price: 7.1, amount: 21.3 }),
+    L("p2-c", "bill-p2", "org-1", 1, { description: "Duplex Receptacle Ivory", quantity: 5, unit_price: 3, amount: 15 }),
+    // Every ticket taxed evenly at 8% (the credit's tax is 8% of its parts), so filing moves no tax (S1).
+    L("p2-t", "bill-p2", "org-1", 2, { description: "Sales Tax", category: "Tax", unit_price: 2.9, amount: 2.9 }),
+    L("p3-g", "bill-p3", "org-1", 0, { description: "GFCI Receptacle 20A White", quantity: 1, unit_price: 9.9, amount: 9.9, billable: false, returned: true, pen_mark: "struck" }),
+    emt("o-a", "bill-o"),
+    emt("y-a", "bill-y"),
+    emt("xp-a", "bill-xp", "org-2"),
+    L("c-a", "bill-c", "org-1", 0, { description: "1/2 in EMT Connector Steel", quantity: -2, unit_price: 5.25, amount: -10.5 }),
+    L("c-b", "bill-c", "org-1", 1, { description: "3/4 in Rigid Coupling Steel", quantity: -1, unit_price: 7.1, amount: -7.1 }),
+    L("c-g", "bill-c", "org-1", 2, { description: "GFCI Receptacle 20A White", quantity: -1, unit_price: 9.9, amount: -9.9 }),
+    L("c-t", "bill-c", "org-1", 3, { description: "Sales Tax", category: "Tax", unit_price: -2.2, amount: -2.2 }),
+  );
+  return t;
+}
+const holds = (t: Record<string, Row[]>, inv: string, status: string, ids: string[], edited = false) => {
+  t.invoices.push({ id: inv, org_id: "org-1", invoice_number: inv.toUpperCase(), status });
+  ids.forEach((id, k) => t.invoice_items.push({ id: `${inv}-${k}`, invoice_id: inv, edited, source_ids: [id], import_key: `bill:${id}` }));
+};
+
+describe("returnBillHome on a credit on a job (cn-v1184)", () => {
+  it("names what it would close, on the same job's bills from the same supplier only, and writes nothing", async () => {
+    use(slip());
+    expect(await returnBillHome("bill-c")).toEqual({ ok: true, kind: "one", by: "words", candidate: { billId: "bill-c", label: "3 lines on T-543, T-576 and T-677" } });
+    expect(db.writes).toEqual([]);
+  });
+
+  it("nothing would close: the sentence, and it stays a credit on the job", async () => {
+    const t = slip();
+    t.bills = t.bills.filter((b) => !["bill-p1", "bill-p2", "bill-p3"].includes(b.id));
+    use(t);
+    expect(await returnBillHome("bill-c")).toEqual({
+      ok: true,
+      kind: "none",
+      sentence: "No bill from Northline Supply on this job carries the lines this credit returns, so nothing was closed. It stays a credit on the job, as before.",
+    });
+  });
+});
+
+describe("the credit, asked by both doors: each refusal one sentence, and NO write", () => {
+  const refusals: [string, (t: Record<string, Row[]>) => void, RegExp][] = [
+    ["not below zero", (t) => (t.bills.find((b) => b.id === "bill-c")!.amount = 30.23), /isn't a credit\b.*Nothing changed\.$/],
+    ["on no job", (t) => (t.bills.find((b) => b.id === "bill-c")!.job_id = null), /isn't on a job.*Nothing changed\.$/],
+    ["a correction", (t) => (t.bills.find((b) => b.id === "bill-c")!.corrects_bill_id = "bill-2"), /filed under another bill already.*Nothing changed\.$/],
+    ["set aside", (t) => (t.bills.find((b) => b.id === "bill-c")!.superseded_by_bill_id = "bill-2"), /set aside as a duplicate.*Nothing changed\.$/],
+    ["something filed under it", (t) => t.bills.push({ ...t.bills.find((b) => b.id === "bill-c")!, id: "bill-u", corrects_bill_id: "bill-c" }), /A correction is filed under this credit.*Nothing changed\.$/],
+    ["no lines", (t) => (t.bill_line_items = t.bill_line_items.filter((l) => l.bill_id !== "bill-c")), /has no lines.*Give it its lines with Edit\. Nothing changed\.$/],
+    ["lines that don't add up", (t) => (t.bills.find((b) => b.id === "bill-c")!.amount = -40), /lines come to \$29\.70 and its total is \$40\.00\. Give it its lines with Edit so they match\. Nothing changed\.$/],
+    ["an invoice that went out holds it", (t) => holds(t, "inv-905", "sent", ["bill-c"]), /^INV-905 already credited this return to the customer, so it stays as it is\. Nothing changed\.$/],
+    ["another company's credit", (t) => (t.bills.find((b) => b.id === "bill-c")!.org_id = "org-2"), /^That bill isn't here any more\. Reload the page\. Nothing changed\.$/],
+    ["a lost read is said, never 'no bill'", () => {}, /Couldn't/],
+  ];
+  for (const [what, change, said] of refusals) {
+    it(what, async () => {
+      const t = slip();
+      change(t);
+      use(t, what.startsWith("a lost read") ? { failRead: new Set(["invoice_items"]) } : undefined);
+      const snap = JSON.stringify(db.tables);
+      const home = await returnBillHome("bill-c");
+      expect(home.ok).toBe(false);
+      if (!home.ok) expect(home.error).toMatch(said);
+      const filed = await fileReturnBillWithItsBill("bill-c");
+      expect(filed.ok).toBe(false);
+      expect(filed.error).toMatch(said);
+      expect(db.writes).toEqual([]);
+      expect(JSON.stringify(db.tables)).toBe(snap);
+    });
+  }
+
+  it("a DRAFT holding the credit does not refuse it (the owner's exact case)", async () => {
+    const t = slip();
+    holds(t, "inv-906", "draft", ["bill-c"]);
+    use(t);
+    expect(await returnBillHome("bill-c")).toMatchObject({ ok: true, kind: "one" });
+  });
+});
+
+describe("fileReturnBillWithItsBill: three bills closed in one filing", () => {
+  it("closes on each bill, each write read back and pinned; the credit's lines off by id; no bills row written", async () => {
+    use(slip());
+    const r = await fileReturnBillWithItsBill("bill-c");
+    expect(r.ok).toBe(true);
+    // NO BILLS ROW IS WRITTEN: the credit stays a bill of its own.
+    expect(db.writes.filter((w) => w.table === "bills")).toEqual([]);
+    expect(db.tables.bills.find((b) => b.id === "bill-c")).toMatchObject({ corrects_bill_id: null, job_id: "job-1", amount: -29.7 });
+    const row = (l: Row) => [l.id.includes("-") && !l.id.startsWith("bill_line_items") ? l.id : "half", l.sort_order, l.quantity, l.amount, l.billable, l.returned, l.returned_credit_bill_id];
+    expect(linesOf("bill-p1").map(row)).toEqual([
+      ["p1-a", 0, 2, 10.5, false, true, "bill-c"],
+      ["p1-t", 1, 1, 0.84, true, false, null],
+    ]);
+    expect(linesOf("bill-p2").map(row)).toEqual([
+      ["p2-b", 0, 2, 14.2, true, false, null],
+      ["half", 1, 1, 7.1, false, true, "bill-c"],
+      ["p2-c", 2, 5, 15, true, false, null],
+      ["p2-t", 3, 1, 2.9, true, false, null],
+    ]);
+    expect(linesOf("bill-p3").map(row)).toEqual([["p3-g", 0, 1, 9.9, false, true, "bill-c"]]);
+    // THE CREDIT'S OWN LINES: the three part lines bill nothing; its tax line exactly as it was.
+    expect(linesOf("bill-c").map((l) => [l.id, l.billable])).toEqual([
+      ["c-a", false],
+      ["c-b", false],
+      ["c-g", false],
+      ["c-t", true],
+    ]);
+    // Same job, same supplier, same company only.
+    for (const id of ["o-a", "y-a", "xp-a"]) expect(db.tables.bill_line_items.find((l) => l.id === id)).toMatchObject({ returned: false, billable: true, returned_credit_bill_id: null });
+    // EVERY WRITE NAMES THE COMPANY, ITS BILL AND ITS LINE (an insert by its columns).
+    for (const w of db.writes.filter((x) => x.verb === "update")) expect(w.filters).toEqual(expect.arrayContaining(["eq:org_id", "eq:bill_id", "eq:id"]));
+    expect(db.writes.filter((w) => w.verb === "update" && w.cols.join() === "billable")).toHaveLength(3);
+    for (const w of db.writes.filter((x) => x.verb === "insert")) expect(w.cols).toEqual(expect.arrayContaining(["org_id", "bill_id"]));
+    expect(r.message).toBe(
+      "CM-445: $29.70 back from the supplier. 3 returned lines are closed on T-543, T-576 and T-677 (1/2 in EMT Connector Steel; 3/4 in Rigid Coupling Steel; GFCI Receptacle 20A White): off the customer's bill, credit received. " +
+        "3/4 in Rigid Coupling Steel was split: 2 kept ($14.20), 1 returned ($7.10).",
+    );
+  });
+
+  it("a second press says it is already filed, and writes nothing", async () => {
+    use(slip());
+    await fileReturnBillWithItsBill("bill-c");
+    const n = db.writes.length;
+    expect(await fileReturnBillWithItsBill("bill-c")).toEqual({ ok: false, error: "This credit is already filed: its lines are off the customer's bill." });
+    expect(await returnBillHome("bill-c")).toEqual({ ok: true, kind: "none", sentence: "This credit is already filed: its lines are off the customer's bill." });
+    expect(db.writes.length).toBe(n);
+  });
+
+  it("one refresh per draft, even when a draft holds the credit and two of the bills; one changed by hand is told its action", async () => {
+    const t = slip();
+    holds(t, "inv-906", "draft", ["bill-c", "bill-p1", "bill-p2"]);
+    holds(t, "inv-907", "draft", ["bill-p3"]);
+    use(t);
+    importCosts.mockClear();
+    importCosts.mockResolvedValue({ ok: true, error: undefined, stats: { pulled_in: 0 } } as any);
+    const r = await fileReturnBillWithItsBill("bill-c");
+    // Two drafts, two refreshes: INV-906 holds three of the papers and is refreshed once.
+    expect(importCosts.mock.calls.map((c) => c[0]).sort()).toEqual(["inv-906", "inv-907"]);
+    importCosts.mockReset();
+    importCosts.mockImplementation(async () => ({ ok: true, error: undefined }));
+    expect(r.message).toContain("INV-906 (a draft) now leaves the returned goods off, and it brought in no other new costs.");
+    expect(r.message).toContain("INV-907 (a draft) now leaves the returned goods off");
+    expect(r.message!.match(/INV-906 \(a draft\)/g)).toHaveLength(1);
+
+    const e = slip();
+    holds(e, "inv-906", "draft", ["bill-p1"], true);
+    use(e);
+    importCosts.mockClear();
+    const r2 = await fileReturnBillWithItsBill("bill-c");
+    expect(importCosts).not.toHaveBeenCalled();
+    expect(r2.message).toContain("use Start It Over for Materials on INV-906 before you send it.");
+  });
+
+  it("a draft that holds ONLY the credit is brought up to date (the owner's exact case)", async () => {
+    const t = slip();
+    holds(t, "inv-906", "draft", ["bill-c"]);
+    use(t);
+    importCosts.mockClear();
+    const r = await fileReturnBillWithItsBill("bill-c");
+    expect(importCosts.mock.calls).toEqual([["inv-906", undefined, { keepInvoiceMarkup: true }]]);
+    expect(r.message).toContain("INV-906 (a draft) now leaves the returned goods off");
+  });
+
+  it("the import is asked once per draft, with the draft's own markup kept", async () => {
+    const t = slip();
+    holds(t, "inv-906", "draft", ["bill-c", "bill-p1", "bill-p2"]);
+    use(t);
+    importCosts.mockClear();
+    await fileReturnBillWithItsBill("bill-c");
+    expect(importCosts.mock.calls).toEqual([["inv-906", undefined, { keepInvoiceMarkup: true }]]);
+  });
+
+  it("a bill an invoice that went out holds: its line stays a credit to the customer, the rest close", async () => {
+    const t = slip();
+    holds(t, "inv-905", "sent", ["bill-p1"]);
+    use(t);
+    const r = await fileReturnBillWithItsBill("bill-c");
+    expect(r.ok).toBe(true);
+    expect(db.tables.bill_line_items.find((l) => l.id === "p1-a")).toMatchObject({ returned: false, billable: true, returned_credit_bill_id: null });
+    expect(linesOf("bill-c").map((l) => l.billable)).toEqual([true, false, false, true]);
+    expect(r.message).toContain("1/2 in EMT Connector Steel stays a credit to the customer, as before: an invoice that went out already billed it.");
+    expect(r.message).toContain("2 returned lines are closed on T-576 and T-677");
+  });
+
+  it("a closing write that fails is said, and that credit line keeps crediting; nothing is rolled back", async () => {
+    use(slip(), {
+      beforeUpdate: (table, patch) => {
+        if (table === "bill_line_items" && patch.returned === true && patch.billable === false) db.tables.bill_line_items.find((l) => l.id === "p1-a")!.billed_amount = 4;
+      },
+    });
+    const r = await fileReturnBillWithItsBill("bill-c");
+    expect(r.ok).toBe(true);
+    expect(linesOf("bill-c").map((l) => [l.id, l.billable])).toEqual([
+      ["c-a", true],
+      ["c-b", false],
+      ["c-g", false],
+      ["c-t", true],
+    ]);
+    expect(r.message).toContain("1/2 in EMT Connector Steel changed on the bill just now, so it was not closed.");
+    expect(r.message).toContain("2 returned lines are closed on T-576 and T-677");
+  });
+});
+
+// ── cn-v1184 fixer (skeptic #86) ──────────────────────────────────────────────────────────────────
+describe("skeptic #86: the row's door, put right", () => {
+  const snapOf = () => JSON.stringify(db.tables);
+
+  it("S1: a ticket with an untaxed line would change what the customer pays in tax: refused by both doors, nothing written", async () => {
+    const t = slip();
+    // T-543 also carries an untaxed delivery charge: its $0.84 of tax is on the connectors alone.
+    t.bills.find((b) => b.id === "bill-p1")!.amount = 21.84;
+    t.bill_line_items.push({ ...t.bill_line_items.find((l) => l.id === "p1-a")!, id: "p1-d", description: "Delivery Charge", quantity: 1, unit_price: 10.5, amount: 10.5, sort_order: 2 });
+    use(t);
+    const snap = snapOf();
+    const said =
+      "The tax on this credit ($1.41) is not the tax its lines carry on T-543 and T-576 ($0.99), so filing it would change what the customer pays. It stays a credit on the job, as before. Nothing changed.";
+    expect(await returnBillHome("bill-c")).toEqual({ ok: false, error: said });
+    expect(await fileReturnBillWithItsBill("bill-c")).toEqual({ ok: false, error: said });
+    expect(db.writes).toEqual([]);
+    expect(snapOf()).toBe(snap);
+  });
+
+  it("S2: a line this credit already closed, its credit line switched back on: found, and taken off again (by id, read back); a draft brought up to date (S8)", async () => {
+    use(slip());
+    await fileReturnBillWithItsBill("bill-c");
+    db.tables.bill_line_items.find((l) => l.id === "c-a")!.billable = true;
+    holds(db.tables, "inv-906", "draft", ["bill-c"]);
+    const purchase = JSON.stringify(db.tables.bill_line_items.filter((l) => l.bill_id !== "bill-c"));
+    expect(await returnBillHome("bill-c")).toEqual({ ok: true, kind: "one", by: "words", candidate: { billId: "bill-c", label: "1 line on T-543" } });
+    importCosts.mockClear();
+    const n = db.writes.length;
+    const r = await fileReturnBillWithItsBill("bill-c");
+    expect(r.ok).toBe(true);
+    expect(r.message).toContain("1 line this credit had already closed: off the customer's bill now.");
+    expect(r.message).not.toContain("nothing was closed");
+    expect(db.tables.bill_line_items.find((l) => l.id === "c-a")?.billable).toBe(false);
+    // Nothing on the purchases moved; the one write is the credit's own line, by id.
+    expect(JSON.stringify(db.tables.bill_line_items.filter((l) => l.bill_id !== "bill-c"))).toBe(purchase);
+    expect(db.writes.slice(n).filter((w) => w.table === "bill_line_items").map((w) => [w.cols.join(), w.filters.includes("eq:id")])).toEqual([["billable", true]]);
+    // S8: nothing closed, but a credit line came off: the draft holding the credit follows.
+    expect(importCosts.mock.calls).toEqual([["inv-906", undefined, { keepInvoiceMarkup: true }]]);
+  });
+
+  it("S3: a line somebody else split a moment ago is not split again", async () => {
+    let once = false;
+    use(slip(), {
+      beforeUpdate: (table, patch) => {
+        if (table === "bill_line_items" && "quantity" in patch && !once) {
+          once = true;
+          // Another tab's filing landed first: the coupling is already 2 kept.
+          Object.assign(db.tables.bill_line_items.find((l) => l.id === "p2-b")!, { quantity: 2, amount: 14.2 });
+        }
+      },
+    });
+    const r = await fileReturnBillWithItsBill("bill-c");
+    expect(r.ok).toBe(true);
+    expect(db.tables.bill_line_items.filter((l) => l.bill_id === "bill-p2" && l.returned_credit_bill_id === "bill-c")).toEqual([]);
+    expect(db.tables.bill_line_items.find((l) => l.id === "p2-b")).toMatchObject({ quantity: 2, amount: 14.2 });
+    expect(r.message).toContain("3/4 in Rigid Coupling Steel changed on the bill just now, so it was not closed.");
+    expect(linesOf("bill-c").find((l) => l.id === "c-b")?.billable).toBe(true);
+  });
+
+  it("S4: nothing closes because an invoice that went out billed it: the sentence says so and names it; with a line no bill carries, both sentences", async () => {
+    const only = (extra: Row[] = []) => {
+      const t = slip();
+      t.bill_line_items = t.bill_line_items.filter((l) => !["c-g", "p3-g"].includes(l.id));
+      t.bill_line_items.push(...extra);
+      holds(t, "inv-905", "sent", ["bill-p1", "bill-p2"]);
+      t.bills.find((b) => b.id === "bill-c")!.amount = -(10.5 + 7.1 + 2.2 + extra.reduce((s, l) => s - l.amount, 0));
+      return t;
+    };
+    const invoiced = "An invoice that went out, INV-905, already billed what this credit returns, so it stays a credit to the customer, as before. Nothing changed.";
+    use(only());
+    expect(await returnBillHome("bill-c")).toEqual({ ok: true, kind: "none", sentence: invoiced });
+    const cover = { ...slip().bill_line_items.find((l) => l.id === "c-g")!, id: "c-w", description: "Weatherproof Box Cover", quantity: -1, unit_price: -9, amount: -9 };
+    use(only([cover]));
+    expect(await returnBillHome("bill-c")).toEqual({
+      ok: true,
+      kind: "none",
+      sentence: `${invoiced} No bill from Northline Supply on this job carries the lines this credit returns, so nothing was closed. It stays a credit on the job, as before.`,
+    });
+    expect(db.writes).toEqual([]);
+  });
+
+  it("S6: a tax line by its words, not its category, is written category Tax in the same filing, so the tax is never credited twice", async () => {
+    const t = slip();
+    t.bill_line_items.find((l) => l.id === "c-t")!.category = null;
+    use(t);
+    const r = await fileReturnBillWithItsBill("bill-c");
+    expect(r.ok).toBe(true);
+    expect(linesOf("bill-c").find((l) => l.id === "c-t")).toMatchObject({ category: "Tax", billable: true });
+    const w = db.writes.find((x) => x.cols.join() === "category");
+    expect(w?.filters).toEqual(expect.arrayContaining(["eq:org_id", "eq:bill_id", "eq:id"]));
+    // THE MONEY: every part line of the credit is off, so the credit puts nothing in front of the
+    // customer; read as a part line, its tax would have credited $2.20 on top of the purchases' own share.
+    const credit = db.tables.bills.find((b) => b.id === "bill-c")! as Row & BillForItemisation;
+    const rows = billItemisation(credit, linesOf("bill-c") as BillLine[], 0);
+    expect(Math.round(rows.reduce((s, x) => s + x.quantity * x.unit_price, 0) * 100)).toBe(0);
   });
 });

@@ -41,6 +41,8 @@ import { useBillsSearch } from "./bills-search-box";
 import { JobScopePicker } from "@/components/job-scope-picker";
 import { canCorrect, correctionFaces, correctionsUnder } from "@/lib/bill-correction";
 import type { CorrectableBill } from "@/components/correct-bill-modal";
+import { returnRowLine, rowOffersFileWithItsBill } from "@/lib/return-bill-door";
+import { ReturnBillDoor } from "@/components/return-bill-door";
 
 interface JobOption {
   id: string;
@@ -308,6 +310,15 @@ export function BillsReceipts({
     const face = faces.get(b.id);
     // Indented only where it really sits under its original in this list (a search can hide one).
     const underIt = face?.kind === "corrects" && shownIds.has(face.originalId);
+    // FILE WITH ITS BILL on a credit recorded on a job (cn-v1184): this page cannot tell whether an
+    // invoice that went out holds it, so it offers and the server refuses.
+    const creditRow = {
+      ready: correctionsReady,
+      bill: { amount: b.amount, job_id: b.job_id, corrects_bill_id: b.corrects_bill_id ?? null, superseded: b.superseded ?? null },
+      hasCorrections: (correctionsOf.get(b.id)?.length ?? 0) > 0,
+      lines: b.line_items,
+    };
+    const creditLine = returnRowLine(creditRow);
     return (
       <li key={`bill-${b.id}`} className={underIt ? "border-l-4 border-slate-200 bg-slate-50/40 pl-4" : undefined}>
         {/* ONE ROW PER BILL; it opens to the bill's detail. `bill-<id>` is where the search box, a
@@ -328,6 +339,7 @@ export function BillsReceipts({
               {/* THE PAIR READS AS ONE PURCHASE (0381): what this one corrects, or what corrects it
                   and the purchase's figure with it. */}
               {face && <span className="block truncate text-xs font-medium text-slate-600">{face.words}</span>}
+              {creditLine && <span className="block text-xs text-slate-600">{creditLine}</span>}
               {split && split.notBilledCount > 0 && (
                 <span className="block text-xs font-medium text-amber-700">
                   {split.notBilledCount} {split.notBilledCount === 1 ? "line" : "lines"} not billed to the customer
@@ -367,6 +379,8 @@ export function BillsReceipts({
                   Open the Job
                 </Link>
               )}
+              {/* File With Its Bill on a credit recorded on a job (cn-v1184). */}
+              {rowOffersFileWithItsBill(creditRow) && <ReturnBillDoor billId={b.id} />}
             </div>
             {b.receipt ? (
               <div className="mt-2">

@@ -1,5 +1,6 @@
 import { decideReceiptLine } from "@/app/(app)/bills/receipt-billing";
-import { applyPenMark, type PenMark } from "@/lib/pen-marks";
+import { applyPenMark, penMarkOf, type PenMark } from "@/lib/pen-marks";
+import { isTaxish } from "@/lib/credit-memo-close";
 
 /**
  * A PAPER'S LINES, AS THE BILL WILL HOLD THEM (moved out of organize/paperwork-core.ts for Shop
@@ -45,6 +46,14 @@ export interface BillLine {
  * `returned` and no `hand_quantity`, and passes through exactly as it is, so cleanLines(cleanLines(x))
  * is cleanLines(x). The 100-line cap applies after the split.
  *
+ * A TAX LINE NEVER TAKES A PEN MARK (cn-v1184): tax rides with what it taxes (lib/bill-itemisation
+ * takes a not-billed line's share of the untouched tax off with it), and a stroke over the tax or the
+ * totals says nothing a line mark could say. So on a tax line (isTaxish, the one predicate) what the
+ * reader said (`pen`, `hand_quantity`) and what is stored (`pen`, `returned`) are ignored, and so is a
+ * stored `billable: false` that came WITH a mark or a `returned: true` (the mark's doing). A tax line
+ * a person switched off with no mark on it stays off. Still idempotent: the clean tax line carries
+ * neither a mark nor `returned`.
+ *
  * AN `unclear` LINE IS NEVER A REASON TO WAIT (P8): it is filed like any other line, held off the
  * customer's bill by billable = false, and the bill asks Kept or Returned. File It is not blocked.
  */
@@ -63,12 +72,18 @@ export function cleanLines(raw: any): BillLine[] {
       // lines are jsonb, re-read verbatim when it is filed) wins over the default, so re-filing
       // never re-bills the snacks. decideReceiptLine is the deterministic net under the model's
       // category: it fills a shrug when the words are plainly food, and never overrules a person.
-      const { category, billable } = decideReceiptLine(description, stated, l?.billable);
+      // A TAX LINE (cn-v1184): by the words or the category, stated or resolved; one predicate.
+      const tax =
+        isTaxish({ category: stated, description }) ||
+        isTaxish({ category: decideReceiptLine(description, stated, undefined).category, description });
+      const markedOff = penMarkOf(l?.pen) != null || l?.returned === true;
+      const storedBillable = tax && markedOff && l?.billable === false ? undefined : l?.billable;
+      const { category, billable } = decideReceiptLine(description, stated, storedBillable);
       // A part-used amount a person set on the bill (TD3), kept only where it can stand: on a line
       // that still bills AFTER its pen mark, between nothing and the line itself (0272's check).
       const used = l?.billed_amount === null || l?.billed_amount === undefined || l?.billed_amount === "" ? NaN : Number(l.billed_amount);
       const clean: BillLine = { description, quantity, unit_price, amount, category, billable };
-      return applyPenMark(clean, l).map((m) =>
+      return applyPenMark(clean, tax ? null : l).map((m) =>
         m.billable && Number.isFinite(used) && used >= 0 && used <= Math.abs(m.amount) + 0.005
           ? { ...m, billed_amount: Math.round(used * 100) / 100 }
           : m,

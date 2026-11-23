@@ -267,3 +267,28 @@ describe("cn-v1181 fixer: the card words Returned from the paper's own tender (F
     expect(buttons(h)).not.toContain("Returned");
   });
 });
+
+describe("a tax line takes no Returned on the bill's card (cn-v1184, B1)", () => {
+  const T = (o: Record<string, unknown>) => L({ id: "t", description: "Sales tax", category: "Tax", ...o });
+  it("an ordinary tax line on account: its Bill switch, no Returned (an item beside it keeps its own)", () => {
+    const h = render(receipt([L({}), T({})], { creditExpected: true }));
+    expect(buttons(h).filter((b) => b === "Returned")).toHaveLength(1);
+    expect(h).toContain('aria-label="Bill Sales tax to the customer"');
+    expect(h).not.toContain('aria-label="Returned: Sales tax"');
+  });
+  it("by its printed words alone, no category: no Returned", () => {
+    const h = render(receipt([T({ description: "TAX", category: null })], { creditExpected: true }));
+    expect(buttons(h)).not.toContain("Returned");
+  });
+  it("a marked tax line: Kept, the way out, and no Returned, whatever the mark", () => {
+    for (const o of [
+      { pen: "unclear", billable: false },
+      { pen: "struck", returned: true, billable: false },
+      { pen: "quantity", returned: false, billable: true },
+    ]) {
+      const h = render(receipt([T(o)], { creditExpected: true }));
+      expect(buttons(h)).not.toContain("Returned");
+      if (o.pen !== "quantity") expect(buttons(h)).toContain("Kept");
+    }
+  });
+});

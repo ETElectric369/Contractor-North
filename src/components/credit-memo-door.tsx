@@ -44,11 +44,18 @@ export function CreditMemoDoorView({
   busy,
   onFind,
   onPick,
+  findingWords = "Filing…",
+  filingWords,
 }: {
   state: CreditMemoDoorState;
   busy: boolean;
   onFind: () => void;
   onPick: (billId: string) => void;
+  /** What the first button says while busy. The tray's first tap may file at once, so "Filing…";
+   *  a door whose first tap only searches passes "Finding…" (cn-v1184 fixer, skeptic #86 S10). */
+  findingWords?: string;
+  /** What a found bill's button says while it files; unset keeps the bill's label (the tray). */
+  filingWords?: string;
 }) {
   return (
     <div className="mt-2 space-y-2">
@@ -59,7 +66,7 @@ export function CreditMemoDoorView({
           disabled={busy}
           className="h-11 min-w-[44px] rounded-lg bg-slate-900 px-4 text-sm font-medium text-white disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900"
         >
-          {busy ? "Filing…" : CREDIT_MEMO_DOOR}
+          {busy ? findingWords : CREDIT_MEMO_DOOR}
         </button>
       )}
       {state.step === "pick" && (
@@ -73,7 +80,7 @@ export function CreditMemoDoorView({
               disabled={busy}
               className="block min-h-[44px] w-full rounded-lg border border-slate-300 px-3 py-2 text-left text-sm text-slate-900 disabled:opacity-60 dark:border-slate-600 dark:text-slate-100"
             >
-              {c.label}
+              {busy && filingWords ? filingWords : c.label}
             </button>
           ))}
         </div>

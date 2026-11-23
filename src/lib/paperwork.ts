@@ -1546,7 +1546,10 @@ export const PAPER_BUCKETS = BUSINESS_COST_BUCKETS;
 /** The credit memo's one door in the tray. */
 export const CREDIT_MEMO_DOOR = "File With Its Bill";
 
-/** A credit memo still waiting in the tray: the only paper File With Its Bill takes. */
+/** A credit memo still waiting in the tray: the only PAPER the tray's File With Its Bill takes (it files
+ *  the memo under the one bill it reverses). A credit already recorded as a bill on a job has its own
+ *  door on its row (cn-v1184, lib/return-bill-door): it closes the credit's lines across the job's bills
+ *  and never files it under one. */
 export function isWaitingCreditMemo(item: PaperItem): boolean {
   return paperTypeOfItem(item) === "credit_memo" && (item.status ?? "needs_review") === "needs_review" && !item.bill_id;
 }

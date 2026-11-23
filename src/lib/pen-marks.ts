@@ -169,6 +169,15 @@ export function penSentence(
   return out.join(" ");
 }
 
+/**
+ * A TAX LINE IS NEVER RETURNED BY HAND (cn-v1184): tax rides with what it taxes, so the way to take
+ * tax off is to mark the items that went back (lib/bill-itemisation takes their share with them). The
+ * by-hand doors on a bill's line and on a waiting paper's line both refuse with this sentence; Kept on
+ * a marked tax line stays allowed (it is the way out).
+ */
+export const TAX_FOLLOWS_ITEMS =
+  "Tax follows the items: mark the items that went back, and their share of the tax comes off with them. Nothing changed.";
+
 /** The one vocabulary. Anything clickable is Title Case. */
 export const PEN_WORDS = {
   kept: "Kept",

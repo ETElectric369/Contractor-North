@@ -1,6 +1,7 @@
 import { formatCurrency } from "@/lib/utils";
 import { lineWords } from "@/lib/bill-correction";
 import { sameItem } from "@/lib/supplier-returns";
+import { excludedReceiptCost } from "@/lib/bill-itemisation";
 
 /**
  * A SUPPLIER'S CREDIT MEMO CLOSES WHAT IT RETURNS (cn-v1181): THE PAIRING RULE, PURE.
@@ -11,8 +12,9 @@ import { sameItem } from "@/lib/supplier-returns";
  * show up on the invoice". Goods that went back should not show on the customer's invoice at all,
  * unless the customer was ALREADY billed for them (then the credit is the customer's, as today).
  *
- * THE RULE. The memo is filed as a correction UNDER the bill it reverses (0381, the correction door's
- * own write). Then each of the memo's lines is paired with ONE line of that bill:
+ * THE RULE (THE TRAY'S ROAD, cn-v1181). A memo still waiting in the tray is filed as a correction
+ * UNDER the bill it reverses (0381, the correction door's own write). Then each of the memo's lines is
+ * paired with ONE line of that bill:
  *   (1) an OPEN returned line (returned, no credit memo yet) of the same item and the same amount to
  *       the cent: the memo closes it;
  *   (2) else, when no invoice that has gone out bills the purchase, a line that still bills, of the
@@ -24,6 +26,11 @@ import { sameItem } from "@/lib/supplier-returns";
  * A line closed in (1) or (2) is off the customer's bill on BOTH sides: the purchase line bills
  * nothing and the memo's own line credits nothing. Tax lines ride with what they tax (the
  * itemisation's own rule); a positive line (a restocking fee) is the company's cost and said.
+ *
+ * THE ROW'S ROAD (cn-v1184). A credit already recorded on a job (a bill of its own below zero) is
+ * NEVER filed under one bill: a return slip often covers goods from several invoices. The row's door
+ * closes its lines across the job's bills (pairCreditAcrossBills below, built from this same pairing)
+ * and the credit stays a bill of its own.
  *
  * Words are compared the way the return path compares them: whole words, one description holding
  * the other, at least two words (lib/supplier-returns `sameItem`, the one function both doors ask). Money is whole cents; float noise never decides a pair.
@@ -298,4 +305,218 @@ export function creditMemoSentence(o: {
     out.push(`${fees.map((p) => desc(p.memoIndex)).join("; ")} (${formatCurrency(fromCents(fee))}) is the company's cost, not billed to the customer.`);
   }
   return out.join(" ");
+}
+
+// ── cn-v1184: ONE CREDIT, SEVERAL BILLS ON ITS JOB ───────────────────────────────────────────────
+
+/**
+ * A RETURN SLIP OFTEN COVERS GOODS FROM SEVERAL INVOICES ON ONE JOB (the owner's papers, 2026-11-22:
+ * two of his four slips did). So a credit recorded on a job is never attached under ONE bill: it stays
+ * a bill of its own, and what it returns is closed on whichever of the job's bills carry those lines.
+ *
+ * Built ONLY from `pairCreditMemo`, per bill, in three passes over the bills in a fixed order (bill
+ * date, then id), each pass over the credit lines not yet paired and the bill lines not yet used:
+ *   (1) open returns first, on EVERY bill (as `pairCreditMemo` asks them, whatever went out);
+ *   (2) whole lines, only on bills no invoice that went out holds;
+ *   (3) splits, only on those bills.
+ * What is left: `tax` (it needs no bill line: tax rides with what it taxes on both papers), `fee` (a
+ * positive line), `zero`, else `stays`: "invoiced" when a bill an invoice that went out holds would
+ * have taken it, "noMatch" when no line of the job's bills carries its words, else "noFit".
+ * A one-bill credit pairs exactly as `pairCreditMemo` pairs it.
+ */
+export type ReturnBill = { id: string; bill_date?: string | null; invoiced: boolean; lines: readonly PurchaseLine[] };
+
+export type BillPairing =
+  | { kind: "closeReturned" | "closeWhole"; memoIndex: number; billId: string; line: PurchaseLine }
+  /** cn-v1184 fixer (skeptic #86, S2): a line THIS credit already closed on a bill, while the credit's
+   *  own line still bills (a write that failed, or its Bill switch turned back on). Nothing on the bill
+   *  is written; the credit's line comes off again. Only when the caller names the credit (`creditId`). */
+  | { kind: "closedBefore"; memoIndex: number; billId: string; line: PurchaseLine }
+  | { kind: "split"; memoIndex: number; billId: string; line: PurchaseLine; kept: { quantity: number; amount: number }; back: { quantity: number; amount: number } }
+  | { kind: "stays"; memoIndex: number; why: "invoiced" | "noFit" | "noMatch" }
+  | { kind: "tax"; memoIndex: number }
+  | { kind: "fee"; memoIndex: number }
+  | { kind: "zero"; memoIndex: number };
+
+export function pairCreditAcrossBills(memo: readonly MemoLine[], bills: readonly ReturnBill[], o: { creditId?: string } = {}): BillPairing[] {
+  const ordered = [...bills].sort((a, b) => String(a.bill_date ?? "").localeCompare(String(b.bill_date ?? "")) || String(a.id).localeCompare(String(b.id)));
+  const out: (BillPairing | null)[] = memo.map(() => null);
+  const used = new Set<string>();
+  memo.forEach((m, i) => {
+    if (isTaxish(m)) out[i] = { kind: "tax", memoIndex: i };
+    else if (toCents(m.amount) > 0) out[i] = { kind: "fee", memoIndex: i };
+    else if (toCents(m.amount) === 0) out[i] = { kind: "zero", memoIndex: i };
+  });
+  // (0) LINES THIS CREDIT ALREADY CLOSED (skeptic #86, S2): a bill line that names this credit, of the
+  // same item and the same amount to the cent, each bill line used once. Nothing on the bill moves.
+  if (o.creditId) {
+    memo.forEach((m, i) => {
+      if (out[i]) return;
+      const words = lineWords(m.description);
+      for (const b of ordered) {
+        const hit = b.lines.find(
+          (l) =>
+            !used.has(String(l.id)) &&
+            l.returned_credit_bill_id === o.creditId &&
+            !isTaxish(l) &&
+            toCents(l.amount) === -toCents(m.amount) &&
+            sameItemWords(words, lineWords(l.description)),
+        );
+        if (hit) {
+          used.add(String(hit.id));
+          out[i] = { kind: "closedBefore", memoIndex: i, billId: b.id, line: hit };
+          return;
+        }
+      }
+    });
+  }
+  const pass = (take: ReadonlySet<Pairing["kind"]>, invoiced: boolean, only: (b: ReturnBill) => boolean) => {
+    for (const b of ordered) {
+      if (!only(b)) continue;
+      const open = memo.map((_, i) => i).filter((i) => !out[i]);
+      if (!open.length) return;
+      const lines = b.lines.filter((l) => !used.has(String(l.id)));
+      for (const p of pairCreditMemo(open.map((i) => memo[i]), lines, { invoiced })) {
+        if (!take.has(p.kind) || !("line" in p) || !p.line) continue;
+        const i = open[p.memoIndex];
+        used.add(String(p.line.id));
+        out[i] = { ...(p as Extract<Pairing, { kind: "closeReturned" | "closeWhole" | "split" }>), memoIndex: i, billId: b.id };
+      }
+    }
+  };
+  pass(new Set(["closeReturned"]), true, () => true);
+  pass(new Set(["closeReturned", "closeWhole"]), false, (b) => !b.invoiced);
+  pass(new Set(["split"]), false, (b) => !b.invoiced);
+  memo.forEach((m, i) => {
+    if (out[i]) return;
+    const words = lineWords(m.description);
+    const carries = ordered.some((b) => b.lines.some((l) => !isTaxish(l) && sameItemWords(words, lineWords(l.description))));
+    if (!carries) {
+      out[i] = { kind: "stays", memoIndex: i, why: "noMatch" };
+      return;
+    }
+    const wouldHave = ordered.some(
+      (b) => b.invoiced && pairCreditMemo([m], b.lines.filter((l) => !used.has(String(l.id))), { invoiced: true }).some((p) => p.kind === "stays" && p.why === "invoiced"),
+    );
+    out[i] = { kind: "stays", memoIndex: i, why: wouldHave ? "invoiced" : "noFit" };
+  });
+  return out as BillPairing[];
+}
+
+/** "T-543", "T-543 and T-576", "T-543, T-576 and T-677". */
+export function andList(words: readonly string[]): string {
+  if (words.length <= 1) return words[0] ?? "";
+  return `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
+}
+
+/**
+ * WHAT THE DOOR SAYS ONCE A CREDIT ON A JOB IS FILED WITH ITS BILLS: what closed and where, each
+ * split, what stays and why, the fees. `notClosed`: pairs whose closing write did not land (said, and
+ * their credit lines left crediting as before). `billWords`: each bill's number as it is shown.
+ */
+export function creditAcrossBillsSentence(o: {
+  creditWords: string;
+  creditTotal: number;
+  memo: readonly MemoLine[];
+  pairs: readonly BillPairing[];
+  billWords: ReadonlyMap<string, string>;
+  notClosed?: readonly number[];
+}): string {
+  const desc = (i: number) => String(o.memo[i]?.description ?? "").trim() || "a line";
+  const failed = new Set(o.notClosed ?? []);
+  const closing = o.pairs.filter((p) => CLOSES.has(p.kind as Pairing["kind"]));
+  const closed = closing.filter((p) => !failed.has(p.memoIndex)) as Extract<BillPairing, { billId: string }>[];
+  const out: string[] = [`${o.creditWords}: ${formatCurrency(Math.abs(o.creditTotal))} back from the supplier.`];
+  if (closed.length) {
+    const where = andList(Array.from(new Set(closed.map((p) => o.billWords.get(p.billId) ?? "that bill"))));
+    out.push(
+      `${closed.length === 1 ? "1 returned line is" : `${closed.length} returned lines are`} closed on ${where} (${closed.map((p) => desc(p.memoIndex)).join("; ")}): off the customer's bill, credit received.`,
+    );
+  }
+  for (const p of closed) {
+    if (p.kind !== "split") continue;
+    out.push(`${String(p.line.description ?? "").trim()} was split: ${p.kept.quantity} kept (${formatCurrency(p.kept.amount)}), ${p.back.quantity} returned (${formatCurrency(p.back.amount)}).`);
+  }
+  const lost = closing.filter((p) => failed.has(p.memoIndex));
+  if (lost.length) {
+    out.push(`${lost.map((p) => desc(p.memoIndex)).join("; ")} changed on the bill just now, so ${lost.length === 1 ? "it was" : "they were"} not closed.`);
+  }
+  const verb = (n: number, one: string, many: string) => (n === 1 ? one : many);
+  const invoiced = o.pairs.filter((p) => p.kind === "stays" && p.why === "invoiced");
+  if (invoiced.length) out.push(`${invoiced.map((p) => desc(p.memoIndex)).join("; ")} ${verb(invoiced.length, "stays", "stay")} a credit to the customer, as before: an invoice that went out already billed it.`);
+  const noMatch = o.pairs.filter((p) => p.kind === "stays" && p.why === "noMatch");
+  if (noMatch.length) {
+    out.push(`${noMatch.map((p) => desc(p.memoIndex)).join("; ")} matched no line on this job's bills, so ${verb(noMatch.length, "it stays", "they stay")} a credit to the customer, as before.`);
+  }
+  const noFit = [...o.pairs.filter((p) => p.kind === "stays" && p.why === "noFit"), ...lost];
+  if (noFit.length) out.push(`${noFit.map((p) => desc(p.memoIndex)).join("; ")} ${verb(noFit.length, "stays", "stay")} a credit to the customer, as before.`);
+  const fees = o.pairs.filter((p) => p.kind === "fee");
+  if (fees.length) {
+    const fee = fees.reduce((s, p) => s + toCents(o.memo[p.memoIndex]?.amount), 0);
+    out.push(`${fees.map((p) => desc(p.memoIndex)).join("; ")} (${formatCurrency(fromCents(fee))}) ${verb(fees.length, "is", "are")} the company's cost, not billed to the customer.`);
+  }
+  return out.join(" ");
+}
+
+// ── cn-v1184 fixer (skeptic #86, S1 + S13): FILING NEVER CHANGES WHAT THE CUSTOMER PAYS IN TAX ─────
+
+/**
+ * Closing a line that STILL BILLED moves tax on both papers: the credit's own tax line credits less
+ * (its share for the part lines that come off), and each bill closed on takes its own share of its tax
+ * off with the line (lib/bill-itemisation excludedReceiptCost, the one copy of that arithmetic). The
+ * two must be the same money, or filing changes what the customer pays: a ticket with an untaxed line
+ * (a delivery charge) takes off only half the tax the credit gave back; a tax line a person split by
+ * hand takes off none of it.
+ *   (a) the credit's tax for those lines = |Σ the credit's tax lines| × (the closing pairs' credit
+ *       lines ÷ ALL the credit's part lines);
+ *   (b) per bill closed on: excludedReceiptCost(lines after the closes) − excludedReceiptCost(lines
+ *       now) − the dollars closed (a whole close: the line not billable; a split: the kept half bills,
+ *       the returned half does not).
+ * Only `closeWhole` and `split` are checked: `closeReturned` (and a line this credit closed before)
+ * moves no money on the bill. Allowed: 2 cents plus 1 cent per bill closed on (each bill rounds its
+ * tax once). All in whole cents.
+ */
+export type ReturnTaxVerdict =
+  | { checked: false; ok: true }
+  | { checked: true; ok: boolean; creditTaxCents: number; billsTaxCents: number; billIds: string[] };
+
+export function returnTaxCheck(o: {
+  /** EVERY line of the credit (its tax lines, and all its part lines, on the bill or off). */
+  credit: readonly MemoLine[];
+  /** The lines the pairs' memoIndex points into. */
+  memo: readonly MemoLine[];
+  pairs: readonly BillPairing[];
+  bills: readonly { id: string; lines: readonly PurchaseLine[] }[];
+}): ReturnTaxVerdict {
+  type Moves = { kind: "closeWhole"; memoIndex: number; billId: string; line: PurchaseLine } | Extract<BillPairing, { kind: "split" }>;
+  const closing = o.pairs.filter((p) => p.kind === "closeWhole" || p.kind === "split") as Moves[];
+  if (!closing.length) return { checked: false, ok: true };
+  const tax = Math.abs(o.credit.filter((l) => isTaxish(l)).reduce((s, l) => s + toCents(l.amount), 0));
+  const allParts = o.credit.filter((l) => !isTaxish(l) && toCents(l.amount) < 0).reduce((s, l) => s - toCents(l.amount), 0);
+  const closingSize = closing.reduce((s, p) => s + Math.abs(toCents(o.memo[p.memoIndex]?.amount)), 0);
+  const creditTaxCents = allParts > 0 ? Math.round((tax * closingSize) / allParts) : 0;
+
+  const billIds = Array.from(new Set(closing.map((p) => p.billId)));
+  let billsTaxCents = 0;
+  for (const id of billIds) {
+    const now = [...(o.bills.find((b) => b.id === id)?.lines ?? [])];
+    const mine = closing.filter((p) => p.billId === id);
+    const after: PurchaseLine[] = [];
+    let closedCents = 0;
+    for (const l of now) {
+      const p = mine.find((x) => String(x.line.id) === String(l.id));
+      if (!p) after.push(l);
+      else if (p.kind === "closeWhole") {
+        after.push({ ...l, billable: false, returned: true });
+        closedCents += toCents(l.amount);
+      } else {
+        after.push({ ...l, quantity: p.kept.quantity, amount: p.kept.amount });
+        after.push({ ...l, id: `${l.id}:returned`, quantity: p.back.quantity, amount: p.back.amount, billable: false, returned: true });
+        closedCents += toCents(p.back.amount);
+      }
+    }
+    billsTaxCents += toCents(excludedReceiptCost(after)) - toCents(excludedReceiptCost(now)) - closedCents;
+  }
+  const ok = Math.abs(creditTaxCents - billsTaxCents) <= 2 + billIds.length;
+  return { checked: true, ok, creditTaxCents, billsTaxCents, billIds };
 }

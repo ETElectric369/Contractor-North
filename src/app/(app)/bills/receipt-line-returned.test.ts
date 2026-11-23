@@ -343,3 +343,28 @@ describe("the Bill switch on a returned line (skeptic #84, M3)", () => {
     expect(line().billable).toBe(true);
   });
 });
+
+describe("a tax line is never returned by hand (cn-v1184, B1)", () => {
+  it("Returned on a tax line (by category or by its printed words) is refused in one sentence, and writes nothing", async () => {
+    const { TAX_FOLLOWS_ITEMS } = await import("@/lib/pen-marks");
+    for (const l of [
+      { description: "Sales tax", category: "Tax", pen_mark: null, billable: true },
+      { description: "TAX", category: null, pen_mark: null, billable: true },
+      { description: "Sales tax", category: "Tax", pen_mark: "unclear", billable: false },
+    ]) {
+      seed({ payment: "on_account", line: l });
+      expect(await setReceiptLineReturned("l-1", true)).toEqual({ ok: false, error: TAX_FOLLOWS_ITEMS });
+      expect(db.writes).toHaveLength(0);
+      expect(line().returned).toBe(false);
+    }
+    expect(TAX_FOLLOWS_ITEMS).toBe(
+      "Tax follows the items: mark the items that went back, and their share of the tax comes off with them. Nothing changed.",
+    );
+  });
+
+  it("Kept on a marked tax line stays allowed: it is the way out", async () => {
+    seed({ payment: "on_account", line: { description: "Sales tax", category: "Tax", pen_mark: "struck", returned: true, billable: false } });
+    expect(await setReceiptLineReturned("l-1", false)).toEqual({ ok: true });
+    expect(line()).toMatchObject({ returned: false, billable: true });
+  });
+});
