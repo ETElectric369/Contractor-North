@@ -1,5 +1,6 @@
 import { attachRates, payRateMap } from "@/lib/profile-columns";
 import { storyForJob } from "@/lib/story";
+import { changedSinceSent, invoiceStatusLabel } from "@/lib/invoice-revision";
 import { SettleUpButton } from "@/components/settle-up-button";
 import { PaidAheadCard, RequestPaymentButton } from "@/components/request-payment";
 import { readPaymentRequestSeed } from "../../billing/request-actions";
@@ -193,7 +194,7 @@ export default async function JobDetailPage({
     supabase.from("quotes").select("id, quote_number, status, subtotal, tax, total, doc_type, created_at").eq("job_id", id),
     supabase.from("work_orders").select("id, wo_number, title, status").eq("job_id", id),
     supabase.from("change_orders").select("*").eq("job_id", id).order("created_at", { ascending: false }),
-    supabase.from("invoices").select("id, invoice_number, status, total, amount_paid, invoice_kind, created_at").eq("job_id", id).order("created_at", { ascending: false }),
+    supabase.from("invoices").select("id, invoice_number, status, total, amount_paid, invoice_kind, created_at, sent_at, revised_at").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("payment_milestones").select("id, sort_order, label, percent, amount, status, invoice_id, billed_amount").eq("job_id", id).order("sort_order"),
     supabase.from("contracts").select("id, status, contract_number, title, body, public_token, signed_name, signed_at").eq("job_id", id).neq("status", "void").order("created_at", { ascending: false }).limit(1),
     supabase.from("lien_records").select("*").eq("job_id", id).maybeSingle(),
@@ -2235,8 +2236,8 @@ export default async function JobDetailPage({
           {/* EACH INVOICE IS A CARD OF ITS OWN (cn-v1174, the owner: "bring more attention to the
               invoices on the top as they blend in to the box below"). The house look the Leads,
               Inspections and Closing lists use: ul.space-y-3, each li its own rounded-xl border-2
-              card, the number leading in bold (an invoice has no title column). The status word stays the stored word: there is no
-              status-word function for invoices (lib/statuses has estimates, leads and customers). */}
+              card, the number leading in bold (an invoice has no title column). The status word is the one invoice word
+              (lib/invoice-revision invoiceStatusLabel, 0419): "Sent - Revised" when it changed since it went out. */}
           {(invoices ?? []).length > 0 ? (
           <ul className="space-y-3">
             {[...((invoices ?? []) as any[])].sort(newestInvoiceFirst).map((iv: any) => (
@@ -2250,7 +2251,7 @@ export default async function JobDetailPage({
                     <span className="block truncate font-bold text-slate-900">{iv.invoice_number}{iv.created_at && <span className="ml-2 text-xs font-normal text-slate-500">{formatDateTz(iv.created_at, tz)}</span>}</span>
                     <InvoiceAmountDetail total={iv.total} paid={iv.amount_paid} status={iv.status} />
                   </span>
-                  <span className="flex shrink-0 items-center gap-3"><InvoiceAmount total={iv.total} paid={iv.amount_paid} status={iv.status} /><Badge tone={statusTone(iv.status)}>{iv.status}</Badge></span>
+                  <span className="flex shrink-0 items-center gap-3"><InvoiceAmount total={iv.total} paid={iv.amount_paid} status={iv.status} /><Badge tone={statusTone(iv.status)}>{invoiceStatusLabel(iv.status, changedSinceSent(iv.sent_at, iv.revised_at))}</Badge></span>
                 </Link>
                 {/* GET PAID, ON THE BILL IT PAYS (W1-24). Record a Payment left this tab with the
                     Progress Payment hub: money is taken on its invoice, whose Get Paid is one sheet

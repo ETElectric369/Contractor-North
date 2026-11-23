@@ -70,14 +70,21 @@ function isMissingColumn(err: unknown, column: string): boolean {
  */
 export async function readBillLines(supabase: Db, billIds: string[]): Promise<{ lines: any[]; error?: string }> {
   if (!billIds.length) return { lines: [] };
-  const read = (withBillable: boolean) =>
+  // `returned` + `returned_credit_bill_id` (0417) ride the newest rung (cn-v1186): a supplier return
+  // spends what already went back on a crossed-out purchase line first (returnLinesAgainstPurchases),
+  // and without them on the wire a slip for goods that never billed is credited against the lines
+  // that did. A database behind the deploy drops them on the retry, and the matcher reads as before.
+  const read = (withBillable: boolean, withReturned: boolean) =>
     supabase
       .from("bill_line_items")
-      .select(`id, bill_id, description, quantity, unit_price, amount, category, sort_order${withBillable ? ", billable, billed_amount" : ""}`)
+      .select(
+        `id, bill_id, description, quantity, unit_price, amount, category, sort_order${withBillable ? ", billable, billed_amount" : ""}${withReturned ? ", returned, returned_credit_bill_id" : ""}`,
+      )
       .in("bill_id", billIds)
       .order("sort_order");
-  let res = await read(true);
-  if (res.error && isMissingColumn(res.error, "billable")) res = await read(false);
+  let res = await read(true, true);
+  if (res.error && isMissingColumn(res.error, "returned")) res = await read(true, false);
+  if (res.error && isMissingColumn(res.error, "billable")) res = await read(false, false);
   if (res.error) {
     reportError("materialsImport.billLines", res.error, { bills: billIds.length });
     return { lines: [], error: "Couldn't read this job's receipts just now, so nothing was imported - try again in a moment." };

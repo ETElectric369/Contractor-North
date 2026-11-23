@@ -319,10 +319,14 @@ d("the switch board, the page-open counter and the backfill (0352, 0353, 0355)",
       [o, tech],
     );
     const cust = await one("insert into customers (org_id, name) values ($1, 'TEST customer') returning id", [o]);
+    // The link the customer's insert made (0298's trigger) is OFF since 0419, so a plain insert here
+    // would do nothing and the case would ask about an off link. It must be ON and never used: the
+    // link 0298 minted for everyone, which 0355 must not read as use.
     await c.query(
-      "insert into customer_portal_access (customer_id, org_id, token, enabled) values ($1, $2, $3, true) on conflict do nothing",
+      "insert into customer_portal_access (customer_id, org_id, token, enabled) values ($1, $2, $3, true) on conflict (customer_id) do update set enabled = true",
       [cust.id, o, `test-${cust.id}`],
     );
+    expect((await one("select enabled, last_opened_at from customer_portal_access where customer_id = $1", [cust.id]))).toEqual({ enabled: true, last_opened_at: null });
 
     await asServer();
     await c.query("savepoint backfill");

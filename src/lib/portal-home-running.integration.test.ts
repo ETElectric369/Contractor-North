@@ -119,6 +119,8 @@ d("the portal home's running bills and the office's photo check (0323)", { timeo
     // A bill on A's job but billed to B: B's paper, not a running bill of A's.
     await invoice(custB, jobA, "TEST-0323-8", "draft", 333, 0);
     tokenA = (await one("select token from public.customer_portal_access where customer_id = $1", [custA])).token;
+    // 0419: a new customer's link starts OFF; A's home page must open, so the office turns it on.
+    await c.query("update public.customer_portal_access set enabled = true where customer_id = $1", [custA]);
 
     photo = (
       await one("insert into public.documents (org_id, job_id, name, kind, category, file_url) values ($1, $2, 'test-0323.jpg', 'other', 'Photo', $3) returning id", [

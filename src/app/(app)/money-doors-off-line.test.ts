@@ -71,7 +71,7 @@ describe("doors outside the job page", () => {
     expect(read("jobs/[id]/page.tsx")).toContain('portalOn={on("customer_portal")} />');
     const src = read("jobs/[id]/job-customer-page.tsx");
     expect(src).toContain("portalOn = true,");
-    expect(src).toContain("{portalOn && <LinkCard link={link} who={who} jobId={jobId} />}");
+    expect(src).toContain("{portalOn && <LinkCard link={link} who={who} jobId={jobId} onTurnedOn={reloadLink} />}");
     expect(src).toContain('{portalOn ? "Choose them on the Photos tab with Show Customer under each photo. " : null}');
     expect(src).toMatch(/\{portalOn && \(\s*<Link href=\{`\/jobs\/\$\{jobId\}\?tab=photos`\}/);
   });

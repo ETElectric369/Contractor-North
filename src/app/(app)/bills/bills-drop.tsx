@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { useFileDragActive } from "@/components/drop-target";
+import { endFileDrag, useFileDragActive } from "@/components/drop-target";
 import { PaperworkList, type PaperRowItem } from "@/components/paperwork-row";
 import { SnapLinesList, clearFinishedSnapLines, snapFiles, useSnapLines } from "@/components/snap-or-note";
 import type { NumberMatch } from "@/lib/paperwork";
@@ -37,11 +37,14 @@ export function PaperworkDropZone({ children }: { children: React.ReactNode }) {
       {/* PAGE-WIDE, AND FIXED TO THE SCREEN. A wrapper zone the height of this page put its label
           halfway down a long list, off screen. This covers the viewport while a file is dragged
           anywhere over the window, and hands EVERY file to the queue. No stopPropagation, so the
-          window's own drop listener still clears the drag state. */}
+          window's own drop listener still clears the drag state.
+          NEVER A DEAD END (cn-v1186: "stuck"): a tap on the layer ends the drag, so a store that
+          missed the drag's end can always be cleared by hand. */}
       {dragging && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center border-4 border-dashed border-brand bg-white/90 p-4"
           style={STRIPES}
+          onClick={endFileDrag}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { billItemisation, type BillLine } from "@/lib/bill-itemisation";
-import { isReturnBill, returnCreditCost, returnCreditRows, returnLinesAgainstPurchases, returnsSummaryParts, returnsThatFit } from "@/lib/supplier-returns";
+import { isReturnBill, returnCreditCost, returnCreditRows, returnLinesAgainstPurchases, returnsSummaryParts, returnsThatFit, sameItem, type ReturnAwareLine } from "@/lib/supplier-returns";
 
 /**
  * A SUPPLIER RETURN REACHES THE INVOICE — the arithmetic, pinned.
@@ -358,5 +358,228 @@ describe("returnsThatFit — a credit never takes an invoice below zero", () => 
     const a = { billId: "a", credit: 0.01 };
     const fee = { billId: "f", credit: -5 };
     expect(returnsThatFit(0, [a, fee])).toEqual({ land: [fee], held: [a] });
+  });
+});
+
+/**
+ * THE SAME CATALOGUE NUMBER IS THE SAME PART (cn-v1186): two readers abbreviate a part's words
+ * differently, so the maker and the catalogue number in second place match on their own. Inputs are
+ * normalised the way the matcher normalises them (lower case, punctuation to spaces).
+ */
+describe("sameItem — the same catalogue number names the same part", () => {
+  const w = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const same = (a: string, b: string) => sameItem(w(a), w(b));
+
+  it("the owner's two pairs match, each way round", () => {
+    expect(same("SIEM MBK125A 125A Riser Main CB Kit", "SIEM MBK125A 125A RISER MAIN CB KT")).toBe(true);
+    expect(same("SIEM MBK125A 125A RISER MAIN CB KT", "SIEM MBK125A 125A Riser Main CB Kit")).toBe(true);
+    expect(same("BLINE 18186RTSCNK NM3R SC Enclosure", "BLINE 18186RTSCNK NM3R SC ENCL")).toBe(true);
+    // Digits only, at least five: a number too.
+    expect(same("RACO 53890 2G WP Box w/5 1 in Hubs", "RACO 53890 TWO GANG BOX")).toBe(true);
+  });
+
+  it("a different number, a different colour, a different maker, a short rating: never", () => {
+    expect(same("SIEM ECSBPK10 Manual Interlock Kit", "SIEM ECSBPK02 Standby Pwr Interlock Kit")).toBe(false);
+    expect(same("SIEM MBK125A 125A Riser Main CB Kit", "SIEM MBK200A 200A Riser Main CB Kit")).toBe(false);
+    expect(same("WIRE THHN12SOLBLACK (500 ea)", "WIRE THHN12SOLWHITE (500 ea)")).toBe(false);
+    expect(same("ACME 125A Breaker", "ACME 125A Panel")).toBe(false);
+    expect(same("SIEM MBK125A Riser Kit", "ACME MBK125A Riser Kit")).toBe(false);
+    // Letters only in second place, however long, is a word and not a number.
+    expect(same("SIEM BREAKER Main Kit", "SIEM BREAKER Riser Kit")).toBe(false);
+    // Four digits are not five.
+    expect(same("RACO 5389 Box", "RACO 5389 Cover")).toBe(false);
+  });
+
+  it("every case it already passed still passes", () => {
+    expect(same("H245ICAT 4 in LED Shallow IC HSG", "4 in LED SHALLOW IC HSG")).toBe(true);
+    expect(same("IDEAL 30641 Twister 341-Tan 500", "IDEAL 30641 Twister 341-Tan 500")).toBe(true);
+    expect(same("Wire", "Wire")).toBe(false);
+    expect(same("Wire", "Wire nuts")).toBe(false);
+    expect(same("4 in RL 600/900LM 5CCT D2W", "H245ICAT 4 in LED Shallow IC HSG")).toBe(false);
+    expect(sameItem("", "siem mbk125a kit")).toBe(false);
+  });
+});
+
+/**
+ * A RETURN COMES OFF THE LINE THAT WENT BACK FIRST (cn-v1186): a purchase line crossed out as
+ * returned (0417) and not yet closed by a filed credit carries the size that already left the bill;
+ * a return spends that first and is credited nothing for it.
+ */
+describe("returnLinesAgainstPurchases — what already went back is spent first", () => {
+  type B = { id: string; amount: string; created_at?: string; lines: ReturnAwareLine[] };
+  const P = (id: string, qty: number, amount: number, over: Partial<ReturnAwareLine> = {}): ReturnAwareLine => ({
+    id, description: "SIEM Q120 SP 20A 120/240V CB", quantity: String(qty), unit_price: String(amount / qty), amount: String(amount), category: "Electrical", billable: true, billed_amount: null, returned: false, returned_credit_bill_id: null, ...over,
+  });
+  const R = (id: string, qty: number, amount: number): ReturnAwareLine => ({
+    id, description: "SIEM Q120 SP 20A 120/240V CB", quantity: String(-qty), unit_price: String(-amount / qty), amount: String(-amount), category: "Electrical", billable: true, billed_amount: null,
+  });
+  const credits = (bills: B[]) => {
+    const held = returnLinesAgainstPurchases(bills, (b) => b.lines);
+    return bills.filter((b) => isReturnBill(b.amount)).map((b) => 0 - sum(returnCreditRows({ id: b.id, supplier: "Northline Supply", amount: b.amount }, held.get(b) ?? b.lines, 0)) || 0);
+  };
+  const kept = P("p-kept", 3, 28.47);
+  const crossed = P("p-crossed", 5, 47.45, { billable: false, returned: true });
+
+  it("three kept and billed, five crossed out: the slip for the five credits nothing, and the three stay billed", () => {
+    const bills: B[] = [
+      { id: "ticket", amount: "75.92", lines: [kept, crossed] },
+      { id: "slip", amount: "-47.45", created_at: "2026-11-20T10:00:00Z", lines: [R("s1", 5, 47.45)] },
+    ];
+    expect(credits(bills)).toEqual([0]);
+  });
+
+  it("a slip for more than went back: only the rest is held to what billed", () => {
+    const bills: B[] = [
+      { id: "ticket", amount: "75.92", lines: [kept, crossed] },
+      { id: "slip", amount: "-66.43", lines: [R("s1", 7, 66.43)] },
+    ];
+    expect(credits(bills)).toEqual([18.98]); // 66.43 - 47.45 that already went back
+  });
+
+  it("the size is spent once: two slips, the older takes the crossed-out five, the newer reaches the billed three", () => {
+    const bills: B[] = [
+      { id: "ticket", amount: "75.92", lines: [kept, crossed] },
+      { id: "0000-newer", amount: "-28.47", created_at: "2026-11-21T10:00:00Z", lines: [R("s2", 3, 28.47)] },
+      { id: "ffff-older", amount: "-47.45", created_at: "2026-11-20T10:00:00Z", lines: [R("s1", 5, 47.45)] },
+    ];
+    expect(credits(bills)).toEqual([28.47, 0]);
+  });
+
+  it("a line a filed credit already closed gives no such size: a second slip still reaches the billed lines", () => {
+    const closed = { ...crossed, returned_credit_bill_id: "slip-filed" };
+    const bills: B[] = [
+      { id: "ticket", amount: "75.92", lines: [kept, closed] },
+      { id: "slip-2", amount: "-28.47", lines: [R("s2", 3, 28.47)] },
+    ];
+    expect(credits(bills)).toEqual([28.47]);
+  });
+
+  it("a line without the returned key reads exactly as before", () => {
+    const { returned: _r, returned_credit_bill_id: _c, ...bare } = crossed;
+    const bills: B[] = [
+      { id: "ticket", amount: "75.92", lines: [kept, bare] },
+      { id: "slip", amount: "-47.45", lines: [R("s1", 5, 47.45)] },
+    ];
+    expect(credits(bills)).toEqual([28.47]);
+  });
+
+  it("the anchor still holds: the rows sum to the marked-up credit, tax share and all", () => {
+    const tax: ReturnAwareLine = { id: "s-tax", description: "Sales Tax", quantity: "1", unit_price: "-6.83", amount: "-6.83", category: "Tax", billable: true, billed_amount: null };
+    const bills: B[] = [
+      { id: "ticket", amount: "75.92", lines: [kept, crossed] },
+      { id: "slip", amount: "-79.24", lines: [R("s1", 7, 66.43), { ...R("s0", 1, 5.98), description: "ACME 77777 Box Cover" }, tax] },
+    ];
+    const held = returnLinesAgainstPurchases(bills, (b) => b.lines);
+    const lines = held.get(bills[1])!;
+    // 18.98 of the 7 and the whole 5.98 cover (no purchase): 24.96 of 72.41, its tax share 6.83 × 24.96/72.41.
+    const expectCost = Math.round((24.96 + (6.83 * 24.96) / 72.41) * 100) / 100;
+    expect(returnCreditCost(bills[1].amount, lines)).toBe(expectCost);
+    expect(sum(returnCreditRows({ id: "slip", supplier: "Northline Supply", amount: bills[1].amount }, lines, 20))).toBe(-mark(expectCost, 20));
+  });
+});
+
+/**
+ * A SIZE IS NOT A PART NUMBER (skeptic #88, S1). Fed through the same word-normaliser the matcher uses
+ * (lower case, punctuation to spaces), so each row asks the question the app asks.
+ */
+describe("sameItem — a size, a rating or a count in second place is not a part number", () => {
+  const w = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const NEVER: [string, string][] = [
+    ["GE 15AMP 1P BREAKER", "GE 15AMP GFCI BREAKER"],
+    ["SIEM 200AMP MAIN BREAKER", "SIEM 200AMP METER COMBO"],
+    ["CABLE 250FT 12/2 NM-B", "CABLE 250FT 14/2 NM-B"],
+    ["WIRE 12AWG THHN BLACK", "WIRE 12AWG THHN WHITE"],
+    ["WIRENUT 100PK RED", "WIRENUT 100PK YELLOW"],
+    ["LED 4000K 6IN WAFER", "LED 4000K 4IN WAFER"],
+    ["SQD 2POLE 20A BREAKER", "SQD 2POLE 30A BREAKER"],
+    ["RACO 4SQUARE BOX DEEP", "RACO 4SQUARE COVER FLAT"],
+    ["PIPE SCH40 1IN PVC", "PIPE SCH40 2IN PVC"],
+    ["CABLE CAT6A PLENUM BLUE", "CABLE CAT6A RISER WHITE"],
+    ["LED PAR38 SPOT 3000K", "LED PAR38 FLOOD 4000K"],
+    ["ENCL NEMA3R 12X12 SC", "ENCL NEMA3R 24X24 HC"],
+    ["WIRE 10000FT THHN BLACK", "WIRE 10000FT THHN WHITE"],
+    ["SIEM MBK125A 125A RISER KIT", "SIEM MBK200A 200A RISER KIT"],
+  ];
+  const ALWAYS: [string, string][] = [
+    ["SIEM MBK125A 125A Riser Main CB Kit", "SIEM MBK125A 125A RISER MAIN CB KT"],
+    ["BLINE 18186RTSCNK NM3R SC Enclosure", "BLINE 18186RTSCNK NM3R SC ENCL"],
+    ["SIEM ECSBPK10 Manual Interlock Kit", "SIEM ECSBPK10 MANUAL INTERLOCK KT"],
+    ["SIEM PNW3048L1200C 30/48CT 200A N3R Load Center", "SIEM PNW3048L1200C 30/48CT 200A N3R LD-CTR"],
+    ["RACO 53890 2G WP BOX", "RACO 53890 2 GANG WEATHERPROOF BX"],
+  ];
+  it.each(NEVER)("never the same part: %s / %s", (a, b) => {
+    expect(sameItem(w(a), w(b))).toBe(false);
+    expect(sameItem(w(b), w(a))).toBe(false);
+  });
+  it.each(ALWAYS)("always the same part: %s / %s", (a, b) => {
+    expect(sameItem(w(a), w(b))).toBe(true);
+    expect(sameItem(w(b), w(a))).toBe(true);
+  });
+});
+
+/**
+ * WHAT WENT BACK IS SPENT ONLY WHEN THE SLIP'S OWN NUMBERS SAY SO (skeptic #88, S2 and S7): the same
+ * unit price, and the whole crossed-out line. A smaller slip may be goods the customer kept and paid for.
+ */
+describe("returnLinesAgainstPurchases — a slip spends what went back only whole and at the same price", () => {
+  type B = { id: string; amount: string; created_at?: string; lines: ReturnAwareLine[] };
+  const D = "SIEM Q120 SP 20A 120/240V CB";
+  const P = (id: string, qty: number, amount: number, over: Partial<ReturnAwareLine> = {}): ReturnAwareLine => ({
+    id, description: D, quantity: String(qty), unit_price: String(amount / qty), amount: String(amount), category: "Electrical", billable: true, billed_amount: null, returned: false, returned_credit_bill_id: null, ...over,
+  });
+  const gone = (id: string, qty: number, amount: number, over: Partial<ReturnAwareLine> = {}) => P(id, qty, amount, { billable: false, returned: true, ...over });
+  const R = (id: string, qty: number, amount: number, over: Partial<ReturnAwareLine> = {}): ReturnAwareLine => ({
+    id, description: D, quantity: String(-qty), unit_price: String(-amount / qty), amount: String(-amount), category: "Electrical", billable: true, billed_amount: null, ...over,
+  });
+  const slip = (id: string, day: number, lines: ReturnAwareLine[]): B => ({
+    id, created_at: `2026-11-${day}T10:00:00Z`, amount: String(lines.reduce((s, l) => s + Number(l.amount), 0)), lines,
+  });
+  const credits = (bills: B[]) => {
+    const held = returnLinesAgainstPurchases(bills, (b) => b.lines);
+    return bills.filter((b) => isReturnBill(b.amount)).map((b) => 0 - sum(returnCreditRows({ id: b.id, supplier: "Northline Supply", amount: b.amount }, held.get(b) ?? b.lines, 0)) || 0);
+  };
+  const ticket = (): B => ({ id: "ticket", amount: "75.92", created_at: "2026-11-01T10:00:00Z", lines: [P("p-kept", 3, 28.47), gone("p-gone", 5, 47.45)] });
+
+  it("the slip for the whole crossed-out five credits 0", () => {
+    expect(credits([ticket(), slip("s", 20, [R("r", 5, 47.45)])])).toEqual([0]);
+  });
+
+  it("a slip for eight spends the five and credits the three that billed: 28.47", () => {
+    expect(credits([ticket(), slip("s", 20, [R("r", 8, 75.92)])])).toEqual([28.47]);
+  });
+
+  it("a slip for two, smaller than the crossed-out five, credits 18.98 and leaves the five open for their own slip", () => {
+    const bills = [ticket(), slip("s-two", 20, [R("r1", 2, 18.98)]), slip("s-five", 21, [R("r2", 5, 47.45)])];
+    expect(credits(bills)).toEqual([18.98, 0]);
+  });
+
+  it("two open crossed-out lines of one part (two and three) and a slip for five: credits 0", () => {
+    const t: B = { id: "ticket", amount: "75.92", lines: [P("p-kept", 3, 28.47), gone("p-g2", 2, 18.98), gone("p-g3", 3, 28.47)] };
+    expect(credits([t, slip("s", 20, [R("r", 5, 47.45)])])).toEqual([0]);
+  });
+
+  it("largest first, whatever the listing order: a slip for three spends the crossed-out three, not the two", () => {
+    const a: B = { id: "ticket", amount: "75.92", lines: [P("p-kept", 3, 28.47), gone("p-a", 2, 18.98), gone("p-b", 3, 28.47)] };
+    const b: B = { ...a, lines: [P("p-kept", 3, 28.47), gone("p-a", 3, 28.47), gone("p-b", 2, 18.98)] };
+    expect(credits([a, slip("s", 20, [R("r", 3, 28.47)])])).toEqual([0]);
+    expect(credits([b, slip("s", 20, [R("r", 3, 28.47)])])).toEqual([0]);
+  });
+
+  it("the same words at a different price: kept one at $90 billed, one at $70 crossed out; a slip of one at $90 credits 90", () => {
+    const desc = "CABLE NM-B 12/2 250 COIL";
+    const t: B = { id: "ticket", amount: "160", lines: [P("p-90", 1, 90, { description: desc }), gone("p-70", 1, 70, { description: desc })] };
+    expect(credits([t, slip("s", 20, [R("r", 1, 90, { description: desc })])])).toEqual([90]);
+  });
+
+  it("a line with no quantity (a price adjustment) spends nothing that went back, and is held to what billed, as before the wave", () => {
+    const adj = R("r-adj", 1, 8, { description: `${D} price adj`, quantity: null, unit_price: null });
+    expect(credits([ticket(), slip("s", 20, [adj])])).toEqual([8]);
+    // ...and the crossed-out five are still there for their own slip.
+    expect(credits([ticket(), slip("s", 20, [adj]), slip("s5", 21, [R("r5", 5, 47.45)])])).toEqual([8, 0]);
+  });
+
+  it("a line with no quantity as large as the crossed-out line still spends none of it: held to the three that billed", () => {
+    const adj = R("r-adj", 1, 47.45, { description: `${D} price adj`, quantity: null, unit_price: null });
+    expect(credits([ticket(), slip("s", 20, [adj])])).toEqual([28.47]);
   });
 });

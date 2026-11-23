@@ -14,7 +14,7 @@ describe("newestInvoiceFirst", () => {
 
   it("the job tab reads its invoices ordered, with created_at, and sorts with the helper", () => {
     const src = readFileSync("src/app/(app)/jobs/[id]/page.tsx", "utf8");
-    expect(src).toMatch(/from\("invoices"\)\.select\("id, invoice_number, status, total, amount_paid, invoice_kind, created_at"\)\.eq\("job_id", id\)\.order\("created_at", \{ ascending: false \}\)/);
+    expect(src).toMatch(/from\("invoices"\)\.select\("id, invoice_number, status, total, amount_paid, invoice_kind, created_at, sent_at, revised_at"\)\.eq\("job_id", id\)\.order\("created_at", \{ ascending: false \}\)/);
     expect(src).toContain("newestInvoiceFirst");
   });
   it("the billing list uses the same tie-break", () => {

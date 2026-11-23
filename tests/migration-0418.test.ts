@@ -29,9 +29,9 @@ describe("migration 0418: one key between a bill and its lines", () => {
   const sql = read("0418_one_key_between_bills_and_lines.sql");
   const code = codeOf(sql);
 
-  it("is the newest migration, the one 0418, under the house timeouts, with no transaction of its own", () => {
+  // The newest-migration line moved to tests/migration-0419.test.ts with 0419 (house practice).
+  it("is the one 0418, under the house timeouts, with no transaction of its own", () => {
     expect(names.filter((n) => n.startsWith("0418_"))).toEqual(["0418_one_key_between_bills_and_lines.sql"]);
-    expect(names[names.length - 1]).toBe("0418_one_key_between_bills_and_lines.sql");
     expect(code).toContain("set local lock_timeout = '3s';");
     expect(code).toContain("set local statement_timeout = '15s';");
     expect(code).not.toMatch(/^\s*(begin|commit)\s*;/im);

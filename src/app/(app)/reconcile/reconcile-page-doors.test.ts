@@ -184,7 +184,7 @@ vi.mock("next/navigation", () => ({
 
 const render = async () => {
   const { default: ReconcilePage } = await import("./page");
-  return renderToStaticMarkup((await ReconcilePage()) as React.ReactElement);
+  return renderToStaticMarkup((await ReconcilePage({})) as React.ReactElement);
 };
 
 let html = "";
@@ -607,5 +607,63 @@ describe("the kinds Record is what the page is made of", () => {
       .map((d) => html.indexOf(`id="${d.anchor}"`));
     for (const i of order) expect(i).toBeGreaterThan(-1);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+});
+
+/**
+ * THE WAY BACK TO A DISMISSED PICK (cn-v1186). Dismiss takes an answered pair off this page, so All
+ * Bills' Change link on the set-aside copy opens /reconcile?pick=<its id>, and the pair is drawn
+ * again with Change Your Mind and Dismiss on it. Only a uuid is read; anything else is ignored.
+ */
+describe("a dismissed pick comes back through ?pick=", () => {
+  const KEPT = "5a0c9e1e-1d2b-4c3d-8e4f-000000000901";
+  const ASIDE = "5a0c9e1e-1d2b-4c3d-8e4f-000000000902";
+  const DISMISSED: Record<string, unknown[]> = {
+    ...TABLES,
+    bills: BILLS.map((b) =>
+      b.id === "b-dup-a"
+        ? { ...b, id: KEPT }
+        : b.id === "b-dup-b"
+          ? { ...b, id: ASIDE, superseded_by_bill_id: KEPT, duplicate_dismissed_at: "2026-09-20T18:00:00Z" }
+          : b,
+    ),
+  };
+  const renderWith = async (pick?: string) => {
+    CURRENT = DISMISSED;
+    try {
+      const { default: ReconcilePage } = await import("./page");
+      return renderToStaticMarkup((await ReconcilePage({ searchParams: Promise.resolve(pick === undefined ? {} : { pick }) })) as React.ReactElement);
+    } finally {
+      CURRENT = TABLES;
+    }
+  };
+
+  it("dismissed and no pick: the pair is not on the page", async () => {
+    const page = await renderWith();
+    expect(page).not.toContain('id="same-ticket-two-jobs"');
+  });
+
+  it("pick names the set-aside copy: the pair is drawn, answered, with Change Your Mind and Dismiss", async () => {
+    const card = sectionOf(await renderWith(ASIDE), "same-ticket-two-jobs");
+    const names = doors(card);
+    expect(names).toContain("Change Your Mind");
+    expect(names).toContain("Dismiss");
+    expect(names.some((n) => /^Keep It on /.test(n))).toBe(false);
+    expect(text(card)).toContain("you kept it on");
+  });
+
+  it("pick names the kept copy: the same pair comes back", async () => {
+    expect(doors(sectionOf(await renderWith(KEPT), "same-ticket-two-jobs"))).toContain("Change Your Mind");
+  });
+
+  it("the page reads `pick` only through the uuid check", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/reconcile/page.tsx"), "utf8");
+    expect(src).toContain('const pick = typeof rawPick === "string" && isUuid(rawPick) ? rawPick.trim().toLowerCase() : null;');
+    expect(src).toContain("readReconcileWork(supabase, orgId, figuresFrom(owed), { showDismissedWith: pick })");
+  });
+
+  it("a pick that is not a uuid is ignored", async () => {
+    expect(await renderWith("b-dup-b")).not.toContain('id="same-ticket-two-jobs"');
+    expect(await renderWith("' or 1=1")).not.toContain('id="same-ticket-two-jobs"');
   });
 });

@@ -181,3 +181,20 @@ describe("the bills list is ordered by the day on the paper", () => {
     expect(PAGE).toContain("nullsFirst: false");
   });
 });
+
+/**
+ * THE DISMISSED STAMP RIDES THE BILLS READ (0419 duplicate_dismissed_at; cn-v1186), above the pen
+ * marks, and falls off FIRST: a database without it reads every pair as it always did, never a pair
+ * hidden and never a page without its bills.
+ */
+describe("the bills page reads duplicate_dismissed_at, and drops it first when the database hasn't got it", () => {
+  it("the column is on the first attempt only, and the next attempt is the same read without it", () => {
+    expect(PAGE).toContain('${o.dupDismissed ? ", duplicate_dismissed_at" : ""}');
+    expect(PAGE).toContain(
+      "let attempt = await read({ ...ladder[0], pen: true, dupDismissed: true });\n  if (attempt.error && isMissingColumn(attempt.error)) attempt = await read({ ...ladder[0], pen: true });",
+    );
+    expect((PAGE.match(/dupDismissed: true/g) ?? []).length).toBe(1);
+    expect(PAGE).toMatch(/isMissingColumn[\s\S]{0,800}duplicate_dismissed_at/);
+  });
+});
+

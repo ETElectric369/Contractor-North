@@ -76,7 +76,7 @@ const lane = (rows: typeof ROWS) =>
     customerHoldsOlderCopy(i.sent_at, i.revised_at, { total: i.total, amountPaid: i.amount_paid, sentTotal: i.sent_total, paidAt: i.payments.map((p) => p.paid_at) }),
   );
 
-describe("the Revised - Send Again lane, on the rows the board reads", () => {
+describe("the Sent - Revised lane, on the rows the board reads", () => {
   it("holds exactly the bills whose customer paid against a figure that has since moved", () => {
     expect(lane(ROWS).map((r) => r.invoice_number).sort()).toEqual(["INV-BOTH", "INV-DEPOSIT", "INV-OLD", "INV-OWED-BACK"]);
   });
@@ -163,7 +163,7 @@ describe("the board asks the question", () => {
 
 describe("the lane says the true thing, and points at a door that exists", () => {
   it("has its own stage, and its words are about the money, like the invoice page's notice", () => {
-    expect(src).toContain('title="Revised - Send Again"');
+    expect(src).toContain('title="Sent - Revised"');
     expect(src).toContain("the figure they paid against is not the figure now");
     // The old claim is gone from every sentence a person reads: the link they hold is live.
     const prose = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
@@ -184,8 +184,8 @@ describe("the lane says the true thing, and points at a door that exists", () =>
 
   it("the new copy uses hyphens, like the rest of the copy written this year", () => {
     for (const sentence of [
-      "Revised - Send Again",
-      "The money on these changed after a payment landed, so the figure they paid against is not the figure now. Open one to send it again.",
+      "Sent - Revised",
+      "The money on these changed after a payment landed, so the figure they paid against is not the figure now. Open one to send it again, or dismiss it if they already know.",
     ]) {
       expect(src).toContain(sentence);
       expect(sentence).not.toContain("—");
@@ -206,7 +206,7 @@ describe("the board speaks one language", () => {
     const titles = [...src.matchAll(/title="([^"]*)"/g)].map((m) => m[1]);
     expect(titles.length).toBeGreaterThanOrEqual(4);
     for (const t of titles) expect(t).not.toContain("—");
-    for (const t of ["Done - Not Invoiced", "Draft - Not Sent", "Revised - Send Again", "Sent - Awaiting Payment"]) {
+    for (const t of ["Done - Not Invoiced", "Draft - Not Sent", "Sent - Revised", "Sent - Awaiting Payment"]) {
       expect(titles).toContain(t);
     }
   });
@@ -237,5 +237,71 @@ describe("the board speaks one language", () => {
     expect(code).toContain('<span className="hidden sm:inline">{children}&nbsp;</span>');
     expect(code).not.toMatch(/>Review &amp; Send <ChevronRight/);
     expect(code).not.toMatch(/>Record Payment <ChevronRight/);
+  });
+});
+
+/**
+ * 0419 (Erik, 2026-11-22): "I know its been revised and I don't want to send it again, can we put a
+ * dismiss button on those please" and "For Revised, lets mark it Sent - Revised with the send again
+ * alarm dismissible".
+ */
+describe("Sent - Revised: each row can be dismissed, and the word stays on the record", () => {
+  /** The lane's own block: from its Stage to the next Stage. */
+  const laneStart = code.indexOf('title="Sent - Revised"');
+  const lane = code.slice(laneStart, code.indexOf("<Stage", laneStart + 1));
+
+  it("the board reads the dismissal and hands it to the one rule (the projection law)", () => {
+    expect(code).toMatch(/select\("[^"]*\bresend_dismissed_at\b[^"]*"\)\.not\("revised_at"/);
+    expect(code).toMatch(/resendDismissedAt: i\.resend_dismissed_at/);
+  });
+
+  it("a dismissed bill leaves the lane, on the board's own call", () => {
+    const deposit = ROWS.find((r) => r.invoice_number === "INV-DEPOSIT")!;
+    const call = (dismissed: string | null) =>
+      customerHoldsOlderCopy(deposit.sent_at, deposit.revised_at, { total: deposit.total, amountPaid: deposit.amount_paid, sentTotal: deposit.sent_total, paidAt: deposit.payments.map((p) => p.paid_at), resendDismissedAt: dismissed });
+    expect(call(null)).toBe(true);
+    expect(call("2026-10-04T09:00:00.000Z")).toBe(false);
+  });
+
+  it("every row carries Dismiss, as a SIBLING of its link, never inside it", () => {
+    expect(src).toContain('import { DismissResendButton } from "./dismiss-resend-button";');
+    expect(lane).toContain("needsResend.map(");
+    expect(lane).toContain("<DismissResendButton invoiceId={String(inv.id)} />");
+    // The link closes before the button opens, and the button sits inside the row's <li>.
+    const linkClose = lane.indexOf("</Link>");
+    const button = lane.indexOf("<DismissResendButton");
+    const liClose = lane.indexOf("</li>");
+    expect(linkClose).toBeGreaterThan(0);
+    expect(button).toBeGreaterThan(linkClose);
+    expect(liClose).toBeGreaterThan(button);
+    // No button of any kind between the link's open and close.
+    const inside = lane.slice(lane.indexOf("<Link"), linkClose);
+    expect(inside).not.toMatch(/<button|<DismissResendButton|onClick/);
+  });
+
+  it("the button is a 44px target, disabled while it runs, refreshes on success, and says a refusal in the row", () => {
+    const btn = readFileSync(join(process.cwd(), "src/app/(app)/billing/dismiss-resend-button.tsx"), "utf8");
+    expect(btn).toContain("min-h-11");
+    expect(btn).toContain("min-w-11");
+    expect(btn).toContain("disabled={pending}");
+    expect(btn).toContain("router.refresh()");
+    expect(btn).toContain("setError(res.error)");
+    expect(btn).toContain("dismissResendNotice(invoiceId)");
+    expect(btn).toContain('"Dismiss"');
+    expect(btn).not.toMatch(/<Link|<a /);
+  });
+
+  it("the Sent lane says where the others are, and marks a bill that changed since it went out", () => {
+    expect(src).toContain("in Sent - Revised above.");
+    expect(src).not.toContain("Revised - Send Again");
+    // The record question (changed since sent), from the revised read the page already makes.
+    expect(code).toMatch(/const changedIds = new Set\(\(\(revisedInv \?\? \[\]\) as any\[\]\)\.filter\(\(i\) => changedSinceSent\(i\.sent_at, i\.revised_at\)\)/);
+    const sentLane = code.slice(code.indexOf('title="Sent - Awaiting Payment"'));
+    expect(sentLane).toContain('{changedIds.has(String(inv.id)) ? " · Revised" : ""}');
+  });
+
+  it("All Invoices prints the one status word; its tone still comes from the raw status", () => {
+    expect(code).toContain("<Badge tone={statusTone(inv.status)}>{invoiceStatusLabel(inv.status, changedIds.has(String(inv.id)))}</Badge>");
+    expect(code).not.toContain("<Badge tone={statusTone(inv.status)}>{inv.status}</Badge>");
   });
 });

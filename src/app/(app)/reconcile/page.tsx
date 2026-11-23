@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
+import { isUuid } from "@/lib/actions/resolve-id";
 import { getOrgSettings } from "@/lib/org-settings";
 import { viewerSeesOwnerMoney } from "@/lib/bank-viewer";
 import { PageHeader } from "@/components/page-header";
@@ -25,10 +26,12 @@ import { SupplierCandidateReview, SupplierMergeReview, SupplierUnfiledSpellings 
 import { SupplierDuplicates } from "@/app/(app)/bills/supplier-duplicates";
 import {
   acceptSupplierMerge,
+  dismissDuplicatePick,
   dismissSupplierMerge,
   fileSpellingAsItsOwnAccount,
   markBothReal,
   resolveDuplicateBill,
+  restoreDuplicatePick,
   unmarkBothReal,
   unresolveDuplicateBill,
 } from "@/app/(app)/bills/supplier-actions";
@@ -103,7 +106,17 @@ const OWED_READ = "what your suppliers say you owe";
  * boundary — nothing below it reads a figure or serializes one into a prop for a man who should not
  * see it. (/bills itself has no page-level role check; that is not a pattern to copy. /payroll is.)
  */
-export default async function ReconcilePage() {
+export default async function ReconcilePage(props: {
+  /**
+   * `pick` IS ALL BILLS' WAY BACK TO A DISMISSED PICK (cn-v1186): the set-aside copy's Change link
+   * sends its bill id, and the pair holding it is drawn again with Change Your Mind on it. Anything
+   * that is not a uuid is ignored.
+   */
+  searchParams?: Promise<{ pick?: string | string[] }>;
+}) {
+  // `props?.`: a caller with no props at all (the page's own render tests) reads as no pick.
+  const rawPick = ((await props?.searchParams) ?? {}).pick;
+  const pick = typeof rawPick === "string" && isUuid(rawPick) ? rawPick.trim().toLowerCase() : null;
   const supabase = await createClient();
   const {
     data: { user },
@@ -153,7 +166,7 @@ export default async function ReconcilePage() {
     },
   );
   const owed = owedRead.owed;
-  const work = await readReconcileWork(supabase, orgId, figuresFrom(owed));
+  const work = await readReconcileWork(supabase, orgId, figuresFrom(owed), { showDismissedWith: pick });
 
   // ── THE STATEMENTS DROPPED HERE, ANSWERED HERE (2026-10-03) ──────────────────────────────────
   // Erik: "so it still doesnt make sense to me that all this reconcile stuff is on the bills page."
@@ -414,12 +427,19 @@ export default async function ReconcilePage() {
       {work.supersedeReady && (
         <SupplierDuplicates
           groups={work.duplicates}
+          // All Bills' Change link (`?pick=`): a Dismiss leaves the pick behind, and a pick no pair
+          // holds any more is said, with Put It Back (cn-v1186, skeptic S4 and S6).
+          picked={!!pick}
+          strayPick={work.strayPick}
           actions={{
             resolveDuplicate: resolveDuplicateBill,
             unresolveDuplicate: unresolveDuplicateBill,
             // BOTH ARE REAL (0400): both costs stay where they are and the pair stops being asked about.
             markBothReal,
             unmarkBothReal,
+            // DISMISS (0419): an answered pair leaves the page; the pick stands.
+            dismissDuplicate: dismissDuplicatePick,
+            restoreDuplicate: restoreDuplicatePick,
           }}
         />
       )}

@@ -402,6 +402,20 @@ export function BillsReceipts({
             ) : null}
           </div>
         </details>
+        {/* THE WAY BACK TO A DISMISSED PICK (cn-v1186): a pick dismissed from Reconcile leaves that
+            page, so the set-aside copy carries the door back to it. It sits beside the row, never in
+            the row's summary: a link inside the row's own toggle would be one control inside another. */}
+        {b.superseded && (
+          <div className="-mt-1 px-3 text-xs">
+            <Link
+              href={`/reconcile?pick=${encodeURIComponent(b.id)}#same-ticket-two-jobs`}
+              aria-label="Change which copy of this ticket counts"
+              className="inline-flex min-h-11 items-center font-medium text-brand hover:underline"
+            >
+              Change
+            </Link>
+          </div>
+        )}
       </li>
     );
   });

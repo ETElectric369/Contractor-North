@@ -262,7 +262,7 @@ export const EXPORT_TABLES: readonly ExportTable[] = [
     order: "id",
     columns: [
       "id", "invoice_number", "invoice_kind", "customer_id", "job_id", "quote_id", "appointment_id", "status", "title", "description", "notes",
-      "tax_rate", "subtotal", "tax", "total", "amount_paid", "due_date", "due_date_by_hand", "sent_at", "revised_at", "sent_total", "hold_until", "hold_reason",
+      "tax_rate", "subtotal", "tax", "total", "amount_paid", "due_date", "due_date_by_hand", "sent_at", "revised_at", "sent_total", "resend_dismissed_at", "hold_until", "hold_reason",
       "dismissed_import_keys", "qbo_id", "qbo_realm_id", "created_by", "created_at", "updated_at",
     ],
   },
@@ -296,7 +296,7 @@ export const EXPORT_TABLES: readonly ExportTable[] = [
     columns: [
       "id", "job_id", "supplier", "supplier_account_id", "supplier_invoice_number", "bill_number", "bill_date", "amount", "amount_paid", "status",
       "category", "scope_category", "is_statement", "pricing_provisional", "on_shelf", "po_id", "bank_line_id", "superseded_by_bill_id",
-      "corrects_bill_id", "both_real_at", "notes", "created_by", "created_at", "updated_at",
+      "corrects_bill_id", "both_real_at", "duplicate_dismissed_at", "notes", "created_by", "created_at", "updated_at",
     ],
   },
   {

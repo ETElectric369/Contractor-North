@@ -50,55 +50,157 @@ const STRIPES_OVER = {
  */
 
 // ── Window-level "a file drag is happening" store (one set of listeners, many targets). ──
+//
+// THE STORE NEVER OUTLIVES THE DRAG (cn-v1186; the owner: "stuck", then "i didnt try to drop anything
+// there it did that on its own when i clicked on bills"). It used to be cleared only by a window
+// dragleave that brought the depth to 0 or by a window drop, both heard in the bubble phase. A
+// DropTarget stops its drop from propagating (and React's root is the document, so the native event
+// never reached the window), and a drag that leaves the window can go without a dragleave being
+// heard: either way the store stayed "dragging" for the life of the tab, and Bills' page-wide layer
+// (bills-drop.tsx) covered the next visit with nothing that could dismiss it. So, on top of the rules
+// above:
+//   · CAPTURE PHASE. Every window listener is registered with capture, so a target that stops the
+//     event cannot hide it from the store.
+//   · DROP AND DRAGEND END IT, DEFERRED (setTimeout 0, never synchronously and never a microtask).
+//     Bills' layer is mounted only while the store says dragging, and its own onDrop must still run:
+//     if the store flipped inside the capture phase React could unmount the layer before its handler
+//     ran, and the dropped papers would be lost with nothing said.
+//   · A WATCHDOG. While a file is dragged over the page the browser fires dragover continuously; each
+//     one is a single timestamp (and turns the store on when a dragenter was missed). While the store
+//     is active one interval runs; when nothing has been heard for SILENCE_MS the drag is over or has
+//     left the window, and it ends. The interval exists only while the store is active.
+//   · A DRAG BEGUN INSIDE THE PAGE (dragstart) is not a file coming in, even where the browser lists
+//     "Files" for a dragged image: it never turns the store on. The preventDefault that stops the tab
+//     navigating to a dropped file is unchanged; only the ACTIVATION is gated.
+//   · ESCAPE, and endFileDrag() for any door that must end it by hand (Bills' layer on a tap).
 let dragDepth = 0;
 let dragActive = false;
 let wired = false;
+/** A drag that started inside the page (dragstart): never a file coming in. */
+let innerDrag = false;
+/** When a Files dragover or dragenter was last heard (Date.now()). */
+let lastHeard = 0;
+let watchdog: ReturnType<typeof setInterval> | null = null;
+const WATCH_MS = 400;
+const SILENCE_MS = 1200;
 const subs = new Set<() => void>();
 const notify = () => subs.forEach((f) => f());
 const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
 
+function stopWatchdog() {
+  if (watchdog !== null) {
+    clearInterval(watchdog);
+    watchdog = null;
+  }
+}
+
+function activate() {
+  if (dragActive) return;
+  dragActive = true;
+  if (watchdog === null) {
+    watchdog = setInterval(() => {
+      if (Date.now() - lastHeard >= SILENCE_MS) endFileDrag();
+    }, WATCH_MS);
+  }
+  notify();
+}
+
+/** Ends the file drag by hand: depth 0, not active, flags cleared, subscribers told (nothing when idle). */
+export function endFileDrag() {
+  dragDepth = 0;
+  innerDrag = false;
+  stopWatchdog();
+  if (!dragActive) return;
+  dragActive = false;
+  notify();
+}
+
 function wire() {
   if (wired || typeof window === "undefined") return;
   wired = true;
-  window.addEventListener("dragenter", (e) => {
-    if (!hasFiles(e)) return;
-    dragDepth++;
-    if (!dragActive) {
-      dragActive = true;
-      notify();
-    }
-  });
-  window.addEventListener("dragleave", (e) => {
-    if (!hasFiles(e)) return;
-    dragDepth = Math.max(0, dragDepth - 1);
-    if (dragDepth === 0 && dragActive) {
-      dragActive = false;
-      notify();
-    }
-  });
-  // Without these two, dropping anywhere outside a target NAVIGATES the tab to the file.
-  window.addEventListener("dragover", (e) => {
-    if (hasFiles(e)) e.preventDefault();
-  });
-  window.addEventListener("drop", (e) => {
-    if (hasFiles(e)) e.preventDefault();
-    dragDepth = 0;
-    if (dragActive) {
-      dragActive = false;
-      notify();
-    }
-  });
+  const capture = { capture: true } as const;
+  window.addEventListener(
+    "dragstart",
+    () => {
+      innerDrag = true;
+    },
+    capture,
+  );
+  // A dragend can go unheard (the dragged element left the page mid-drag). The next press of a pointer
+  // means that drag is over, so a stranded flag can never keep real files out for the life of the tab.
+  window.addEventListener(
+    "pointerdown",
+    () => {
+      innerDrag = false;
+    },
+    capture,
+  );
+  window.addEventListener(
+    "dragenter",
+    (e) => {
+      if (!hasFiles(e) || innerDrag) return;
+      dragDepth++;
+      lastHeard = Date.now();
+      activate();
+    },
+    capture,
+  );
+  window.addEventListener(
+    "dragleave",
+    (e) => {
+      if (!hasFiles(e) || innerDrag) return;
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0 && dragActive) endFileDrag();
+    },
+    capture,
+  );
+  // Without the preventDefaults in these two, dropping anywhere outside a target NAVIGATES the tab
+  // to the file. Dragover is continuous: one timestamp, and the store turned on if a dragenter was missed.
+  window.addEventListener(
+    "dragover",
+    (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      if (innerDrag) return;
+      lastHeard = Date.now();
+      if (!dragActive) activate();
+    },
+    capture,
+  );
+  window.addEventListener(
+    "drop",
+    (e) => {
+      if (hasFiles(e)) e.preventDefault();
+      // DEFERRED, so the layer under the cursor still gets its own drop (see the block above).
+      setTimeout(endFileDrag, 0);
+    },
+    capture,
+  );
+  window.addEventListener("dragend", () => setTimeout(endFileDrag, 0), capture);
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (dragActive && (e as KeyboardEvent).key === "Escape") endFileDrag();
+    },
+    capture,
+  );
 }
 
-const subscribe = (cb: () => void) => {
+/** The store's subscribe (wires the window listeners once). Exported for the store's own tests. */
+export const subscribeFileDrag = (cb: () => void) => {
   wire();
   subs.add(cb);
-  return () => subs.delete(cb);
+  return () => {
+    subs.delete(cb);
+  };
 };
+
+/** The store's snapshot: true while a FILE drag is over the window. */
+export const fileDragActive = () => dragActive;
 
 /** True while a FILE drag is anywhere over the window — what reveals the shadow zones. */
 export function useFileDragActive(): boolean {
-  return useSyncExternalStore(subscribe, () => dragActive, () => false);
+  return useSyncExternalStore(subscribeFileDrag, fileDragActive, () => false);
 }
 
 export function DropTarget({

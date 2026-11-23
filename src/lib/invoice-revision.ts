@@ -61,6 +61,15 @@ import { invoiceBalance, invoiceOverpayment } from "@/lib/invoice-math";
  *     changes" - paid first. A payment that landed AFTER the change was made against the live link,
  *     which already showed the new figure, so it is not a payment on an older one; the payments' own
  *     dates, against revised_at, say which came first.
+ *
+ * ── THE NOTICE CAN BE PUT AWAY (Erik, 2026-11-22; migration 0419) ─────────────────────────────
+ *   "I know its been revised and I don't want to send it again, can we put a dismiss button on
+ *    those please" ... "For Revised, lets mark it Sent - Revised with the send again alarm
+ *    dismissible"
+ * Two answers, each with one home here: `resend_dismissed_at` (when the office dismissed the notice,
+ * counted only while it is later than sent_at, so the next send re-arms it) is the last step of
+ * customerHoldsOlderCopy; and invoiceStatusLabel is the one word every list prints for a bill that
+ * changed since it went out ("Sent - Revised"), so the record stays visible after the alarm is quiet.
  */
 
 /** The statuses whose lines may still be edited. Everything except the one ending. */
@@ -103,7 +112,26 @@ export type MoneyFacts = {
   amountPaid: number | null | undefined;
   sentTotal?: number | null | undefined;
   paidAt: readonly (string | null | undefined)[];
+  /** 0419's `resend_dismissed_at`: when the office dismissed the send-again notice (null = never, or
+   *  brought back). The projection law again: a page that asks the notice question selects it, or a
+   *  dismissed notice comes back on that page alone. Absent = not dismissed. */
+  resendDismissedAt?: string | null;
 };
+
+/**
+ * Was the send-again notice put away SINCE the bill last went out? Both stamps must parse and the
+ * dismissal must be STRICTLY later than the send. Equal instants are not a dismissal of this send, and
+ * a missing or unparseable date is never one: an alarm is put away by a real date, never by garbage.
+ * A send after the dismissal moves sent_at past it, so the next send re-arms the notice with nothing
+ * having to clear the column (0419).
+ */
+export function dismissedSinceSent(sentAt: string | null | undefined, dismissedAt: string | null | undefined): boolean {
+  if (!sentAt || !dismissedAt) return false;
+  const sent = Date.parse(sentAt);
+  const dismissed = Date.parse(dismissedAt);
+  if (Number.isNaN(sent) || Number.isNaN(dismissed)) return false;
+  return dismissed > sent;
+}
 
 /**
  * THE RECORD QUESTION: did the bill change after it last went out? `revised_at` strictly after
@@ -154,7 +182,13 @@ function cents(x: unknown): number {
  *       equals the total now, so the change was wording (a title, the scope, a due date: cn-v967
  *       stamps those too) and the figure they paid against still stands. A payment never changes
  *       total, so a payment alone never fails this step;
- *   (e) otherwise: they paid against a figure that has since moved, and money is still owed one
+ *   (e) the office put the notice away since the last send (0419's resend_dismissed_at, later than
+ *       sent_at: dismissedSinceSent): "I know its been revised and I don't want to send it again"
+ *       (Erik, 2026-11-22). A dismissal holds until the bill is sent again: a send moves sent_at past
+ *       it and re-arms the notice. A later change alone does NOT bring the notice back; the bill's
+ *       status word still says "Sent - Revised" (invoiceStatusLabel), and Bring the Notice Back on the
+ *       invoice's own page is the way back;
+ *   (f) otherwise: they paid against a figure that has since moved, and money is still owed one
  *       way or the other. Say so, and offer Send Again.
  *
  * WHEN sent_total IS NULL the bill went out before 0405 (or the figure was never recorded), so (d)
@@ -177,8 +211,51 @@ export function customerHoldsOlderCopy(
   // (d) the figure the send carried is the figure now: a wording change, not a money change.
   const sentCents = cents(facts.sentTotal);
   if (facts.sentTotal != null && Number.isFinite(sentCents) && sentCents === cents(facts.total)) return false;
-  // (e) paid against a figure that has since moved, with a difference still standing.
+  // (e) the office dismissed the notice since the last send: quiet until the bill is sent again.
+  if (dismissedSinceSent(sentAt, facts.resendDismissedAt)) return false;
+  // (f) paid against a figure that has since moved, with a difference still standing.
   return true;
+}
+
+/**
+ * Is the notice quiet ONLY because the office dismissed it? The rule with the dismissal ignored says
+ * it would stand, and the dismissal counts (dismissedSinceSent). The invoice's own page asks this to
+ * say so in its quiet line and to offer Bring the Notice Back; every other quiet case keeps its own
+ * words.
+ */
+export function resendNoticeDismissed(
+  sentAt: string | null | undefined,
+  revisedAt: string | null | undefined,
+  facts: MoneyFacts,
+): boolean {
+  if (!dismissedSinceSent(sentAt, facts.resendDismissedAt)) return false;
+  return customerHoldsOlderCopy(sentAt, revisedAt, { ...facts, resendDismissedAt: null });
+}
+
+const STATUS_WORD: Record<string, string> = {
+  draft: "Draft",
+  sent: "Sent",
+  partial: "Partial",
+  paid: "Paid",
+  overdue: "Overdue",
+  void: "Void",
+};
+
+/** The statuses a bill can be revised in and still be out with the customer: the suffix rides these. */
+const REVISABLE_OUT = new Set(["sent", "partial", "overdue"]);
+
+/**
+ * THE ONE STATUS WORD for an invoice, on every list that prints one (Erik, 2026-11-22: "For Revised,
+ * lets mark it Sent - Revised"). The stored status as a word, and for a bill that is out with the
+ * customer (sent, partial, overdue) and changed since it went out (`changed`, the RECORD question:
+ * changedSinceSent) the word gains " - Revised". Paid, draft and void never take it: a paid bill's word
+ * is about the money that landed, a draft has not gone out, and void is an ending. Anything unknown is
+ * printed as it is. The badge's tone still comes from the raw status (statusTone).
+ */
+export function invoiceStatusLabel(status: string | null | undefined, changed: boolean): string {
+  const raw = String(status ?? "");
+  const word = STATUS_WORD[raw] ?? raw;
+  return changed && REVISABLE_OUT.has(raw) ? `${word} - Revised` : word;
 }
 
 /**

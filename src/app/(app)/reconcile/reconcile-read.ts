@@ -81,6 +81,13 @@ export interface ReconcileWork {
   questions: SupplierCandidateQuestion[];
   loose: SupplierSpelling[];
   duplicates: DuplicateBillGroup[];
+  /**
+   * A PICK THAT NO PAIR HOLDS (cn-v1186, skeptic S6): All Bills' Change link sent a set-aside bill
+   * whose two copies no longer match (one was edited after the pick), so no group on the page holds
+   * it. The card says so and offers Put It Back on that pair. Null for no pick, a pick from another
+   * company (never in this read), a bill that is not set aside, or one a group already holds.
+   */
+  strayPick: StrayPick | null;
   /** How many rows of each kind still need someone. The badge is counted off this. */
   counts: ReconcileOpenCounts;
   /** The unfiled pile totalled the way the Suppliers card totals it, for the fall-back sentence. */
@@ -91,6 +98,16 @@ export interface ReconcileWork {
   supersedeReady: boolean;
   /** Which reads failed, by name. Nothing is claimed off a failed read — the page says so. */
   failed: string[];
+}
+
+/** A set-aside bill the page's `pick` named that no pair on the page holds. */
+export interface StrayPick {
+  billId: string;
+  /** The pair's id as the duplicate doors read it: the set-aside copy and the copy it points at. */
+  groupId: string;
+  supplier: string;
+  amount: number;
+  billDate: string | null;
 }
 
 /**
@@ -119,6 +136,7 @@ const EMPTY: ReconcileWork = {
   questions: [],
   loose: [],
   duplicates: [],
+  strayPick: null,
   counts: NO_DISAGREEMENTS,
   unassigned: { bills: 0, total: 0 },
   notOnAccount: NO_PILE,
@@ -130,7 +148,7 @@ const EMPTY: ReconcileWork = {
 function isMissingColumn(err: unknown): boolean {
   const code = String((err as { code?: string })?.code ?? "");
   const message = String((err as { message?: string })?.message ?? "");
-  return code === "42703" || /does not exist/i.test(message) || /\b(superseded_by_bill_id|pricing_provisional|both_real_at)\b/i.test(message);
+  return code === "42703" || /does not exist/i.test(message) || /\b(superseded_by_bill_id|pricing_provisional|both_real_at|duplicate_dismissed_at)\b/i.test(message);
 }
 
 /**
@@ -148,8 +166,10 @@ function isMissingColumn(err: unknown): boolean {
 async function readBillsWithLines(supabase: any, orgId: string) {
   // THE NEWEST COLUMNS FALL OFF FIRST, one at a time: both_real_at (0400, Both Are Real) goes before
   // superseded_by_bill_id (0271), so a database between the two still draws the picker — a stamp it
-  // cannot read is a pair that asks again, never a page without its card.
-  const newest = ["both_real_at", "superseded_by_bill_id"] as const;
+  // cannot read is a pair that asks again, never a page without its card. duplicate_dismissed_at
+  // (0419, Dismiss on an answered pair) is newer still and falls off first: without it a dismissed
+  // pair is simply drawn again, never a pair hidden.
+  const newest = ["duplicate_dismissed_at", "both_real_at", "superseded_by_bill_id"] as const;
   const columns = (drop: number) =>
     `id, supplier, supplier_account_id, bill_number, amount, amount_paid, status, bill_date, job_id, category, notes, supplier_invoice_number${newest
       .slice(drop)
@@ -175,6 +195,8 @@ export async function readReconcileWork(
   supabase: any,
   orgId: string,
   figures: ReconcileFigures | null,
+  /** The page's `pick` (a bill id, uuid-checked there): a dismissed pair holding it is drawn again. */
+  opts?: { showDismissedWith?: string | null },
 ): Promise<ReconcileWork> {
   if (!orgId) return EMPTY;
 
@@ -243,7 +265,11 @@ export async function readReconcileWork(
   });
 
   const { proposals, questions, loose } = supplierNameWork({ unfiled, accounts, aliasRows });
-  const { groups: duplicates, ready: supersedeReady } = duplicateTicketGroups({ bills: billRows });
+  const { groups: duplicates, ready: supersedeReady } = duplicateTicketGroups({
+    bills: billRows,
+    showDismissedWith: opts?.showDismissedWith ?? null,
+  });
+  const strayPick = strayPickOf(billRows, duplicates, supersedeReady, opts?.showDismissedWith ?? null);
 
   // ── THEY CALL IT PAID, YOUR BILL IS OPEN (0383) ────────────────────────────────────────────
   // The set is the one covering walk's (supplierCoverage.settledBySupplier, handed down from the
@@ -275,6 +301,7 @@ export async function readReconcileWork(
     questions,
     loose,
     duplicates,
+    strayPick,
     counts: {
       // OPEN BY CONSTRUCTION, and that is the rule rather than an omission: a proposal, a question
       // or a loose spelling exists only while its bills sit on no account, and every answer on
@@ -294,6 +321,30 @@ export async function readReconcileWork(
     notOnAccount: { figure: figures?.notOnAnAccount ?? null, unnamed: pile.unnamed, settledAtTheRegister: pile.settledAtTheRegister },
     supersedeReady,
     failed,
+  };
+}
+
+/**
+ * THE CHANGE LINK NEVER LEADS NOWHERE (cn-v1186, skeptic S6). `rows` is this company's own bills
+ * (the read names the company), so a pick from another company is simply not found.
+ */
+export function strayPickOf(
+  rows: readonly NameWorkBill[],
+  groups: readonly DuplicateBillGroup[],
+  ready: boolean,
+  pick: string | null,
+): StrayPick | null {
+  if (!pick || !ready) return null;
+  if (groups.some((g) => g.copies.some((c) => c.billId === pick))) return null;
+  const row = rows.find((b) => String(b.id) === pick);
+  const kept = String((row as { superseded_by_bill_id?: string | null } | undefined)?.superseded_by_bill_id ?? "");
+  if (!row || !kept) return null;
+  return {
+    billId: pick,
+    groupId: `dup:${JSON.stringify([pick, kept].sort())}`,
+    supplier: String(row.supplier ?? "").trim(),
+    amount: Number(row.amount) || 0,
+    billDate: row.bill_date ?? null,
   };
 }
 

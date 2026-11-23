@@ -19,6 +19,8 @@ import { callerLang } from "@/lib/lang-of";
 import { translator } from "@/lib/i18n";
 import { fillSlots } from "@/lib/lang-words";
 import type { Lang } from "@/lib/locale";
+import { featureOn } from "@/lib/features";
+import { featureOffSentence } from "@/lib/viewer-switches";
 
 export type ActionResult = { ok: boolean; error?: string; id?: string };
 
@@ -192,6 +194,10 @@ export async function emailPortalLink(customerId: string, message?: SendMessage)
   const r = await readPortalSend(supabase, orgId, customerId, { override: m.to });
   if (!r.ok) return { ok: false, error: await ws.say(r.error) };
   const { c, org, settings, link } = r;
+  // THE COMPANY'S SWITCH TOO (cn-v1186): with Customer Portal off on the switch board, the page says
+  // "Ask your contractor" to everyone, so no link to it is emailed, whatever this customer's own
+  // switch says. Said in the switch board's own sentence, as the other switched-off doors say it.
+  if (!featureOn(settings.features, "customer_portal")) return { ok: false, error: featureOffSentence("customer_portal") };
   const to = m.to ?? c.email;
   if (!to) return { ok: false, error: await ws.say("cu_srv_noEmail") };
 

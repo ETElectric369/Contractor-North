@@ -1077,7 +1077,8 @@ export async function resolveDuplicateBill(input: {
 
   const { data: moved, error } = await supabase
     .from("bills")
-    .update({ superseded_by_bill_id: keepBillId })
+    // A FRESH ANSWER ALWAYS SHOWS (0419): a dismissal left from an older pick never hides a new one.
+    .update({ superseded_by_bill_id: keepBillId, duplicate_dismissed_at: null })
     .in("id", losers)
     .eq("org_id", org.orgId)
     .is("superseded_by_bill_id", null)
@@ -1195,7 +1196,8 @@ export async function unresolveDuplicateBill(groupId: string): Promise<SupplierA
 
   const { data, error } = await ctx.supabase
     .from("bills")
-    .update({ superseded_by_bill_id: null })
+    // An undone answer leaves no stale dismissal behind it (0419).
+    .update({ superseded_by_bill_id: null, duplicate_dismissed_at: null })
     .in("id", ids)
     .in("superseded_by_bill_id", ids)
     .eq("org_id", org.orgId)
@@ -1206,6 +1208,79 @@ export async function unresolveDuplicateBill(groupId: string): Promise<SupplierA
   revalidateSupplierNames();
   for (const row of data as any[]) if (row.job_id) revalidatePath(`/jobs/${row.job_id}`);
   return { ok: true, message: "Put back. Both copies count again, the way they did before." };
+}
+
+/**
+ * DISMISS AN ANSWERED PAIR (0419 bills.duplicate_dismissed_at; cn-v1186).
+ *
+ *   "same with the double billed in reconcile, im not going to change my mind, dismiss please"
+ *
+ * An answered pair kept its row on Reconcile for good, so the pick could be changed. This takes the
+ * row away and leaves the pick exactly as it is: the stamp goes on the copies that were SET ASIDE
+ * (each points at another copy of this same pair), never on the copy he kept, and nothing else moves.
+ * An open pair is refused: a question is answered, not put away. The way back is All Bills' Change
+ * link on the set-aside copy, which opens Reconcile with that pair drawn again.
+ */
+export async function dismissDuplicatePick(groupId: string): Promise<SupplierActionResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const org = orgOf(ctx);
+  if ("error" in org) return { ok: false, error: org.error };
+
+  const ids = billIdsInGroupId(groupId);
+  if (!ids.length) return { ok: false, error: "Couldn't tell which pair you meant. Reload the page." };
+
+  const { data: rows, error: readErr } = await ctx.supabase
+    .from("bills")
+    .select("id, superseded_by_bill_id")
+    .in("id", ids)
+    .eq("org_id", org.orgId);
+  if (readErr) return { ok: false, error: `Looking that pair up didn't go through, so nothing changed. ${dbError(readErr)}` };
+  const setAside = ((rows ?? []) as { id: string; superseded_by_bill_id?: string | null }[])
+    .filter((r) => r.superseded_by_bill_id && ids.includes(String(r.superseded_by_bill_id)))
+    .map((r) => String(r.id));
+  if (!rows?.length) return { ok: false, error: "Those bills aren't there any more." };
+  if (!setAside.length) return { ok: false, error: "That pair hasn't been answered yet, so there is nothing to dismiss. Pick a job for it first." };
+
+  const { data, error } = await ctx.supabase
+    .from("bills")
+    .update({ duplicate_dismissed_at: new Date().toISOString() })
+    .in("id", setAside)
+    .in("superseded_by_bill_id", ids)
+    .eq("org_id", org.orgId)
+    .select("id, job_id");
+  if (error) return { ok: false, error: `That didn't save, so the pair is still on the page. ${dbError(error)}` };
+  if (!data?.length) return { ok: false, error: "That pair changed under you. Reload the page." };
+  if (data.length < setAside.length) return { ok: false, error: "Those bills changed under you — reload and try again." };
+
+  revalidateSupplierNames();
+  for (const row of data as any[]) if (row.job_id) revalidatePath(`/jobs/${row.job_id}`);
+  return { ok: true, message: "Dismissed. The pick stands and this pair is off the page. To change it later, open that bill in All Bills." };
+}
+
+/** UNDO FOR DISMISS: the stamp comes off the pair's copies and the answered pair is drawn again. */
+export async function restoreDuplicatePick(groupId: string): Promise<SupplierActionResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const org = orgOf(ctx);
+  if ("error" in org) return { ok: false, error: org.error };
+
+  const ids = billIdsInGroupId(groupId);
+  if (!ids.length) return { ok: false, error: "Couldn't tell which pair you meant. Reload the page." };
+
+  const { data, error } = await ctx.supabase
+    .from("bills")
+    .update({ duplicate_dismissed_at: null })
+    .in("id", ids)
+    .eq("org_id", org.orgId)
+    .not("duplicate_dismissed_at", "is", null)
+    .select("id, job_id");
+  if (error) return { ok: false, error: `That didn't go back. ${dbError(error)}` };
+  if (!data?.length) return { ok: false, error: "That pair is already on the page. Reload the page." };
+
+  revalidateSupplierNames();
+  for (const row of data as any[]) if (row.job_id) revalidatePath(`/jobs/${row.job_id}`);
+  return { ok: true, message: "Put back. The pick is on the page again." };
 }
 
 /**

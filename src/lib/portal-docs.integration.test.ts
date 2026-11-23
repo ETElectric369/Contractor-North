@@ -160,6 +160,9 @@ d("plans and drawings on the customer's page (0326)", { timeout: 30_000 }, () =>
     jobB = await job(custB, "TEST-0326-B");
     tokenA = (await one("select token from public.customer_portal_access where customer_id = $1", [custA])).token;
     tokenB = (await one("select token from public.customer_portal_access where customer_id = $1", [custB])).token;
+    // 0419: a new customer's link starts OFF. Both pages here must open (B's too: "another customer's
+    // link opens nothing of it" means a WORKING link, not a turned-off one), so the office turns them on.
+    await c.query("update public.customer_portal_access set enabled = true where customer_id = any($1::uuid[])", [[custA, custB]]);
   });
   afterAll(async () => {
     await c?.query("rollback").catch(() => undefined);

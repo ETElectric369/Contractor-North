@@ -36,7 +36,7 @@ import { listCustomerOptions } from "@/lib/schedule-options";
    the same functions the server's revision stamp is written against, so the sentences on the page and
    the rules in the database can never drift apart. The lib is server-only, which is why the ANSWERS
    cross to the client components and the rules do not. */
-import { changedSinceSent, customerHoldsOlderCopy } from "@/lib/invoice-revision";
+import { changedSinceSent, customerHoldsOlderCopy, invoiceStatusLabel, resendNoticeDismissed } from "@/lib/invoice-revision";
 import { ProgressReportCard } from "@/components/progress-report-card";
 import { isActualsDraw } from "@/lib/actuals-draw";
 import { fixedBillingsNotYetNetted } from "@/lib/unbilled-work";
@@ -90,7 +90,8 @@ export default async function InvoicePage({
   /* THE PROJECTION IS WHERE THIS PAGE'S TRUTH COMES FROM (the projection law). `*` means the three
      delivery facts ride along without being named: 0267's `sent_at` (a real send, never a pay
      door's promotion to 'sent'), 0269's `revised_at` (the bill changed after that send) and 0405's
-     `sent_total` (the figure the send carried). The notice's rule reads all three, so if this ever
+     `sent_total` (the figure the send carried), and 0419's `resend_dismissed_at` (the office put the
+     notice away since that send). The notice's rule reads all four, so if this ever
      narrows to a field list, those names have to be on it or the card goes quiet about a customer
      who paid against a figure that has since moved — the exact silence cn-v962 traded the edit
      lock for. */
@@ -380,23 +381,30 @@ export default async function InvoicePage({
      columns - the payments' paid_at included (the projection law). */
   const sentAt = (inv as { sent_at?: string | null }).sent_at;
   const revisedAt = (inv as { revised_at?: string | null }).revised_at;
-  const holdsOlderCopy = customerHoldsOlderCopy(sentAt, revisedAt, {
+  const noticeFacts = {
     total: inv.total,
     amountPaid: inv.amount_paid,
     sentTotal: (inv as { sent_total?: number | null }).sent_total,
     paidAt: ((payments ?? []) as { paid_at?: string | null }[]).map((p) => p.paid_at),
-  });
+    // 0419: when the office dismissed the notice (read by the `*` above).
+    resendDismissedAt: (inv as { resend_dismissed_at?: string | null }).resend_dismissed_at,
+  };
+  const holdsOlderCopy = customerHoldsOlderCopy(sentAt, revisedAt, noticeFacts);
+  /* QUIET ONLY BECAUSE IT WAS DISMISSED (0419): the body says so and offers Bring the Notice Back;
+     every other quiet case keeps its own line. */
+  const noticeDismissed = resendNoticeDismissed(sentAt, revisedAt, noticeFacts);
   /* THE RECORD, for the ⋯'s Mark Sent Again - I Re-Sent It: did the bill change since it last went
      out, whatever the notice says? A menu row is a door, not a nag (skeptic #56, 2026-11-07): an
      unpaid bill that changed must still be re-stampable by hand, or revised_at > sent_at stands and
      sent_total stays the old figure. */
   const changedSince = changedSinceSent(sentAt, revisedAt);
-  /** The badge: the status, and on a paid bill how much and when (the newest payment). */
+  /** The badge: the status, and on a paid bill how much and when (the newest payment). Every other
+   *  status is the one status word (invoiceStatusLabel): "Sent - Revised" when it changed since it went out. */
   const lastPaidAt = ((payments ?? []) as { paid_at?: string | null }[])[0]?.paid_at ?? null;
   const statusWords =
     inv.status === "paid"
       ? `Paid ${formatCurrency(Number(inv.amount_paid ?? 0))}${lastPaidAt ? ` · ${formatDate(lastPaidAt)}` : ""}`
-      : inv.status;
+      : invoiceStatusLabel(inv.status, changedSince);
   /** Every Get Paid door on this page opens the same sheet, with the same facts. */
   const payDoor = {
     source: "invoice" as const,
@@ -693,6 +701,7 @@ export default async function InvoicePage({
         tz={orgSettings.timezone}
         salesTax={featureOn(orgSettings.features, "sales_tax")}
         customerHoldsOlderCopy={holdsOlderCopy}
+        resendNoticeDismissed={noticeDismissed}
         netDays={netTermsDays((org as any)?.settings)}
         estimateIsContract={jobContract}
         /* THE QUESTION THIS DRAFT IS CARRYING, read on every load rather than only at an import: the

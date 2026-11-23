@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { Camera, ChevronRight, Copy, ExternalLink, FileText, Loader2, Palette, Plus, RotateCcw, Trash2, Upload, X } from "lucide-react";
+import { Camera, ChevronRight, Copy, ExternalLink, FileText, Loader2, Palette, Plus, Power, RotateCcw, Trash2, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { DayField } from "@/components/day-field";
@@ -32,6 +32,7 @@ import { PapersCard } from "./job-portal-papers";
 import { JobPortalPanel } from "./job-portal-panel";
 import { portalOfficeLookUrl } from "../../portal-look-actions";
 import { openOfficeLook } from "@/components/portal/open-office-look";
+import { setPortalEnabled } from "../../crm/actions";
 
 /**
  * WHAT THE CUSTOMER SEES ON THIS JOB, AND THE OFFICE'S HANDS ON IT (office only: the page renders
@@ -85,6 +86,13 @@ export function JobCustomerPage({
   const [priceBookNote, setPriceBookNote] = useState<string | null>(null);
   const [link, setLink] = useState<LinkState | null>(null);
 
+  // The link's state as the tab first reads it; Turn On reads it again the same way (0419).
+  const putLink = useCallback((ln: Awaited<ReturnType<typeof jobPortalLink>>) => {
+    if (ln.ok)
+      setLink({ url: ln.url, enabled: ln.enabled, hasLink: ln.hasLink, jobShown: ln.jobShown, customerId: ln.customerId, customerName: ln.customerName });
+  }, []);
+  const reloadLink = useCallback(async () => putLink(await jobPortalLink(jobId)), [jobId, putLink]);
+
   const load = useCallback(async () => {
     const [st, ln] = await Promise.all([jobShareState(jobId), jobPortalLink(jobId)]);
     if (!st.ok) {
@@ -101,10 +109,9 @@ export function JobCustomerPage({
       setOptions(st.options);
       setPriceBookNote(st.priceBookNote);
     }
-    if (ln.ok)
-      setLink({ url: ln.url, enabled: ln.enabled, hasLink: ln.hasLink, jobShown: ln.jobShown, customerId: ln.customerId, customerName: ln.customerName });
+    putLink(ln);
     setLoaded(true);
-  }, [jobId]);
+  }, [jobId, putLink]);
 
   useEffect(() => {
     load().catch(() => {
@@ -125,7 +132,7 @@ export function JobCustomerPage({
 
   return (
     <div className="space-y-4">
-      {portalOn && <LinkCard link={link} who={who} jobId={jobId} />}
+      {portalOn && <LinkCard link={link} who={who} jobId={jobId} onTurnedOn={reloadLink} />}
       {loadError ? (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{loadError}</div>
       ) : (
@@ -163,9 +170,21 @@ export function JobCustomerPage({
 
 // ── the link ─────────────────────────────────────────────────────────────────────────────────
 
-function LinkCard({ link, who, jobId }: { link: LinkState | null; who: string; jobId: string }) {
+export function LinkCard({
+  link,
+  who,
+  jobId,
+  onTurnedOn,
+}: {
+  link: LinkState | null;
+  who: string;
+  jobId: string;
+  /** Read the link again the way the tab first loads it, so Copy the Link and See What They See come alive. */
+  onTurnedOn: () => Promise<void>;
+}) {
   const toast = useToast();
   const [looking, startLook] = useTransition();
+  const [turning, startTurn] = useTransition();
   if (!link) return null;
   if (!link.customerId) {
     return (
@@ -193,13 +212,32 @@ function LinkCard({ link, who, jobId }: { link: LinkState | null; who: string; j
             .
           </p>
         ) : !link.enabled ? (
-          <p className="mt-2 text-sm text-red-700">
-            Their link is turned off, so it opens to &ldquo;This link was turned off.&rdquo;{" "}
-            <Link href={`/crm/${link.customerId}`} className="font-semibold underline">
-              Turn It On from Their Contact Page
-            </Link>
-            .
-          </p>
+          // OFF IS THE ORDINARY STATE (0419: a customer's page starts off, the owner turns it on for
+          // who needs it). So a plain line and the door itself, not an alarm and a link away.
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <p className="text-sm text-slate-700">
+              {who}&apos;s page is off, so nothing here shows to them yet. Turn it on when they need it.
+            </p>
+            <Button
+              variant="outline"
+              disabled={turning}
+              onClick={() => {
+                const customerId = link.customerId;
+                if (!customerId) return;
+                startTurn(async () => {
+                  const res = await setPortalEnabled(customerId, true);
+                  if (!res.ok) {
+                    toast(res.error ?? "That didn't take.", "error");
+                    return;
+                  }
+                  toast("Turned on. Their link works; each device asks for a code from their email.", "success");
+                  await onTurnedOn();
+                });
+              }}
+            >
+              <Power className="h-4 w-4" /> Turn On
+            </Button>
+          </div>
         ) : null}
         {link.hasLink && !link.jobShown ? (
           <p className="mt-2 text-sm text-amber-800">
@@ -210,7 +248,8 @@ function LinkCard({ link, who, jobId }: { link: LinkState | null; who: string; j
         <div className="mt-3 flex flex-wrap gap-2">
           <Button
             variant="outline"
-            disabled={!url || !link.jobShown || looking}
+            // Off, the office's look is refused at the door (portal_preview_redeem asks for an enabled link).
+            disabled={!url || !link.enabled || !link.jobShown || looking}
             onClick={() => {
               const customerId = link.customerId;
               if (!url || !customerId) return;
@@ -220,7 +259,11 @@ function LinkCard({ link, who, jobId }: { link: LinkState | null; who: string; j
                 if (problem) toast(problem, "error");
               });
             }}
-            title="Open it exactly as the customer sees it, without their code. Your own looks don't count as them opening it."
+            title={
+              link.enabled
+                ? "Open it exactly as the customer sees it, without their code. Your own looks don't count as them opening it."
+                : "Turn the link on first"
+            }
           >
             <ExternalLink className="h-4 w-4" /> See What They See
           </Button>

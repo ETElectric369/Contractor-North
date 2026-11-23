@@ -31,10 +31,38 @@ export interface SupplierDuplicateActions {
   markBothReal?: (billIds: string[]) => Promise<SupplierActionResult>;
   /** Undo for Both Are Real: the stamp comes off the pair (the group id carries the bill ids). */
   unmarkBothReal?: (groupId: string) => Promise<SupplierActionResult>;
+  /**
+   * DISMISS AN ANSWERED PAIR (0419 duplicate_dismissed_at; cn-v1186): the pick stands and the row
+   * leaves the page. Optional: a mount without the door draws no button. Never on an open pair.
+   */
+  dismissDuplicate?: (groupId: string) => Promise<SupplierActionResult>;
+  /** Undo for Dismiss: the pair is drawn again, answered as it was. */
+  restoreDuplicate?: (groupId: string) => Promise<SupplierActionResult>;
 }
 
 /** The one way back from an action: the undo door, its busy key, and the words if the server says none. */
 type Undo = { fn: () => Promise<SupplierActionResult>; key: string; fallback: string };
+
+/**
+ * Where a Dismiss lands when the page was opened through All Bills' Change link (`?pick=`): the same
+ * page WITHOUT the pick. A refresh keeps the pick, and the pick draws the dismissed pair again, Dismiss
+ * and all, so the row could never leave (cn-v1186, skeptic S4).
+ */
+export const RECONCILE_WITHOUT_PICK = "/reconcile#same-ticket-two-jobs";
+
+/** Where a done action lands: the page without its pick for a Dismiss opened through one, else null (a refresh). */
+export function landingAfter(then: "refresh" | "leave-pick", picked: boolean): string | null {
+  return then === "leave-pick" && picked ? RECONCILE_WITHOUT_PICK : null;
+}
+
+/** A set-aside bill the page's pick named that no pair on the page holds (reconcile-read's strayPickOf). */
+export interface StrayPickRow {
+  billId: string;
+  groupId: string;
+  supplier: string;
+  amount: number;
+  billDate: string | null;
+}
 
 /**
  * THE SAME TICKET, FILED TO TWO JOBS (Erik, 2026-09-18).
@@ -56,9 +84,15 @@ type Undo = { fn: () => Promise<SupplierActionResult>; key: string; fallback: st
 export function SupplierDuplicates({
   groups,
   actions,
+  picked = false,
+  strayPick = null,
 }: {
   groups: DuplicateBillGroup[];
   actions: SupplierDuplicateActions;
+  /** The page was opened with a valid `?pick=` (All Bills' Change link). */
+  picked?: boolean;
+  /** The pick's bill is set aside, but no pair on the page holds it (its copies no longer match). */
+  strayPick?: StrayPickRow | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -71,9 +105,16 @@ export function SupplierDuplicates({
   // takes the last group off the page, and a card that unmounted with it took the Undo away in the
   // same breath. So it stays mounted while `done` is set — the banner and its Undo — and goes
   // only once there is neither a group nor a word to say.
-  if (!groups.length && !done) return null;
+  if (!groups.length && !done && !strayPick) return null;
 
-  function run(fn: () => Promise<SupplierActionResult>, key: string, fallback: string, undo?: Undo | null) {
+  function run(
+    fn: () => Promise<SupplierActionResult>,
+    key: string,
+    fallback: string,
+    undo?: Undo | null,
+    /** "leave-pick": a Dismiss on a page opened through `?pick=` lands on the page without the pick. */
+    then: "refresh" | "leave-pick" = "refresh",
+  ) {
     setError(null);
     setBusy(key);
     start(async () => {
@@ -85,7 +126,9 @@ export function SupplierDuplicates({
         return;
       }
       setDone({ text: res.message ?? fallback, undo: undo ?? null });
-      router.refresh();
+      const landing = landingAfter(then, picked);
+      if (landing) router.replace(landing);
+      else router.refresh();
     });
   }
   // THE TWO WAYS BACK, each the shape of the door it undoes: a pick is unresolved, a Both Are Real is unmarked.
@@ -96,6 +139,10 @@ export function SupplierDuplicates({
   const undoBoth = (groupId: string): Undo | null =>
     actions.unmarkBothReal
       ? { fn: () => actions.unmarkBothReal!(groupId), key: `unmark:${groupId}`, fallback: "Put back. The pair will be asked about again." }
+      : null;
+  const undoDismiss = (groupId: string): Undo | null =>
+    actions.restoreDuplicate
+      ? { fn: () => actions.restoreDuplicate!(groupId), key: `restore:${groupId}`, fallback: "Put back. The pick is on the page again." }
       : null;
 
   const openGroups = groups.filter((g) => !g.resolution);
@@ -110,7 +157,9 @@ export function SupplierDuplicates({
           <p>
             {openGroups.length > 0
               ? `These receipts match line for line, to the penny, so one job may be carrying a cost that is not its own. You say which job it belongs to${actions.markBothReal ? ", or that both are real purchases" : ""}. Nothing gets deleted either way.`
-              : "Nothing is waiting on you here. The picks you made are below, and you can change any of them."}
+              : actions.dismissDuplicate
+                ? "Nothing is waiting on you here. The picks you made are below: change one, or dismiss it and it leaves this page."
+                : "Nothing is waiting on you here. The picks you made are below, and you can change any of them."}
           </p>
         </WhyFold>
       </div>
@@ -123,6 +172,33 @@ export function SupplierDuplicates({
           {done.undo && (
             <Button variant="outline" className="shrink-0" disabled={pending} onClick={() => run(done.undo!.fn, done.undo!.key, done.undo!.fallback)}>
               <Undo2 className="h-4 w-4" /> Undo
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* THE CHANGE LINK NEVER LEADS NOWHERE (cn-v1186, skeptic S6): All Bills' Change link opened this
+          page on a set-aside bill whose two copies no longer match, so no pair below holds it. Said in
+          one line, with the one door that still applies: put both copies back to counting. */}
+      {strayPick && (
+        <div id={`stray-pick-${strayPick.billId}`} className="mb-3 rounded-lg border border-slate-200 p-3">
+          <p className="text-sm text-slate-700">
+            {`${strayPick.supplier || "That bill"} · ${formatCurrency(strayPick.amount)}${strayPick.billDate ? ` · ${formatDate(strayPick.billDate)}` : ""}: it was set aside as a copy of another bill, but the two no longer match, so there is no pair to show here. Put it back and it counts as a job cost again.`}
+          </p>
+          {actions.unresolveDuplicate && (
+            <Button
+              variant="outline"
+              className="mt-2"
+              disabled={pending && busy === `unresolve:${strayPick.groupId}`}
+              onClick={() =>
+                run(
+                  () => actions.unresolveDuplicate!(strayPick.groupId),
+                  `unresolve:${strayPick.groupId}`,
+                  "Put back. Both copies count again, the way they did before.",
+                )
+              }
+            >
+              Put It Back
             </Button>
           )}
         </div>
@@ -235,34 +311,56 @@ export function SupplierDuplicates({
                   <>
                     The other copy is still on file, marked as the duplicate, so it no longer counts against that
                     job.{" "}
-                    {actions.unresolveDuplicate ? (
-                      <button
-                        type="button"
-                        className="flex min-h-11 items-center font-medium text-brand hover:underline"
-                        disabled={pending}
-                        onClick={() =>
-                          run(
-                            () => actions.unresolveDuplicate!(g.id),
-                            `unresolve:${g.id}`,
-                            "Put back. Both copies are counting again, the way they were.",
-                          )
-                        }
-                      >
-                        Change Your Mind
-                      </button>
-                    ) : (
-                      // The set-aside copy's own row in All Bills (FoldOpener opens it), not the
-                      // top of a ledger he would have to search.
-                      <a
-                        href={(() => {
-                          const setAside = g.copies.find((c) => c.billId !== g.resolution?.keptBillId);
-                          return setAside ? `#bill-${setAside.billId}` : "#all-bills";
-                        })()}
-                        className="flex min-h-11 items-center font-medium text-brand hover:underline"
-                      >
-                        To Change It, Open That Bill in All Bills
-                      </a>
-                    )}
+                    <span className="flex flex-wrap items-center gap-x-4">
+                      {actions.unresolveDuplicate ? (
+                        <button
+                          type="button"
+                          className="flex min-h-11 items-center font-medium text-brand hover:underline"
+                          disabled={pending}
+                          onClick={() =>
+                            run(
+                              () => actions.unresolveDuplicate!(g.id),
+                              `unresolve:${g.id}`,
+                              "Put back. Both copies are counting again, the way they were.",
+                            )
+                          }
+                        >
+                          Change Your Mind
+                        </button>
+                      ) : (
+                        // The set-aside copy's own row in All Bills (FoldOpener opens it), not the
+                        // top of a ledger he would have to search.
+                        <a
+                          href={(() => {
+                            const setAside = g.copies.find((c) => c.billId !== g.resolution?.keptBillId);
+                            return setAside ? `#bill-${setAside.billId}` : "#all-bills";
+                          })()}
+                          className="flex min-h-11 items-center font-medium text-brand hover:underline"
+                        >
+                          To Change It, Open That Bill in All Bills
+                        </a>
+                      )}
+                      {/* DISMISS (0419; cn-v1186): "im not going to change my mind, dismiss please". The pick
+                          stands; the row leaves the page. Its way back is All Bills' Change link. */}
+                      {actions.dismissDuplicate && (
+                        <button
+                          type="button"
+                          className="flex min-h-11 items-center font-medium text-brand hover:underline"
+                          disabled={pending}
+                          onClick={() =>
+                            run(
+                              () => actions.dismissDuplicate!(g.id),
+                              `dismiss:${g.id}`,
+                              "Dismissed. The pick stands and this pair is off the page. To change it later, open that bill in All Bills.",
+                              undoDismiss(g.id),
+                              "leave-pick",
+                            )
+                          }
+                        >
+                          Dismiss
+                        </button>
+                      )}
+                    </span>
                   </>
                 ) : (
                   <WhyFold>

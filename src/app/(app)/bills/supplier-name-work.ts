@@ -112,6 +112,8 @@ export interface NameWorkBill {
   superseded_by_bill_id?: string | null;
   /** bills.both_real_at (0400): he said both copies of this ticket are real purchases. */
   both_real_at?: string | null;
+  /** bills.duplicate_dismissed_at (0419): on a set-aside copy, he put the ANSWERED pair away. */
+  duplicate_dismissed_at?: string | null;
   notes?: string | null;
   /** The job's own row. `job_number` and `customers(name)` are read ONLY to name a job in full
    *  (jobSaidLabel) for a sentence read away from the job; a read that does not select them gets a
@@ -456,8 +458,14 @@ export interface DuplicateTicketWork {
 export function duplicateTicketGroups(input: {
   /** Every bill, INCLUDING the superseded ones, each with its line items and notes. */
   bills: readonly NameWorkBill[];
+  /**
+   * THE WAY BACK TO A DISMISSED PICK (cn-v1186): a bill id. A dismissed pair holding this bill is
+   * kept, so All Bills' Change link lands on the pair with Change Your Mind on it. Only that pair.
+   */
+  showDismissedWith?: string | null;
 }): DuplicateTicketWork {
   const bills = input.bills ?? [];
+  const showWith = String(input.showDismissedWith ?? "");
   const ready = bills.every((b) => "superseded_by_bill_id" in (b as object));
   if (!ready) return { groups: [], ready: false };
 
@@ -508,6 +516,15 @@ export function duplicateTicketGroups(input: {
     // Already sorted out? The copy he set aside points at the copy he kept.
     const supersededCopy = copies.find((c) => billById.get(c.billId)?.superseded_by_bill_id);
     const keptBillId = supersededCopy ? String(billById.get(supersededCopy.billId)?.superseded_by_bill_id ?? "") : "";
+    const answered = !!keptBillId && ids.includes(keptBillId);
+    // DISMISSED (0419 duplicate_dismissed_at; cn-v1186). "im not going to change my mind, dismiss
+    // please": an ANSWERED pair whose set-aside copies ALL carry the stamp leaves the page. An open
+    // pair never reads the stamp (a stale one must not hide a question), a set-aside copy without it
+    // keeps the pair (a third copy set aside since), and a read without the column hides nothing.
+    if (answered && !(showWith && ids.includes(showWith))) {
+      const setAside = ids.filter((id) => billById.get(id)?.superseded_by_bill_id);
+      if (setAside.length && setAside.every((id) => billById.get(id)?.duplicate_dismissed_at)) return [];
+    }
     return [
       {
         // BOTH BILL IDS RIDE IN THE ID, because Undo is handed nothing else.
@@ -515,7 +532,7 @@ export function duplicateTicketGroups(input: {
         amount: d.amount,
         lineCount: Number(d.bills[0]?.lineCount ?? 0),
         copies,
-        resolution: keptBillId && ids.includes(keptBillId) ? { keptBillId } : null,
+        resolution: answered ? { keptBillId } : null,
       },
     ];
   });

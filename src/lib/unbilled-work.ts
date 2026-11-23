@@ -666,18 +666,23 @@ export async function readJobBillsWithLines(
 ): Promise<{ data: (MaterialBill & { id: string })[]; error: unknown | null }> {
   // id + po_id feed the claim key and the shared PO-supersede rule; the line columns feed
   // billableBillCost. `amount` on the line is the supplier's own extension - see billLineCost.
-  const read = (withLineStates: boolean) => {
+  const read = (withLineStates: boolean, withReturned: boolean) => {
     const q = supabase
       .from("bills")
       // `description` matches a supplier return to the purchase it reverses, and `created_at` is
-      // the order returns spend it in (returnLinesAgainstPurchases).
-      .select(`id, amount, po_id, created_at, bill_date, bill_line_items(id, description, quantity, unit_price, amount, category${withLineStates ? ", billable, billed_amount" : ""})`)
+      // the order returns spend it in (returnLinesAgainstPurchases). `returned` and
+      // `returned_credit_bill_id` (0417, cn-v1186) tell it what of a purchase line already went back,
+      // which a return spends first; a database behind the deploy drops them on the retry.
+      .select(
+        `id, amount, po_id, created_at, bill_date, bill_line_items(id, description, quantity, unit_price, amount, category${withLineStates ? ", billable, billed_amount" : ""}${withReturned ? ", returned, returned_credit_bill_id" : ""})`,
+      )
       .eq("job_id", jobId)
       .is("superseded_by_bill_id", null);
     return scope?.orgId ? q.eq("org_id", scope.orgId) : q;
   };
-  let res = await read(true);
-  if (res.error && isMissingBillLineState(res.error)) res = await read(false);
+  let res = await read(true, true);
+  if (res.error && isMissingBillLineState(res.error)) res = await read(true, false);
+  if (res.error && isMissingBillLineState(res.error)) res = await read(false, false);
   return { data: (res.data ?? []) as (MaterialBill & { id: string })[], error: res.error ?? null };
 }
 

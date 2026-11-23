@@ -10,7 +10,7 @@ import { join } from "node:path";
  */
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 
-import { SupplierDuplicates, type SupplierDuplicateActions } from "./supplier-duplicates";
+import { RECONCILE_WITHOUT_PICK, SupplierDuplicates, landingAfter, type SupplierDuplicateActions } from "./supplier-duplicates";
 import { titleCaseIn } from "../../../../tests/title-case-words";
 import type { DuplicateBillGroup } from "./supplier-balance";
 
@@ -68,15 +68,133 @@ describe("the done banner and its Undo outlive the last pair", () => {
     expect(render([])).toBe("");
   });
 
-  it("the card returns null only when there are no groups AND nothing was just done", () => {
-    expect(card).toContain("if (!groups.length && !done) return null;");
+  it("the card returns null only when there are no groups AND nothing was just done (AND no stray pick, cn-v1186)", () => {
+    expect(card).toContain("if (!groups.length && !done && !strayPick) return null;");
     expect(card).not.toContain("if (!groups.length) return null;");
     // The hooks come first, so the mount is one shape whatever the list says.
-    expect(card.indexOf("useState<{ text: string; undo: Undo | null } | null>(null)")).toBeLessThan(card.indexOf("if (!groups.length && !done) return null;"));
+    expect(card.indexOf("useState<{ text: string; undo: Undo | null } | null>(null)")).toBeLessThan(card.indexOf("if (!groups.length && !done && !strayPick) return null;"));
   });
 
   it("Reconcile mounts the card whenever the supersede door exists, never only while groups remain", () => {
     expect(page).toContain("{work.supersedeReady && (");
     expect(page).not.toContain("work.duplicates.length > 0 &&");
+  });
+});
+
+/**
+ * DISMISS (0419 duplicate_dismissed_at; cn-v1186): "im not going to change my mind, dismiss please".
+ * An ANSWERED pair carries Dismiss beside Change Your Mind; an open pair never does; its Undo is the
+ * restore door; and the sentence over an all-answered card says where a dismissed pick goes.
+ */
+describe("Dismiss on an answered pair", () => {
+  const withDismiss: SupplierDuplicateActions = { ...full, dismissDuplicate: vi.fn(), restoreDuplicate: vi.fn() };
+  const card = readFileSync(join(process.cwd(), "src/app/(app)/bills/supplier-duplicates.tsx"), "utf8");
+
+  it("an answered pair offers Change Your Mind and Dismiss, both Title Case", () => {
+    const b = buttons(render([group({ resolution: { keptBillId: "a" } })], withDismiss));
+    expect(b).toEqual(["Change Your Mind", "Dismiss"]);
+    for (const t of b) expect(titleCaseIn(t, "en"), t).toBe(true);
+  });
+
+  it("an open pair never offers Dismiss", () => {
+    expect(buttons(render([group()], withDismiss))).not.toContain("Dismiss");
+  });
+
+  it("a mount without the door draws no Dismiss and keeps the old sentence", () => {
+    const html = render([group({ resolution: { keptBillId: "a" } })]);
+    expect(buttons(html)).not.toContain("Dismiss");
+    expect(html).toContain("The picks you made are below, and you can change any of them.");
+  });
+
+  it("with the door, the all-answered sentence says a dismissed pick leaves this page", () => {
+    expect(render([group({ resolution: { keptBillId: "a" } })], withDismiss)).toContain(
+      "Nothing is waiting on you here. The picks you made are below: change one, or dismiss it and it leaves this page.",
+    );
+  });
+
+  it("Dismiss runs the dismiss door through the card's own run, with the restore door as its Undo", () => {
+    expect(card).toMatch(/run\(\s*\(\) => actions\.dismissDuplicate!\(g\.id\),\s*`dismiss:\$\{g\.id\}`,[\s\S]{0,200}undoDismiss\(g\.id\),\s*"leave-pick",\s*\)/);
+    expect(card).toMatch(/const undoDismiss = \(groupId: string\): Undo \| null =>\s*actions\.restoreDuplicate\s*\?\s*\{ fn: \(\) => actions\.restoreDuplicate!\(groupId\)/);
+    // Only under the answered branch: the button sits inside `g.resolution ? (` and before its `) : (`.
+    const answeredBranch = card.slice(card.indexOf("{g.resolution ? (\n                  <>"), card.indexOf("<WhyFold>\n                    <p>\n                      Picking a job"));
+    expect(answeredBranch).toContain("actions.dismissDuplicate && (");
+  });
+
+  it("Reconcile hands the card both doors", () => {
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/reconcile/page.tsx"), "utf8");
+    expect(page).toContain("dismissDuplicate: dismissDuplicatePick,");
+    expect(page).toContain("restoreDuplicate: restoreDuplicatePick,");
+  });
+});
+
+/**
+ * DISMISS ON A PAIR OPENED THROUGH `?pick=` TAKES IT OFF THE PAGE (cn-v1186, skeptic S4). A refresh
+ * keeps the pick, and the pick draws the dismissed pair again; so a Dismiss there lands on the page
+ * without the pick. Every other answer, and the Undo, still refreshes in place.
+ */
+describe("Dismiss on a page opened through a pick", () => {
+  const card = readFileSync(join(process.cwd(), "src/app/(app)/bills/supplier-duplicates.tsx"), "utf8");
+  const page = readFileSync(join(process.cwd(), "src/app/(app)/reconcile/page.tsx"), "utf8");
+
+  it("lands on Reconcile without the pick, at the card", () => {
+    expect(landingAfter("leave-pick", true)).toBe("/reconcile#same-ticket-two-jobs");
+    expect(RECONCILE_WITHOUT_PICK).not.toContain("pick");
+  });
+
+  it("without a pick, and for every other answer, it refreshes in place", () => {
+    expect(landingAfter("leave-pick", false)).toBeNull();
+    expect(landingAfter("refresh", true)).toBeNull();
+    expect(landingAfter("refresh", false)).toBeNull();
+  });
+
+  it("the run replaces the route on a landing and refreshes otherwise; only Dismiss asks to leave the pick", () => {
+    expect(card).toMatch(/const landing = landingAfter\(then, picked\);\s*if \(landing\) router\.replace\(landing\);\s*else router\.refresh\(\);/);
+    expect(card.match(/"leave-pick",\n/g)?.length).toBe(1);
+    expect(card).toMatch(/undoDismiss\(g\.id\),\s*"leave-pick",\s*\)/);
+    // The Undo runs with the default, a refresh: the restored pair is drawn again where it was.
+    expect(card).toContain("onClick={() => run(done.undo!.fn, done.undo!.key, done.undo!.fallback)}");
+  });
+
+  it("Reconcile tells the card whether it was opened with a pick", () => {
+    expect(page).toContain("picked={!!pick}");
+  });
+});
+
+/**
+ * THE CHANGE LINK NEVER LEADS NOWHERE (cn-v1186, skeptic S6): a pick whose copies no longer match is
+ * held by no pair; the card says so in one line and offers Put It Back on that pair.
+ */
+describe("a pick that no pair holds", () => {
+  const stray = { billId: "b", groupId: 'dup:["a","b"]', supplier: "Northline Supply", amount: 84.1, billDate: "2026-08-28" };
+  const page = readFileSync(join(process.cwd(), "src/app/(app)/reconcile/page.tsx"), "utf8");
+  const card = readFileSync(join(process.cwd(), "src/app/(app)/bills/supplier-duplicates.tsx"), "utf8");
+
+  it("with no groups the card still draws, says so in one line, and offers Put It Back", () => {
+    const html = renderToStaticMarkup(createElement(SupplierDuplicates, { groups: [], actions: full, strayPick: stray }));
+    expect(html).toContain("Northline Supply · $84.10");
+    expect(html).toContain("the two no longer match, so there is no pair to show here");
+    expect(buttons(html)).toEqual(["Put It Back"]);
+    expect(titleCaseIn("Put It Back", "en")).toBe(true);
+    expect(html).not.toMatch(/please|!/i);
+  });
+
+  it("Put It Back runs the unresolve door on that pair, through the card's run (its answer said on the card)", () => {
+    expect(card).toMatch(/run\(\s*\(\) => actions\.unresolveDuplicate!\(strayPick\.groupId\),\s*`unresolve:\$\{strayPick\.groupId\}`,/);
+  });
+
+  it("without a stray pick nothing extra is drawn", () => {
+    expect(render([])).toBe("");
+  });
+
+  it("a mount without the unresolve door draws the line and no dead button", () => {
+    const html = renderToStaticMarkup(
+      createElement(SupplierDuplicates, { groups: [], actions: { resolveDuplicate: vi.fn() }, strayPick: stray }),
+    );
+    expect(html).toContain("no pair to show here");
+    expect(buttons(html)).toEqual([]);
+  });
+
+  it("Reconcile hands the card the read's stray pick", () => {
+    expect(page).toContain("strayPick={work.strayPick}");
   });
 });

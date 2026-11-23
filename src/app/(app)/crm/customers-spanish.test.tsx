@@ -166,7 +166,7 @@ describe("the portal link card in Spanish", () => {
 
   it("a turned-off link, and English by default", () => {
     expect(text(es(<PortalLinkButton customerId="c-1" customerName="Larkspur" initial={{ ...initial, enabled: false } as never} hasEmail />))).toContain(
-      "El enlace está desactivado. Se abre con “This link was turned off.” No se muestra nada más.",
+      "El enlace está desactivado. Actívalo cuando este cliente lo necesite. Hasta entonces el enlace se abre con “This link was turned off.”",
     );
     const words = text(en(<PortalLinkButton customerId="c-1" customerName="Larkspur" initial={initial as never} hasEmail />));
     expect(words).toContain(`Link is on. Signed in on 2 devices · Last opened ${formatDateTime(initial.lastOpenedAt)}. Your own looks don't count.`);

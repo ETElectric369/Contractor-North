@@ -141,6 +141,12 @@ d("the portal link asks for a code (0331)", { timeout: 30_000 }, () => {
     custB = await cust(orgId, "TEST 0331 B", "test0331-b@example.com");
     custNoEmail = await cust(orgId, "TEST 0331 no email", "  ");
     if (otherOrgId) custOther = await cust(otherOrgId, "TEST 0331 other org", "test0331-o@example.com");
+    // 0419: a new customer's link starts OFF. Every case here signs in on a WORKING link (no_email,
+    // cross-customer and cross-org mean nothing on a turned-off one), so the office turns each on.
+    // The Turn Off case below turns A off itself.
+    await c.query("update public.customer_portal_access set enabled = true where customer_id = any($1::uuid[])", [
+      [custA, custB, custNoEmail, ...(custOther ? [custOther] : [])],
+    ]);
   });
   afterAll(async () => {
     await c?.query("rollback").catch(() => undefined);

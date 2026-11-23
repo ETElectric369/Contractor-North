@@ -141,7 +141,7 @@ vi.mock("next/navigation", () => ({
 
 const render = async () => {
   const { default: ReconcilePage } = await import("./page");
-  return renderToStaticMarkup((await ReconcilePage()) as React.ReactElement);
+  return renderToStaticMarkup((await ReconcilePage({})) as React.ReactElement);
 };
 
 let html = "";

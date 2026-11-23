@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readReconcileWork, figuresFrom, supplierGapRows } from "./reconcile-read";
+import { readReconcileWork, figuresFrom, strayPickOf, supplierGapRows } from "./reconcile-read";
 import { disagreeing, gapOf } from "./supplier-gap";
 import { reconcileBadge } from "@/lib/reconcile-kinds";
 import { readSupplierOwed } from "@/lib/supplier-owed-read";
@@ -176,6 +176,60 @@ describe("what is counted is what still needs someone", () => {
   });
 });
 
+/**
+ * DISMISSED (0419 duplicate_dismissed_at; cn-v1186). An answered pair whose set-aside copy is stamped
+ * leaves the page; the count never had it (badges show open); Reconcile's `pick` draws it again; and a
+ * database without the column steps down one rung and hides nothing.
+ */
+describe("a dismissed pick leaves the page, and the way back draws it again", () => {
+  const dismissed = {
+    ...BOOK,
+    bills: BOOK.bills.map((b) => (b.id === "b-d2" ? { ...b, superseded_by_bill_id: "b-d1", duplicate_dismissed_at: "2026-11-22T21:00:00Z" } : b)),
+  };
+
+  it("the dismissed pair is off the page and the count is unchanged", async () => {
+    const { page, badge } = await read(dismissed as any);
+    expect(page.duplicates).toEqual([]);
+    expect(page.counts["same-ticket-two-jobs"]).toBe(0);
+    expect(badge.counts).toEqual(page.counts);
+  });
+
+  it("showDismissedWith (the page's `pick`) draws that pair again, answered", async () => {
+    const db = fakeDb(dismissed as any);
+    const work = await readReconcileWork(db, ORG, null, { showDismissedWith: "b-d2" });
+    expect(work.duplicates.map((g) => g.copies.map((c) => c.billId))).toEqual([["b-d1", "b-d2"]]);
+    expect(work.duplicates[0].resolution).toEqual({ keptBillId: "b-d1" });
+    expect(work.counts["same-ticket-two-jobs"]).toBe(0);
+  });
+
+  it("the read lists the column, and a database without it steps down one rung and hides no pair", async () => {
+    const selects: string[] = [];
+    const base = fakeDb(dismissed as any);
+    const db = {
+      from: (table: string) => {
+        if (table !== "bills") return base.from(table);
+        const c: Record<string, unknown> = {};
+        let cols = "";
+        for (const m of ["eq", "neq", "in", "is", "not", "or", "order", "limit"]) c[m] = () => c;
+        c.select = (s: string) => ((cols = s), selects.push(s), c);
+        c.then = (ok: (v: unknown) => unknown, err: (e: unknown) => unknown) =>
+          Promise.resolve(
+            cols.includes("duplicate_dismissed_at")
+              ? { data: null, error: { code: "42703", message: "column bills.duplicate_dismissed_at does not exist" } }
+              : { data: dismissed.bills.map(({ duplicate_dismissed_at: _d, ...rest }: any) => rest), error: null },
+          ).then(ok, err);
+        return c;
+      },
+    } as any;
+    const work = await readReconcileWork(db, ORG, null);
+    expect(selects[0]).toContain(", duplicate_dismissed_at, both_real_at, superseded_by_bill_id,");
+    expect(selects[1]).not.toContain("duplicate_dismissed_at");
+    expect(selects[1]).toContain(", both_real_at, superseded_by_bill_id,");
+    expect(work.failed).toEqual([]);
+    expect(work.duplicates).toHaveLength(1);
+  });
+});
+
 describe("nothing is claimed off a read that failed", () => {
   it("a lost bills read counts nothing and names what it could not read", async () => {
     const { page } = await read(BOOK as any, { bills: { message: "boom" } });
@@ -284,5 +338,61 @@ describe("the two records, both from readSupplierOwed", () => {
     // account, plus Fernside's 120.00 and Quarry Lane's 90.00 on no account). The settled card swipe
     // is in none of it, which is the one rule both this figure and the pile share.
     expect(owed!.bought.total).toBe(653.5);
+  });
+});
+
+/**
+ * THE CHANGE LINK NEVER LEADS NOWHERE (cn-v1186, skeptic S6). All Bills' Change link opens Reconcile
+ * with `pick=<set-aside bill>`; when the two copies no longer match (one was edited after the pick) no
+ * pair holds that bill, and the read hands the page the bill so the card can say so and offer Put It Back.
+ */
+describe("a pick that no pair holds", () => {
+  // b-d2 was set aside as a copy of b-d1, then edited: its lines no longer match, so no pair forms.
+  const drifted = {
+    ...BOOK,
+    bills: BOOK.bills.map((b) =>
+      b.id === "b-d2" ? { ...b, superseded_by_bill_id: "b-d1", bill_line_items: [{ description: "Staples" }], supplier: "Northline Supply" } : b,
+    ),
+  };
+
+  it("the read names the set-aside bill and the pair's id the duplicate doors read", async () => {
+    const work = await readReconcileWork(fakeDb(drifted as any), ORG, null, { showDismissedWith: "b-d2" });
+    expect(work.duplicates).toEqual([]);
+    expect(work.strayPick).toEqual({ billId: "b-d2", groupId: 'dup:["b-d1","b-d2"]', supplier: "Northline Supply", amount: 21.75, billDate: "2026-08-02" });
+    // Never counted: it is a way back, not a question waiting.
+    expect(work.counts["same-ticket-two-jobs"]).toBe(0);
+  });
+
+  it("no pick, a pick a pair holds, a bill that is not set aside, or one not in this company's read: nothing", async () => {
+    const db = fakeDb(drifted as any);
+    expect((await readReconcileWork(db, ORG, null)).strayPick).toBeNull();
+    expect((await readReconcileWork(fakeDb(BOOK as any), ORG, null, { showDismissedWith: "b-d2" })).strayPick).toBeNull();
+    expect((await readReconcileWork(db, ORG, null, { showDismissedWith: "b-on" })).strayPick).toBeNull();
+    expect((await readReconcileWork(db, ORG, null, { showDismissedWith: "b-elsewhere" })).strayPick).toBeNull();
+  });
+
+  it("strayPickOf: held by a group, not ready, or no pick is null", () => {
+    const rows = drifted.bills as any[];
+    const held = [{ id: "g", amount: 1, lineCount: 1, copies: [{ billId: "b-d2" }], resolution: null }] as any[];
+    expect(strayPickOf(rows, held, true, "b-d2")).toBeNull();
+    expect(strayPickOf(rows, [], false, "b-d2")).toBeNull();
+    expect(strayPickOf(rows, [], true, null)).toBeNull();
+    expect(strayPickOf(rows, [], true, "b-d2")?.groupId).toBe('dup:["b-d1","b-d2"]');
+  });
+
+  it("the bills it looks in are read by company", async () => {
+    const eqs: [string, unknown][] = [];
+    const base = fakeDb(drifted as any);
+    const db = {
+      from: (table: string) => {
+        const c = base.from(table);
+        if (table !== "bills") return c;
+        const eq = c.eq;
+        c.eq = (col: string, v: unknown) => (eqs.push([col, v]), eq(col, v));
+        return c;
+      },
+    } as any;
+    await readReconcileWork(db, ORG, null, { showDismissedWith: "b-d2" });
+    expect(eqs).toContainEqual(["org_id", ORG]);
   });
 });

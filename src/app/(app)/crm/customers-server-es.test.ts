@@ -170,3 +170,26 @@ describe("what the customer reads stays English under a Spanish caller", () => {
     expect(db.profileReads).toBe(0);
   });
 });
+
+describe("the company's Customer Portal switch is checked too (cn-v1186)", () => {
+  const rows = (features: Record<string, boolean>) => ({
+    customers: { name: "Sam Tillery", email: "office@example.test" },
+    customer_portal_access: { token: "tok", enabled: true, last_opened_at: null },
+    organizations: { name: "Snowbell Electric", phone: null, email: null, settings: { features } },
+  });
+  it("off on the switch board: refused in the switch board's own sentence, and nothing is emailed", async () => {
+    db.rows = rows({ customer_portal: false });
+    expect(await emailPortalLink("c1")).toEqual({ ok: false, error: "Customer Portal is off. The owner can turn it on in Settings, Features." });
+    expect(db.emails).toHaveLength(0);
+  });
+  it("on: the link goes, as before", async () => {
+    db.rows = rows({ customer_portal: true });
+    expect(await emailPortalLink("c1")).toEqual({ ok: true });
+    expect(db.emails).toHaveLength(1);
+  });
+  it("the customer's own switch is still asked first: an off link says so even with the company's on", async () => {
+    db.rows = { ...rows({ customer_portal: true }), customer_portal_access: { token: "tok", enabled: false, last_opened_at: null } };
+    expect(await emailPortalLink("c1")).toEqual({ ok: false, error: "Su enlace está desactivado. Toca Activar primero." });
+    expect(db.emails).toHaveLength(0);
+  });
+});

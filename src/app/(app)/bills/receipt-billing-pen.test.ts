@@ -186,7 +186,10 @@ describe("every read that feeds the card names the three columns (the projection
   it("/bills: on the line embed, above the ladder, falling back to the old top rung", () => {
     const page = src("src/app/(app)/bills/page.tsx");
     expect(page).toContain(`\${o.pen ? "${PEN}" : ""}, sort_order)`);
-    expect(page).toContain("let attempt = await read({ ...ladder[0], pen: true });");
+    // cn-v1186 put one rung above it: the pair-dismissal stamp (0419) is the first column to go when a
+    // database does not have it yet, and the pen columns are still the next.
+    expect(page).toContain("let attempt = await read({ ...ladder[0], pen: true, dupDismissed: true });");
+    expect(page).toContain("if (attempt.error && isMissingColumn(attempt.error)) attempt = await read({ ...ladder[0], pen: true });");
     expect(page).toContain("if (attempt.error && isMissingColumn(attempt.error)) attempt = await read(ladder[0]);");
     // ...and the map right after it carries them onto the card.
     expect(page).toContain("pen: penMarkOf(l.pen_mark),");

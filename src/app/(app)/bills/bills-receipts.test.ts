@@ -104,3 +104,28 @@ describe("a bill's row says what is open on it, by the number (0383)", () => {
     expect(DOORS).toContain("if (!confirm(`Delete bill from");
   });
 });
+
+/**
+ * THE WAY BACK TO A DISMISSED PICK (cn-v1186). A pick dismissed from Reconcile leaves that page, so
+ * the copy he set aside carries Change, to /reconcile?pick=<its id>, which draws the pair again. The
+ * link sits beside the row's own toggle, never inside the <summary>: one control inside another is
+ * not a door a phone can be sure of.
+ */
+describe("a set-aside copy's row carries Change back to its pick", () => {
+  it("links to Reconcile with the bill's own id, under the set-aside condition", () => {
+    expect(SRC).toMatch(/\{b\.superseded && \([\s\S]{0,200}<Link\s+href=\{`\/reconcile\?pick=\$\{encodeURIComponent\(b\.id\)\}#same-ticket-two-jobs`\}/);
+    expect(SRC).toMatch(/className="inline-flex min-h-11[^"]*"\s*>\s*Change\s*<\/Link>/);
+  });
+
+  it("the link is outside the row's <summary> and outside its <details>", () => {
+    const at = SRC.indexOf("/reconcile?pick=");
+    const summaryClose = SRC.lastIndexOf("</summary>", at);
+    const detailsClose = SRC.lastIndexOf("</details>", at);
+    const summaryOpen = SRC.lastIndexOf("<summary", at);
+    expect(summaryClose).toBeGreaterThan(summaryOpen);
+    expect(detailsClose).toBeGreaterThan(summaryClose);
+    // ...and the row it belongs to closes after it.
+    expect(SRC.indexOf("</li>", at)).toBeGreaterThan(at);
+    expect(SRC.slice(detailsClose, at)).not.toContain("<details");
+  });
+});

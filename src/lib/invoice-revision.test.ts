@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { changedSinceSent, customerHoldsOlderCopy, hasUnsentRevision, invoiceLineEditRefusal, shouldStampRevision, type MoneyFacts } from "@/lib/invoice-revision";
+import { changedSinceSent, customerHoldsOlderCopy, dismissedSinceSent, hasUnsentRevision, invoiceLineEditRefusal, invoiceStatusLabel, resendNoticeDismissed, shouldStampRevision, type MoneyFacts } from "@/lib/invoice-revision";
 
 /**
  * 2026-09-18 — "even if i did sent it ill always need to be able to go back and make changes as
@@ -250,5 +250,91 @@ describe("hasUnsentRevision — the RECORD question for the doors that re-stamp 
     expect(await hasUnsentRevision(client({ status: "sent", sent_at: sent, revised_at: revised }, [], { message: "boom" }), "inv-1")).toBe(false);
     const throwing = { from: () => { throw new Error("no"); } };
     expect(await hasUnsentRevision(throwing, "inv-1")).toBe(false);
+  });
+});
+
+/**
+ * 2026-11-22 (0419) — "I know its been revised and I don't want to send it again, can we put a dismiss
+ * button on those please" and "For Revised, lets mark it Sent - Revised with the send again alarm
+ * dismissible". The notice gains one last step (dismissed since the last send: quiet), and every list
+ * prints one status word for a bill that changed since it went out.
+ */
+describe("the send-again notice can be dismissed, and a send re-arms it (0419)", () => {
+  const sent = "2026-10-01T18:04:00.000Z";
+  const revised = "2026-10-05T21:30:00.000Z";
+  const before = ["2026-10-02T17:00:00.000Z"];
+  /** A notice that stands on every earlier step: paid before the change, the money moved, a balance left. */
+  const standing: MoneyFacts = { total: 1250, amountPaid: 500, sentTotal: 1000, paidAt: before };
+
+  it("dismissedSinceSent: strictly later than the send, and two real dates, or nothing", () => {
+    expect(dismissedSinceSent(sent, "2026-10-06T09:00:00.000Z")).toBe(true);
+    expect(dismissedSinceSent(sent, "2026-09-30T09:00:00.000Z")).toBe(false);
+    expect(dismissedSinceSent(sent, sent)).toBe(false);
+    expect(dismissedSinceSent(sent, "not a date")).toBe(false);
+    expect(dismissedSinceSent("not a date", "2026-10-06T09:00:00.000Z")).toBe(false);
+    expect(dismissedSinceSent(sent, null)).toBe(false);
+    expect(dismissedSinceSent(null, "2026-10-06T09:00:00.000Z")).toBe(false);
+    expect(dismissedSinceSent(sent, undefined)).toBe(false);
+  });
+
+  type Row = { name: string; sentAt: string | null; revisedAt: string | null; facts: MoneyFacts; expected: boolean };
+  const TABLE: Row[] = [
+    { name: "standing, never dismissed", sentAt: sent, revisedAt: revised, facts: standing, expected: true },
+    { name: "dismissed after the send", sentAt: sent, revisedAt: revised, facts: { ...standing, resendDismissedAt: "2026-10-06T09:00:00.000Z" }, expected: false },
+    // A later change alone does NOT bring it back: dismissed, then changed again, still before no new send.
+    { name: "dismissed, then changed again with no new send", sentAt: sent, revisedAt: "2026-10-09T09:00:00.000Z", facts: { ...standing, resendDismissedAt: "2026-10-06T09:00:00.000Z" }, expected: false },
+    // A send after the dismissal re-arms it: the bill went out at 10-07, changed at 10-08 after a payment on 10-07.
+    { name: "dismissed BEFORE the last send", sentAt: "2026-10-07T09:00:00.000Z", revisedAt: "2026-10-08T09:00:00.000Z", facts: { ...standing, paidAt: ["2026-10-07T12:00:00.000Z"], sentTotal: 1000, resendDismissedAt: "2026-10-06T09:00:00.000Z" }, expected: true },
+    { name: "dismissed at the very instant of the send", sentAt: sent, revisedAt: revised, facts: { ...standing, resendDismissedAt: sent }, expected: true },
+    { name: "a garbage dismissal date", sentAt: sent, revisedAt: revised, facts: { ...standing, resendDismissedAt: "yesterday-ish" }, expected: true },
+    { name: "a null dismissal (brought back)", sentAt: sent, revisedAt: revised, facts: { ...standing, resendDismissedAt: null }, expected: true },
+    // Every earlier step still decides first: a dismissal never turns a quiet bill loud.
+    { name: "dismissed, but nothing paid", sentAt: sent, revisedAt: revised, facts: { total: 1250, amountPaid: 0, sentTotal: 1000, paidAt: [], resendDismissedAt: "2026-10-06T09:00:00.000Z" }, expected: false },
+    { name: "dismissed, but re-sent after the change", sentAt: "2026-10-05T21:31:00.000Z", revisedAt: revised, facts: { ...standing, resendDismissedAt: "2026-10-06T09:00:00.000Z" }, expected: false },
+  ];
+  for (const row of TABLE) {
+    it(`${row.name} -> ${row.expected ? "send it again" : "nothing to say"}`, () => {
+      expect(customerHoldsOlderCopy(row.sentAt, row.revisedAt, row.facts)).toBe(row.expected);
+    });
+  }
+
+  it("resendNoticeDismissed: true only when the dismissal is the one thing keeping it quiet", () => {
+    const dismissed = { ...standing, resendDismissedAt: "2026-10-06T09:00:00.000Z" };
+    expect(resendNoticeDismissed(sent, revised, dismissed)).toBe(true);
+    // not dismissed: the notice stands, so it was not dismissed
+    expect(resendNoticeDismissed(sent, revised, standing)).toBe(false);
+    // quiet for another reason (nothing paid; squared up; wording only): its own quiet line, not this one
+    expect(resendNoticeDismissed(sent, revised, { ...dismissed, amountPaid: 0, paidAt: [] })).toBe(false);
+    expect(resendNoticeDismissed(sent, revised, { ...dismissed, total: 500 })).toBe(false);
+    expect(resendNoticeDismissed(sent, revised, { ...dismissed, sentTotal: 1250 })).toBe(false);
+    // a dismissal older than the last send does not count
+    expect(resendNoticeDismissed(sent, revised, { ...standing, resendDismissedAt: "2026-09-30T09:00:00.000Z" })).toBe(false);
+    expect(resendNoticeDismissed(sent, revised, { ...standing, resendDismissedAt: "garbage" })).toBe(false);
+  });
+});
+
+describe("invoiceStatusLabel — one status word on every list", () => {
+  const TABLE: [string | null | undefined, boolean, string][] = [
+    ["draft", false, "Draft"],
+    ["draft", true, "Draft"],
+    ["sent", false, "Sent"],
+    ["sent", true, "Sent - Revised"],
+    ["partial", false, "Partial"],
+    ["partial", true, "Partial - Revised"],
+    ["overdue", false, "Overdue"],
+    ["overdue", true, "Overdue - Revised"],
+    ["paid", false, "Paid"],
+    ["paid", true, "Paid"],
+    ["void", false, "Void"],
+    ["void", true, "Void"],
+    ["something_else", true, "something_else"],
+    [null, true, ""],
+    [undefined, false, ""],
+  ];
+  for (const [status, changed, want] of TABLE) {
+    it(`${String(status)} / changed ${changed} -> "${want}"`, () => expect(invoiceStatusLabel(status, changed)).toBe(want));
+  }
+  it("the suffix uses a spaced hyphen, like the rest of the copy written this year", () => {
+    expect(invoiceStatusLabel("sent", true)).not.toContain("—");
   });
 });

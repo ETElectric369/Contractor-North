@@ -780,3 +780,120 @@ describe("setSupplierOnAccount - one write, either direction", () => {
     expect(scoped.filter((c) => c.table === "supplier_accounts")).toHaveLength(1);
   });
 });
+
+/**
+ * DISMISS AN ANSWERED PAIR (0419 bills.duplicate_dismissed_at; cn-v1186). The owner, of the same
+ * ticket on two jobs: "im not going to change my mind, dismiss please". The stamp goes on the copy
+ * he SET ASIDE, by id AND company; the pick itself is not touched; an open pair is refused; and the
+ * two doors that make or undo a pick clear any stale stamp in the write they already make.
+ */
+describe("dismissDuplicatePick / restoreDuplicatePick - an answered pair leaves Reconcile, and comes back", () => {
+  const { dismissDuplicatePick, restoreDuplicatePick, unresolveDuplicateBill } = actions;
+  const KEPT = "5a0c9e1e-1d2b-4c3d-8e4f-000000000901"; // the copy on J-901 (Larkspur), kept
+  const ASIDE = "5a0c9e1e-1d2b-4c3d-8e4f-000000000902"; // the copy on J-902 (Snowbell), set aside
+  const PAIR = `dup:${JSON.stringify([KEPT, ASIDE].sort())}`;
+  let scoped: ScopedCall[];
+  beforeEach(() => { scoped = []; });
+
+  const answered = { data: [{ id: KEPT, superseded_by_bill_id: null }, { id: ASIDE, superseded_by_bill_id: KEPT }], error: null };
+
+  it("stamps the set-aside copy of THIS company's answered pair, reads it back, and says the pick stands", async () => {
+    state.client = scopedFake(
+      { "profiles.select": [STAFF], "bills.select": [answered], "bills.update": [{ data: [{ id: ASIDE, job_id: "job-902" }], error: null }] },
+      scoped,
+    );
+    const res = await dismissDuplicatePick(PAIR);
+    expect(res).toEqual({ ok: true, message: "Dismissed. The pick stands and this pair is off the page. To change it later, open that bill in All Bills." });
+    const read = scoped.find((c) => c.table === "bills" && c.verb === "select")!;
+    expect(read.filters).toEqual([
+      ["select", "id, superseded_by_bill_id"],
+      ["in", "id", [KEPT, ASIDE].sort()],
+      ["eq", "org_id", "org-1"],
+    ]);
+    const write = scoped.find((c) => c.table === "bills" && c.verb === "update")!;
+    // The stamp and nothing else: the pick (superseded_by_bill_id) is not in the payload.
+    expect(Object.keys(write.payload)).toEqual(["duplicate_dismissed_at"]);
+    expect(Date.now() - Date.parse(write.payload.duplicate_dismissed_at)).toBeLessThan(10_000);
+    expect(write.filters).toEqual([
+      ["in", "id", [ASIDE]],
+      ["in", "superseded_by_bill_id", [KEPT, ASIDE].sort()],
+      ["eq", "org_id", "org-1"],
+      ["select", "id, job_id"],
+    ]);
+  });
+
+  it("an OPEN pair is refused and nothing is written: a question is answered, not put away", async () => {
+    state.client = scopedFake(
+      { "profiles.select": [STAFF], "bills.select": [{ data: [{ id: KEPT, superseded_by_bill_id: null }, { id: ASIDE, superseded_by_bill_id: null }], error: null }] },
+      scoped,
+    );
+    const res = await dismissDuplicatePick(PAIR);
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("That pair hasn't been answered yet, so there is nothing to dismiss. Pick a job for it first.");
+    expect(scoped.some((c) => c.verb === "update")).toBe(false);
+  });
+
+  it("another company's bills read back as nothing, and nothing is written", async () => {
+    state.client = scopedFake({ "profiles.select": [STAFF], "bills.select": [{ data: [], error: null }] }, scoped);
+    expect(await dismissDuplicatePick(PAIR)).toEqual({ ok: false, error: "Those bills aren't there any more." });
+    expect(scoped.some((c) => c.verb === "update")).toBe(false);
+  });
+
+  it("a copy set aside to a bill OUTSIDE this pair does not make the pair answered", async () => {
+    state.client = scopedFake(
+      { "profiles.select": [STAFF], "bills.select": [{ data: [{ id: KEPT, superseded_by_bill_id: null }, { id: ASIDE, superseded_by_bill_id: "5a0c9e1e-1d2b-4c3d-8e4f-000000000999" }], error: null }] },
+      scoped,
+    );
+    expect((await dismissDuplicatePick(PAIR)).ok).toBe(false);
+    expect(scoped.some((c) => c.verb === "update")).toBe(false);
+  });
+
+  it("zero rows written is a refusal said in words, never a success (the silent-write law)", async () => {
+    state.client = scopedFake({ "profiles.select": [STAFF], "bills.select": [answered], "bills.update": [{ data: [], error: null }] }, scoped);
+    expect(await dismissDuplicatePick(PAIR)).toEqual({ ok: false, error: "That pair changed under you. Reload the page." });
+  });
+
+  it("a tech is refused before any bill is read; a group id that names no pair reads nothing", async () => {
+    state.client = scopedFake({ "profiles.select": [{ data: { role: "tech", org_id: "org-1", active: true }, error: null }, { data: { role: "tech", org_id: "org-1", active: true }, error: null }] }, scoped);
+    expect(await dismissDuplicatePick(PAIR)).toEqual({ ok: false, error: "This action is staff-only." });
+    expect(await restoreDuplicatePick(PAIR)).toEqual({ ok: false, error: "This action is staff-only." });
+    state.client = scopedFake({ "profiles.select": [STAFF, STAFF] }, scoped);
+    expect((await dismissDuplicatePick("not-a-group")).ok).toBe(false);
+    expect((await restoreDuplicatePick("not-a-group")).ok).toBe(false);
+    expect(scoped.filter((c) => c.table === "bills")).toHaveLength(0);
+  });
+
+  it("Undo takes the stamp off the pair the group id names, org-scoped, and only where it is set", async () => {
+    state.client = scopedFake({ "profiles.select": [STAFF], "bills.update": [{ data: [{ id: ASIDE, job_id: "job-902" }], error: null }] }, scoped);
+    expect(await restoreDuplicatePick(PAIR)).toEqual({ ok: true, message: "Put back. The pick is on the page again." });
+    const write = scoped.find((c) => c.table === "bills" && c.verb === "update")!;
+    expect(write.payload).toEqual({ duplicate_dismissed_at: null });
+    expect(write.filters).toEqual([
+      ["in", "id", [KEPT, ASIDE].sort()],
+      ["eq", "org_id", "org-1"],
+      ["not", "duplicate_dismissed_at", "is", null],
+      ["select", "id, job_id"],
+    ]);
+    state.client = scopedFake({ "profiles.select": [STAFF], "bills.update": [{ data: [], error: null }] }, scoped);
+    expect(await restoreDuplicatePick(PAIR)).toEqual({ ok: false, error: "That pair is already on the page. Reload the page." });
+  });
+
+  it("Keep It on and Change Your Mind each clear the stamp in the write they already make", async () => {
+    state.client = scopedFake({ "profiles.select": [STAFF], "bills.update": [{ data: [{ id: ASIDE, job_id: "job-902" }], error: null }] }, scoped);
+    expect((await unresolveDuplicateBill(PAIR)).ok).toBe(true);
+    expect(scoped.find((c) => c.verb === "update")!.payload).toEqual({ superseded_by_bill_id: null, duplicate_dismissed_at: null });
+
+    state.client = fakeSupabase(
+      {
+        "profiles.select": [STAFF],
+        "bills.select": [{ data: { id: KEPT, amount: "84.10", job_id: "job-901", jobs: { name: "J-901 Larkspur" } }, error: null }],
+        "bills.update": [{ data: [{ id: ASIDE, job_id: "job-902", jobs: { name: "J-902 Snowbell" } }], error: null }],
+        "bill_supplier_invoices.update": [{ data: [], error: null }],
+        "invoice_items.select": [{ data: [], error: null }],
+      },
+      calls,
+    );
+    expect((await resolveDuplicateBill({ groupId: PAIR, keepBillId: KEPT, duplicateBillIds: [ASIDE] })).ok).toBe(true);
+    expect(calls.find((c) => c.table === "bills" && c.verb === "update")!.payload).toEqual({ superseded_by_bill_id: KEPT, duplicate_dismissed_at: null });
+  });
+});

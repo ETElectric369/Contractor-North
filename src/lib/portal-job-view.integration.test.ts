@@ -209,6 +209,10 @@ d("what the customer sees on a job (0300/0301)", { timeout: 30_000 }, () => {
 
     tokenA = (await one("select token from public.customer_portal_access where customer_id = $1", [custA])).token;
     tokenB = (await one("select token from public.customer_portal_access where customer_id = $1", [custB])).token;
+    // 0419: a new customer's link starts OFF. Both pages here must open (B's too: "B's link opens
+    // nothing of A's job" means a WORKING link, not a turned-off one), so the office turns them on.
+    // The turned-off case below turns A off itself.
+    await c.query("update public.customer_portal_access set enabled = true where customer_id = any($1::uuid[])", [[custA, custB]]);
 
     // The office's choices, made as the office.
     await as(staffId);

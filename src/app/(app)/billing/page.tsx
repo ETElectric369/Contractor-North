@@ -16,7 +16,8 @@ import { InvoiceAmount, InvoiceAmountDetail } from "@/components/invoice-amount"
    one home (lib/invoice-revision.ts) — the same function the server stamps by and the invoice page
    banners by. A second copy of it on this board is exactly the shape of the draft gate this wave
    spent a day untangling, where one of nine copies had been wrong for months. */
-import { customerHoldsOlderCopy } from "@/lib/invoice-revision";
+import { changedSinceSent, customerHoldsOlderCopy, invoiceStatusLabel } from "@/lib/invoice-revision";
+import { DismissResendButton } from "./dismiss-resend-button";
 import { computeCollected } from "@/lib/analytics/money-metrics";
 import { listCustomerOptions } from "@/lib/schedule-options";
 import { NewInvoiceButton } from "./new-invoice-button";
@@ -134,8 +135,9 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
       // that has since moved and a difference remains. The payments' dates ride along for the ORDER
       // (skeptic #56): paid, THEN changed - a payment that landed after the change was made on the
       // live figure, so it raises nothing. The projection law: the rule cannot read what this does
-      // not select.
-      supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, sent_at, revised_at, sent_total, payments(paid_at), customers(name)").not("revised_at", "is", null).neq("status", "void").order("revised_at", { ascending: false }).limit(1000),
+      // not select. 0419's resend_dismissed_at rides along for the same reason: the notice the office
+      // dismissed stays quiet only on a page that reads the dismissal.
+      supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, sent_at, revised_at, sent_total, resend_dismissed_at, payments(paid_at), customers(name)").not("revised_at", "is", null).neq("status", "void").order("revised_at", { ascending: false }).limit(1000),
       // The switches (0352): Sales Tax off means a new invoice starts untaxed, with no tax field.
       viewerSwitches(),
       orgP,
@@ -179,8 +181,13 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
       amountPaid: i.amount_paid,
       sentTotal: i.sent_total,
       paidAt: ((i.payments ?? []) as { paid_at?: string | null }[]).map((p) => p.paid_at),
+      resendDismissedAt: i.resend_dismissed_at,
     }),
   );
+  // THE RECORD, for the status word (Erik, 2026-11-22: "For Revised, lets mark it Sent - Revised"):
+  // every bill that changed since it last went out, whatever the notice says, from the same revised
+  // read (a bill with no revised_at never changed). A dismissed notice leaves its lane; the word stays.
+  const changedIds = new Set(((revisedInv ?? []) as any[]).filter((i) => changedSinceSent(i.sent_at, i.revised_at)).map((i) => String(i.id)));
   // ONE INVOICE, ONE ROW. A revised bill with money owed used to sit in Revised AND in Sent, so
   // the board listed it twice. It lives in Revised now (the verb it needs first is "send the
   // corrected copy"), and Sent shows the rest. Owed to You still reads `unpaid`, so every open
@@ -373,15 +380,15 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
           Amber on purpose: the same colour as the banner on the invoice's own page, so the board
           and the page can never look like they are talking about two different problems. */}
       {needsResend.length > 0 && (
-        <Stage tone="amber" icon={<Send className="h-4 w-4" />} title="Revised - Send Again" count={needsResend.length} sub="The money on these changed after a payment landed, so the figure they paid against is not the figure now. Open one to send it again.">
+        <Stage tone="amber" icon={<Send className="h-4 w-4" />} title="Sent - Revised" count={needsResend.length} sub="The money on these changed after a payment landed, so the figure they paid against is not the figure now. Open one to send it again, or dismiss it if they already know.">
           {needsResend.map((inv: any) => {
             const u = unpaidById.get(String(inv.id));
             return (
-              <li key={inv.id}>
+              <li key={inv.id} className={`flex items-center gap-2 pr-3 ${u?.overdue ? "bg-red-50/60" : ""}`}>
                 {/* A DOOR TO SOMETHING THAT EXISTS. This row does not send anything — it opens the
                     invoice, where the amber notice and the one Send button already live. A
                     second send path written here is how two doors drift apart. */}
-                <Link href={`/billing/${inv.id}`} className={`flex items-center justify-between gap-3 px-4 py-2.5 ${u?.overdue ? "bg-red-50/60 hover:bg-red-50" : "hover:bg-amber-50"}`}>
+                <Link href={`/billing/${inv.id}`} className={`flex min-w-0 flex-1 items-center justify-between gap-3 py-2.5 pl-4 ${u?.overdue ? "hover:bg-red-50" : "hover:bg-amber-50"}`}>
                   <div className="min-w-0">
                     <div className="truncate text-sm font-medium text-slate-900">{inv.customers?.name ?? "—"}</div>
                     <div className="flex items-center gap-1.5 text-xs text-slate-500">
@@ -402,6 +409,8 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
                     <Verb>Review &amp; Send</Verb>
                   </div>
                 </Link>
+                {/* DISMISS (0419), A SIBLING OF THE LINK, NEVER INSIDE IT: quiet until this bill is sent again. */}
+                <DismissResendButton invoiceId={String(inv.id)} />
               </li>
             );
           })}
@@ -415,7 +424,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
           icon={<Send className="h-4 w-4" />}
           title="Sent - Awaiting Payment"
           count={awaiting.length}
-          sub={`Out the door, money not in yet. Late ones say how late.${heldAbove > 0 ? ` ${heldAbove} more ${heldAbove === 1 ? "is" : "are"} in Revised - Send Again above.` : ""}`}
+          sub={`Out the door, money not in yet. Late ones say how late.${heldAbove > 0 ? ` ${heldAbove} more ${heldAbove === 1 ? "is" : "are"} in Sent - Revised above.` : ""}`}
         >
           {awaiting.map((inv) => (
             <li key={inv.id}>
@@ -424,7 +433,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
                   <div className="truncate text-sm font-medium text-slate-900">{inv.customer ?? "—"}</div>
                   <div className="flex items-center gap-1.5 text-xs text-slate-500">
                     {inv.overdue && <LateChip days={inv.daysLate} />}
-                    <span className="truncate">{inv.invoice_number}{inv.due_date ? ` · due ${formatDate(inv.due_date)}` : ""}</span>
+                    <span className="truncate">{inv.invoice_number}{changedIds.has(String(inv.id)) ? " · Revised" : ""}{inv.due_date ? ` · due ${formatDate(inv.due_date)}` : ""}</span>
                   </div>
                   <InvoiceAmountDetail total={inv.total} paid={inv.paid} overdue={inv.overdue} />
                 </div>
@@ -578,7 +587,7 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
                     </div>
                     <div className="flex shrink-0 items-center gap-4">
                       <InvoiceAmount total={Number(inv.total) || 0} paid={Number(inv.amount_paid) || 0} status={inv.status} />
-                      <Badge tone={statusTone(inv.status)}>{inv.status}</Badge>
+                      <Badge tone={statusTone(inv.status)}>{invoiceStatusLabel(inv.status, changedIds.has(String(inv.id)))}</Badge>
                     </div>
                   </Link>
                 </li>

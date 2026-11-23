@@ -169,7 +169,7 @@ export function PortalLinkButton({
           </>
         ) : (
           <>
-            <span className="font-medium text-red-700">{t("cu_linkIsOff")}</span> {t("cu_opensToOff")}
+            <span className="font-medium text-slate-700">{t("cu_linkIsOff")}</span> {t("cu_opensToOff")}
           </>
         )}
       </p>
@@ -185,7 +185,9 @@ export function PortalLinkButton({
         </div>
       )}
       <div className="flex flex-wrap gap-2">
-        <Button variant="outline" onClick={preview} disabled={pending} title={t("cu_seeTitle")}>
+        {/* Off, the office's look is refused at the door (portal_preview_redeem asks for an enabled link)
+            and would open a tab that says "turned off": it waits, like Copy, with the same reason. */}
+        <Button variant="outline" onClick={preview} disabled={pending || !on} title={on ? t("cu_seeTitle") : t("cu_turnOnFirst")}>
           <ExternalLink className="h-4 w-4" /> {t("cu_btn_seeWhatTheySee")}
         </Button>
         <Button
@@ -214,17 +216,23 @@ export function PortalLinkButton({
             <Mail className="h-4 w-4" /> {t("cu_btn_emailItToThem")}
           </Button>
         )}
-        <Button
-          variant="outline"
-          onClick={() => {
-            say(null);
-            setConfirmNew(true);
-          }}
-          disabled={pending}
-          title={t("cu_newLinkTitle")}
-        >
-          <RefreshCw className="h-4 w-4" /> {t("cu_btn_newLink")}
-        </Button>
+        {/* NEW LINK ONLY WHILE THE LINK IS ON (cn-v1186, skeptic S5). The database's rotate turns the
+            page on as it makes the new link, and off is the ordinary state now: New Link on an off link
+            quietly opened the customer's page. Off, Turn On is the door, and the link it turns on is the
+            one already made. */}
+        {on && (
+          <Button
+            variant="outline"
+            onClick={() => {
+              say(null);
+              setConfirmNew(true);
+            }}
+            disabled={pending}
+            title={t("cu_newLinkTitle")}
+          >
+            <RefreshCw className="h-4 w-4" /> {t("cu_btn_newLink")}
+          </Button>
+        )}
         <Button
           variant="outline"
           onClick={toggle}

@@ -82,12 +82,40 @@ function itemWords(desc: unknown): string {
  * front ("H245ICAT 4 in LED Shallow IC HSG") and the purchase without it ("4 in LED SHALLOW IC
  * HSG"), so one description has to hold the other as whole words - never a fuzzy score. At least
  * two words, so "wire" alone never claims every coil on the job.
+ *
+ * OR THE SAME CATALOGUE NUMBER (cn-v1186, the owner's papers on J-941). Two readers abbreviate the
+ * same part's words differently: the ticket's reader wrote "SIEM MBK125A 125A Riser Main CB Kit" and
+ * the return slip says "SIEM MBK125A 125A RISER MAIN CB KT"; "... NM3R SC Enclosure" against
+ * "... NM3R SC ENCL". Neither holds the other, so a slip for goods crossed off the ticket was credited
+ * in full and the filing door said no line carried its words. The words differ; the NUMBER is the
+ * part. So two descriptions also name the same part when each has at least two words, the first word
+ * (the maker) is the same, the second word is the same, and that second word is a catalogue number.
+ * Exact words, still nothing fuzzy: "MBK125A" is not "MBK200A".
+ *
+ * A SIZE IS NOT A PART NUMBER (skeptic #88). "Letters and digits, five or more" took "15AMP", "250FT",
+ * "12AWG", "100PK" and "4000K" for part numbers, so a 12/2 coil and a 14/2 coil of the same length were
+ * one part, and a return of the one was spent against the other. A catalogue number is now:
+ *   - digits only, at least 5 ("53890"); or
+ *   - letters and digits mixed, at least 7 characters, and NOT a size or a count with its unit or word
+ *     after it: not one to four digits followed only by letters ("1000AMP", "4SQUARE", "3PHASE"), and
+ *     not digits followed by one to four letters ("10000FT").
+ * Anything else, a rating, a schedule, a cable category or a lamp type in second place ("125A", "Q120",
+ * "2POLE", "SCH40", "CAT6A", "PAR38", "NEMA3R"), names a kind of part and never one part.
  */
+const isCatalogueNumber = (w: string): boolean => {
+  if (/^[0-9]+$/.test(w)) return w.length >= 5;
+  if (!/[a-z]/.test(w) || !/[0-9]/.test(w)) return false;
+  return w.length >= 7 && !/^\d{1,4}[a-z]+$/.test(w) && !/^\d+[a-z]{1,4}$/.test(w);
+};
+
 export function sameItem(a: string, b: string): boolean {
   if (!a || !b) return false;
   const [short, long] = a.length <= b.length ? [a, b] : [b, a];
   if (short.split(" ").length < 2) return false;
-  return ` ${long} `.includes(` ${short} `);
+  if (` ${long} `.includes(` ${short} `)) return true;
+  const [makerA, numberA] = a.split(" ");
+  const [makerB, numberB] = b.split(" ");
+  return makerA === makerB && numberA === numberB && isCatalogueNumber(numberA);
 }
 
 /**
@@ -121,6 +149,32 @@ export function sameItem(a: string, b: string): boolean {
  * query returned them, so the card, the panel and the importer - which all call this over the same
  * job's bills - agree on which return got which cents.
  *
+ * A RETURN COMES OFF THE LINE THAT WENT BACK FIRST (cn-v1186, the owner's papers on J-941). A part
+ * bought on two lines of one ticket: three kept and billed, five crossed out as returned (0417) and
+ * billed to nobody. The slip for the five was held only to what the matching lines billed, and the
+ * three that billed were what was left to hold it to: the customer was credited for five parts he was
+ * never charged for, and the three he kept came off his bill. So a purchase line marked `returned`
+ * whose `returned_credit_bill_id` is still null carries a second size: what of it already LEFT the
+ * bill (its cost less what it still bills). A return line spends that size, and is credited nothing
+ * for it, ONLY WHEN THE SLIP'S OWN NUMBERS SAY IT IS THAT LINE (skeptic #88):
+ *   - the same unit price: both lines carry a quantity that is not zero, and amount / quantity on the
+ *     two agree within a cent or half a percent, whichever is larger. A line with no quantity (a price
+ *     correction, "price adj") never spends it;
+ *   - the whole line: what is left of the return is at least that line's whole size, to the cent. A
+ *     slip covers a crossed-out line entirely or leaves it alone; it never spends part of one.
+ * The matching lines are tried largest size first (ties in the fixed order below), so the answer does
+ * not hang on how the lines were listed. Why so narrow: a slip smaller than the crossed-out line could
+ * be part of it, or goods the customer kept, was billed for, and then sent back; the papers cannot say
+ * which. Reading it as "already went back" credits the customer nothing for a part he paid for.
+ * Reading it the other way can only credit too much, and the filing door settles that. Whatever the
+ * return has not spent is held to what the matching lines billed, exactly as above. The same order
+ * rules (claimed first, then filing order, then the bill id) decide which return spends a size first.
+ *   - A line a filed credit already CLOSED (`returned_credit_bill_id` set) gives no such size: that
+ *     credit's own line is off the bill already, and a second slip for the same part must still
+ *     reach the lines that billed.
+ *   - A line that does not carry the `returned` key at all (a read without 0417's columns) gives no
+ *     such size, and the matcher reads exactly as it did before.
+ *
  * A returned line with NO matching purchase on the job (a lump bill, a purchase filed elsewhere,
  * words the scanner read differently) is credited in full, as a return is by default: the app has
  * no purchase to hold it to, and inventing one would be a guess. The person decides from the
@@ -130,15 +184,41 @@ export function sameItem(a: string, b: string): boolean {
  * the cap touched carries `billed_amount` = what it may credit (the mirror in returnCreditRows
  * reads that exactly as 0272's split, tax share and all). Purchases are not in the map.
  */
+/** A bill line as the matcher reads it: with 0417's two columns when the caller's read lists them. */
+export type ReturnAwareLine = BillLine & { returned?: boolean | null; returned_credit_bill_id?: unknown };
+
+/** What of a purchase line already LEFT the bill as a return nobody's credit has closed yet: its cost
+ *  less what it still bills. 0 for a line not marked returned, and for one a filed credit closed. */
+function sizeGoneBack(l: ReturnAwareLine): number {
+  if (l.returned !== true) return 0;
+  const closedBy = l.returned_credit_bill_id;
+  if (closedBy != null && String(closedBy).trim() !== "") return 0;
+  return cents(Math.max(0, billLineCost(l) - billLineBilledCost(l)));
+}
+
+/** A line's price for one, as a size: |amount| / |quantity|. null when it carries no quantity (or 0). */
+function unitSize(l: BillLine): number | null {
+  const qty = Math.abs(Number(l.quantity));
+  if (!Number.isFinite(qty) || qty === 0) return null;
+  return Math.abs(billLineCost(l)) / qty;
+}
+
+/** Two prices for one agree: within a cent or half a percent, whichever is larger. */
+function sameUnitPrice(a: number, b: number): boolean {
+  return Math.abs(a - b) <= Math.max(0.01, 0.005 * Math.max(a, b)) + 1e-9;
+}
+
 export function returnLinesAgainstPurchases<T extends { id?: unknown; amount?: unknown; created_at?: unknown }>(
   bills: readonly T[],
-  linesOf: (b: T) => BillLine[] | null | undefined,
+  linesOf: (b: T) => ReturnAwareLine[] | null | undefined,
   /** Bill ids already on a non-void invoice (the caller's claim set). Optional: without it the
    *  order is filing order alone. */
   claimed?: { has(id: string): boolean } | null,
 ): Map<T, BillLine[]> {
   const byId = (x: unknown, y: unknown) => String(x ?? "").localeCompare(String(y ?? ""));
-  const budgets: { words: string; left: number }[] = [];
+  /** `left`: what the line still bills, to hold a return to. `back`: what of it already went back
+   *  (sizeGoneBack), spent first and credited nothing. */
+  const budgets: { words: string; left: number; back: number; unit: number | null }[] = [];
   const purchases = bills
     .map((b, i) => ({ b, i }))
     .filter(({ b }) => Number(b.amount) > 0)
@@ -148,7 +228,7 @@ export function returnLinesAgainstPurchases<T extends { id?: unknown; amount?: u
     for (const { l } of lines) {
       if (isTaxLine(l) || !(billLineCost(l) > 0)) continue;
       const words = itemWords(l.description);
-      if (words) budgets.push({ words, left: cents(billLineBilledCost(l)) });
+      if (words) budgets.push({ words, left: cents(billLineBilledCost(l)), back: sizeGoneBack(l), unit: unitSize(l) });
     }
   }
   const out = new Map<T, BillLine[]>();
@@ -172,7 +252,23 @@ export function returnLinesAgainstPurchases<T extends { id?: unknown; amount?: u
       const matches = budgets.filter((p) => sameItem(words, p.words));
       if (!matches.length) continue;
       const size = cents(-cost);
-      const want = billedPortion(size, l.billed_amount) ?? size;
+      // What already went back on a matching purchase line is spent first and credits nothing, but only
+      // a WHOLE line at the SAME unit price, largest first (see the header: a slip smaller than the
+      // crossed-out line may be goods the customer kept and paid for).
+      let spent = 0;
+      const unit = unitSize(l);
+      if (unit != null) {
+        const sizes = matches
+          .filter((p) => p.back > 0 && p.unit != null && sameUnitPrice(p.unit, unit))
+          .sort((x, y) => y.back - x.back);
+        for (const p of sizes) {
+          if (Math.round((size - spent) * 100) < Math.round(p.back * 100)) continue;
+          spent = cents(spent + p.back);
+          p.back = 0;
+        }
+      }
+      // Only what is left of the return is held to what the matching lines billed, as before.
+      const want = Math.min(billedPortion(size, l.billed_amount) ?? size, cents(size - spent));
       const room = cents(matches.reduce((s, p) => s + p.left, 0));
       const allowed = cents(Math.max(0, Math.min(want, room)));
       let take = allowed;

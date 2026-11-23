@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 import { NavLink } from "@/components/nav-link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
+import { changedSinceSent, invoiceStatusLabel } from "@/lib/invoice-revision";
 import { jobStatusLabel } from "@/lib/job-status";
 import { customerStatusLabel, estimateStatusLabel, ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
 import { fillText, translator } from "@/lib/i18n";
@@ -124,7 +125,7 @@ export default async function CustomerDetailPage({
       .order("created_at", { ascending: false }),
     supabase
       .from("invoices")
-      .select("id, invoice_number, status, total, amount_paid")
+      .select("id, invoice_number, status, total, amount_paid, sent_at, revised_at")
       .eq("customer_id", id)
       .order("created_at", { ascending: false }),
     // A markup is a price: a tech never gets it (and has no Edit to pick one with).
@@ -390,7 +391,7 @@ export default async function CustomerDetailPage({
                 label: iv.invoice_number,
                 sub: <InvoiceAmountDetail total={iv.total} paid={iv.amount_paid} status={iv.status} />,
                 value: <InvoiceAmount total={iv.total} paid={iv.amount_paid} status={iv.status} />,
-                badge: { tone: statusTone(iv.status), text: iv.status },
+                badge: { tone: statusTone(iv.status), text: invoiceStatusLabel(iv.status, changedSinceSent(iv.sent_at, iv.revised_at)) },
                 href: `/billing/${iv.id}`,
               };
             })}

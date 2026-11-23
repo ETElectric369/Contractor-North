@@ -36,6 +36,8 @@ d("the portal link belongs to the office (0298)", { timeout: 30_000 }, () => {
   let staffId = "";
   let otherStaffId = ""; // office staff of a DIFFERENT org, if there is one
   let customerId = "";
+  /** The link as the customer's insert left it, read before the office turns it on (0419). */
+  let atBirth: { org_id: string; token: string; enabled: boolean } | undefined;
 
   const one = async (sql: string, params: unknown[] = []) => (await c.query(sql, params)).rows[0];
 
@@ -100,18 +102,27 @@ d("the portal link belongs to the office (0298)", { timeout: 30_000 }, () => {
     customerId = (
       await one("insert into public.customers (org_id, name) values ($1, 'TEST 0298 portal') returning id", [orgId])
     ).id;
+    // 0419: the link is made with the customer and starts OFF. Read it as it was born, then turn it
+    // on the way the office does (portal_link_set_enabled, as office staff): every case below asks
+    // about a WORKING link (opens, Last Opened, a tech or a neighbour refused), never the default.
+    atBirth = await one("select org_id, token, enabled from public.customer_portal_access where customer_id = $1", [customerId]);
+    await as(staffId);
+    await c.query("select public.portal_link_set_enabled($1, true)", [customerId]);
+    await asServer();
   });
   afterAll(async () => {
     await c?.query("rollback").catch(() => undefined);
     await c?.end();
   });
 
-  it("a new customer gets a link the moment it exists", async () => {
+  it("a new customer gets a link the moment it exists, and it is OFF (0419)", async () => {
     if (!needs()) return;
-    const row = await one("select org_id, token, enabled from public.customer_portal_access where customer_id = $1", [customerId]);
-    expect(row?.org_id).toBe(orgId);
-    expect(row?.token).toMatch(/^[0-9a-f]{32}$/);
-    expect(row?.enabled).toBe(true);
+    expect(atBirth?.org_id).toBe(orgId);
+    expect(atBirth?.token).toMatch(/^[0-9a-f]{32}$/);
+    expect(atBirth?.enabled).toBe(false);
+    // Turn On is one write and turns on the very link the office already sees.
+    const row = await one("select token, enabled from public.customer_portal_access where customer_id = $1", [customerId]);
+    expect(row).toEqual({ token: atBirth?.token, enabled: true });
   });
 
   it("every customer's link moved and still opens their page; the old column is empty everywhere", async () => {

@@ -57,6 +57,7 @@ import { invoiceStatusItems, statusToSend } from "@/lib/nav-tree";
 import { todayStrInTz } from "@/lib/tz";
 import { embeddedJob, isFinishedJobStatus } from "@/lib/action-items/due-filters";
 import { MarkupBox } from "./markup-box";
+import { DismissResendButton } from "../dismiss-resend-button";
 
 interface PriceItemLite { id: string; code: string | null; description: string; unit: string; buy_price: number; markup_pct: number; }
 interface TaxRateLite { id: string; name: string; rate: number; is_default: boolean; }
@@ -156,6 +157,7 @@ export function InvoiceDetail({
   jobs = [],
   customerName = null,
   customerHoldsOlderCopy = false,
+  resendNoticeDismissed = false,
   runningClocks = [],
   importMode,
   importHeld = null,
@@ -187,6 +189,10 @@ export function InvoiceDetail({
   /** 0269: revised_at is later than sent_at — the bill in their hands is not this one. Decided by
    *  lib/invoice-revision.ts on the server, never re-derived here. */
   customerHoldsOlderCopy?: boolean;
+  /** 0419: the notice would stand but the office dismissed it since the last send
+   *  (lib/invoice-revision resendNoticeDismissed, decided on the server). The quiet line says so and
+   *  offers Bring the Notice Back. */
+  resendNoticeDismissed?: boolean;
   /** What the Import row may offer (page.tsx decides, lib/actuals-draw): "standard" = every import;
    *  "actuals" = a draw built from actuals, refreshed like an invoice (no From Estimate); "none" = a
    *  draw billing a slice of the contract. Absent = by kind, the rule before J-011. */
@@ -1194,7 +1200,10 @@ export function InvoiceDetail({
                     Sent {formatDateTime(sentAt)} · changed {formatDateTime(revisedAt)}
                   </p>
                 </div>
-                {/* The fix, in reach of the problem: the same Send sheet the header opens. */}
+                {/* The fix, in reach of the problem: the same Send sheet the header opens. And beside it
+                    Dismiss (0419, Erik 2026-11-22: "I know its been revised and I don't want to send it
+                    again"): quiet until this bill is sent again. */}
+                <DismissResendButton invoiceId={invoice.id} />
                 <SendButton
                   kind="invoice"
                   id={invoice.id}
@@ -1206,6 +1215,14 @@ export function InvoiceDetail({
                   label="Send Again"
                   variant="outline"
                 />
+              </div>
+            ) : resendNoticeDismissed ? (
+              /* DISMISSED (0419): said, with the way back. Never a dead end. */
+              <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 bg-slate-50/60 p-3">
+                <p className="min-w-0 flex-1 text-sm text-slate-500">
+                  {who} paid on an older version of this bill, and the money on it has changed since. You dismissed the notice, so it stays quiet until this bill is sent again.
+                </p>
+                <DismissResendButton invoiceId={invoice.id} restore />
               </div>
             ) : (
               <p className="border-b border-slate-100 bg-slate-50/60 p-3 text-sm text-slate-500">

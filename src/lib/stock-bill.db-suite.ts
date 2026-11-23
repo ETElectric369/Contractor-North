@@ -108,6 +108,10 @@ export function defineStockBillSuite(connect: () => Promise<SqlClient>, opts: St
     }
     // ── fixtures, as the server (no table-level locks beyond rows) ──
     const cust = (await one("insert into public.customers (org_id, name) values ($1, 'TEST Stock Bill Customer') returning id", [orgId])).id as string;
+    // 0419: a new customer's link starts OFF. The customer's-page case below reads this job through the
+    // link, so the office turns it on (the table may not exist on an old database: then nothing to do).
+    if ((await one("select to_regclass('public.customer_portal_access') is not null as ok")).ok)
+      await c.query("update public.customer_portal_access set enabled = true where customer_id = $1 and org_id = $2", [cust, orgId]);
     const job = async (n: string) =>
       (
         await one(
