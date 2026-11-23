@@ -110,6 +110,10 @@ export interface OrgSettings {
   /** Payroll cadence + the anchor date a biweekly/weekly cycle counts from. */
   pay_schedule: "weekly" | "biweekly" | "semimonthly" | "monthly";
   pay_anchor: string; // "YYYY-MM-DD" — start of a reference pay period
+  /** INSPECTION DAYS (cn-v1185): the weekdays, the from..to window and the most a day on which a
+   *  website visitor who has just sent a form picks an open time (lib/schedule/open-times). `offer`
+   *  is the switch. Healed on read by healInspectionDays; stored in the same shape. */
+  inspection_days: InspectionDays;
 
   /** Where a lead came from, as the company names it (cn-v1170): the lead form's Lead Source list.
    *  Read through leadSourceList (cleaned on read; an empty list reads as the default). */
@@ -398,6 +402,34 @@ export function leadSourceList(raw: unknown): string[] {
   return out.length ? out : [...DEFAULT_LEAD_SOURCES];
 }
 
+/** A weekday key, Sunday first (the order a healed list is kept in). */
+export type Weekday = "sun" | "mon" | "tue" | "wed" | "thu" | "fri" | "sat";
+const WEEKDAYS: readonly Weekday[] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+/** The company's inspection days (cn-v1185): `offer` turns the website offer on; `start`/`end` are
+ *  "HH:MM" on the company's clock; `per_day` is the most inspections a day holds (1..8). */
+export type InspectionDays = { offer: boolean; days: Weekday[]; start: string; end: string; per_day: number };
+export const INSPECTION_DAYS_DEFAULT: InspectionDays = { offer: false, days: [], start: "09:00", end: "15:00", per_day: 3 };
+
+/**
+ * Stored inspection days, read safely: total (any value in, a whole InspectionDays out) and idempotent.
+ * `offer` only for a real `true`; known weekdays, once each, Sunday first; "HH:MM" times or the
+ * default; `per_day` an integer clamped 1..8, else 3. An `end` not after `start` is KEPT as typed: the
+ * card says so and nothing is offered (open-times offersOpenTimes), rather than a silent swap.
+ */
+export function healInspectionDays(raw: unknown): InspectionDays {
+  const r = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const picked = new Set(Array.isArray(r.days) ? r.days.filter((d): d is Weekday => typeof d === "string" && (WEEKDAYS as readonly string[]).includes(d)) : []);
+  const hm = (v: unknown, dflt: string) => (typeof v === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(v) ? v : dflt);
+  const n = r.per_day;
+  return {
+    offer: r.offer === true,
+    days: WEEKDAYS.filter((d) => picked.has(d)),
+    start: hm(r.start, INSPECTION_DAYS_DEFAULT.start),
+    end: hm(r.end, INSPECTION_DAYS_DEFAULT.end),
+    per_day: typeof n === "number" && Number.isInteger(n) ? Math.min(8, Math.max(1, n)) : INSPECTION_DAYS_DEFAULT.per_day,
+  };
+}
+
 export const DEFAULT_SETTINGS: OrgSettings = {
   currency: "USD",
   timezone: "America/Los_Angeles",
@@ -436,6 +468,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   weather_source: "device", // default: each user's own location (the crew is mobile)
   pay_schedule: "biweekly",
   pay_anchor: "2026-01-05", // a Monday; biweekly cycles cascade from here
+  inspection_days: { offer: false, days: [], start: "09:00", end: "15:00", per_day: 3 },
 
   // THE ONE COPY of the house list is lib/payment-method (cn-v1152): every pay door draws its chips from
   // settings.payment_methods and falls back to that same list when a company has cleared it.
@@ -700,6 +733,8 @@ export function getOrgSettings(raw: unknown): OrgSettings {
   merged.features = normalizeFeatures((stored as { features?: unknown }).features, (stored as { timeclock_job_codes?: unknown }).timeclock_job_codes);
   merged.timeclock_job_codes = merged.features.job_codes;
   merged.lead_sources = leadSourceList((stored as { lead_sources?: unknown }).lead_sources);
+  // Inspection days (cn-v1185): healed here, once, for every reader (the public offer among them).
+  merged.inspection_days = healInspectionDays((stored as { inspection_days?: unknown }).inspection_days);
   // A day or nothing: a hand-edited "June 8" must not move a company's line somewhere unnamed.
   {
     const b = merged.books_begin;

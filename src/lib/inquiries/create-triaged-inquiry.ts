@@ -72,10 +72,14 @@ const MAX_AUTOBOOK_PER_DAY = 10;
  * nobody agreed to, on a calendar nobody looked at, with nobody telling the customer. It also took
  * the lead off the Leads list (a standing visit does) while the alert said "new lead". It is OFF for
  * every company. The lead still lands, flagged as needing a site inspection, and still alerts; the
- * office books it or sends times. The branch is kept, not deleted: it comes back as a per-company
- * feature that books only on the days a company marked as inspection days, at a time its calendar
- * shows open. Until that is built this stays false; it is NOT a switch to flip by itself, because
- * what it would turn back on is the blind hold.
+ * office books it or sends times.
+ *
+ * THE FEATURE THE OWNER ASKED FOR IS BUILT ELSEWHERE (cn-v1185), and not in this form: a company that
+ * turns on its Inspection Days (settings › Crew & Time) has its website visitor SHOWN the open times on
+ * those days, read from the calendar, and the visitor taps one (lib/actions/public-schedule.ts,
+ * publicScheduleInspection and publicPickInspectionTime). The app still never books by itself. This
+ * hold is not coming back as that feature; it stays false and is NOT a switch to flip, because what it
+ * would turn back on is the blind hold. The branch is left in place: removing it is the owner's call.
  */
 const AUTO_BOOK_FROM_PUBLIC_DOORS: boolean = false;
 
@@ -97,7 +101,7 @@ const AUTO_BOOK_FROM_PUBLIC_DOORS: boolean = false;
  * already converted is finished — somebody who comes back after that is genuine new interest and
  * gets its own row. And a lead older than the window is a new job, not a second thought.
  */
-const TERMINAL_LEAD_STATUSES = ["won", "lost", "archived", "declined", "spam"];
+export const TERMINAL_LEAD_STATUSES: readonly string[] = ["won", "lost", "archived", "declined", "spam"];
 /** How long a submitter is still "the same lead coming back" (a duration, not a calendar day —
  *  ms arithmetic is correct here; no day boundary is being decided). */
 const REPEAT_WINDOW_MS = 30 * 86_400_000;
@@ -282,7 +286,16 @@ export async function createTriagedInquiry(
   supabase: SupabaseClient,
   orgId: string,
   input: CreateTriagedInquiryInput,
-): Promise<{ id: string; triage: LeadTriage }> {
+): Promise<{
+  id: string;
+  triage: LeadTriage;
+  /**
+   * TRUE WHEN `id` IS A LEAD THIS CALL CAME BACK TO, not one it wrote (skeptic #87, S1). That lead was
+   * found by a TYPED phone or e-mail, and anyone can type somebody's phone: a public door may use the
+   * id inside the call, but must never hand it to a browser.
+   */
+  cameBack: boolean;
+}> {
   const triage = classifyLead(input.intake, { inspectionThreshold: input.inspectionThreshold });
 
   // THE SAME PERSON COMING BACK IS THE SAME LEAD (audit v921) — see openLeadFor. The newest
@@ -456,7 +469,7 @@ export async function createTriagedInquiry(
 
   // A true double-submit alerts nobody a second time; a real return, or a changed answer, does.
   if (!quiet) await notifyNewLead(supabase, orgId, input, { cameBack, leadId: id });
-  return { id, triage };
+  return { id, triage, cameBack };
 }
 
 /**

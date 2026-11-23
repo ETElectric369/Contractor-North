@@ -6,6 +6,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { publicIntakeNeeds } from "@/lib/playbook/public-intake";
 import { IntakeForm } from "./intake-form";
+import { offersOpenTimes } from "@/lib/schedule/open-times";
 
 export const dynamic = "force-dynamic";
 // The segment's server actions inherit this budget. submitIntake finishes fast for the customer;
@@ -80,7 +81,9 @@ export default async function IntakePage({
         </p>
       </header>
       )}
-      <IntakeForm handle={handle} needs={needs} orgName={org.name} />
+      {/* offersTimes (cn-v1185): the company ticked its Inspection Days; the thank-you then shows one
+          "Pick a Time for a Site Visit" button. False draws the form exactly as before. */}
+      <IntakeForm handle={handle} needs={needs} orgName={org.name} offersTimes={offersOpenTimes(org.settings)} />
     </main>
   );
 }

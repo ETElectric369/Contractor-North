@@ -43,6 +43,7 @@ export const words: WordCatalog = {
     "src/app/(app)/settings/lead-sources.tsx",
     "src/components/feature-off-line.tsx",
     "src/components/nav-link.tsx",
+    "src/app/(app)/settings/maps-provider-toggle.tsx",
     "src/components/weather-widget.tsx",
     // The fence's idle line reads one shell word, Open Settings (sh_btn_openSettings, 2026-11-16).
     "src/components/geofence-monitor.tsx",
@@ -354,6 +355,11 @@ export const words: WordCatalog = {
     sh_openIn: "Open in…",
     sh_btn_googleMaps: "Google Maps",
     sh_btn_appleMaps: "Apple Maps",
+    // The Settings card for the same choice (settings/maps-provider-toggle.tsx, cn-v1185): what the card asks,
+    // what it says before anything is chosen, and the one true line on a device with no Apple Maps (Android).
+    sh_mapsWhich: "Which app the Navigate buttons open for driving directions.",
+    sh_mapsNotChosen: "Not chosen yet. The first Navigate tap asks.",
+    sh_mapsGoogleOnly: "The Navigate buttons open Google Maps on this phone. Apple Maps is only on Apple devices.",
     // ── The weather widget (components/weather-widget.tsx) ──
     sh_wx_following: "Following your location",
     sh_wx_yourLocation: "Your location",
@@ -709,6 +715,9 @@ export const words: WordCatalog = {
     sh_openIn: "Abrir en…",
     sh_btn_googleMaps: "Google Maps",
     sh_btn_appleMaps: "Apple Maps",
+    sh_mapsWhich: "La app que abren los botones Navegar para darte indicaciones de manejo.",
+    sh_mapsNotChosen: "Aún no has elegido. El primer toque en Navegar te pregunta.",
+    sh_mapsGoogleOnly: "En este teléfono, los botones Navegar abren Google Maps. Apple Maps solo está en dispositivos Apple.",
     // ── El widget del clima (components/weather-widget.tsx) ──
     sh_wx_following: "Siguiendo tu ubicación",
     sh_wx_yourLocation: "Tu ubicación",

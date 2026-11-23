@@ -36,9 +36,10 @@ import {
   type DayHours,
 } from "@/lib/schedule-math";
 import { actualSpans } from "@/lib/schedule/plan-vs-actual";
+import { readDayBusy } from "@/lib/schedule/day-busy";
 import { jobWords } from "@/lib/action-items/words";
 import { dayHoursOf, freezeDrawnDays, nextDayHours, readDayHours } from "@/lib/schedule/day-hours";
-import { ownHoursByJobDay, segmentCols, withDayHours, type SegmentRow } from "@/lib/schedule/segment-hours";
+import { segmentCols, withDayHours, type SegmentRow } from "@/lib/schedule/segment-hours";
 import { ACTIVE_JOB_STATUSES, ENDED_JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
 import { rescheduleAppointment, unscheduleAppointment } from "../appointments/actions";
 import {
@@ -46,7 +47,6 @@ import {
   hmToMinutes,
   minutesToHm,
   PINNED_TO_TOP,
-  type Busy,
 } from "@/lib/schedule/fit-day";
 import {
   appointmentTypeFor,
@@ -1999,101 +1999,10 @@ export async function planDayTimes(
   if ("error" in ctx) return { ok: false, times: [], error: ctx.error };
   const ws = wordsOf(ctx.supabase, ctx.userId);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return { ok: false, times: [], error: await ws.say("ag_pickADay") };
-  const own = new Set((opts?.jobIds ?? []).map(String));
-
   const { tz, dayStartHm, dayEndHm } = await orgSchedulePrefs(ctx.supabase);
-  const dayStart = tzDayStartUtc(dateISO, tz);
-  // The day ends at the NEXT local midnight, resolved on the calendar: a clock-change day is 23 or 25
-  // hours long, and start + 24h cut it or ran an hour into tomorrow.
-  const next = new Date(`${dateISO}T00:00:00Z`);
-  next.setUTCDate(next.getUTCDate() + 1);
-  const dayEnd = tzDayStartUtc(next.toISOString().slice(0, 10), tz);
-
-  // Everything already holding time on this day. A CALL is excluded — it is pinned to the top and
-  // costs the route nothing, so it must not push a real visit later.
-  /* OVERLAP, NOT A POINT TEST. A three-day service call booked Monday OCCUPIES Tuesday, but a
-     starts_at-within-the-day filter could not see it — so the fitter read Tuesday as empty and
-     booked an inspection at 9am inside a day the calendar draws as full. Anything that STARTS
-     before the day ends and ENDS after it starts is busy here; rows with no end are caught by the
-     second arm (they start within the day and occupy their drawn hour). */
-  const { data: appts } = await ctx.supabase
-    .from("appointments")
-    .select("starts_at, ends_at, type, status, job_id, absorbed") // PROJECTION LAW: every column read below
-    .lt("starts_at", dayEnd.toISOString())
-    .or(`ends_at.gte.${dayStart.toISOString()},and(ends_at.is.null,starts_at.gte.${dayStart.toISOString()})`)
-    .limit(200);
-
-  /* PLACED JOBS ARE BUSY TOO. Three audit lenses independently caught the fitter reading only
-     appointments — so the day after the a-service-call-is-a-job ruling, the work it now places as
-     JOBS was invisible here, and "morning" would fit a new visit straight on top of a placed job:
-     the Nora double-booking, resurrected through the very change that fixed her page. Rules:
-       timed job (real clock)      → busy for its real span
-       untimed but sized           → busy from open for its size
-       bare all-day, unsized       → ELASTIC, not busy: an unsized all-day job is exactly the day
-                                     Erik squeezes a visit into ("the visit is on the way"), and
-                                     blocking it would fight the workflow the rail exists for.
-     A work-type appointment SUPERSEDED by its job is skipped — its job now carries the block, and
-     counting both would double-width the day.
-     THE SAME BLOCK THE CALENDAR DRAWS (lib/schedule/job-block jobDayBlock): a sized job is busy for its
-     size, a timed one for its real span, and an all-day one that nobody sized stays elastic. */
-  const wd = workDayMinutes({ start: dayStartHm, end: dayEndHm });
-  const { data: dayJobs } = await ctx.supabase
-    .from("jobs")
-    .select("id, scheduled_start, scheduled_end, planned_minutes, status") // PROJECTION LAW: every column read below
-    .lt("scheduled_start", dayEnd.toISOString())
-    .or(`scheduled_end.gte.${dayStart.toISOString()},and(scheduled_end.is.null,scheduled_start.gte.${dayStart.toISOString()})`)
-    .in("status", ["scheduled", "in_progress"])
-    .limit(100);
-
-  /* A DAY'S OWN HOURS (0370) are the block that day holds: Honeysuckle's noon to 5 beside its other
-     days is busy noon to 5, never its usual full day. Before 0370 there are none (the read without
-     the columns), and every job holds its usual block, as before. */
-  const { data: daySegs } = await withDayHours((h) =>
-    ctx.supabase
-      .from("job_schedule_segments")
-      .select(segmentCols("job_id, start_date, end_date", h))
-      .lte("start_date", dateISO)
-      .gte("end_date", dateISO),
-  );
-  const ownHere = ownHoursByJobDay((daySegs ?? []) as unknown as SegmentRow[]);
-
-  const busy: Busy[] = [];
-  for (const j of (dayJobs ?? []) as { id?: string; scheduled_start: string | null; scheduled_end: string | null; planned_minutes: number | null }[]) {
-    if (!j.scheduled_start || own.has(String(j.id ?? ""))) continue;
-    const dayHours = ownHere.get(String(j.id ?? ""))?.get(dateISO) ?? null;
-    const b = jobDayBlock({
-      day: dateISO,
-      scheduledStart: j.scheduled_start,
-      scheduledEnd: j.scheduled_end,
-      plannedMinutes: j.planned_minutes,
-      tz,
-      wd,
-      dayHours,
-    });
-    // Elastic all-day (unsized, no hours of its own) — open to a squeezed visit.
-    if (!dayHours && b.allDay && !(Number(j.planned_minutes ?? 0) > 0)) continue;
-    busy.push({ startMin: b.startMin, endMin: Math.max(b.startMin + 15, b.endMin) });
-  }
-
-  for (const a of (appts ?? []) as { starts_at: string; ends_at: string | null; type: string | null; status: string | null; job_id?: string | null; absorbed?: boolean }[]) {
-    if (a.status === "cancelled" || a.type === "call") continue;
-    // Absorbed = its JOB owns the slot now (0237), and the jobs loop above already counted it —
-    // reading both would double-book the same block against itself.
-    if (a.absorbed) continue;
-    // The visit of a job being placed is that job's own, never a reason to push it later.
-    if (a.job_id && own.has(String(a.job_id))) continue;
-    // CLAMPED TO THIS DAY: a span that started yesterday is busy from midnight; one that runs on
-    // past tonight is busy to midnight. Only the middle of a multi-day booking reads as full.
-    const startsToday = new Date(a.starts_at) >= dayStart;
-    const startMin = startsToday ? tzMinutesOfDay(a.starts_at, tz) : 0;
-    // An appointment with no end is drawn as an hour, so it occupies an hour. Reading it as a point
-    // would let the next visit land inside a block he can see on his screen.
-    const endsToday = a.ends_at ? new Date(a.ends_at) < dayEnd : true;
-    const endMin = a.ends_at && new Date(a.ends_at) > new Date(a.starts_at)
-      ? endsToday ? Math.min(24 * 60, tzMinutesOfDay(a.ends_at, tz) || 24 * 60) : 24 * 60
-      : startMin + 60;
-    busy.push({ startMin, endMin: Math.max(startMin + 15, endMin) });
-  }
+  // WHAT FILLS THE DAY: the one rule (lib/schedule/day-busy, cn-v1185), the same one the website's
+  // open times read. No company passed: the reads stay RLS-scoped, exactly as they were here.
+  const busy = await readDayBusy(ctx.supabase, { dateISO, tz, dayStartHm, dayEndHm, ownJobIds: opts?.jobIds });
 
   // Bounded by HIS working day. Past the end it still lands (never silently refused) — just after
   // everything else, where he can see it ran long.

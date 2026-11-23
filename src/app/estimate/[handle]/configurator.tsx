@@ -5,7 +5,8 @@ import { CalendarClock, CheckCircle2, ExternalLink, Loader2, ChevronRight, Chevr
 import { computeDeckEstimate, deckAsksTrpa, type DeckAnswers, type DeckMaterial, type DeckShape } from "@/lib/estimate/deck";
 import { classifyLead, PROJECT_TYPES, type LeadIntake, type ProjectType } from "@/lib/lead-triage";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
-import { publicScheduleInspection } from "@/lib/actions/public-schedule";
+import { publicScheduleInspection, type OfferedTime } from "@/lib/actions/public-schedule";
+import { SiteVisitOffer } from "@/components/site-visit-offer";
 import { submitEstimateLead } from "./actions";
 import { SITE_VISIT_REQUESTED } from "@/app/inquire/site-visit-words";
 import type { EstimateResult, Qualifying } from "./types";
@@ -382,6 +383,8 @@ function ScheduleVisitCta({ handle, calendlyUrl, contact, brand, leadId }: { han
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null); // confirmation copy once the request lands
   const [error, setError] = useState<string | null>(null);
+  // The open times the request answered with (cn-v1185): set only when the company offers times.
+  const [offer, setOffer] = useState<OfferedTime[] | null>(null);
 
   if (calendlyUrl) {
     return (
@@ -394,6 +397,17 @@ function ScheduleVisitCta({ handle, calendlyUrl, contact, brand, leadId }: { han
       >
         <CalendarClock className="h-4 w-4" /> Schedule Your Site Visit <ExternalLink className="h-3.5 w-3.5" />
       </a>
+    );
+  }
+
+  if (offer) {
+    return (
+      <SiteVisitOffer
+        handle={handle}
+        leadId={leadId ?? null}
+        contact={{ name: contact.name, phone: contact.phone, email: contact.email, address: contact.address }}
+        times={offer}
+      />
     );
   }
 
@@ -412,6 +426,8 @@ function ScheduleVisitCta({ handle, calendlyUrl, contact, brand, leadId }: { han
       // The lead THIS browser's submit returned is the only key the tap attaches by (cn-v1180).
       const res = await publicScheduleInspection({ handle, leadId, ...contact });
       if (!res.ok) { setError(res.error ?? "Something went wrong — please call us instead."); return; }
+      // OPEN TIMES (cn-v1185): the company ticked its Inspection Days, so the visitor taps one.
+      if (res.times && res.times.length > 0) { setOffer(res.times); return; }
       // ONE SENTENCE EITHER WAY (cn-v1180, audit A6): true whether a booking exists or not.
       setDone(SITE_VISIT_REQUESTED);
     } catch {

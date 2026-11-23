@@ -7,7 +7,15 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { createTriagedInquiry } from "@/lib/inquiries/create-triaged-inquiry";
 import { rateLimited, clientIp } from "@/lib/rate-limit";
 
-export type ContactResult = { ok: boolean; error?: string };
+export type ContactResult = {
+  ok: boolean;
+  error?: string;
+  /** The lead THIS submit WROTE (cn-v1185, audit A6; skeptic #87, S1), and only that. A lead the
+   *  submit came back to was found by a TYPED phone or e-mail, and anyone can type somebody's phone,
+   *  so its id never leaves the server (createTriagedInquiry's `cameBack`). The thank-you's "Pick a
+   *  Time for a Site Visit" attaches by it, the way the deck configurator's tap does. */
+  leadId?: string;
+};
 
 /**
  * Public "contact / request an estimate" submit from an org's marketing homepage. Drops a
@@ -53,8 +61,10 @@ export async function submitSiteContact(
   if (await rateLimited(`contact-org:${orgId}`, 50, 86_400))
     return { ok: false, error: "We've had a lot of messages today — please call us instead." };
 
+  let leadId: string | undefined;
+  let cameBack = false;
   try {
-    await createTriagedInquiry(supabase, orgId, {
+    ({ id: leadId, cameBack } = await createTriagedInquiry(supabase, orgId, {
       name,
       phone: phone || null,
       email: email || null,
@@ -63,10 +73,12 @@ export async function submitSiteContact(
       intake: { projectType: null, contact: { name, email: email || null, phone: phone || null, address: null } },
       intakeJson: { source: "website_contact", message: String(payload?.message ?? "").trim() || null },
       inspectionThreshold: settings.site_inspection_threshold,
-    });
+    }));
   } catch {
     return { ok: false, error: "Couldn't send — please call us instead." };
   }
   revalidatePath("/leads");
-  return { ok: true };
+  // Only a lead this call wrote goes back to the browser (skeptic #87, S1); a returning visitor's
+  // thank-you simply has no Pick a Time button, and the office already heard "lead came back".
+  return { ok: true, ...(leadId && !cameBack ? { leadId } : {}) };
 }

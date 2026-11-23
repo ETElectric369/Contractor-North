@@ -36,7 +36,7 @@ export interface IntakePayload {
 export async function submitIntake(
   handle: string,
   payload: IntakePayload,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; leadId?: string } | { ok: false; error: string }> {
   if (payload?.hp) return { ok: true }; // bot trap — pretend success, write nothing
 
   const name = String(payload?.contact?.name ?? "").trim().slice(0, 120);
@@ -126,6 +126,7 @@ export async function submitIntake(
 
   const hasPlans = String(answers["has_plans"] ?? "").toLowerCase() === "yes";
   let inquiryId: string | null = null;
+  let cameBack = false;
   try {
     const created = await createTriagedInquiry(supabase, orgId, {
     name,
@@ -157,6 +158,7 @@ export async function submitIntake(
       autoBookInspection: false,
     });
     inquiryId = created.id;
+    cameBack = created.cameBack;
   } catch {
     return { ok: false, error: "Something went wrong — please call us instead." };
   }
@@ -175,5 +177,9 @@ export async function submitIntake(
       await runPlanBrief(bgOrgId, bgInquiryId).catch(() => undefined);
     });
   }
-  return { ok: true };
+  // The lead THIS submit WROTE, and only that (cn-v1185, audit A6; skeptic #87, S1). A lead it came
+  // back to was found by a TYPED phone or e-mail, and anyone can type somebody's phone: its id is used
+  // above (the plan brief) and never handed to the browser. The thank-you's "Pick a Time for a Site
+  // Visit" attaches by it.
+  return { ok: true, ...(inquiryId && !cameBack ? { leadId: inquiryId } : {}) };
 }

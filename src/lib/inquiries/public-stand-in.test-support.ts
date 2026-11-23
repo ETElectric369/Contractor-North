@@ -2,9 +2,11 @@
  * A STAND-IN SERVICE CLIENT FOR THE PUBLIC DOORS' TESTS (cn-v1180). The public doors run on the
  * service client, which has no RLS, so the only thing keeping one company's rows from another's is
  * the filters the code writes by hand. A stand-in that ignored them would pass a door that names no
- * company; this one HONOURS eq / neq / in / gte / order / limit on reads, updates and the read-back
- * of an insert, and returns only the columns a select lists (a column the read forgot is absent, as
- * PostgREST would leave it). Every read and write is logged with its filters.
+ * company; this one HONOURS eq / neq / is / in / gt / gte / lt / lte / order / limit on reads, updates,
+ * deletes and the read-back of an insert, and returns only the columns a select lists (a column the
+ * read forgot is absent, as PostgREST would leave it). Every read and write is logged with its filters.
+ * `opts.fail` makes a chosen call answer with an error (and write nothing), for the failure paths.
+ * Not honoured, and so never to be leaned on: `or` (no door that uses this stand-in calls it).
  *
  * Not a test file itself (no `.test.` before the extension the runner looks for): the tests beside
  * create-triaged-inquiry, public-schedule and the /inquire action import it.
@@ -28,9 +30,14 @@ function selected(cols: string): string[] {
   return out.map((c) => c.replace(/\(.*$/s, "").replace(/!.*$/, "").trim());
 }
 
-export type Logged = { table: string; op: "select" | "insert" | "update"; filters: string[]; patch?: Row; rows?: Row[] };
+type Op = "select" | "insert" | "update" | "delete";
+export type Logged = { table: string; op: Op; filters: string[]; patch?: Row; rows?: Row[] };
 
-export function standIn(tables: Record<string, Row[]>, rpcs: Record<string, (args: Row) => { data?: unknown; error?: unknown }> = {}) {
+export function standIn(
+  tables: Record<string, Row[]>,
+  rpcs: Record<string, (args: Row) => { data?: unknown; error?: unknown }> = {},
+  opts: { fail?: (table: string, op: Op, filters: string[]) => boolean } = {},
+) {
   const log: Logged[] = [];
   let seq = 0;
   const from = (table: string) => {
@@ -39,17 +46,27 @@ export function standIn(tables: Record<string, Row[]>, rpcs: Record<string, (arg
     const orders: [string, boolean][] = [];
     let cols: string | null = null;
     let lim = Infinity;
-    let op: "select" | "insert" | "update" = "select";
+    let op: Op = "select";
     let patch: Row | null = null;
     let inserted: Row[] = [];
     const project = (r: Row) => (cols && cols !== "*" ? Object.fromEntries(selected(cols).filter((n) => n in r).map((n) => [n, r[n]])) : { ...r });
     const run = (): { data: Row[] | null; error: unknown } => {
       const t = (tables[table] ??= []);
+      if (opts.fail?.(table, op, filters)) {
+        log.push({ table, op, filters });
+        return { data: null, error: { message: `stand-in: ${op} on ${table} failed` } };
+      }
       if (op === "insert") {
+        t.push(...inserted);
         log.push({ table, op, filters, rows: inserted });
         return { data: cols ? inserted.map(project) : null, error: null };
       }
       let rows = t.filter((r) => preds.every((p) => p(r)));
+      if (op === "delete") {
+        tables[table] = t.filter((r) => !rows.includes(r));
+        log.push({ table, op, filters, rows });
+        return { data: cols ? rows.map(project) : null, error: null };
+      }
       if (op === "update") {
         for (const r of rows) Object.assign(r, patch);
         log.push({ table, op, filters, patch: patch ?? {}, rows });
@@ -70,7 +87,10 @@ export function standIn(tables: Record<string, Row[]>, rpcs: Record<string, (arg
         op = "insert";
         const now = new Date().toISOString();
         inserted = (Array.isArray(v) ? v : [v]).map((r) => ({ id: `${table}-new-${++seq}`, created_at: now, updated_at: now, ...r }));
-        (tables[table] ??= []).push(...inserted);
+        return q;
+      },
+      delete() {
+        op = "delete";
         return q;
       },
       update(p: Row) {
@@ -93,9 +113,29 @@ export function standIn(tables: Record<string, Row[]>, rpcs: Record<string, (arg
         preds.push((r) => vs.includes(r[c]));
         return q;
       },
+      is(c: string, v: null) {
+        filters.push(`${c} is ${v}`);
+        preds.push((r) => (v === null ? r[c] == null : r[c] === v));
+        return q;
+      },
       gte(c: string, v: string) {
         filters.push(`${c}>=${v}`);
         preds.push((r) => r[c] != null && String(r[c]) >= v);
+        return q;
+      },
+      gt(c: string, v: string) {
+        filters.push(`${c}>${v}`);
+        preds.push((r) => r[c] != null && String(r[c]) > v);
+        return q;
+      },
+      lt(c: string, v: string) {
+        filters.push(`${c}<${v}`);
+        preds.push((r) => r[c] != null && String(r[c]) < v);
+        return q;
+      },
+      lte(c: string, v: string) {
+        filters.push(`${c}<=${v}`);
+        preds.push((r) => r[c] != null && String(r[c]) <= v);
         return q;
       },
       order(c: string, o?: { ascending?: boolean }) {

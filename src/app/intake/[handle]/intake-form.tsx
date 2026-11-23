@@ -14,6 +14,7 @@ import { applicableNeeds } from "@/lib/playbook/resolve";
 import type { PublicNeed } from "@/lib/playbook/public-intake";
 import type { Answers, Need } from "@/lib/playbook/types";
 import { submitIntake } from "./actions";
+import { SiteVisitDoor } from "@/components/site-visit-offer";
 
 /**
  * The customer's side of the playbook — the same `when` engine the inspector runs, so "Do you
@@ -58,7 +59,19 @@ function AddressParts({
   );
 }
 
-export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: PublicNeed[]; orgName: string }) {
+export function IntakeForm({
+  handle,
+  needs,
+  orgName,
+  offersTimes = false,
+}: {
+  handle: string;
+  needs: PublicNeed[];
+  orgName: string;
+  /** The company offers open inspection times (cn-v1185, offersOpenTimes on the page). False draws
+   *  this form exactly as before: no new button. */
+  offersTimes?: boolean;
+}) {
   // city/state/zip are filled by the picker AND visible/typable (see AddressParts) — 0177's law
   // forbids the app DERIVING them from a typed blob, not the customer stating them.
   const [contact, setContact] = useState({ name: "", phone: "", email: "", address: "", city: "", state: "", zip: "" });
@@ -77,6 +90,8 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
   const [otherOpen, setOtherOpen] = useState<string[]>([]);
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // The lead THIS submit wrote (cn-v1185): the only key the site-visit tap attaches by.
+  const [leadId, setLeadId] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
   const pb = useMemo(() => ({ needs: needs as Need[] }), [needs]);
@@ -156,6 +171,13 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
         <p className="mt-1 text-sm text-emerald-700">
           {orgName} has your request and will get back to you soon.
         </p>
+        {offersTimes && leadId && (
+          <SiteVisitDoor
+            handle={handle}
+            leadId={leadId}
+            contact={{ name: contact.name, phone: contact.phone, email: contact.email, address: effSite.address || contact.address }}
+          />
+        )}
       </div>
     );
 
@@ -190,6 +212,7 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
             return setErr("That didn't send — check your connection and tap Send again. Nothing you typed is lost.");
           }
           if (!r.ok) return setErr(r.error);
+          setLeadId(r.leadId ?? null);
           setDone(true);
         });
       }}

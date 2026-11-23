@@ -1191,6 +1191,32 @@ const SWITCH_BOARD_KEYS = ["features", "trade", "timeclock_job_codes"];
 // not carry it past that door.
 const PROTECTED_SETTINGS_KEYS = ["custom_domain", "public_handle", "lead_inbound_secret", "office_sees_owner_money", "estimating_mode", ...SWITCH_BOARD_KEYS];
 
+// INSPECTION DAYS (cn-v1185): what the browser sends is never trusted. The card's Save posts
+// { offer, days, start, end, per_day }; anything else under that key is refused in words (never
+// healed into a different answer than the person saw), and what is stored is only those five keys,
+// the days in week order. An `end` not after `start` is allowed: the card says nothing is offered.
+const INSPECTION_WEEK = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const INSPECTION_HM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const INSPECTION_DAYS_UNREADABLE = "Inspection Days didn't save: the days or times weren't readable. Reload the page and set them again.";
+function checkInspectionDays(raw: unknown): { value: Record<string, unknown> } | { error: string } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { error: INSPECTION_DAYS_UNREADABLE };
+  const r = raw as Record<string, unknown>;
+  const keys = Object.keys(r).sort().join(",");
+  if (keys !== "days,end,offer,per_day,start") return { error: INSPECTION_DAYS_UNREADABLE };
+  if (typeof r.offer !== "boolean") return { error: INSPECTION_DAYS_UNREADABLE };
+  if (!Array.isArray(r.days) || r.days.length > 7 || r.days.some((d) => typeof d !== "string" || !INSPECTION_WEEK.includes(d)))
+    return { error: INSPECTION_DAYS_UNREADABLE };
+  if (new Set(r.days).size !== r.days.length) return { error: INSPECTION_DAYS_UNREADABLE };
+  if (typeof r.start !== "string" || !INSPECTION_HM.test(r.start)) return { error: INSPECTION_DAYS_UNREADABLE };
+  if (typeof r.end !== "string" || !INSPECTION_HM.test(r.end)) return { error: INSPECTION_DAYS_UNREADABLE };
+  if (typeof r.per_day !== "number" || !Number.isInteger(r.per_day) || r.per_day < 1 || r.per_day > 8)
+    return { error: INSPECTION_DAYS_UNREADABLE };
+  const days = r.days as string[];
+  return {
+    value: { offer: r.offer, days: INSPECTION_WEEK.filter((d) => days.includes(d)), start: r.start, end: r.end, per_day: r.per_day },
+  };
+}
+
 /** Merge a partial settings patch into organizations.settings (JSONB). STAFF get full access
  *  (protected keys stripped — they have dedicated guarded setters). An external site collaborator
  *  is routed through the update_site_content RPC, which merges ONLY the whitelisted marketing keys
@@ -1202,6 +1228,12 @@ export async function updateOrgSettings(
 ): Promise<Result> {
   if (patch && SWITCH_BOARD_KEYS.some((k) => k in patch))
     return { ok: false, error: "Only the owner turns features on or off, on the Features page in Settings." };
+  let inspectionDays: Record<string, unknown> | null = null;
+  if (patch && "inspection_days" in patch) {
+    const checked = checkInspectionDays(patch.inspection_days);
+    if ("error" in checked) return { ok: false, error: checked.error };
+    inspectionDays = checked.value;
+  }
   const ctx = await resolveSiteContext(orgId);
   if ("error" in ctx) return { ok: false, error: ctx.error };
 
@@ -1221,6 +1253,7 @@ export async function updateOrgSettings(
   // response body. normalizeDocStyle protects rendering; storing only the known keys (the tagline
   // among them) protects the wire.
   if ("doc_style" in safe) safe.doc_style = normalizeDocStyle(safe.doc_style);
+  if (inspectionDays) safe.inspection_days = inspectionDays;
 
   const { data: org } = await ctx.supabase
     .from("organizations")

@@ -42,6 +42,9 @@ import { isPlatformAdmin } from "@/lib/platform-admin";
 import { DocumentSettings } from "./document-settings";
 import { NumberingSettings } from "./numbering-settings";
 import { SchedulingSettings } from "./scheduling-settings";
+import { InspectionDaysSettings } from "./inspection-days-settings";
+import { readOpenTimesPreview } from "./open-times-preview";
+import { INSPECTION_SLOT_MIN } from "@/lib/schedule/open-times";
 import { FeaturesPanel } from "./features-panel";
 import { FeatureOffLine } from "@/components/feature-off-line";
 import { featureOn, type FeatureKey } from "@/lib/features";
@@ -238,6 +241,11 @@ export default async function SettingsPage({
   // CREW & PAYROLL IS QUIET until somebody besides the owner is on the team (rule j): the pay
   // period means nothing to a company of one, even with the switch on.
   const payrollDoors = on("crew_payroll") && members.some((m) => m.role !== "owner" && m.active !== false);
+
+  // WHAT A WEBSITE VISITOR WOULD BE OFFERED RIGHT NOW (cn-v1185, the Inspection Days card): read only
+  // while the saved offer is on, with this staff member's own client and own company, by the same
+  // reader the public door uses. A failed read is "couldn't read the calendar", never "nothing open".
+  const openTimesPreview = isStaff ? await readOpenTimesPreview(supabase, profile?.org_id, settings) : null;
 
   // Site articles (the SEO content layer) — RLS scopes to the org; staff-only tab below.
   const { data: sitePosts } = isStaff
@@ -785,6 +793,14 @@ export default async function SettingsPage({
                   textReady={texting.ready}
                   isOwner={profile?.role === "owner"}
                   payroll={payrollDoors}
+                />
+              </Section>
+              <Section title="Inspection Days">
+                <InspectionDaysSettings
+                  saved={settings.inspection_days}
+                  leadsOn={on("leads")}
+                  slotMin={INSPECTION_SLOT_MIN}
+                  preview={openTimesPreview}
                 />
               </Section>
               {/* Job Codes off: the codes and templates wait here unchanged; the box above (the

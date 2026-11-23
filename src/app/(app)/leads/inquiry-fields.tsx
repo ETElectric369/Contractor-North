@@ -63,7 +63,9 @@ export function leadSourceOptions(
  * THE ONE LEAD FORM (cn-v1170). Erik, 2026-11-19: "Name / Business / Address / phone / email / Scope /
  * Notes", "what they need + kind of work = SCOPE", "Remove how long (will be determined in Inspector)",
  * and "under Name lets have "Business" as text that can be clicked to open the field to enter a
- * business name to save space". Then Lead Source, the company's own list (Settings).
+ * business name to save space"; three days later (cn-v1185) "make Business a full window instead of
+ * clickable to see", so Business is a plain box under Name. Then Lead Source, the company's own list
+ * (Settings).
  *
  *   The person (Name through Email) is the one person block (components/person-fields, cn-v1171),
  *   which the customer form draws too. Residential or commercial is worked out from Business on the

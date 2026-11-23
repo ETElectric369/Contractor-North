@@ -6,8 +6,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 /**
  * THE ONE LEAD FORM (cn-v1170). Erik, 2026-11-19: "Name / Business / Address / phone / email / Scope /
- * Notes", "what they need + kind of work = SCOPE", "Remove how long", Business as a text link under
- * Name, and a Lead Source list the company keeps. Drawn the way the modal draws it (react-dom/server),
+ * Notes", "what they need + kind of work = SCOPE", "Remove how long", Business as a plain box under
+ * Name (a text link until cn-v1185: "make Business a full window instead of clickable to see"), and a
+ * Lead Source list the company keeps. Drawn the way the modal draws it (react-dom/server),
  * in both languages, with the server actions stubbed.
  */
 vi.mock("next/navigation", () => ({
@@ -56,16 +57,17 @@ const lead = (over: Partial<Inquiry> = {}): Inquiry =>
   }) as Inquiry;
 
 describe("the field order", () => {
-  it("Name, Address, Phone, Email, Scope, Notes, Lead Source: Business and the town closed behind links", () => {
+  it("Name, Business, Address, Phone, Email, Scope, Notes, Lead Source: Business is a box, the town closed behind its link", () => {
     const html = draw(blank());
-    expect(labels(html)).toEqual(["Name", "Address", "Phone", "Email", "Scope", "Notes", "Lead Source"]);
-    // The Business link sits under Name, before Address; the town's link under Address, before Phone.
+    // BUSINESS IS A BOX, ALWAYS (cn-v1185): under Name, before Address, with nothing to tap first.
+    expect(labels(html)).toEqual(["Name", "Business", "Address", "Phone", "Email", "Scope", "Notes", "Lead Source"]);
+    expect(html).toContain('id="company_name"');
+    expect(html).not.toContain(">Business</button>");
+    // The town's link sits under Address, before Phone.
     const at = (s: string) => html.indexOf(s);
-    expect(at(">Business</button>")).toBeGreaterThan(at(">Name<"));
-    expect(at(">Business</button>")).toBeLessThan(at(">Address<"));
     expect(at(">City, State, ZIP</button>")).toBeGreaterThan(at(">Address<"));
     expect(at(">City, State, ZIP</button>")).toBeLessThan(at(">Phone<"));
-    expect(html).toMatch(/class="[^"]*min-h-11[^"]*"[^>]*>Business<\/button>/);
+    expect(html).toMatch(/class="[^"]*min-h-11[^"]*"[^>]*>City, State, ZIP<\/button>/);
   });
 
   it("no Kind of Work, no How Long, no More Options", () => {
@@ -90,9 +92,11 @@ describe("the field order", () => {
   });
 });
 
-describe("the Business link", () => {
-  it("closed by default; open with the box when the lead has a business", () => {
-    expect(draw(blank())).not.toContain('id="company_name"');
+describe("the Business box", () => {
+  it("drawn with nothing in it, and with the lead's business when it has one; never a link to tap", () => {
+    const empty = draw(blank());
+    expect(empty).toMatch(/id="company_name"[^>]*value=""|value=""[^>]*id="company_name"/);
+    expect(empty).not.toContain(">Business</button>");
     const html = draw({ ...blank(), company_name: "Northline Supply" });
     expect(html).not.toContain(">Business</button>");
     expect(labels(html)).toEqual(["Name", "Business", "Address", "Phone", "Email", "Scope", "Notes", "Lead Source"]);
@@ -116,7 +120,7 @@ describe("the City / State / ZIP link", () => {
     const v = inquiryFormValue(lead({ address: null }));
     expect(townBoxesFilled(v)).toBe(true);
     const html = draw(v);
-    expect(labels(html)).toEqual(["Name", "Address", "City", "State", "Zip", "Phone", "Email", "Scope", "Notes", "Lead Source"]);
+    expect(labels(html)).toEqual(["Name", "Business", "Address", "City", "State", "Zip", "Phone", "Email", "Scope", "Notes", "Lead Source"]);
     expect(html).not.toContain(">City, State, ZIP</button>");
   });
 });
@@ -169,8 +173,8 @@ describe("the Lead Source select", () => {
 describe("in Spanish", () => {
   it("the same order, the links in Spanish", () => {
     const html = drawEs(blank());
-    expect(labels(html)).toEqual(["Nombre", "Dirección", "Teléfono", "Correo", "Alcance", "Notas", "Origen del Prospecto"]);
-    expect(html).toContain(">Empresa</button>");
+    expect(labels(html)).toEqual(["Nombre", "Empresa", "Dirección", "Teléfono", "Correo", "Alcance", "Notas", "Origen del Prospecto"]);
+    expect(html).not.toContain(">Empresa</button>");
     expect(html).toContain(">Ciudad, Estado, Código Postal</button>");
     expect(drawEs(inquiryFormValue(lead({ source: "deck_configurator" })))).toContain(">Desde Tu Sitio Web<");
   });

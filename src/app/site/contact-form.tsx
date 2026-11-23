@@ -3,10 +3,23 @@
 import { useState } from "react";
 import { CheckCircle2, Loader2, ArrowRight } from "lucide-react";
 import { submitSiteContact } from "./actions";
+import { SiteVisitDoor } from "@/components/site-visit-offer";
 
 /** On-page "request an estimate / get in touch" form for the org marketing site — keeps the
  *  visitor on the branded page instead of bouncing to a separate inquiry page. */
-export function ContactForm({ orgId, brand, heading }: { orgId: string; brand: string; heading: string }) {
+export function ContactForm({
+  orgId,
+  brand,
+  heading,
+  offersTimes = false,
+}: {
+  orgId: string;
+  brand: string;
+  heading: string;
+  /** The company offers open inspection times (cn-v1185, offersOpenTimes on the server page). False
+   *  draws this form exactly as before: no new button. */
+  offersTimes?: boolean;
+}) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -15,6 +28,8 @@ export function ContactForm({ orgId, brand, heading }: { orgId: string; brand: s
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The lead THIS submit wrote (cn-v1185): the only key the site-visit tap attaches by.
+  const [leadId, setLeadId] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -25,6 +40,7 @@ export function ContactForm({ orgId, brand, heading }: { orgId: string; brand: s
     try {
       const res = await submitSiteContact(orgId, { name, phone, email, message, hp });
       if (!res.ok) { setError(res.error ?? "Something went wrong."); return; }
+      setLeadId(res.leadId ?? null);
       setDone(true);
     } catch {
       setError("Something went wrong — please call us instead.");
@@ -42,6 +58,9 @@ export function ContactForm({ orgId, brand, heading }: { orgId: string; brand: s
         <CheckCircle2 className="mx-auto h-12 w-12" style={{ color: brand }} />
         <h3 className="mt-3 text-xl font-bold text-slate-900">Thanks — we&apos;ve got it</h3>
         <p className="mt-1 text-slate-600">We&apos;ll reach out shortly.</p>
+        {offersTimes && leadId && (
+          <SiteVisitDoor orgId={orgId} leadId={leadId} contact={{ name, phone, email }} brand={brand} />
+        )}
       </div>
     );
   }

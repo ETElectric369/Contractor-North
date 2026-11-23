@@ -59,10 +59,12 @@ const larkspur = {
 } as unknown as Customer;
 
 describe("the one person block, drawn by both forms", () => {
-  it("New Customer: the lead form's order, then Notes, Type, Status; Business and the town behind their links", () => {
+  it("New Customer: the lead form's order, then Notes, Type, Status; Business a box, the town behind its link", () => {
     const html = en(createElement(NewCustomerButton));
-    expect(labels(html)).toEqual(["Name", "Address", "Phone", "Email", "Notes", "Type", "Status"]);
-    expect(html).toContain(">Business</button>");
+    expect(labels(html)).toEqual(["Name", "Business", "Address", "Phone", "Email", "Notes", "Type", "Status"]);
+    // BUSINESS IS A BOX, ALWAYS (cn-v1185): no word to tap first, in any form that draws a person.
+    expect(html).toContain('id="company_name"');
+    expect(html).not.toContain(">Business</button>");
     expect(html).toContain(">City, State, ZIP</button>");
     for (const n of ["company_name", "city", "state", "zip"]) expect(html).toContain(`type="hidden" name="${n}"`);
     for (const n of ["name", "address", "phone", "email", "notes", "type", "status"]) expect(html).toMatch(new RegExp(`name="${n}"`));
@@ -75,7 +77,7 @@ describe("the one person block, drawn by both forms", () => {
 
   it("the lead form draws the same block (same order, same links), then its own Scope, Notes, Lead Source", () => {
     const html = en(createElement(InquiryFields, { value: inquiryFormValue(), onChange: () => {}, sources: [] }));
-    expect(labels(html)).toEqual(["Name", "Address", "Phone", "Email", "Scope", "Notes", "Lead Source"]);
+    expect(labels(html)).toEqual(["Name", "Business", "Address", "Phone", "Email", "Scope", "Notes", "Lead Source"]);
     for (const f of ["src/app/(app)/leads/inquiry-fields.tsx", "src/components/customer-fields.tsx"]) expect(src(f)).toContain("<PersonFields ");
     expect(src("src/app/(app)/leads/inquiry-fields.tsx")).not.toContain("AddressAutocomplete");
     for (const f of ["src/app/(app)/crm/new-customer-button.tsx", "src/app/(app)/crm/[id]/edit-customer-button.tsx"]) {
@@ -107,10 +109,10 @@ describe("the one person block, drawn by both forms", () => {
 
   it("in Spanish: the block's words, the status Prospecto", () => {
     const html = es(createElement(EditCustomerButton, { customer: { ...larkspur, company_name: null } as Customer }));
-    expect(labels(html)).toEqual(["Nombre", "Dirección", "Ciudad", "Estado (EE. UU.)", "Código postal", "Teléfono", "Correo", "Notas", "Tipo", "Estado"]);
-    expect(html).toContain(">Empresa</button>");
+    expect(labels(html)).toEqual(["Nombre", "Empresa", "Dirección", "Ciudad", "Estado (EE. UU.)", "Código postal", "Teléfono", "Correo", "Notas", "Tipo", "Estado"]);
+    expect(html).not.toContain(">Empresa</button>");
     expect(html).toMatch(/<option value="lead" selected="">Prospecto<\/option>/);
-    expect(labels(es(createElement(NewCustomerButton)))).toEqual(["Nombre", "Dirección", "Teléfono", "Correo", "Notas", "Tipo", "Estado"]);
+    expect(labels(es(createElement(NewCustomerButton)))).toEqual(["Nombre", "Empresa", "Dirección", "Teléfono", "Correo", "Notas", "Tipo", "Estado"]);
   });
 
   it("personValue: a stored street with its town reads as picked", () => {

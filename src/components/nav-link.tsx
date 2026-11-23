@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { navUrl, MAPS_PROVIDER_KEY, type MapsProvider } from "@/lib/maps";
+import { navUrl, mapsProviderHere, MAPS_PROVIDER_KEY, type MapsProvider } from "@/lib/maps";
 import { useLang } from "@/components/lang-provider";
 import { translator } from "@/lib/i18n";
 
@@ -13,7 +13,8 @@ import { translator } from "@/lib/i18n";
  * choice is made it's a plain link that opens directly. All directions links go
  * through here. The ask's words follow the signed-in person's language (useLang +
  * the shell catalog, lib/words/shell sh_openIn / sh_btn_googleMaps / sh_btn_appleMaps —
- * the visit-page-in-Spanish wave, cn-v1144); the two apps keep their names.
+ * the visit-page-in-Spanish wave, cn-v1144); the two apps keep their names. A device with no Apple
+ * Maps (Android) is never asked: its links open Google Maps (lib/maps mapsProviderHere, cn-v1185).
  */
 export function NavLink({
   address,
@@ -29,11 +30,13 @@ export function NavLink({
   const ref = useRef<HTMLSpanElement>(null);
   const t = translator(useLang());
 
+  // An Android phone never asks and never opens Apple Maps, whatever it stored (lib/maps, cn-v1185).
   useEffect(() => {
+    let stored: string | null = null;
     try {
-      const p = localStorage.getItem(MAPS_PROVIDER_KEY);
-      if (p === "google" || p === "apple") setProvider(p);
+      stored = localStorage.getItem(MAPS_PROVIDER_KEY);
     } catch {}
+    setProvider(mapsProviderHere(stored, navigator.userAgent));
   }, []);
 
   useEffect(() => {

@@ -58,18 +58,22 @@ export function townBoxesFilled(v: PersonValue): boolean {
 /**
  * ONE PERSON BLOCK, EVERY FORM THAT TYPES A PERSON IN (cn-v1171). Erik, 2026-11-19: "the lead manual
  * entry form might be one of a few, can we check on the one thing many doors for that one". This is the
- * lead form's block as he drew it the release before, lifted whole: Name; under it the word "Business"
- * that opens the box ("under Name lets have "Business" as text that can be clicked to open the field");
- * Address with City / State / ZIP behind the same kind of link; Phone; Email. The lead form and the
- * customer form (New Customer, Edit Customer) both draw it, so the person is typed one way everywhere.
+ * lead form's block as he drew it the release before, lifted whole: Name; Business; Address with
+ * City / State / ZIP behind a link; Phone; Email. The lead form and the customer form (New Customer,
+ * Edit Customer) both draw it, so the person is typed one way everywhere.
  *
- *   Business and the town open themselves when they hold something; both always post as hidden
- *   inputs, open or not. Address is the street-only picker: the town a pick resolves shows on one grey
+ *   BUSINESS IS A BOX, ALWAYS (cn-v1185). It was the word "Business" under Name that opened the box
+ *   when tapped (his own ask, cn-v1170); two days of use later, Erik: "in the new lead box make
+ *   Business a full window instead of clickable to see", and a second company the same day: "Business
+ *   button not necessary". So the box is simply there, under Name, in every form that draws a person.
+ *
+ *   The town opens itself when it holds something; Business and the town always post as hidden
+ *   inputs. Address is the street-only picker: the town a pick resolves shows on one grey
  *   line under it and posts hidden; typing over a street picked in this sitting clears its town (a
  *   town left from another street is the false value 0177 forbids), while a stored town stays.
  *
  * State lives in the parent; phone + address are uncontrolled inside their components, so the parent
- * remounts this block (key) to show a restore or a filled-in card, which also re-decides the two links.
+ * remounts this block (key) to show a restore or a filled-in card, which also re-decides the town's link.
  * It draws its rows with no wrapper, so they sit in the parent's own spacing.
  */
 export function PersonFields({
@@ -90,7 +94,6 @@ export function PersonFields({
   seededTownIsSuggestion?: boolean;
 }) {
   const t = translator(useLang());
-  const [businessOpen, setBusinessOpen] = useState(() => !!value.company_name.trim());
   const [townOpen, setTownOpen] = useState(() => townBoxesFilled(value));
   // The street a suggestion resolved IN THIS SITTING, or null. Only that pick's town is cleared when
   // the street is typed over (cn-v1171, skeptic #74): a STORED street reads as picked for the grey
@@ -106,18 +109,11 @@ export function PersonFields({
             what is enough (a name alone is no longer required). */}
         <Label htmlFor="name">{t("ld_name")}</Label>
         <Input id="name" name="name" autoComplete="name" value={value.name} onChange={(e) => onChange({ name: e.target.value })} placeholder={namePlaceholder ?? t("ld_namePlaceholder")} />
-        {!businessOpen && (
-          <button type="button" onClick={() => setBusinessOpen(true)} className={linkClass}>
-            {t("ld_btn_business")}
-          </button>
-        )}
       </div>
-      {businessOpen && (
-        <div>
-          <Label htmlFor="company_name">{t("ld_business")}</Label>
-          <Input autoComplete="organization" id="company_name" value={value.company_name} onChange={(e) => onChange({ company_name: e.target.value })} />
-        </div>
-      )}
+      <div>
+        <Label htmlFor="company_name">{t("ld_business")}</Label>
+        <Input autoComplete="organization" id="company_name" value={value.company_name} onChange={(e) => onChange({ company_name: e.target.value })} />
+      </div>
       <input type="hidden" name="company_name" value={value.company_name} />
       <div>
         <Label htmlFor="address">{t("ld_address")}</Label>

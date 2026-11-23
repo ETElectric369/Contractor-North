@@ -30,7 +30,7 @@ const OWN_LINE: Record<string, number> = {
   "src/app/api/pick/confirmed/route.ts": 1, // a customer picked a time: its own line
   "src/app/q/[token]/actions.ts": 1, // an estimate accepted from the public page: its own line
   "src/lib/inquiries/create-triaged-inquiry.ts": 1, // a new request: its own line
-  "src/lib/actions/public-schedule.ts": 1, // a booking from the public schedule: its own line
+  "src/lib/actions/public-schedule.ts": 2, // a request for times, and a time a website visitor picked (cn-v1185): each its own line
 };
 
 /** The sites that were bare pushes and now go through notifyPeople (the line, then the push). */

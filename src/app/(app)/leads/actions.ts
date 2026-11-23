@@ -32,6 +32,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { INTAKE_BUCKET, intakePaths, isOwnIntakePath } from "@/lib/playbook/uploads";
 import { hasCaptureData } from "@/lib/inspections";
 import { briefNote, carriedNote, carryForInquiry } from "@/lib/inquiries/carry-intake-answers";
+import { leadInspectionRow } from "@/lib/inquiries/lead-visit-row";
 import { runPlanBrief } from "@/lib/plan-brief-run";
 import { rateLimited } from "@/lib/rate-limit";
 import { callerLang } from "@/lib/lang-of";
@@ -754,26 +755,18 @@ export async function convertInquiry(
     if (!startsAtIso) return { ok: false, error: await wordsOf(ctx.supabase, ctx.userId).say("ld_srv_pickValidDay") };
     const carry = await carryForInquiry(supabase, inq);
 
-    const { data: booked, error: aErr } = await supabase.from("appointments").insert({
-      // ALWAYS AN INSPECTION (cn-v1170), through the helpers a lead with no kind always took; no
-      // length and no end from the lead ("Remove how long (will be determined in Inspector)"), so
-      // the calendar draws its default block.
-      type: LEAD_VISIT_TYPE,
-      title: bookingTitle(LEAD_VISIT_KIND, String(inq.name ?? "")),
-      starts_at: startsAtIso,
-      location: inq.address,
-      notes:
-        [inq.message ?? inq.notes ?? null, carriedNote(carry.carried), briefNote(carry.briefCarried)]
-          .filter(Boolean)
-          .join("\n\n") || null,
-      // The customer's own answers, on the inspection, so the inspector CONFIRMS rather than
-      // re-asks — which is what the Tahoe Deck starter has claimed since it was written.
-      inspection_template_id: carry.inspectionTemplateId,
-      inspection_answers: carry.inspectionAnswers,
-      customer_id: opts.customerId || inq.customer_id || null,
-      inquiry_id: id, // provenance: the calendar entry knows its lead
-      created_by: ctx.userId,
-    }).select("id").single();
+    // ALWAYS AN INSPECTION (cn-v1170), no length and no end from the lead ("Remove how long (will be
+    // determined in Inspector)"). ONE ROW SHAPE (cn-v1185): the website visitor's own pick
+    // (publicPickInspectionTime) writes this same row, so the shape lives in lib/inquiries/lead-visit-row.
+    const { data: booked, error: aErr } = await supabase.from("appointments").insert(
+      leadInspectionRow({
+        lead: { ...inq, id },
+        carry,
+        startsAtIso,
+        customerId: opts.customerId || inq.customer_id || null,
+        createdBy: ctx.userId,
+      }),
+    ).select("id").single();
     if (aErr) return { ok: false, error: aErr.message };
     /* BOOK IT CLOSES THE LINK IT REPLACES (cn-v1180, C7). A lead sent times whose first went by with no
        pick is back on the list, and Book It (or the rail's batch, which books through here) made a

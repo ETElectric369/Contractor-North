@@ -18,6 +18,7 @@ import { SpecialtyShowcase } from "./specialty-showcase";
 import { ContactForm } from "./contact-form";
 import { AskNort } from "./ask-nort";
 import { featureOn } from "@/lib/features";
+import { offersOpenTimes } from "@/lib/schedule/open-times";
 
 /**
  * The org marketing homepage — one template, 100% data-driven from the org record + settings.
@@ -326,6 +327,9 @@ export async function OrgSite({ org, articlesHref, pageLinks = [], appHost = fal
   // so those pages are reachable from the content they extend, not just the nav.
   const portfolioPageHref = pageLinks.find((p) => pageSlugFromHref(p.href) === "portfolio")?.href ?? null;
   const contactPageHref = pageLinks.find((p) => pageSlugFromHref(p.href) === "contact")?.href ?? null;
+  // The company offers open inspection times (cn-v1185): the contact form's thank-you then shows
+  // ONE "Pick a Time for a Site Visit" button. False leaves the form exactly as it was.
+  const offersTimes = offersOpenTimes(s);
 
   // schema.org LocalBusiness markup — how Google connects this site to the real-world business.
   // The linchpin is `sameAs`/`hasMap` pointing at the org's Google Business Profile: it tells
@@ -503,7 +507,7 @@ export async function OrgSite({ org, articlesHref, pageLinks = [], appHost = fal
           <PortfolioBand portfolio={portfolio} brand={brand} orgName={org.name} moreHref={portfolioPageHref} />
           <ReviewsBand reviews={reviews} brand={brand} gbpUrl={reviewUrl} appHostExt={appHost} />
           <EstimateBand hasConfigurator={hasConfigurator} hasIntake={hasIntake} estimateHref={estimateHref} ctaLabel={ctaLabel} brand={brand} />
-          <ContactBand orgId={org.id} brand={brand} hasEstimateDoor={hasEstimateDoor} pageHref={contactPageHref} />
+          <ContactBand orgId={org.id} brand={brand} hasEstimateDoor={hasEstimateDoor} pageHref={contactPageHref} offersTimes={offersTimes} />
         </>
       )}
 
@@ -588,12 +592,12 @@ function EstimateBand({ hasConfigurator, hasIntake, estimateHref, ctaLabel, bran
   );
 }
 
-function ContactBand({ orgId, brand, hasEstimateDoor, pageHref }: { orgId: string; brand: string; hasEstimateDoor: boolean; pageHref?: string | null }) {
+function ContactBand({ orgId, brand, hasEstimateDoor, pageHref, offersTimes }: { orgId: string; brand: string; hasEstimateDoor: boolean; pageHref?: string | null; offersTimes: boolean }) {
   return (
     <section id="contact-form" className="border-t border-slate-100 bg-slate-50 px-4 py-16">
       {/* When a real estimate door exists (configurator OR intake), this band steps back into the
           "quick message" role so the page doesn't claim two estimate paths. */}
-      <ContactForm orgId={orgId} brand={brand} heading={hasEstimateDoor ? "Prefer to just message us?" : "Request a free estimate"} />
+      <ContactForm orgId={orgId} brand={brand} heading={hasEstimateDoor ? "Prefer to just message us?" : "Request a free estimate"} offersTimes={offersTimes} />
       {/* Teaser to the full builder "contact" page, when the org has published one. */}
       {pageHref && (
         <p className="mt-6 text-center">
@@ -675,7 +679,7 @@ function HomeBlockRenderer({
       const pad = b.style?.pad;
       if (b.props.key === "portfolio") out.push(padWrap(k, pad, <PortfolioBand portfolio={portfolio} brand={brand} orgName={org.name} moreHref={portfolioPageHref} />));
       else if (b.props.key === "reviews") out.push(padWrap(k, pad, <ReviewsBand reviews={reviews} brand={brand} gbpUrl={gbpUrl} />));
-      else if (b.props.key === "contact") out.push(padWrap(k, pad, <ContactBand orgId={org.id} brand={brand} hasEstimateDoor={hasConfigurator || hasIntake} pageHref={contactPageHref} />));
+      else if (b.props.key === "contact") out.push(padWrap(k, pad, <ContactBand orgId={org.id} brand={brand} hasEstimateDoor={hasConfigurator || hasIntake} pageHref={contactPageHref} offersTimes={offersOpenTimes(org.settings)} />));
       else if (b.props.key === "estimate") out.push(padWrap(k, pad, <EstimateBand hasConfigurator={hasConfigurator} hasIntake={hasIntake} estimateHref={estimateHref} ctaLabel={ctaLabel} brand={brand} />));
       else if (b.props.key === "services") out.push(padWrap(k, pad, <ServicesBand services={services} brand={brand} />));
       else if (b.props.key === "specialty")

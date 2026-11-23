@@ -6,6 +6,8 @@ import {
   cardFeeDecision,
   feePctLabel,
   getOrgSettings,
+  healInspectionDays,
+  INSPECTION_DAYS_DEFAULT,
   parseGeoFromMapUrl,
   parsePayMethod,
   payUrl,
@@ -334,6 +336,56 @@ describe("deposit_percent and deposit_cap_amount", () => {
   it("what is not a number reads as the default, the way a missing key does", () => {
     for (const odd of ["ten", true, null, {}, Number.NaN]) {
       expect(getOrgSettings({ deposit_percent: odd as never, deposit_cap_amount: odd as never })).toMatchObject({ deposit_percent: 10, deposit_cap_amount: 1000 });
+    }
+  });
+});
+
+describe("inspection_days (cn-v1185): healed on read, total and idempotent", () => {
+  it("a company that never set them reads the default, off", () => {
+    expect(INSPECTION_DAYS_DEFAULT).toEqual({ offer: false, days: [], start: "09:00", end: "15:00", per_day: 3 });
+    expect(getOrgSettings({}).inspection_days).toEqual(INSPECTION_DAYS_DEFAULT);
+    expect(getOrgSettings(null).inspection_days).toEqual(INSPECTION_DAYS_DEFAULT);
+  });
+
+  it("getOrgSettings heals a drifted stored value for every reader", () => {
+    expect(getOrgSettings({ inspection_days: { offer: "true", days: ["mon", "mon"], start: "9", per_day: 20 } }).inspection_days).toEqual({
+      offer: false, days: ["mon"], start: "09:00", end: "15:00", per_day: 8,
+    });
+    expect(getOrgSettings({ inspection_days: "on" }).inspection_days).toEqual(INSPECTION_DAYS_DEFAULT);
+  });
+
+  it("a stored value is read back in the same shape", () => {
+    const v = { offer: true, days: ["tue", "thu"], start: "08:30", end: "14:00", per_day: 2 };
+    expect(getOrgSettings({ inspection_days: v }).inspection_days).toEqual(v);
+  });
+
+  it("offer is on only for the boolean true", () => {
+    for (const odd of ["true", 1, "yes", null, {}]) expect(healInspectionDays({ offer: odd }).offer).toBe(false);
+    expect(healInspectionDays({ offer: true }).offer).toBe(true);
+  });
+
+  it("days keep known weekdays, once each, Sunday first", () => {
+    expect(healInspectionDays({ days: ["fri", "mon", "Mon", "funday", 3, "mon", "sun"] }).days).toEqual(["sun", "mon", "fri"]);
+    expect(healInspectionDays({ days: "mon" }).days).toEqual([]);
+  });
+
+  it("times must be HH:MM on a 24-hour clock, else the default; an end before the start is kept as typed", () => {
+    expect(healInspectionDays({ start: "9:00", end: "24:00" })).toMatchObject({ start: "09:00", end: "15:00" });
+    expect(healInspectionDays({ start: "07:60", end: 1500 })).toMatchObject({ start: "09:00", end: "15:00" });
+    expect(healInspectionDays({ start: "14:00", end: "10:00" })).toMatchObject({ start: "14:00", end: "10:00" });
+  });
+
+  it("per_day is an integer clamped 1..8, else 3", () => {
+    expect(healInspectionDays({ per_day: 0 }).per_day).toBe(1);
+    expect(healInspectionDays({ per_day: 12 }).per_day).toBe(8);
+    expect(healInspectionDays({ per_day: 5 }).per_day).toBe(5);
+    for (const odd of [2.5, "4", null, Number.NaN, Infinity]) expect(healInspectionDays({ per_day: odd }).per_day).toBe(3);
+  });
+
+  it("is total and idempotent", () => {
+    for (const raw of [undefined, null, 7, "x", [], { offer: true, days: ["sat", "sat", "wed"], start: "10:00", end: "09:00", per_day: 99 }]) {
+      const once = healInspectionDays(raw);
+      expect(healInspectionDays(once)).toEqual(once);
     }
   });
 });

@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { CalendarClock, CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
-import { publicScheduleInspection } from "@/lib/actions/public-schedule";
+import { publicScheduleInspection, type OfferedTime } from "@/lib/actions/public-schedule";
+import { SiteVisitOffer } from "@/components/site-visit-offer";
 import { submitPublicInquiry } from "./actions";
 import { SITE_VISIT_REQUESTED } from "../site-visit-words";
 
@@ -39,6 +40,8 @@ export function InquiryForm({
   const [scheduling, setScheduling] = useState(false);
   const [schedDone, setSchedDone] = useState<string | null>(null); // confirmation copy once the request lands
   const [schedError, setSchedError] = useState<string | null>(null);
+  // The open times the request answered with (cn-v1185): set only when the company offers times.
+  const [offer, setOffer] = useState<OfferedTime[] | null>(null);
 
   async function scheduleVisit() {
     setSchedError(null);
@@ -49,6 +52,8 @@ export function InquiryForm({
         name, phone, email, address, city, state: stateName, zip, message, hp, leadId,
       });
       if (!res.ok) { setSchedError(res.error ?? "Something went wrong — please call us instead."); return; }
+      // OPEN TIMES (cn-v1185): the company ticked its Inspection Days, so the visitor taps one.
+      if (res.times && res.times.length > 0) { setOffer(res.times); return; }
       // ONE SENTENCE EITHER WAY (cn-v1180, audit A6): the server no longer says whether a booking
       // exists, so the words are true whether it does or not.
       setSchedDone(SITE_VISIT_REQUESTED);
@@ -104,6 +109,8 @@ export function InquiryForm({
           <p className="mt-5 rounded-lg bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
             {schedDone}
           </p>
+        ) : offer ? (
+          <SiteVisitOffer orgId={org} leadId={leadId} contact={{ name, phone, email, address }} times={offer} />
         ) : calendlyUrl ? (
           <a
             href={calendlyUrl}
@@ -127,7 +134,7 @@ export function InquiryForm({
           </button>
         )}
         {schedError && <p className="mt-2 text-sm text-red-600">{schedError}</p>}
-        {!schedDone && !calendlyUrl && (
+        {!schedDone && !offer && !calendlyUrl && (
           <p className="mt-2 text-xs text-slate-400">We&apos;ll text you a few time options to pick from.</p>
         )}
       </div>

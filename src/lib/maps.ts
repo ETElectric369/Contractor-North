@@ -5,6 +5,23 @@
 export type MapsProvider = "apple" | "google";
 export const MAPS_PROVIDER_KEY = "cn_maps_provider";
 
+/**
+ * APPLE MAPS ONLY WHERE IT EXISTS (cn-v1185). A tech's report from an Android phone: "Apple maps does
+ * not work on my phone". It cannot: there an Apple Maps link opens a web page, never navigation. Yet
+ * the first Navigate tap asked "Apple or Google" on every device, and Settings showed Apple Maps as
+ * the chosen app on a phone that had chosen nothing. ONE RULE, read by the link and by the Settings
+ * card: an Android device opens Google Maps, whatever was stored on it.
+ */
+export function appleMapsWorksHere(userAgent: string | null | undefined): boolean {
+  return !/\bAndroid\b/i.test(userAgent ?? "");
+}
+
+/** The maps app a Navigate link opens on this device. null = nothing chosen yet: the link asks once. */
+export function mapsProviderHere(stored: string | null | undefined, userAgent: string | null | undefined): MapsProvider | null {
+  if (!appleMapsWorksHere(userAgent)) return "google";
+  return stored === "google" || stored === "apple" ? stored : null;
+}
+
 export function navUrl(address: string, provider: MapsProvider = "apple"): string {
   const a = encodeURIComponent(address);
   return provider === "google"

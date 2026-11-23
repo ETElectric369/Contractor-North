@@ -119,8 +119,9 @@ export async function submitEstimateLead(handle: string, payload: EstimatePayloa
 
   let triage;
   let leadId: string | undefined;
+  let cameBack = false;
   try {
-    ({ triage, id: leadId } = await createTriagedInquiry(supabase, orgId, {
+    ({ triage, id: leadId, cameBack } = await createTriagedInquiry(supabase, orgId, {
       name,
       email: email || null,
       phone: phone || null,
@@ -155,7 +156,10 @@ export async function submitEstimateLead(handle: string, payload: EstimatePayloa
     // Only itemize when we're actually showing a firm number.
     lines: triage.showInstantPrice ? est.lines : [],
     assumptions: triage.showInstantPrice ? est.assumptions : [],
-    // The id the same browser's site-visit tap attaches by (cn-v1180, audit A6).
-    ...(leadId ? { leadId } : {}),
+    // The id the same browser's site-visit tap attaches by (cn-v1180, audit A6): only a lead THIS
+    // submit wrote (skeptic #87, S1). A lead it came back to was found by a TYPED phone or e-mail, and
+    // anyone can type somebody's phone, so that id never leaves the server; the tap then files its own
+    // request lead and pings the office, as any tap without an id does.
+    ...(leadId && !cameBack ? { leadId } : {}),
   };
 }

@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1185", date: "2026-11-22", line: "Your website can offer open inspection times: set them in Settings › Crew & Time › Inspection Days, and a visitor's tap books one. Business is a box on every form. Android opens Google Maps." },
   { version: "cn-v1184", date: "2026-11-22", line: "A supplier's return slip recorded on a job now has File With Its Bill on its row: what went back comes off the customer's invoice. Tax is never read as crossed out." },
   { version: "cn-v1183", date: "2026-11-22", line: "An invite is one step now: the email's link opens one form (your name and a password) and you're in. No second email to confirm. A new invite replaces the old one." },
   { version: "cn-v1182", date: "2026-11-22", line: "Fixed: a paper with pen marks was filed with no lines; press Read Again on it. Read Again is now a button on each bill row in a job's Costs tab." },

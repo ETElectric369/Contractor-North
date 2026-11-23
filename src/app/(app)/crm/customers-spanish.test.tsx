@@ -101,7 +101,7 @@ describe("New Customer in Spanish", () => {
     expect(words).toContain("Nuevo Cliente");
     expect(html).toContain('data-modal="Nuevo Cliente"');
     expect(html).toContain('data-actions="Crear Cliente"');
-    // cn-v1171: the person is the lead form's own block (Business and the town behind their links).
+    // cn-v1171: the person is the lead form's own block (Business a box since cn-v1185; the town behind its link).
     for (const w of ["Nombre", "Empresa", "Tipo", "Estado", "Correo", "Teléfono", "Dirección", "Ciudad, Estado, Código Postal", "Notas", "Importar un .vcf", "Autorrelleno"]) expect(words).toContain(w);
     for (const o of ["Residencial", "Comercial", "Industrial", "Contratista", "Subcontratista", "Activo", "Inactivo"]) {
       expect(html).toContain(`>${o}</option>`);

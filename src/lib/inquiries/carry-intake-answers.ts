@@ -150,11 +150,14 @@ export function intakeAnswerLines(
  * read into a report the inspector then opened blank.
  *
  * Reads THE org inspection (is_inspection, singular) on the CALLER's client — RLS-scoped
- * callers can only ever find their own org's.
+ * callers can only ever find their own org's. A caller on the SERVICE client (the website visitor's
+ * own pick, cn-v1185) has no RLS, and the same read would find ANY company's inspection form: it
+ * passes `orgId`, and the read names the company by hand. Staff callers pass nothing and read as before.
  */
 export async function carryForInquiry(
   supabase: SupabaseClient,
   inq: { intake?: { intake_answers?: unknown } | null },
+  opts: { orgId?: string | null } = {},
 ): Promise<{
   inspectionTemplateId: string | null;
   inspectionAnswers: Answers;
@@ -167,12 +170,9 @@ export async function carryForInquiry(
   const hasIntake = !!stored && typeof stored === "object";
   const hasBrief = brief?.status === "ready" && !!brief.answers && Object.keys(brief.answers).length > 0;
   if (!hasIntake && !hasBrief) return none;
-  const { data: form } = await supabase
-    .from("forms")
-    .select("id, schema, playbook")
-    .eq("is_inspection", true)
-    .limit(1)
-    .maybeSingle();
+  let formQ = supabase.from("forms").select("id, schema, playbook").eq("is_inspection", true);
+  if (opts.orgId) formQ = formQ.eq("org_id", opts.orgId);
+  const { data: form } = await formQ.limit(1).maybeSingle();
   if (!form) return none;
   const pb = playbookForForm(form as { schema?: unknown; playbook?: unknown });
   const { answers: fromCustomer, carried } = hasIntake

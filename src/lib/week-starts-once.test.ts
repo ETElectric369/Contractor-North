@@ -44,6 +44,10 @@ const THE_ONE_FUNCTION = "src/lib/tz.ts";
  */
 const ALLOWED: { file: string; why: string }[] = [
   {
+    file: "src/lib/schedule/open-times.ts",
+    why: "Asks which WEEKDAY a calendar date is: whether it is one of the company's ticked inspection days, and its name on an open time's label. A weekday NAME, never where a week begins.",
+  },
+  {
     file: "src/app/(app)/appointments/appointment-button.tsx",
     why: "Skips Sat/Sun when offering the customer dates to pick from. A weekend SKIP, not a week start — it never asks where the week begins.",
   },

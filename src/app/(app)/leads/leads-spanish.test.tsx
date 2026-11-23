@@ -142,11 +142,11 @@ describe("the row in Spanish (cn-v1170)", () => {
 });
 
 describe("New Lead's fields in Spanish", () => {
-  it("labels in the one form's order, the two links, and no Kind or How Long (cn-v1170)", () => {
+  it("labels in the one form's order, Business a box, the town's link, and no Kind or How Long (cn-v1170, cn-v1185)", () => {
     const html = es(createElement(InquiryFields, { value: inquiryFormValue(), onChange: () => {} }));
     const labels = [...html.matchAll(/<label[^>]*>([^<]+)<\/label>/g)].map((m) => m[1]);
-    expect(labels).toEqual(["Nombre", "Dirección", "Teléfono", "Correo", "Alcance", "Notas", "Origen del Prospecto"]);
-    expect(html).toContain(">Empresa</button>");
+    expect(labels).toEqual(["Nombre", "Empresa", "Dirección", "Teléfono", "Correo", "Alcance", "Notas", "Origen del Prospecto"]);
+    expect(html).not.toContain(">Empresa</button>");
     expect(html).toContain(">Ciudad, Estado, Código Postal</button>");
     expect(html).not.toContain("Cuánto Tiempo");
     expect(html).not.toContain("Más Opciones");
