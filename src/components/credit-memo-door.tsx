@@ -64,21 +64,21 @@ export function CreditMemoDoorView({
           type="button"
           onClick={onFind}
           disabled={busy}
-          className="h-11 min-w-[44px] rounded-lg bg-slate-900 px-4 text-sm font-medium text-white disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900"
+          className="h-11 min-w-[44px] rounded-lg bg-slate-900 px-4 text-sm font-medium text-white disabled:opacity-60"
         >
           {busy ? findingWords : CREDIT_MEMO_DOOR}
         </button>
       )}
       {state.step === "pick" && (
         <div className="space-y-2">
-          <p className="text-sm text-slate-700 dark:text-slate-300">{state.question ?? WHICH_BILL}</p>
+          <p className="text-sm text-slate-700">{state.question ?? WHICH_BILL}</p>
           {state.candidates.map((c) => (
             <button
               key={c.billId}
               type="button"
               onClick={() => onPick(c.billId)}
               disabled={busy}
-              className="block min-h-[44px] w-full rounded-lg border border-slate-300 px-3 py-2 text-left text-sm text-slate-900 disabled:opacity-60 dark:border-slate-600 dark:text-slate-100"
+              className="block min-h-[44px] w-full rounded-lg border border-slate-300 px-3 py-2 text-left text-sm text-slate-900 disabled:opacity-60"
             >
               {busy && filingWords ? filingWords : c.label}
             </button>
@@ -86,7 +86,7 @@ export function CreditMemoDoorView({
         </div>
       )}
       {state.step === "said" && (
-        <p role="status" className={`text-sm ${state.tone === "refused" ? "text-red-700 dark:text-red-400" : "text-slate-700 dark:text-slate-300"}`}>
+        <p role="status" className={`text-sm ${state.tone === "refused" ? "text-red-700" : "text-slate-700"}`}>
           {state.words}
         </p>
       )}

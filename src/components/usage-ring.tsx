@@ -31,18 +31,18 @@ export type UsageRingProps = {
 
 /** The fill's stroke by state — the app's sea-glass accent (globals.css --glass-tint) while fine. */
 const STROKE: Record<UsageState, string> = {
-  fine: "stroke-[rgb(var(--glass-tint))] dark:stroke-teal-400",
-  watch: "stroke-amber-500 dark:stroke-amber-400",
-  almost: "stroke-orange-500 dark:stroke-orange-400",
-  out: "stroke-red-600 dark:stroke-red-500",
+  fine: "stroke-[rgb(var(--glass-tint))]",
+  watch: "stroke-amber-500",
+  almost: "stroke-orange-500",
+  out: "stroke-red-600",
 };
 
 /** The percent's ink by state, so a glance at the number says the same thing as the ring. */
 const INK: Record<UsageState, string> = {
-  fine: "text-slate-900 dark:text-slate-100",
-  watch: "text-amber-700 dark:text-amber-300",
-  almost: "text-orange-700 dark:text-orange-300",
-  out: "text-red-700 dark:text-red-300",
+  fine: "text-slate-900",
+  watch: "text-amber-700",
+  almost: "text-orange-700",
+  out: "text-red-700",
 };
 
 const RADIUS = 44;
@@ -66,7 +66,7 @@ export function UsageRing({ pct, state, degraded = false, lang = "en", size = 96
       data-state={state}
       className={["shrink-0", className].filter(Boolean).join(" ")}
     >
-      <circle cx="50" cy="50" r={RADIUS} fill="none" strokeWidth="8" className="stroke-slate-200 dark:stroke-slate-700" />
+      <circle cx="50" cy="50" r={RADIUS} fill="none" strokeWidth="8" className="stroke-slate-200" />
       <circle
         cx="50"
         cy="50"

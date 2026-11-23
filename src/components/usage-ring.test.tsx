@@ -23,8 +23,8 @@ describe("UsageRing", () => {
     expect(html).toContain('width="96"');
     expect(html).toContain('height="96"');
     expect(html).toContain('data-state="fine"');
-    expect(html).toContain("stroke-[rgb(var(--glass-tint))] dark:stroke-teal-400");
-    expect(html).toContain("stroke-slate-200 dark:stroke-slate-700"); // the track
+    expect(html).toContain("stroke-[rgb(var(--glass-tint))]");
+    expect(html).toContain("stroke-slate-200"); // the track
     expect(html).toContain(">40%</text>");
     expect(html).toContain(`stroke-dashoffset="${CIRC * 0.6}"`);
     expect(html).toContain('stroke-linecap="round"');
@@ -33,11 +33,11 @@ describe("UsageRing", () => {
   });
 
   it("watch is amber, almost is orange, out is red — each with a dark variant, and the ink follows", () => {
-    expect(render({ pct: 80, state: "watch" })).toContain("stroke-amber-500 dark:stroke-amber-400");
-    expect(render({ pct: 80, state: "watch" })).toContain("text-amber-700 dark:text-amber-300");
-    expect(render({ pct: 92, state: "almost" })).toContain("stroke-orange-500 dark:stroke-orange-400");
-    expect(render({ pct: 100, state: "out" })).toContain("stroke-red-600 dark:stroke-red-500");
-    expect(render({ pct: 100, state: "out" })).toContain("text-red-700 dark:text-red-300");
+    expect(render({ pct: 80, state: "watch" })).toContain("stroke-amber-500");
+    expect(render({ pct: 80, state: "watch" })).toContain("text-amber-700");
+    expect(render({ pct: 92, state: "almost" })).toContain("stroke-orange-500");
+    expect(render({ pct: 100, state: "out" })).toContain("stroke-red-600");
+    expect(render({ pct: 100, state: "out" })).toContain("text-red-700");
   });
 
   it("100% is a full ring (offset 0); 0% draws no fill and no round dot; anything past the ends is clamped and rounded", () => {
