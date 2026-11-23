@@ -213,11 +213,25 @@ export async function insertItemizedBill(
     // An `unclear` line is written like any other, held off the customer's bill (billable = false)
     // and asked on the bill: nothing waits for it (P8).
     const creditExpected = status === "unpaid";
+    // ONE SHAPE FOR EVERY ROW OF ONE INSERT (cn-v1182; found on production the evening cn-v1181
+    // shipped). The data API takes the columns of a many-row insert from every key any row names,
+    // and a row that leaves one out gets NULL there, NOT the column's default. cn-v1181 gave only
+    // the MARKED lines `pen_mark` and `returned`, so on a paper with one struck line and one
+    // ordinary line the ordinary line was sent `returned = NULL`, the column is NOT NULL, and the
+    // database refused the WHOLE insert: the bill was written at its printed total with no lines
+    // at all. Every paper with ink on it lost its lines that way, from File It and from Read Again.
+    // So: when ANY line of this bill carries a column, EVERY row names it. A bill with no marked
+    // line still names exactly the columns it always named (a database without 0417 takes it).
+    const isMarked = (l: (typeof lines)[number]) => l.pen != null || l.returned === true;
+    const anyMarked = lines.some(isMarked);
+    const partUsed = (l: (typeof lines)[number], pen: { billable: boolean }) =>
+      l.billed_amount !== undefined && (!isMarked(l) || pen.billable) ? l.billed_amount : null;
+    const anyPartUsed = lines.some((l) => partUsed(l, penColumns(l, creditExpected)) !== null);
     const { error: lineErr } = await supabase
       .from("bill_line_items")
       .insert(
         lines.map((l, i) => {
-          const marked = l.pen != null || l.returned === true;
+          const marked = isMarked(l);
           const pen = penColumns(l, creditExpected);
           return {
             bill_id: data.id,
@@ -227,11 +241,11 @@ export async function insertItemizedBill(
             amount: l.amount,
             category: l.category,
             billable: marked ? pen.billable : l.billable,
-            // A part-used amount a person set on the bill before an Undo (TD3); absent otherwise,
-            // so a line as read writes exactly what it always wrote. Never on a marked line that is
-            // off the customer's bill.
-            ...(l.billed_amount !== undefined && (!marked || pen.billable) ? { billed_amount: l.billed_amount } : {}),
-            ...(marked ? { pen_mark: pen.pen_mark, returned: pen.returned } : {}),
+            // A part-used amount a person set on the bill before an Undo (TD3). Never on a marked
+            // line that is off the customer's bill; null on the rows that have none.
+            ...(anyPartUsed ? { billed_amount: partUsed(l, pen) } : {}),
+            // An ordinary line beside a marked one says what the columns' defaults say.
+            ...(anyMarked ? { pen_mark: marked ? pen.pen_mark : null, returned: marked ? pen.returned : false } : {}),
             sort_order: i,
           };
         }),

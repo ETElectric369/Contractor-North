@@ -112,6 +112,16 @@ export function billOfTie(t: PaperTie): string | null {
   return t.bill_id ?? t.tied_bill_id ?? null;
 }
 
+/**
+ * THE BILLS A PAPER MADE (cn-v1182), with the picture still on file: the rows a job's Costs tab may
+ * offer Read Again on. `bill_id` only. A paper TIED to a bill somebody typed (`tied_bill_id`) did
+ * not make it: there is nothing of that bill to make again from the picture, and the Read Again
+ * door answers so (organize/read-again-core asks for the row whose `bill_id` is the bill).
+ */
+export function billsMadeFromPaper(ties: readonly Pick<PaperTie, "bill_id" | "file_url">[] | null | undefined): string[] {
+  return Array.from(new Set((ties ?? []).filter((t) => !!t.bill_id && !!t.file_url).map((t) => String(t.bill_id))));
+}
+
 /** The paper is on the books through this tie: a bill, a supplier's document or petty cash. */
 function accountedBy(t: PaperTie): boolean {
   return !!(billOfTie(t) || t.tied_supplier_invoice_id || t.petty_cash_id);

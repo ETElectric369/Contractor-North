@@ -162,6 +162,12 @@ const TICKET_LINES = [
   { description: "Sales tax", quantity: 1, unit_price: 12, amount: 12, category: "Tax", pen: null, hand_quantity: null },
 ];
 const ORDINARY_KEYS = ["amount", "bill_id", "billable", "category", "description", "quantity", "sort_order", "unit_price"];
+/** The data API's rule for a many-row insert: a column one row leaves out is sent as NULL, never as
+ *  the column's default. So every row of one insert names the same columns. */
+const sameColumnsOnEveryRow = (rows: Record<string, unknown>[]) => {
+  const shape = (r: Record<string, unknown>) => Object.keys(r).sort().join(",");
+  return rows.every((r) => shape(r) === shape(rows[0]));
+};
 
 describe("P1: both readers learn ONE rule for ink", () => {
   it("the rule says to transcribe what is PRINTED and never to lower anything for a pen mark", () => {
@@ -247,12 +253,20 @@ describe("P5: the bill is written whole, its marked lines carry the pen (0417)",
       ["3/4 in EMT, 10 ft", 60, true, "quantity", false],
       ["3/4 in EMT, 10 ft", 40, false, "quantity", true],
       ["Weatherproof box", 50, false, "struck", true],
-      ["Sales tax", 12, true, undefined, undefined],
+      // THE ORDINARY LINE BESIDE A MARKED ONE SAYS WHAT THE DEFAULTS SAY (cn-v1182). This test used
+      // to pin `undefined, undefined` here and call it a virtue ("names exactly the columns it always
+      // named"). On the database that shape is `returned = NULL` in a NOT NULL column: the data API
+      // fills a column one row leaves out with NULL, never the default, and refuses the whole insert.
+      ["Sales tax", 12, true, null, false],
     ]);
-    // An ordinary line's insert names exactly the columns it always named.
-    expect(Object.keys(rows[3]).sort()).toEqual(ORDINARY_KEYS);
-    // 0417's checks hold on every row this writes.
-    for (const r of rows) if (r.returned) expect(r.billable).toBe(false);
+    // ONE SHAPE FOR EVERY ROW OF ONE INSERT.
+    expect(sameColumnsOnEveryRow(rows)).toBe(true);
+    expect(Object.keys(rows[3]).sort()).toEqual([...ORDINARY_KEYS, "pen_mark", "returned"].sort());
+    // 0417's checks hold on every row this writes, and so does its NOT NULL.
+    for (const r of rows) {
+      if (r.returned) expect(r.billable).toBe(false);
+      expect(typeof r.returned).toBe("boolean");
+    }
   });
 
   it("PAID AT PURCHASE: the same marks come off the customer's bill, and nothing is tracked as returned", async () => {
@@ -263,8 +277,9 @@ describe("P5: the bill is written whole, its marked lines carry the pen (0417)",
       [60, true, "quantity", false],
       [40, false, "quantity", false],
       [50, false, "struck", false],
-      [12, true, undefined, undefined],
+      [12, true, null, false],
     ]);
+    expect(sameColumnsOnEveryRow(rows)).toBe(true);
     expect(did("bills", "insert")!.payload.amount).toBe(162);
   });
 
@@ -273,6 +288,47 @@ describe("P5: the bill is written whole, its marked lines carry the pen (0417)",
     const unclear = readerFields({ paper_type: "bill", kind: "receipt", amount: 50, line_items: [{ ...TICKET_LINES[1], pen: "unclear" }] }, "t").line_items!;
     expect((await insertItemizedBill(state.client, BILL, unclear, "unpaid")).id).toBe("bill-u");
     expect((did("bill_line_items", "insert")!.payload as any[])[0]).toMatchObject({ billable: false, pen_mark: "unclear", returned: false });
+  });
+
+  it("a part-used amount on ONE line is named on every row of that insert (null where there is none)", async () => {
+    state.client = fakeSupabase({ "bills.insert": [{ data: { id: "bill-h" }, error: null }], "bill_line_items.insert": [{ data: [{ id: "l" }], error: null }] }, calls);
+    const two = [
+      { description: "Wire, 250 ft", quantity: 1, unit_price: 180, amount: 180, category: "Materials", billable: true, billed_amount: 90 },
+      { description: "Tape", quantity: 1, unit_price: 12, amount: 12, category: "Materials", billable: true },
+    ];
+    await insertItemizedBill(state.client, BILL, two as any, "unpaid");
+    const rows = did("bill_line_items", "insert")!.payload as any[];
+    expect(rows.map((r) => r.billed_amount)).toEqual([90, null]);
+    expect(sameColumnsOnEveryRow(rows)).toBe(true);
+    // No ink on this bill: the pen columns are named on no row.
+    expect(rows.some((r) => "returned" in r || "pen_mark" in r)).toBe(false);
+  });
+
+  it("every mix of marked and ordinary lines goes in as ONE shape, with `returned` a real boolean on every row that names it", async () => {
+    const kinds = [
+      { description: "ordinary", quantity: 1, unit_price: 5, amount: 5, category: "Materials", billable: true },
+      { description: "own cost", quantity: 1, unit_price: 5, amount: 5, category: "Materials", billable: false },
+      { description: "struck", quantity: 1, unit_price: 5, amount: 5, category: "Materials", billable: false, pen: "struck", returned: true },
+      { description: "unclear", quantity: 1, unit_price: 5, amount: 5, category: "Materials", billable: false, pen: "unclear" },
+      { description: "returned by hand", quantity: 1, unit_price: 5, amount: 5, category: "Materials", billable: false, returned: true },
+      { description: "part used", quantity: 1, unit_price: 5, amount: 5, category: "Materials", billable: true, billed_amount: 2 },
+    ];
+    // Every non-empty subset of the six kinds, on account and paid at purchase.
+    for (let mask = 1; mask < 1 << kinds.length; mask++) {
+      for (const status of ["unpaid", "paid"] as const) {
+        calls.length = 0;
+        state.client = fakeSupabase({ "bills.insert": [{ data: { id: "bill-m" }, error: null }], "bill_line_items.insert": [{ data: [{ id: "l" }], error: null }] }, calls);
+        const batch = kinds.filter((_, i) => mask & (1 << i));
+        await insertItemizedBill(state.client, BILL, batch as any, status);
+        const rows = did("bill_line_items", "insert")!.payload as any[];
+        expect(sameColumnsOnEveryRow(rows), `mask ${mask} ${status}`).toBe(true);
+        for (const r of rows) {
+          if ("returned" in r) expect(typeof r.returned, `mask ${mask} ${status}`).toBe("boolean");
+          expect(typeof r.billable, `mask ${mask} ${status}`).toBe("boolean");
+          if (r.returned) expect(r.billable).toBe(false);
+        }
+      }
+    }
   });
 
   it("a bill with no pen mark writes byte-for-byte what it always wrote", async () => {
@@ -376,8 +432,10 @@ describe("P6: an Undo carries the answers back onto the paper, and File It write
       [40, false, "quantity", true],
       [50, true, "struck", false],
       [3, false, "unclear", false],
-      [9, true, undefined, undefined],
+      // The ordinary line beside the marked ones names the same columns, at their defaults (cn-v1182).
+      [9, true, null, false],
     ]);
+    expect(sameColumnsOnEveryRow(rows)).toBe(true);
   });
 
   it("before 0417 is on the database the read is asked again without the pen columns, and Undo still works", async () => {

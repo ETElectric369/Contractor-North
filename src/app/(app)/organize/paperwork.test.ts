@@ -1599,7 +1599,9 @@ describe("Undo, Delete and a deleted bill leave nothing wrong behind (audit v994
     expect(filed.ok).toBe(true);
     const written = did("bill_line_items", "insert")!.payload;
     expect(written[0]).toMatchObject({ billable: false });
-    expect(written[0].billed_amount).toBeUndefined();
+    // Named on every row once one row carries it (cn-v1182: one shape per insert); null is what the
+    // database held for this row all along, since the data API sent NULL for the key it left out.
+    expect(written[0].billed_amount).toBeNull();
     expect(written[1]).toMatchObject({ billable: true, billed_amount: 7.2 });
   });
 

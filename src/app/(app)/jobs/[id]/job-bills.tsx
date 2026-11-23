@@ -4,7 +4,7 @@ import { companyLabel } from "@/lib/vendor-words";
 import { useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, RotateCcw } from "lucide-react";
 import { billedOnLabel, nothingToBillWhy, openOwnNote, pileCount, type JobCostGroups } from "@/lib/job-cost-groups";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -24,6 +24,9 @@ import { executeAction } from "@/lib/actions/execute";
 import { canCorrect, correctionFaces, correctionsUnder } from "@/lib/bill-correction";
 import { penMarkOf } from "@/lib/pen-marks";
 import type { CorrectableBill } from "@/components/correct-bill-modal";
+import { ReadAgainConfirm } from "@/app/(app)/bills/receipt-billing-card";
+import { isStillOwed } from "@/lib/supplier-owed";
+import { useToast } from "@/components/toast";
 
 /**
  * ALREADY BILLED ON THE COSTS TAB (0357). `open`: the Not Billed Yet rows the door can mark (a row
@@ -126,6 +129,39 @@ function poLabel(p: JobPo): string {
 }
 
 /**
+ * READ AGAIN ON THE JOB'S OWN ROW (cn-v1182). Erik, on a job's Costs tab with six marked papers in
+ * front of him: "so how do i get this to re-read the bills or should i delete them and snap again?"
+ * The door existed, one screen away: Open the Bill, then a small link under that bill's lines on
+ * /bills. A door nobody can find is not a door, so the row carries it, beside Correct This Bill.
+ *
+ * It is offered only where the server will not refuse it, a STRICT SUBSET of what /bills offers
+ * (receipt-billing-card: made from a paper, not on an invoice that went out, not paid other than at
+ * the counter) and of what read-again-core checks before it changes anything:
+ *   - a paper MADE the bill and has its picture (the page's `madeFromPaper`, lib/job-photos
+ *     billsMadeFromPaper). A paper only tied to a typed bill draws its Receipt door and no Read
+ *     Again: the server would answer that the bill was not made from a paper;
+ *   - it sits in a pile no invoice holds: Not Billed Yet, or never billed. The Billed fold, and the
+ *     one plain list drawn when the claims could not be read, do not offer it: there the row cannot
+ *     know that no sent invoice bills it, and /bills, which can, still does;
+ *   - nothing has been paid on it and it is still owed (a payment record would go with the bill);
+ *   - it is not a correction and has none under it (the pair is one purchase).
+ * A receipt paid at the counter keeps the door on /bills only: this row does not know how it was paid.
+ */
+export function rowOffersReadAgain(input: {
+  hasPaper: boolean;
+  pile: "open" | "billed" | "nothing" | "plain";
+  bill: { status: string; amount: number | string; amount_paid?: number | null; corrects_bill_id?: string | null };
+  hasCorrections: boolean;
+}): boolean {
+  const { hasPaper, pile, bill, hasCorrections } = input;
+  if (!hasPaper) return false;
+  if (pile !== "open" && pile !== "nothing") return false;
+  if (bill.corrects_bill_id || hasCorrections) return false;
+  if ((Number(bill.amount_paid) || 0) !== 0) return false;
+  return isStillOwed({ status: bill.status, amount: bill.amount, amountPaid: bill.amount_paid ?? null });
+}
+
+/**
  * THE JOB'S SUPPLIER BILLS. With `groups` (a job that bills its actuals, the claims read in hand)
  * the list is sorted OPEN FIRST (Erik, 2026-09-25: "in costs i need to know what is open more than
  * i need to know all the totals"): Not Billed Yet, with the door that bills it (`openAside`), then
@@ -149,6 +185,7 @@ export function JobBills({
   papers = null,
   correctionsReady = false,
   billWhat = null,
+  madeFromPaper = null,
 }: {
   jobId: string;
   bills: Bill[];
@@ -172,8 +209,16 @@ export function JobBills({
   /** Bill id → one line of what was bought on it (the page's paper-summary rule: its line
    *  descriptions, then "+N more"). A bill no line describes says nothing. */
   billWhat?: Record<string, string> | null;
+  /** The bills a paper MADE, with its picture still on file (lib/job-photos billsMadeFromPaper):
+   *  the rows Read Again may be offered on. None handed down, none offered. */
+  madeFromPaper?: readonly string[] | null;
 }) {
   const [editBill, setEditBill] = useState<Bill | null>(null);
+  const madeFrom = new Set(madeFromPaper ?? []);
+  /** The bill Read Again is asking about: ONE confirm for the list, mounted while asked, never re-keyed. */
+  const [readAgainBill, setReadAgainBill] = useState<string | null>(null);
+  const router = useRouter();
+  const toast = useToast();
   // DOES THIS JOB HAVE PARTS AT ALL (item C1)? On a job whose estimate is broken into Framing and
   // Decking, a cost under no part is a real gap and the row says so. On a job with no scoped estimate
   // there is no gap and no door to fix one, so the row says nothing rather than nagging about a
@@ -263,6 +308,11 @@ export function JobBills({
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <BillPaperDoors papers={papers?.[b.id]} />
         <BillRowDoors bill={b} jobId={jobId} onEdit={() => setEditBill(b)} correct={correctable(b)} follows={followsOf(b.id)} />
+        {rowOffersReadAgain({ hasPaper: madeFrom.has(b.id), pile, bill: b, hasCorrections: (correctionsOf.get(b.id)?.length ?? 0) > 0 }) && (
+          <Button variant="outline" onClick={() => setReadAgainBill(b.id)}>
+            <RotateCcw /> Read Again
+          </Button>
+        )}
         <Link href={`/bills#bill-${b.id}`} className="flex min-h-11 items-center px-2 text-sm font-medium text-brand hover:underline">
           Open the Bill
         </Link>
@@ -438,6 +488,17 @@ export function JobBills({
           pos={pos}
           onClose={() => setEditBill(null)}
           follows={followsOf(editBill.id)}
+        />
+      )}
+      {readAgainBill && (
+        <ReadAgainConfirm
+          billId={readAgainBill}
+          onClose={() => setReadAgainBill(null)}
+          onDone={(message) => {
+            setReadAgainBill(null);
+            toast(message, "success");
+            router.refresh();
+          }}
         />
       )}
     </div>

@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1182", date: "2026-11-22", line: "Fixed: a paper with pen marks was filed with no lines; press Read Again on it. Read Again is now a button on each bill row in a job's Costs tab." },
   { version: "cn-v1181", date: "2026-11-22", line: "Pen marks on a supplier's paper are read: a crossed-out line comes off the customer's bill. A credit memo files with its bill. Left to Bill is now Everything Billable. Inspection rows open." },
   { version: "cn-v1180", date: "2026-11-22", line: "A lead's ending now withdraws its pick-a-time link. Web forms no longer book an inspection by themselves. The phone bar shows badges. Delete Job says what goes with it and what stays." },
   { version: "cn-v1179", date: "2026-11-22", line: "Flag a job's task to put it on Needs You. My Day no longer lists every job's tasks. An on-hold job with no day waits in Waiting. A morning Materials to Buy Today notice. Get Paid says what it does." },

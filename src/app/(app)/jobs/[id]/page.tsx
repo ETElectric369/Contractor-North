@@ -92,7 +92,7 @@ import { ProfitLine } from "./profit-line";
 import { computeJobProgress, livePurchaseOrders } from "@/lib/job-progress-math";
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { documentsForViewer } from "@/lib/tech-documents";
-import { billPapers, papersOffThisJob, sortJobPapers, type PaperTie } from "@/lib/job-photos";
+import { billPapers, billsMadeFromPaper, papersOffThisJob, sortJobPapers, type PaperTie } from "@/lib/job-photos";
 import { jobLabel } from "@/lib/schedule-options";
 import { FIXED_PILL_CLASS, isFixedPrice } from "@/lib/doc-label";
 import { directionsTarget } from "@/lib/maps";
@@ -1971,6 +1971,8 @@ export default async function JobDetailPage({
                 billedHours={hoursMarked}
                 handsNote={handsNote}
                 papers={papersByBill}
+                // Read Again's rows (cn-v1182): the bills a paper made, never one a paper is only tied to.
+                madeFromPaper={billsMadeFromPaper(paperTies)}
                 // What was bought on each bill, one line (cn-v1174, paper-summary.ts).
                 billWhat={billWhat}
                 openAside={
