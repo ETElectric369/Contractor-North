@@ -24,9 +24,9 @@ describe("migration 0417: pen marks on a supplier's paper, kept on the bill's li
   const code = noComments(sql);
   const flat = squash(code);
 
-  it("is the newest migration, the one 0417, under the house timeouts, with no transaction of its own", () => {
+  // The newest-migration line moved to tests/migration-0418.test.ts with 0418 (house practice).
+  it("is the one 0417, under the house timeouts, with no transaction of its own", () => {
     expect(names.filter((n) => n.startsWith("0417_"))).toEqual(["0417_pen_marks.sql"]);
-    expect(names[names.length - 1]).toBe("0417_pen_marks.sql");
     expect(code).toContain("set local lock_timeout = '3s';");
     expect(code).toContain("set local statement_timeout = '15s';");
     expect(code).not.toMatch(/^\s*(begin|commit|rollback|start transaction)\s*;/im);
