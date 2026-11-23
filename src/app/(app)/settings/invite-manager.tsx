@@ -8,6 +8,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
+import { inviteCopyLink } from "@/lib/invite-door";
 import { createInvitation, deleteInvitation } from "./actions";
 
 interface Invite {
@@ -26,9 +27,13 @@ interface Invite {
 export function InviteManager({
   invites,
   siteUrl,
+  joinReady,
 }: {
   invites: Invite[];
   siteUrl: string;
+  /** The join page can read an invitation (the service client is configured, read on the server).
+   *  False: Copy Link copies the OLD sign-up link, exactly as createInvitation falls back. */
+  joinReady: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -67,8 +72,11 @@ export function InviteManager({
     });
   }
 
-  function copyLink(email: string) {
-    const link = `${siteUrl}/login?mode=signup&email=${encodeURIComponent(email)}`;
+  // THE ONE BUILDER (cn-v1183): the same one-step link the invite email carries; the old sign-up
+  // link when the join page could not read the row (joinReady false), or the row's token or the
+  // site's address cannot make one.
+  function copyLink(email: string, token: string) {
+    const link = inviteCopyLink(siteUrl, email, token, joinReady);
     navigator.clipboard?.writeText(link);
     setCopied(email);
     setTimeout(() => setCopied(null), 2000);
@@ -97,10 +105,19 @@ export function InviteManager({
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <p className="text-xs text-slate-400">
-        The invited person signs up with this email; when they create their account they&apos;ll
-        automatically join your company with the role you set. An invite lasts 14 days, and only
-        works for someone who isn&apos;t already on a team — if they already have an account here,
-        reset their password under Crew instead.
+        {joinReady ? (
+          <>
+            The invited person gets a link: they choose a password and they&apos;re in, in your company
+            with the role you set. There is no second email to confirm.
+          </>
+        ) : (
+          <>
+            The invited person signs up with this email, confirms it from a second email, and then joins
+            your company with the role you set.
+          </>
+        )}{" "}
+        An invite lasts 14 days, and only works for someone who isn&apos;t already on a team — if they
+        already have an account here, reset their password under Crew instead.
       </p>
 
       {invites.length > 0 && (
@@ -146,9 +163,9 @@ export function InviteManager({
               ) : (
                 <>
                   <button
-                    onClick={() => copyLink(inv.email)}
+                    onClick={() => copyLink(inv.email, inv.token)}
                     className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                    title="Copy signup link"
+                    title="Copy Invite Link"
                   >
                     {copied === inv.email ? (
                       <Check className="h-4 w-4 text-green-600" />
@@ -169,6 +186,11 @@ export function InviteManager({
             </li>
           ))}
         </ul>
+      )}
+      {invites.some((inv) => !inv.accepted_at && !(inv.expires_at && new Date(inv.expires_at) <= new Date())) && (
+        <p className="text-xs text-slate-500">
+          Whoever opens an invite link joins as the address on it. Check the address before you share a link.
+        </p>
       )}
     </div>
   );

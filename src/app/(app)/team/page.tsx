@@ -97,7 +97,7 @@ export default async function TeamPage() {
               <h3 className="text-sm font-semibold text-slate-900">Add to the team</h3>
             </div>
             <div className="space-y-4 px-5 py-4">
-              <InviteManager invites={(invites as any) ?? []} siteUrl={siteUrl} />
+              <InviteManager invites={(invites as any) ?? []} siteUrl={siteUrl} joinReady={adminConfigured()} />
               <div className="border-t border-slate-100 pt-4">
                 <div className="mb-2 text-xs text-slate-500">
                   Or create their login yourself and hand them the password — no email needed:

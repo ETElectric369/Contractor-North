@@ -15,6 +15,7 @@ import { reportError } from "@/lib/observe";
 import { sendEmail } from "@/lib/email";
 import { langFromWord } from "@/lib/locale";
 import { CREW_IMPORT_WORDS, crewSetupLink } from "./crew-setup-link";
+import { inviteJoinLink, inviteSignupLink } from "@/lib/invite-door";
 
 export async function disconnectQuickbooks(): Promise<Result> {
   const supabase = await createClient();
@@ -265,31 +266,75 @@ export async function createInvitation(formData: FormData): Promise<Result & { l
     return { ok: false, error: "Invites can't be sent right now. Try again later." };
   }
 
-  const { error } = await supabase.from("invitations").insert({
-    org_id: orgId,
-    email,
-    role,
-    invited_by: user.id,
-  });
+  // ONE OPEN INVITATION PER COMPANY AND ADDRESS (fixer #85, S3). accept_invitation() joins the
+  // NEWEST open row for the address, so a second open row with another role would quietly change the
+  // seat the link and the email name. The new invitation REPLACES this company's older still-open one
+  // (its link then says "not valid"); expired and accepted rows are never touched, the office still
+  // sees them. A failed delete refuses the invite and writes nothing.
+  const { error: oldErr } = await supabase
+    .from("invitations")
+    .delete()
+    .eq("org_id", orgId)
+    .eq("email", email)
+    .is("accepted_at", null)
+    .gt("expires_at", new Date().toISOString())
+    .select("id");
+  if (oldErr) {
+    return { ok: false, error: "That invite couldn't be sent: the older one for this address couldn't be replaced. Try again." };
+  }
+
+  const { data: made, error } = await supabase
+    .from("invitations")
+    .insert({
+      org_id: orgId,
+      email,
+      role,
+      invited_by: user.id,
+    })
+    .select("id, token, expires_at")
+    .single();
   if (error) return { ok: false, error: dbError(error) };
 
   // ACTUALLY SEND the invite — the row alone was invisible to the invitee (the reported
-  // "invite not received" bug). They join by signing up with THIS email (pending_invite /
-  // accept_invitation, migration 0005), so the email points them at signup. The link is also
-  // returned so the owner can share it directly (text/DM) even if email lags or bounces.
+  // "invite not received" bug). THE ONE-STEP INVITE (cn-v1183): the link carries the invitation's
+  // own token and opens /auth/join, one form whose door makes the account already confirmed, signs
+  // the person in and joins them: no second email. inviteJoinLink is the one builder of that link
+  // (the office's Copy Link calls it too). With no token back, or no service client for the join
+  // page to read the row with, the OLD link is sent: it still works (sign up, then the confirm email).
+  // The link is also returned so the owner can share it directly (text/DM) even if email lags.
   const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
   const { data: org } = await supabase.from("organizations").select("name").eq("id", orgId).maybeSingle();
   const orgName = (org as { name?: string } | null)?.name || "the team";
-  const link = `${base}/login?mode=signup&email=${encodeURIComponent(email)}`;
+  const row = made as { id?: string; token?: string; expires_at?: string } | null;
+  const { adminConfigured } = await import("@/lib/supabase/admin");
+  const joinLink = adminConfigured() ? inviteJoinLink(base, row?.token) : null;
+  if (!joinLink) {
+    reportError("createInvitation.noToken", new Error("invite sent with the old sign-up link"), { invitationId: row?.id ?? null });
+  }
+  const link = joinLink ?? inviteSignupLink(base, email);
+  const roleWords = role === "admin" ? "an admin" : role === "office" ? "office staff" : "a tech";
+  const until = new Date(row?.expires_at ?? Date.now() + 14 * 86_400_000).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  const btn = (label: string) =>
+    `<p style="margin:24px 0"><a href="${esc(link)}" style="background:#0b57c4;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">${label}</a></p>`;
+  const body = joinLink
+    ? `<p style="color:#475569;line-height:1.6">${esc(orgName)} added you on Contractor North as ${esc(roleWords)}. Tap the button, choose a password, and you're in. There is no second email to confirm.</p>
+      ${btn(`Join ${esc(orgName)}`)}
+      <p style="color:#94a3b8;font-size:13px;word-break:break-all">This link is yours: it works once, until ${esc(until)}. Or open: ${esc(link)}</p>`
+    : `<p style="color:#475569;line-height:1.6">You've been added to <strong>${esc(orgName)}</strong> on Contractor North as ${esc(roleWords)}. Create your account with <strong>this email</strong> (${esc(email)}) and you'll join the team automatically.</p>
+      ${btn("Create your account")}
+      <p style="color:#94a3b8;font-size:13px;word-break:break-all">Or open this link: ${esc(link)}</p>`;
   const sendRes = await sendEmail({
     to: email,
     fromName: orgName,
     subject: `You're invited to join ${orgName} on Contractor North`,
     html: `<div style="font-family:system-ui,-apple-system,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#0f172a">
       <h2 style="margin:0 0 8px">You've been invited to ${esc(orgName)}</h2>
-      <p style="color:#475569;line-height:1.6">You've been added to <strong>${esc(orgName)}</strong> on Contractor North as a ${esc(role)}. Create your account with <strong>this email</strong> (${esc(email)}) and you'll join the team automatically.</p>
-      <p style="margin:24px 0"><a href="${link}" style="background:#0b57c4;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">Create your account</a></p>
-      <p style="color:#94a3b8;font-size:13px;word-break:break-all">Or open this link: ${link}</p>
+      ${body}
     </div>`,
   })
     // sendEmail RESOLVES {ok:false,error} on a failed send — it does not reject. Reading the flag
