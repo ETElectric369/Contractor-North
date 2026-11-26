@@ -1288,6 +1288,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           stay on the Now card above, and a FLAGGED job task is a Needs You row below. */}
       <YourList
         rows={six as any}
+        // THE HOLDS WHOSE DAY HAS COME (cn-v1189): filed with Reminders, first, from the one Needs You
+        // build (derived from the jobs' own day; nothing is written to tasks). Staff only, as Needs You's.
+        holds={needsYou.reminders}
         subtasks={sixKids as any}
         todayStr={todayStr}
         doneToday={doneToday}

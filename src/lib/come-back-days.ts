@@ -96,15 +96,18 @@ export function comeBackDue(day: string | null | undefined, todayStr: string): b
 }
 
 /**
- * The chip on a held card: "Back Oct 3", "Back Today" once the day has come (a day already passed is
- * due today, not "3 days ago": it is waiting on a person now), and "No Day Set" for a hold from before
- * the day existed (its Snooze picks one).
+ * THE CHIP ON A HELD CARD, said as a REMINDER (cn-v1189; the owner, from My Day: "the on hold: Back Nov
+ * 29 is confusing so if that means its a reminder then lets call it Reminder Set Nov 29"): "Reminder Set
+ * Oct 3", "Reminder Today" once the day has come (a day already passed is due today, not "3 days ago":
+ * it is waiting on a person now), and "No Reminder Set" for a hold with no day (its Snooze picks one).
+ * HOLDS ONLY: the rail and the calendar line call it. The other Waiting rows keep "Back {day}"
+ * (ag_btn_backOn, waiting-fold waitingLine), so the reminder words are their own keys.
  */
 export function backWords(day: string | null | undefined, todayStr: string, lang: Lang = "en", words?: Words): string {
-  if (!isYmd(day)) return say(lang, words, "ag_btn_noDaySet", "No Day Set");
-  if (day <= todayStr) return say(lang, words, "ag_btn_backToday", "Back Today");
+  if (!isYmd(day)) return say(lang, words, "ag_btn_noReminder", "No Reminder Set");
+  if (day <= todayStr) return say(lang, words, "ag_btn_reminderToday", "Reminder Today");
   const d = shortDay(day, lang);
-  return say(lang, words, "ag_btn_backOn", `Back ${d}`, { day: d });
+  return say(lang, words, "ag_btn_reminderOn", `Reminder Set ${d}`, { day: d });
 }
 
 /**

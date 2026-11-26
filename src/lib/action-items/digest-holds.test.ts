@@ -16,7 +16,7 @@ vi.mock("@/lib/notifications", () => ({ notifyPeople }));
 // billing off nothing lapses, so the fixture carries a live status to be read at all.
 vi.mock("@/lib/stripe", async (orig) => ({ ...(await orig<typeof import("@/lib/stripe")>()), billingEnabled: true }));
 
-import { holdsBackCount, holdsBackLine, sendDayAheadDigests } from "./digest";
+import { holdsBackCount, holdsBackLine, holdsOnlyTitle, sendDayAheadDigests } from "./digest";
 
 type Answer = { data?: unknown; error?: unknown; count?: number | null };
 
@@ -57,8 +57,10 @@ beforeEach(() => {
 
 describe("the holds line", () => {
   it("says how many, in Title Case, one or many", () => {
-    expect(holdsBackLine(1)).toBe("1 Hold Is Back");
-    expect(holdsBackLine(3)).toBe("3 Holds Are Back");
+    expect(holdsBackLine(1)).toBe("1 Hold Reminder Today");
+    expect(holdsBackLine(1, "es")).toBe("1 Recordatorio de Pausa Hoy");
+    expect(holdsBackLine(3, "es")).toBe("3 Recordatorios de Pausa Hoy");
+    expect(holdsBackLine(3)).toBe("3 Hold Reminders Today");
   });
 
   it("a failed read (0366 not on the database) counts 0", () => {
@@ -69,10 +71,13 @@ describe("the holds line", () => {
 });
 
 describe("the morning push", () => {
-  it("a morning with only holds back still pushes, and the line leads", async () => {
+  // RE-PINNED ON PURPOSE (skeptic #90 S7): a morning whose only decisions are hold reminders is not
+  // titled Needs You (Needs You is empty on My Day); it names where they are, Tasks & Reminders.
+  it("a morning with only holds back still pushes, titled where they are, and the line leads", async () => {
     const db = fake({ organizations: { data: [ORG] }, jobs: { count: 2 }, invoices: { count: 0 }, inquiries: { count: 0 }, tasks: { data: [] } });
     expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 1, already: 0, failed: 0, lapsed_skipped: 0 });
-    expect(notifyPeople).toHaveBeenCalledWith("org-1", ["owner-1"], "day_ahead", { title: "Needs You", body: "2 Holds Are Back", url: "/planner" });
+    expect(notifyPeople).toHaveBeenCalledWith("org-1", ["owner-1"], "day_ahead", { title: "Tasks & Reminders", body: "2 Hold Reminders Today", url: "/planner" });
+    expect(holdsOnlyTitle("es")).toBe("Tareas y Recordatorios");
     // Filtered to this company by hand; on hold; back today or earlier, never a hold with no day.
     const jobs = db.filters.jobs;
     expect(jobs).toContainEqual(["eq", "org_id", "org-1"]);
@@ -92,7 +97,7 @@ describe("the morning push", () => {
     await sendDayAheadDigests(db);
     expect(notifyPeople).toHaveBeenCalledWith("org-1", ["owner-1"], "day_ahead", {
       title: "Needs You",
-      body: "3 Holds Are Back · Invoice INV-071 overdue · +2 more",
+      body: "3 Hold Reminders Today · Invoice INV-071 overdue · +2 more",
       url: "/planner",
     });
   });
@@ -111,7 +116,7 @@ describe("the morning push", () => {
     const sent = (notifyPeople.mock.calls[0] as unknown as [string, string[], string, { title: string; body: string }])[3];
     expect(sent.title).toBe("Needs You");
     expect(sent.title).not.toMatch(/\d/);
-    expect(sent.body).toBe("4 Holds Are Back · Invoice INV-971 overdue · +3 more");
+    expect(sent.body).toBe("4 Hold Reminders Today · Invoice INV-971 overdue · +3 more");
   });
 
   // cn-v1170: the lead line is the Leads list (lib/leads/new-intake), the rule Needs You and the
@@ -191,7 +196,7 @@ describe("the morning push and a failed read", () => {
     });
     expect(await sendDayAheadDigests(db)).toEqual({ orgs: 2, pushed: 1, already: 0, failed: 1, lapsed_skipped: 0 });
     expect(notifyPeople).toHaveBeenCalledTimes(1);
-    expect(notifyPeople).toHaveBeenCalledWith("org-2", ["owner-1"], "day_ahead", { title: "Needs You", body: "2 Holds Are Back", url: "/planner" });
+    expect(notifyPeople).toHaveBeenCalledWith("org-2", ["owner-1"], "day_ahead", { title: "Tasks & Reminders", body: "2 Hold Reminders Today", url: "/planner" });
     expect(reportError).toHaveBeenCalledWith("cron-day-ahead", boom, { orgId: "org-1" });
   });
 });

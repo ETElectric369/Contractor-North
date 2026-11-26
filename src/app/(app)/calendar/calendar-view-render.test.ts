@@ -258,12 +258,12 @@ describe("the box says more (cn-v1151)", () => {
   it("a job on hold draws On Hold · the day it comes back in amber, SHORT, and its reason as the first line of the note (skeptic #55)", () => {
     const html = more();
     // The state line is one `truncate` line in a week column: the reason never rides on it to be cut short.
-    expect(html).toContain(`<div class="truncate font-semibold text-amber-700">On Hold · Back ${shortDay(HOLD_BACK)}</div>`);
+    expect(html).toContain(`<div class="truncate font-semibold text-amber-700">On Hold · Reminder Set ${shortDay(HOLD_BACK)}</div>`);
     expect(html).not.toContain("On Hold · Waiting on the permit");
     // The reason draws as the note, in whole lines (a three-hour block has room for it under the state).
     expect(html).toMatch(/style="-webkit-line-clamp:\d+">Waiting on the permit<\/div>/);
     // And the title carries it all: the state, then the reason.
-    expect(html).toContain(`· On Hold · Back ${shortDay(HOLD_BACK)} · Waiting on the permit"`);
+    expect(html).toContain(`· On Hold · Reminder Set ${shortDay(HOLD_BACK)} · Waiting on the permit"`);
   });
 
   it("a done job for the office: Done · Paid when every live bill is paid, Done · Bill Open when one is out; a tech's says Done alone", () => {
@@ -321,7 +321,7 @@ describe("the box says more (cn-v1151)", () => {
     // The week line is still the stuck line above it, inside the host div the hook measures against.
     expect(week).toMatch(/<div class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-clip"><div><div class="sticky top-0 z-20 border-b/);
     const day = more({}, "day", NEXT);
-    expect(day).toContain(`On Hold · Back ${shortDay(HOLD_BACK)}`);
+    expect(day).toContain(`On Hold · Reminder Set ${shortDay(HOLD_BACK)}`);
     expect(day).toContain("Waiting on the permit");
     expect(day).not.toContain("sticky z-[15]");
     expect(day).not.toContain("--grid-stick-top");

@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { viewerSortsBank } from "@/lib/bank-viewer";
 import { createClient } from "@/lib/supabase/server";
-import type { ActionItem, NeedsYou, PileName, WaitingItem } from "./types";
+import type { ActionItem, HoldReminder, NeedsYou, PileName, WaitingItem } from "./types";
 import { AFFORDANCES, KIND_GROUP, appointmentAffordances, sortActionItems, waitingForViewer, waitingRow, waitingRowNoDay } from "./types";
 import { QUOTE_EXPIRY_SOON_DAYS, dueClock, levelOf, summarize, withoutMoneyForTech } from "./needs-you-rule";
 import { isOlder, splitKeptCount } from "./older";
@@ -899,6 +899,8 @@ async function buildActionItems(ctx: {
   // new kind can't ship with a forgotten/mismatched tile.
   const items: Omit<ActionItem, "group">[] = [];
   const waiting: WaitingItem[] = [];
+  // The holds whose day has come, filed with Reminders on My Day (cn-v1189): never a Now row.
+  const holdReminders: HoldReminder[] = [];
   const counts: Partial<Record<PileName, PileCount>> = {};
   // The read facts of the rows that waited thirty days (older.ts): the Older fold's half of a pile.
   const olderCounts: Partial<Record<PileName, PileCount>> = {};
@@ -1915,8 +1917,11 @@ async function buildActionItems(ctx: {
   }
   counts.materials_to_buy = codeCount(matJobsR, 50).capped || codeCount(matSegR, 50).capped ? { capped: true } : {};
 
-  // 5) HOLDS (NY-hold, 0366). A hold whose day has come is a Reminder on Now, with its reason and its
-  // Snooze and Take Off Hold; a later day waits in the fold, and so does a hold with NO day (cn-v1179,
+  // 5) HOLDS (NY-hold, 0366). A hold whose day has come is a REMINDER (cn-v1189; the owner: "lets call
+  // it Reminder Set Nov 29 and file it with reminders and the on hold stays put"): it goes back in its
+  // own list, drawn first in My Day's Tasks & Reminders, and is no row of Needs You and no part of any
+  // number (the badge, the header, the tiles). Nothing is written: the job stays on hold, and the day is
+  // the job's own hold_until, read here. A later day waits in the fold, and so does a hold with NO day (cn-v1179,
   // decision D: the owner, by picture, "seems like thats abetter spot for it"), saying its reason and
   // "No Day Set" and counted by no number. Before 0366 (no hold-day columns) the old rule stands: every
   // hold it reads is a Now row. "Put on hold by Erik" only when the hold says who. Money and legal
@@ -1947,6 +1952,20 @@ async function buildActionItems(ctx: {
       const reason = String(j.hold_reason ?? "").trim();
       // No reason saved: a key the fold says in the reader's language (whyKey, cn-v1180), the way the Now
       // row's textKey does; `why` keeps the English for every other reader of the row.
+      // ITS DAY HAS COME: a Reminder, not a Needs You row (cn-v1189). Only with the day's column (0366):
+      // the legacy read below cannot tell a day from no column, and keeps its old Now row.
+      if (withDay && state === "back" && until) {
+        holdReminders.push({
+          jobId: String(j.id),
+          title: jobWords(j),
+          jobNumber: (j.job_number as string | null) ?? null,
+          name: (j.name as string | null) ?? null,
+          reason: reason || null,
+          holdUntil: until,
+          href: `/jobs/${j.id}`,
+        });
+        continue;
+      }
       if (withDay && state === "later") {
         const row = waitingRow({ id: `onhold-${j.id}`, kind: "job_on_hold", title: jobWords(j), why: reason || "No reason saved", ...(reason ? {} : { whyKey: "ny_w_noReason" }), backOn: until, href: `/jobs/${j.id}` });
         if (row) {
@@ -2187,7 +2206,9 @@ async function buildActionItems(ctx: {
   const fold = waitingForViewer([...waiting, ...folded.waiting], isStaff).sort(
     (a, b) => (a.backOn === null ? 1 : 0) - (b.backOn === null ? 1 : 0) || (a.backOn ?? "").localeCompare(b.backOn ?? "") || a.title.localeCompare(b.title),
   );
-  return { now, waiting: fold, older: olderRows };
+  // THE HOLD REMINDERS (cn-v1189): the longest-waiting first (the earliest day), then by the job's words.
+  const reminders = holdReminders.sort((a, b) => a.holdUntil.localeCompare(b.holdUntil) || a.title.localeCompare(b.title));
+  return { now, waiting: fold, older: olderRows, reminders };
 }
 
 /** An untitled paper's bold line, by what kind of paper it is (cn-v1161). */

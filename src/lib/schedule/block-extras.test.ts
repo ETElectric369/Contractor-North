@@ -149,12 +149,12 @@ describe("jobState — where the job stands, in a tone", () => {
 
   it("on hold: amber and SHORT — On Hold and the day it comes back in the rail's own words; the reason is the note's (skeptic #55)", () => {
     expect(jobState({ status: "on_hold", hold_reason: "Waiting on the permit", hold_until: "2026-11-12" }, tech)).toEqual({
-      text: "On Hold · Back Nov 12",
+      text: "On Hold · Reminder Set Nov 12",
       tone: "warn",
     });
-    // The day has come: Back Today (never "3 days ago"); no day at all: On Hold alone — the state line is one
+    // The day has come: Reminder Today (never "3 days ago"); no day at all: On Hold alone — the state line is one
     // `truncate` line in a week column, so a long reason never rides on it (it leads the note instead).
-    expect(jobState({ status: "on_hold", hold_reason: "Waiting on the permit", hold_until: "2026-11-01" }, office)?.text).toBe("On Hold · Back Today");
+    expect(jobState({ status: "on_hold", hold_reason: "Waiting on the permit", hold_until: "2026-11-01" }, office)?.text).toBe("On Hold · Reminder Today");
     expect(jobState({ status: "on_hold", hold_reason: "Waiting on the permit and the inspector's callback", hold_until: null }, office)?.text).toBe("On Hold");
     expect(jobState({ status: "on_hold" }, office)?.text).toBe("On Hold");
     // The same for the office and the crew: a hold is nobody's money.
@@ -203,8 +203,8 @@ describe("jobState — where the job stands, in a tone", () => {
   });
 
   it("in Spanish through the catalog: the house words (En Pausa, Terminado, En Curso)", () => {
-    expect(jobState({ status: "on_hold", hold_reason: "Esperando el permiso", hold_until: "2026-11-12" }, office, "es", es)?.text).toBe("En Pausa · Vuelve 12 nov");
-    expect(jobState({ status: "on_hold", hold_until: "2026-11-05" }, office, "es", es)?.text).toBe("En Pausa · Vuelve Hoy");
+    expect(jobState({ status: "on_hold", hold_reason: "Esperando el permiso", hold_until: "2026-11-12" }, office, "es", es)?.text).toBe("En Pausa · Recordatorio el 12 nov");
+    expect(jobState({ status: "on_hold", hold_until: "2026-11-05" }, office, "es", es)?.text).toBe("En Pausa · Recordatorio Hoy");
     expect(jobState({ status: "complete", invoices: [{ status: "paid" }] }, office, "es", es)?.text).toBe("Terminado · Pagado");
     expect(jobState({ status: "complete", invoices: [{ status: "overdue" }] }, office, "es", es)?.text).toBe("Terminado · Factura Abierta");
     expect(jobState({ status: "complete", invoices: [{ status: "overdue" }] }, tech, "es", es)?.text).toBe("Terminado");
@@ -264,10 +264,10 @@ describe("jobBlockExtras — the three lines of a job block", () => {
     expect(noteOf(undefined)).toBeNull();
   });
 
-  it("a held job: the state short (On Hold · Back Nov 12), the hold's reason the first line of the note, the job's own words under it (skeptic #55)", () => {
+  it("a held job: the state short (On Hold · Reminder Set Nov 12), the hold's reason the first line of the note, the job's own words under it (skeptic #55)", () => {
     const why = "Waiting on the permit and the inspector's callback";
     const held = jobBlockExtras({ status: "on_hold", hold_reason: why, hold_until: "2026-11-12", notes: "Gate code 2580." }, office);
-    expect(held.state).toEqual({ text: "On Hold · Back Nov 12", tone: "warn" });
+    expect(held.state).toEqual({ text: "On Hold · Reminder Set Nov 12", tone: "warn" });
     expect(held.note).toBe(`${why}\nGate code 2580.`);
     // No notes and no description: the reason alone is the note; no reason: the state alone says On Hold.
     expect(jobBlockExtras({ status: "on_hold", hold_reason: why }, office).note).toBe(why);
@@ -295,7 +295,7 @@ describe("jobBlockExtras — the three lines of a job block", () => {
     );
     expect(out).toEqual({
       hours: "8 h trabajadas · 22 h en el trabajo",
-      state: { text: "En Pausa · Vuelve 12 nov", tone: "warn" },
+      state: { text: "En Pausa · Recordatorio el 12 nov", tone: "warn" },
       // The reason is the person's own words, in whatever language they wrote it; it leads the note the same way.
       note: "Esperando el permiso\nCódigo 2580.",
     });

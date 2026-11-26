@@ -129,12 +129,15 @@ describe("Nort's product map after the shell wave", () => {
     expect(myDay).toContain("My Day lists no other job's tasks.");
     expect(myDay).toContain("The office can flag a task on that Tasks tab (Flag for Needs You), and a flagged task is a row on Needs You under Operations until it is checked off or its flag is removed.");
     const needsYou = lines.find((l) => l.startsWith("- My Day → Needs You"))!;
-    expect(needsYou).toContain("A job on hold with no day waits there too, saying No Day Set, and counts in no number.");
+    expect(needsYou).toContain("A job on hold waits there before its day, saying Reminder Set and the day (with no day: No Reminder Set), and counts in no number.");
+    // cn-v1189: on its day a hold is a reminder in Tasks & Reminders, never a Needs You row.
+    expect(needsYou).toContain("On its day a held job is no Needs You row: it is a reminder first in Tasks & Reminders");
+    expect(needsYou).not.toMatch(/Holds Are Back|Holds Back/);
     expect(needsYou).toContain("A job task the office flagged is a row under Operations with Check Off and Open the Job (two or more: Flagged Tasks · N).");
     const you = lines.find((l) => l.startsWith("- Settings → You"))!;
     expect(you).toContain("Materials to Buy Today is the office's 8 AM notice of today's jobs that still have materials to buy");
     const route = readFileSync(join(process.cwd(), "src/app/api/chat/route.ts"), "utf8");
-    expect(route).toContain("(a job on hold with no day says No Day Set)");
+    expect(route).toContain("(a job on hold says Reminder Set and its day, or No Reminder Set with none; on its day it leaves the fold for a reminder in Tasks & Reminders, still on hold)");
   });
 
   it("Nort's own instructions say Needs You too, where they name the list", () => {

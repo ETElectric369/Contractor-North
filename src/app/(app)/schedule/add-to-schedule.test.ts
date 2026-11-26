@@ -24,6 +24,7 @@ import {
   dayLineKey,
   defaultDraft,
   findAddable,
+  openingHours,
   makesNewJob,
   newJobForWords,
   newJobHereWords,
@@ -122,6 +123,23 @@ describe("the sheet's words and search", () => {
     expect(defaultDraft("18:00", 960, WORK_DAY)).toEqual({ start: "18:00", end: "19:00", sized: true });
   });
 
+  it("a job that already has days opens on its usual hours, not the tapped spot (cn-v1189); a job without opens as before", () => {
+    // J-903, Tupelo Panel: its usual hours 9 to 5; the sheet opened on a 2 PM spot.
+    expect(openingHours({ tappedStart: "14:00", sizeMinutes: 480, workDay: WORK_DAY, usualHours: { start: "09:00", end: "17:00" } })).toEqual({
+      start: "09:00",
+      end: "17:00",
+      sized: true,
+      fromJob: true,
+    });
+    expect(openingHours({ tappedStart: "14:00", sizeMinutes: 240, workDay: WORK_DAY, usualHours: null })).toEqual({ start: "14:00", end: "18:00", sized: true, fromJob: false });
+    // The usual hours go as a chosen length, so the end the sheet shows is the end the writer keeps.
+    const sheet = readFileSync(join(process.cwd(), "src/app/(app)/schedule/add-to-schedule-sheet.tsx"), "utf8");
+    expect(sheet).toContain("const held = chosen || (!draft && base.fromJob);");
+    expect(sheet).toContain('const length = held ? (allDay ? ("full" as const) : e - s) : undefined;');
+    const panel = readFileSync(join(process.cwd(), "src/app/(app)/schedule/calendar-panel.tsx"), "utf8");
+    expect(panel).toContain("usual_hours: usualHoursOf({ scheduledStart: scheduled_start, scheduledEnd: scheduled_end");
+  });
+
   it("a new start with no length chosen shows the end the save will store (the job's size, not the drawn hours)", () => {
     // Tapped at 10:00, a job sized a day: 10 to closing. Only the Start moves to 11:00: the save sends
     // no length and the writer runs a day's size to closing, so the sheet says 11 to 5, never 11 to 6.
@@ -188,7 +206,7 @@ describe("the open spots and the day's +, on the grid", () => {
     expect(view).toMatch(/\{canEdit && \(\s*<AddToScheduleSheet/);
     expect(view).toMatch(/\{canEdit && !target\.armed && \(\s*<button[\s\S]*?onClick=\{\(\) => onSlotTap\(anchorK, null\)\}/);
     const panel = readFileSync(join(process.cwd(), "src/app/(app)/schedule/calendar-panel.tsx"), "utf8");
-    expect(panel).toMatch(/canEdit\s*\?\s*supabase\s*\.from\("jobs"\)\s*\.select\("id, job_number, name, status, address, city, planned_minutes, assigned_to, customers\(name\)"\)\s*\.in\("status", ACTIVE_JOB_STATUSES\)/);
+    expect(panel).toMatch(/canEdit\s*\?\s*supabase\s*\.from\("jobs"\)\s*\.select\("id, job_number, name, status, address, city, planned_minutes, assigned_to, scheduled_start, scheduled_end, customers\(name\)"\)\s*\.in\("status", ACTIVE_JOB_STATUSES\)/);
   });
 });
 

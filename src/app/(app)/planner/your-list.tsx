@@ -41,6 +41,8 @@ import { formatDate } from "@/lib/utils";
 import { carriedDay, carriedPin, isPinned, ranksToday } from "@/lib/six-rank";
 import { createTask, toggleTask, updateTask, type ToggleTaskResult } from "../tasks/actions";
 import { taskHref } from "@/lib/task-href";
+import type { HoldReminder } from "@/lib/action-items/types";
+import { HoldReminderRow } from "./hold-reminder-row";
 
 /** A ranked row (lib/six-rank picks it). A Reminder: no job. focus_date crosses as-is and the card
  *  asks lib/six-rank what it means — the pin's definition has ONE home, and it used to have three. */
@@ -250,6 +252,7 @@ export function AddReminderLine({
 
 export function YourList({
   rows,
+  holds = [],
   subtasks,
   todayStr,
   doneToday,
@@ -258,6 +261,10 @@ export function YourList({
 }: {
   /** The day's Reminders, already in rank order. No cap — Erik: "lets not limit it". */
   rows: SixSlot[];
+  /** THE HOLDS WHOSE DAY HAS COME (cn-v1189), filed with Reminders and drawn FIRST (their day is today
+   *  or earlier). Derived by the Needs You build from the jobs' own day, never a task: no checkbox, and
+   *  never in DoneMarks or the More For You count. Empty for a tech (the holds read is staff only). */
+  holds?: HoldReminder[];
   subtasks: SixSubtask[];
   todayStr: string;
   /** My Reminders completed today (server head-count) — the durable half of the progress marks. */
@@ -450,7 +457,16 @@ export function YourList({
 
       <AddReminderLine jobs={jobs} todayStr={todayStr} />
 
-      {rows.length === 0 ? (
+      {/* THE HOLDS WHOSE DAY HAS COME (cn-v1189): first, above the ranked Reminders. */}
+      {holds.length > 0 && (
+        <ul className="divide-y divide-slate-100 border-b border-slate-100">
+          {holds.map((h) => (
+            <HoldReminderRow key={h.jobId} hold={h} todayStr={todayStr} />
+          ))}
+        </ul>
+      )}
+
+      {rows.length === 0 && holds.length > 0 ? null : rows.length === 0 ? (
         <p className="px-5 py-5 text-center text-sm text-slate-400">
           {t("md_nothingUrgent")}{" "}
           {restCount > 0 && (
@@ -559,7 +575,7 @@ export function YourList({
           })}
         </ul>
       )}
-      {rows.length > 0 && restCount > 0 && (
+      {(rows.length > 0 || holds.length > 0) && restCount > 0 && (
         <Link
           href="/tasks"
           className="flex min-h-[44px] items-center justify-center border-t border-slate-100 text-sm font-medium text-brand hover:bg-slate-50"

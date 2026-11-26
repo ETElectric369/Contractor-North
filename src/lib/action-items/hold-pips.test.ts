@@ -12,13 +12,18 @@ import { describe, it, expect, vi } from "vitest";
  * RE-PINNED ON PURPOSE (cn-v1179, decision D): a hold with NO day is no longer a Now row. It waits in
  * the Waiting fold, saying its reason and No Day Set, after every row that has a day, and counts in no
  * number. Only a database without the hold-day columns (before 0366) keeps the old rule.
+ *
+ * RE-PINNED ON PURPOSE (cn-v1189): a hold whose day has come is no Now row either. It is a REMINDER, in
+ * the build's own `reminders` list, drawn first in My Day's Tasks & Reminders and counted by no number;
+ * its fold words say "Reminder Set Nov 12" and "No Reminder Set". The clock and Due pins went with the
+ * Now row; and the day arriving writes nothing (the job stays on hold).
  */
 
 // A fixed day: the test reads no clock.
 const TODAY = "2026-11-11";
 const daysAgo = (n: number) => new Date(Date.parse(`${TODAY}T20:00:00Z`) - n * 86_400_000).toISOString();
 
-const state = vi.hoisted(() => ({ held: [] as any[], legacy: false }));
+const state = vi.hoisted(() => ({ held: [] as any[], legacy: false, writes: [] as string[] }));
 
 /** Every read answers empty, except the held-jobs read, told apart by its select. `legacy`: the
  *  database has no hold-day columns (before 0366), so the read naming them fails as Postgres would. */
@@ -53,6 +58,13 @@ function fakeClient() {
               return q;
             };
           }
+          // Every write the build might make is written down (cn-v1189, C3: the day arriving writes nothing).
+          if (prop === "update" || prop === "insert" || prop === "upsert" || prop === "delete") {
+            return () => {
+              state.writes.push(`${table}.${String(prop)}`);
+              return q;
+            };
+          }
           return () => q;
         },
       },
@@ -83,34 +95,45 @@ const hold = (id: string, num: string, name: string, touched: string, until: str
 });
 
 describe("a hold with no day waits in the fold (cn-v1179)", () => {
-  it("no day: waiting, after the rows with a day, counted by no number; a later day waits; a day come is back on Now with its clock", async () => {
+  it("no day: waiting, after the rows with a day, counted by no number; a later day waits; a day come is a Reminder, never a Now row (cn-v1189)", async () => {
     state.legacy = false;
+    state.writes = [];
     state.held = [
       hold("j34", "J-934", "Larkspur Deck", daysAgo(85), null),
-      hold("j48", "J-048", "Snowbell Barn", daysAgo(2), "2026-11-12"),
-      hold("j13", "J-013", "Bayberry Porch", daysAgo(40), TODAY),
+      hold("j48", "J-948", "Snowbell Barn", daysAgo(2), "2026-11-12"),
+      hold("j13", "J-913", "Bayberry Porch", daysAgo(40), TODAY),
     ];
     const ctx = { todayStr: TODAY, isStaff: true, userId: "owner-1", tz: "America/Los_Angeles" };
     const r = await getActionItems(ctx);
-    // Back today: a Now row (a lone one, no pile), Due on its own day.
-    const ids = [...r.now, ...r.now.flatMap((x) => x.children ?? [])].map((x) => x.id);
-    expect(ids).toContain("onhold-j13");
-    expect(ids).not.toContain("onhold-j34");
-    expect(ids).not.toContain("onhold-j48");
-    const back = r.now.find((x) => x.id === "onhold-j13")!;
-    expect([back.clock, back.level]).toEqual([TODAY, "soon"]);
+    // ITS DAY HAS COME (cn-v1189): filed with Reminders, never a Needs You row (no row, no pile).
+    const ids = [...r.now, ...r.now.flatMap((x) => x.children ?? []), ...r.older].map((x) => x.id);
+    expect(ids.filter((id) => id.startsWith("onhold-") || id === "pile:holds_back")).toEqual([]);
+    expect(r.reminders).toEqual([
+      { jobId: "j13", title: "Bayberry Porch · J-913", jobNumber: "J-913", name: "Bayberry Porch", reason: "Waiting on the customer", holdUntil: TODAY, href: "/jobs/j13" },
+    ]);
+    // One place at a time: not in the fold either.
+    expect(r.waiting.some((w) => w.id === "onhold-j13")).toBe(false);
     // The fold: tomorrow's first, the one with no day last, saying its reason and No Day Set.
     const held = r.waiting.filter((w) => w.kind === "job_on_hold");
     expect(held.map((w) => [w.id, w.backOn])).toEqual([
       ["onhold-j48", "2026-11-12"],
       ["onhold-j34", null],
     ]);
-    expect(waitingLine(held[1])).toBe("Larkspur Deck · J-934 · Waiting on the customer · No Day Set");
-    expect(waitingLine(held[1], "es", translator("es"))).toBe("Larkspur Deck · J-934 · Waiting on the customer · Sin Día");
-    expect(waitingLine(held[0])).toBe("Snowbell Barn · J-048 · Waiting on the customer · Back Nov 12");
-    // The numbers: only the hold that is back counts (the header, the tiles, the dock's badge).
-    expect(summarize(r.now, { isStaff: true }).total).toBe(1);
-    expect(await getActionItemsCount(ctx)).toBe(1);
+    expect(waitingLine(held[1])).toBe("Larkspur Deck · J-934 · Waiting on the customer · No Reminder Set");
+    expect(waitingLine(held[1], "es", translator("es"))).toBe("Larkspur Deck · J-934 · Waiting on the customer · Sin Recordatorio");
+    expect(waitingLine(held[0])).toBe("Snowbell Barn · J-948 · Waiting on the customer · Reminder Set Nov 12");
+    // The numbers: no hold counts, not even the one whose day came (the header, the tiles, the dock's badge).
+    expect(summarize(r.now, { isStaff: true }).total).toBe(0);
+    expect(await getActionItemsCount(ctx)).toBe(0);
+    // C3: THE DAY ARRIVING WRITES NOTHING. The job stays on hold; the build only reads.
+    expect(state.writes).toEqual([]);
+  });
+
+  it("a tech: no hold reminders (the holds read is staff only, as Needs You's was)", async () => {
+    state.legacy = false;
+    state.held = [hold("j13", "J-913", "Bayberry Porch", daysAgo(40), TODAY)];
+    const r = await getActionItems({ todayStr: TODAY, isStaff: false, userId: "tech-1", tz: "America/Los_Angeles" });
+    expect(r.reminders).toEqual([]);
   });
 
   it("before 0366 (no hold-day columns) the old rule stands: a hold is a Now row with no Snooze", async () => {
@@ -126,32 +149,28 @@ describe("a hold with no day waits in the fold (cn-v1179)", () => {
   });
 });
 
-describe("a hold's clock", () => {
-  it("a hold whose day has come: its clock is that day, Due for seven days after, then plain", async () => {
+describe("the hold reminders' order (cn-v1189)", () => {
+  it("the longest-waiting first: an earlier day before a later one, every one of them off Now", async () => {
+    state.legacy = false;
     state.held = [
-      hold("j13", "J-013", "Birch Remodel", daysAgo(1), daysAgo(9).slice(0, 10)),
+      hold("j48", "J-948", "Tupelo Panel", daysAgo(40), TODAY),
+      hold("j13", "J-913", "Birch Remodel", daysAgo(1), daysAgo(9).slice(0, 10)),
       hold("j21", "J-021", "Larkspur Deck", daysAgo(1), daysAgo(7).slice(0, 10)),
-      hold("j48", "J-048", "Tupelo Panel", daysAgo(40), TODAY),
     ];
     const r = await getActionItems({ todayStr: TODAY, isStaff: true, userId: "owner-1", tz: "America/Los_Angeles" });
-    const pile = r.now.find((i) => i.id === "pile:holds_back")!;
-    const byId = Object.fromEntries(pile.children!.map((k) => [k.id, k]));
-    expect(byId["onhold-j13"].since).toBe(daysAgo(9).slice(0, 10));
-    expect(byId["onhold-j48"].since).toBe(TODAY);
-    expect(byId["onhold-j13"].clock).toBe(daysAgo(9).slice(0, 10));
-    expect(byId["onhold-j48"].clock).toBe(TODAY);
-    // Back nine days: past the window, plain. Back seven days and back today: Due. The pile wears it.
-    expect(byId["onhold-j13"].level).toBe("none");
-    expect(byId["onhold-j21"].level).toBe("soon");
-    expect(byId["onhold-j48"].level).toBe("soon");
-    expect(pile.level).toBe("soon");
+    expect(r.reminders.map((h) => [h.jobId, h.holdUntil])).toEqual([
+      ["j13", daysAgo(9).slice(0, 10)],
+      ["j21", daysAgo(7).slice(0, 10)],
+      ["j48", TODAY],
+    ]);
+    expect(r.now.find((i) => i.id === "pile:holds_back")).toBeUndefined();
   });
 });
 
 describe("the fold's law (cn-v1179)", () => {
   it("waitingRow still refuses a row with no day; waitingRowNoDay takes only a job on hold", async () => {
     const { waitingRow, waitingRowNoDay } = await import("./types");
-    const base = { id: "onhold-j1", kind: "job_on_hold" as const, title: "Larkspur Deck · J-041", why: "Waiting on the permit", href: "/jobs/j1" };
+    const base = { id: "onhold-j1", kind: "job_on_hold" as const, title: "Larkspur Deck · J-961", why: "Waiting on the permit", href: "/jobs/j1" };
     expect(waitingRow({ ...base, backOn: null })).toBeNull();
     expect(waitingRow({ ...base, backOn: "" })).toBeNull();
     expect(waitingRow({ ...base, backOn: "not a day" })).toBeNull();

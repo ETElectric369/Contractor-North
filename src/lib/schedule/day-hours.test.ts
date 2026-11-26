@@ -13,7 +13,7 @@ import {
   type DaySegment,
 } from "@/lib/schedule-math";
 import { dayBlockWords, jobDayBlock, planJobTimes, workDayMinutes } from "./job-block";
-import { dayHoursOf, freezeDrawnDays, nextDayHours, readDayHours } from "./day-hours";
+import { dayHoursOf, freezeDrawnDays, nextDayHours, ownOrUsual, readDayHours, usualHoursOf } from "./day-hours";
 import { ownHoursByJobDay } from "./segment-hours";
 
 /**
@@ -218,5 +218,27 @@ describe("ranges merge only when their hours match", () => {
     expect([...(m.get("j011")?.keys() ?? [])]).toEqual(["2026-09-28", "2026-09-29"]);
     expect(m.get("j011")?.get("2026-09-29")).toEqual(noon5);
     expect(m.has("j058")).toBe(false);
+  });
+});
+
+describe("an added day takes the job's usual hours (cn-v1189)", () => {
+  it("hours equal to the usual block store none of their own; others are the day's own", () => {
+    expect(ownOrUsual({ start: "09:00", end: "17:00" }, { start: "09:00", end: "17:00" })).toBeNull();
+    expect(ownOrUsual({ start: "09:00", end: "13:00" }, { start: "09:00", end: "17:00" })).toEqual({ start: "09:00", end: "13:00" });
+  });
+
+  it("a job's usual hours on the company's clock; none for a job with no day", () => {
+    const LA = "America/Los_Angeles";
+    const wd = { start: "09:00", end: "17:00" };
+    expect(usualHoursOf({ scheduledStart: tzDateTimeUtc("2026-10-05", "10:00", LA), scheduledEnd: tzDateTimeUtc("2026-10-07", "12:00", LA), tz: LA, workDay: wd })).toEqual({ start: "10:00", end: "12:00" });
+    expect(usualHoursOf({ scheduledStart: null, scheduledEnd: null, tz: LA, workDay: wd })).toBeNull();
+  });
+
+  it("a job on hold has no usual hours: its old block is no live plan (J-951, Tupelo Panel)", () => {
+    const LA = "America/Los_Angeles";
+    const wd = { start: "09:00", end: "17:00" };
+    const old = { scheduledStart: tzDateTimeUtc("2026-11-02", "09:00", LA), scheduledEnd: tzDateTimeUtc("2026-11-03", "16:00", LA), plannedMinutes: 960, tz: LA, workDay: wd };
+    expect(usualHoursOf({ ...old, status: "on_hold" })).toBeNull();
+    expect(usualHoursOf({ ...old, status: "scheduled" })).toEqual({ start: "09:00", end: "16:00" });
   });
 });

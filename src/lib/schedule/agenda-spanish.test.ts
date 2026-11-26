@@ -123,10 +123,10 @@ describe("the agenda's libraries in Spanish", () => {
   });
 
   it("come-back-days: the chips Title Case, the refusals, the off-hold line", () => {
-    expect(backWords(null, "2026-11-05", "es", t)).toBe("Sin Día");
-    expect(backWords("2026-11-05", "2026-11-05", "es", t)).toBe("Vuelve Hoy");
-    expect(backWords("2026-11-09", "2026-11-05", "es", t)).toBe("Vuelve 9 nov");
-    expect(backWords("2026-11-09", "2026-11-05")).toBe("Back Nov 9");
+    expect(backWords(null, "2026-11-05", "es", t)).toBe("Sin Recordatorio");
+    expect(backWords("2026-11-05", "2026-11-05", "es", t)).toBe("Recordatorio Hoy");
+    expect(backWords("2026-11-09", "2026-11-05", "es", t)).toBe("Recordatorio el 9 nov");
+    expect(backWords("2026-11-09", "2026-11-05")).toBe("Reminder Set Nov 9");
     expect(shortDay("2026-10-03", "es")).toBe("3 oct");
     expect(checkComeBackDay("2026-11-05", "x", "es", t)).toEqual({ ok: false, error: "Elige un día." });
     expect(checkComeBackDay("2026-11-05", "2026-11-01", "es", t)).toEqual({ ok: false, error: "Elige hoy o después" });

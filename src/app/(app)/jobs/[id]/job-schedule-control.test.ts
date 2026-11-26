@@ -16,6 +16,7 @@ vi.mock("../../schedule/actions", () => ({ setJobScheduleRanges: vi.fn(), setJob
 import { JobScheduleControl } from "./job-schedule-control";
 import { readJobBlock } from "@/lib/schedule/job-block";
 import { tzDateTimeUtc } from "@/lib/tz";
+import { LangProvider } from "@/components/lang-provider";
 
 const LA = "America/Los_Angeles";
 const WORK_DAY = { start: "09:00", end: "17:00" };
@@ -133,5 +134,77 @@ describe("where each edit goes (source)", () => {
     const page = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/page.tsx"), "utf8");
     const from = page.indexOf("<AddTimeEntry");
     expect(page.slice(from, page.indexOf("/>", from))).toContain("workDayEnd={workDay.end}");
+  });
+});
+
+/**
+ * A RANGE ROW WAITS FOR BOTH ITS DAYS (cn-v1189; the owner: "Add date range is not responding", "Add
+ * date range should wait and require a range before auto saving right now it won't even let me add the
+ * second day"). J-904, Larkspur, Mon Oct 5, and a second row with one day picked.
+ */
+describe("a range row waits for both its days", () => {
+  const MON = { start_date: "2026-10-05", end_date: "2026-10-05" };
+  const row = (seg: { start_date: string; end_date: string }, lang: "en" | "es" = "en") =>
+    renderToStaticMarkup(
+      createElement(
+        LangProvider,
+        { lang } as never,
+        createElement(JobScheduleControl, {
+          id: "j904",
+          segments: [MON, seg],
+          block: readJobBlock({ scheduledStart: at("2026-10-05", "09:00"), scheduledEnd: at("2026-10-05", "17:00"), plannedMinutes: 480, tz: LA, workDay: WORK_DAY }),
+          workDay: WORK_DAY,
+        }),
+      ),
+    );
+
+  it("a first day only: it says what it waits for, with One Day at 44px and its remove control; Add Date Range waits", () => {
+    const html = row({ start_date: "2026-10-08", end_date: "" });
+    expect(text(html)).toContain("Pick the last day, or tap One Day.");
+    expect(html).toMatch(/<button[^>]*class="[^"]*\bmin-h-11\b[^"]*"[^>]*>One Day<\/button>/);
+    expect(html.match(/aria-label="Remove date range"/g)?.length).toBe(2);
+    expect(text(html)).not.toContain("Add Date Range");
+    for (const d of doors(html)) expect(d, d).toMatch(/\b(min-)?h-11\b/);
+  });
+
+  it("a last day only: Pick the first day.", () => {
+    const html = row({ start_date: "", end_date: "2026-10-08" });
+    expect(text(html)).toContain("Pick the first day.");
+    expect(html).not.toContain(">One Day<");
+    expect(text(html)).not.toContain("Add Date Range");
+  });
+
+  it("in Spanish", () => {
+    expect(text(row({ start_date: "2026-10-08", end_date: "" }, "es"))).toContain("Elige el último día, o toca Un Solo Día.");
+    expect(row({ start_date: "2026-10-08", end_date: "" }, "es")).toMatch(/>Un Solo Día<\/button>/);
+    expect(text(row({ start_date: "", end_date: "2026-10-08" }, "es"))).toContain("Elige el primer día.");
+  });
+
+  it("both rows ready: no waiting words, and Add Date Range is drawn", () => {
+    const html = row({ start_date: "2026-10-08", end_date: "2026-10-09" });
+    expect(text(html)).toContain("Add Date Range");
+    expect(text(html)).not.toContain("Pick the");
+  });
+
+  it("no date box is disabled, by a save or anything else", () => {
+    const html = row({ start_date: "2026-10-08", end_date: "" });
+    for (const box of html.match(/<input[^>]*type="date"[^>]*>/g) ?? []) expect(box).not.toMatch(/\sdisabled(=|\s|\/|>)/);
+  });
+});
+
+describe("when a save happens, and whose answer shows (source)", () => {
+  const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-schedule-control.tsx"), "utf8");
+
+  it("only the ready rows are sent, and a date edit saves only once its row is ready", () => {
+    expect(src).toContain("const filled = rangesToSave(next).save;");
+    expect(src).toContain('if (rowState(next[i]) === "ready") persist(next);');
+    expect(src).not.toMatch(/disabled=\{pending\}/);
+  });
+
+  it("only the latest save's answer shows; what was stored replaces the saved rows, a waiting row kept, and a join is said", () => {
+    expect(src).toContain("const mine = ++lastSave.current;");
+    expect(src).toContain("if (mine !== lastSave.current) return;");
+    expect(src).toContain("setRanges((now) => reseedRows(stored, now));");
+    expect(src).toContain('setJoined(fillText(t("jb_rangesJoined"), { range: rangeWords(j, (d) => dayWords(d, lang), t("jb_to")) }));');
   });
 });

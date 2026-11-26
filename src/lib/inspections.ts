@@ -3,8 +3,8 @@
  * whole promise is TRUTHFUL buckets (Erik's design 2026-07-14: open work first, settled
  * paperwork files away like estimates do).
  *
- *   • toWriteUp — the money bucket: the visit happened (status completed, or its time
- *     is past AND field capture exists — capture is what makes an unmarked visit "done")
+ *   • toWriteUp — the money bucket: the visit happened (status completed, or its DAY
+ *     has passed AND field capture exists — doneByCapture, what makes an unmarked visit "done")
  *     but no estimate exists yet on its inquiry or job. Each row's next step is one
  *     verb: Create Estimate.
  *   • upcoming — scheduled/proposed visits that are still ahead (or today), and a visit with no day.
@@ -65,6 +65,32 @@ export function hasCaptureData(capture: unknown): boolean {
   const filled = (v: unknown) => typeof v === "string" && v.trim().length > 0;
   const some = (v: unknown) => Array.isArray(v) && v.length > 0;
   return filled(c.notes) || filled(c.measurements) || filled(c.materials) || some(c.photos) || some(c.items) || some(c.measures);
+}
+
+/**
+ * DONE BY CAPTURE (cn-v1189): THE ONE TEST for "nobody tapped Mark Inspection Done, but the visit
+ * happened because something was captured on it". Every reader that files an unmarked visit as done
+ * asks this, and nothing else (bucketInspections, and through it the Inspections list, the Estimates
+ * page's Inspections To Estimate and My Day's write-up pile).
+ *
+ * CAPTURE FINISHES A VISIT ONLY ONCE ITS DAY HAS PASSED: its start is before the start of today, the
+ * company's midnight. A field user, of a visit he had started and left: "Started inspection and now
+ * it's gone". Start Now writes a start of now, so before this the first photo or the first autosaved
+ * note moved a visit still in progress off Inspections and onto Estimates. On its own day a started
+ * visit stays open, reopenable, until Mark Inspection Done or an estimate written from it; the day
+ * after, the capture says it happened.
+ *
+ * It says nothing about status: a cancelled or completed visit is decided before this is asked.
+ */
+export function doneByCapture(
+  row: { starts_at: string | null; capture?: unknown },
+  now: Date = new Date(),
+  tz: string = "UTC",
+): boolean {
+  if (!row.starts_at || !hasCaptureData(row.capture)) return false;
+  const at = new Date(row.starts_at).getTime();
+  if (!Number.isFinite(at)) return false;
+  return at < tzDayStartUtc(todayStrInTz(tz, now), tz).getTime();
 }
 
 /** One tag on an Inspections row: what it says, and the Badge tone it would say it in. The tone names
@@ -238,12 +264,13 @@ export function bucketInspections<T extends InspectionBucketRow>(
 
     if (r.status === "cancelled") out.filed.push(r);
     else if (r.status === "completed") (writtenUp ? out.filed : out.toWriteUp).push(r);
-    // "Done by capture": a past visit with field data counts as happened even if nobody
-    // tapped complete — unless its estimate already exists, in which case it's settled.
-    // A written-up estimate is itself the strongest "the visit happened" signal, so a
-    // past visit whose estimate exists files even when the capture text was left blank.
-    else if (past && (hasCaptureData(r.capture) || writtenUp))
-      (writtenUp ? out.filed : out.toWriteUp).push(r);
+    // A written-up estimate is itself the strongest "the visit happened" signal, so a past visit
+    // whose estimate exists files, captured or not, on its own day too.
+    else if (past && writtenUp) out.filed.push(r);
+    // "Done by capture" (doneByCapture, the one test): field data counts as happened even if nobody
+    // tapped complete, but only once the visit's DAY has passed (cn-v1189). On its own day a started
+    // visit stays open on Inspections, reopenable, falling through to upcoming below.
+    else if (doneByCapture(r, now, tz)) out.toWriteUp.push(r);
     // A past DAY, still scheduled, nothing captured, nothing written from it: it may never have
     // happened, so it asks instead of posing as upcoming.
     else if (r.status === "scheduled" && !!r.starts_at && new Date(r.starts_at).getTime() < todayStart) out.missed.push(r);

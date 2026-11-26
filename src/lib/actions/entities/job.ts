@@ -251,7 +251,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Set job status",
     description:
-      "Change a job's status — 'mark the Miller job on hold / in progress / scheduled'. Resolve the job with list_jobs first. Status: to_be_scheduled, scheduled, in_progress, on_hold, cancelled. FINISHING A JOB IS NOT HERE: 'mark it complete / done / finished' is job.finish, which bills the work first and asks the user to confirm — this tool refuses 'complete' and says so. Putting a job ON HOLD needs its reason (what it's waiting on: it is the reminder when the job comes back) and takes an optional until (YYYY-MM-DD, company-local, today or later: the day it comes back to Needs You; left out, a week from today). With no reason it refuses unless the job already has one saved; ask what it's waiting on.",
+      "Change a job's status — 'mark the Miller job on hold / in progress / scheduled'. Resolve the job with list_jobs first. Status: to_be_scheduled, scheduled, in_progress, on_hold, cancelled. FINISHING A JOB IS NOT HERE: 'mark it complete / done / finished' is job.finish, which bills the work first and asks the user to confirm — this tool refuses 'complete' and says so. Putting a job ON HOLD needs its reason (what it's waiting on: it is what the reminder says) and takes an optional until (YYYY-MM-DD, company-local, today or later: its reminder day, when it shows in My Day's Tasks & Reminders; left out, a week from today). The job stays on hold on that day. With no reason it refuses unless the job already has one saved; ask what it's waiting on.",
     input: z.object({
       id: z.string(),
       status: z.string(),
@@ -313,7 +313,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Snooze a job on hold",
     description:
-      "A job on hold comes back to Needs You on its day with its reason; this moves that day — 'bring the Miller job back next Friday'. Pass the job's id (from list_jobs) and date (YYYY-MM-DD, company-local, today or later). The job stays on hold, held by whoever held it, with its reason; pass reason only when the hold has none saved yet (it never rewrites a saved one). Reversible: pick another day any time.",
+      "A job on hold shows as a reminder in My Day's Tasks & Reminders on its day, with its reason, and stays on hold; this moves that reminder day — 'bring the Miller job back next Friday'. Pass the job's id (from list_jobs) and date (YYYY-MM-DD, company-local, today or later). The job stays on hold, held by whoever held it, with its reason; pass reason only when the hold has none saved yet (it never rewrites a saved one). Reversible: pick another day any time.",
     input: z.object({ id: z.string(), date: z.string().regex(YMD), reason: z.string().nullable().optional() }),
     auth: "staff",
     effect: "write",

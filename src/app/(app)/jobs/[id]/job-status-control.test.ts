@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 /**
  * THE JOB HEADER (W1-17). The status badge IS the status control: the office taps the pill (its
  * status's colours, a chevron) for a glass menu of the statuses; a held job reads "On Hold · waiting
- * on the permit · back Oct 3" with Snooze beside it; the crew reads the same pill, not tappable. The
+ * on the permit · reminder set Oct 3" (cn-v1189) with Snooze beside it; the crew reads the same pill, not tappable. The
  * J-number is said once (the breadcrumb). Manage is three rows for the office and nothing for a tech.
  */
 const writers = vi.hoisted(() => ({
@@ -32,14 +32,20 @@ const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\
 
 describe("the held line", () => {
   it("the reason and the day it comes back", () => {
-    expect(heldWords("waiting on the permit", "2026-10-03", TODAY)).toBe("waiting on the permit · back Oct 3");
+    expect(heldWords("waiting on the permit", "2026-10-03", TODAY)).toBe("waiting on the permit · reminder set Oct 3");
   });
-  it("a day already come is back today, never days ago", () => {
-    expect(heldWords("waiting on the permit", "2026-09-20", TODAY)).toBe("waiting on the permit · back today");
-    expect(heldWords("x", TODAY, TODAY)).toBe("x · back today");
+  it("a day already come is reminder today, never days ago", () => {
+    expect(heldWords("waiting on the permit", "2026-09-20", TODAY)).toBe("waiting on the permit · reminder today");
+    expect(heldWords("x", TODAY, TODAY)).toBe("x · reminder today");
+  });
+  it("the day is written in the reader's language (cn-v1189: a Spanish reader got \"Oct 3\")", async () => {
+    const { translator } = await import("@/lib/i18n");
+    expect(heldWords("x", "2026-10-03", TODAY, translator("es"), "es")).toBe("x · recordatorio el 3 oct");
+    expect(heldWords("x", TODAY, TODAY, translator("es"), "es")).toBe("x · recordatorio hoy");
+    expect(heldWords("x", null, TODAY, translator("es"), "es")).toBe("x · sin recordatorio");
   });
   it("a hold from before 0366 says it has no day; a database without 0366 says no day at all", () => {
-    expect(heldWords("waiting on the permit", null, TODAY)).toBe("waiting on the permit · no day set");
+    expect(heldWords("waiting on the permit", null, TODAY)).toBe("waiting on the permit · no reminder set");
     expect(heldWords("waiting on the permit", undefined, TODAY)).toBe("waiting on the permit");
   });
 });
@@ -59,7 +65,7 @@ describe("the office's pill", () => {
   it("held: the reason and the day beside the pill, and Snooze (44px)", () => {
     const html = render({ status: "on_hold", holdReason: "waiting on the permit", holdUntil: "2026-10-03" });
     expect(html).toMatch(/>On Hold<svg/);
-    expect(html).toContain("· waiting on the permit · back Oct 3");
+    expect(html).toContain("· waiting on the permit · reminder set Oct 3");
     expect(html).toMatch(/<button[^>]*min-h-11[^>]*>Snooze<\/button>/);
   });
 
@@ -122,7 +128,7 @@ describe("the crew's pill", () => {
   it("the same pill and words, nothing to tap", () => {
     const html = render({ viewerIsStaff: false, status: "on_hold", holdReason: "waiting on the permit", holdUntil: "2026-10-03" });
     expect(html).toContain(">On Hold<");
-    expect(html).toContain("· waiting on the permit · back Oct 3");
+    expect(html).toContain("· waiting on the permit · reminder set Oct 3");
     expect(html).not.toContain("<button");
     expect(html).not.toContain("Snooze");
   });

@@ -424,22 +424,23 @@ describe("the build: each row's who, what and amount (table A2)", () => {
   it("a job needing a day and a hold: the job in bold, the customer as the tail, the fact as a key", async () => {
     state.rows.needDay = [{ id: "j5", job_number: "J-070", name: "Larkspur Remodel", status: "to_be_scheduled", created_at: daysAgo(20), customers: { name: "Casey Loam" }, job_schedule_segments: [], time_entries: [] }];
     state.rows.holds = [
-      { id: "j6", job_number: "J-071", name: "Snowbell Barn", updated_at: daysAgo(30), hold_reason: "Waiting on the owner", hold_until: dayAgo(1), customers: { name: "Theo Vance" }, holder: null },
-      { id: "j7", job_number: "J-072", name: "Bayberry Porch", updated_at: daysAgo(30), hold_reason: "", hold_until: null, customers: null, holder: null },
+      { id: "j6", job_number: "J-971", name: "Snowbell Barn", updated_at: daysAgo(30), hold_reason: "Waiting on the owner", hold_until: dayAgo(1), customers: { name: "Theo Vance" }, holder: null },
+      { id: "j7", job_number: "J-972", name: "Bayberry Porch", updated_at: daysAgo(30), hold_reason: "", hold_until: null, customers: null, holder: null },
     ];
     const all = await getActionItems({ todayStr: TODAY, isStaff: true, userId: "owner-1", tz: TZ });
     const rows = all.now;
     expect(byId(rows, "j5")).toMatchObject({ who: "Larkspur Remodel · J-070", what: { key: "ny_w_neverHadADay", tail: "Casey Loam" } });
-    expect(byId(rows, "onhold-j6")).toMatchObject({ who: "Snowbell Barn · J-071", what: { key: "ny_w_holdBack", vars: { text: "Waiting on the owner" }, tail: "Theo Vance" } });
-    // THE CLOCK (cn-v1162): a hold back since yesterday is Due on that day.
-    expect(byId(rows, "onhold-j6")).toMatchObject({ clock: dayAgo(1), level: "soon" });
+    // RE-PINNED ON PURPOSE (cn-v1189): a hold whose day came (yesterday) is a Reminder in Tasks &
+    // Reminders, no row of the board; ny_w_holdBack is said now only by a database without the day column.
+    expect([...rows, ...rows.flatMap((x) => x.children ?? [])].some((r) => r.id === "onhold-j6")).toBe(false);
+    expect(all.reminders).toEqual([{ jobId: "j6", title: "Snowbell Barn · J-971", jobNumber: "J-971", name: "Snowbell Barn", reason: "Waiting on the owner", holdUntil: dayAgo(1), href: "/jobs/j6" }]);
     // The hold with no day waits in the fold, with no day, and is no row of the board.
     expect([...rows, ...rows.flatMap((x) => x.children ?? [])].some((r) => r.id === "onhold-j7")).toBe(false);
     // cn-v1180: no reason saved is a KEY the fold says in the reader's language, never English to all.
-    expect(all.waiting).toContainEqual({ id: "onhold-j7", kind: "job_on_hold", title: "Bayberry Porch · J-072", why: "No reason saved", whyKey: "ny_w_noReason", backOn: null, href: "/jobs/j7" });
+    expect(all.waiting).toContainEqual({ id: "onhold-j7", kind: "job_on_hold", title: "Bayberry Porch · J-972", why: "No reason saved", whyKey: "ny_w_noReason", backOn: null, href: "/jobs/j7" });
     const j7 = all.waiting.find((w) => w.id === "onhold-j7")!;
-    expect(waitingLine(j7, "es", translator("es"))).toBe("Bayberry Porch · J-072 · sin motivo guardado · Sin Día");
-    expect(waitingLine(j7, "en", translator("en"))).toBe("Bayberry Porch · J-072 · no reason saved · No Day Set");
+    expect(waitingLine(j7, "es", translator("es"))).toBe("Bayberry Porch · J-972 · sin motivo guardado · Sin Recordatorio");
+    expect(waitingLine(j7, "en", translator("en"))).toBe("Bayberry Porch · J-972 · no reason saved · No Reminder Set");
     // A job needing a day has no clock at all: every day it holds is a day the office's paper was born.
     expect([byId(rows, "j5").clock ?? null, byId(rows, "j5").level]).toEqual([null, "none"]);
   });

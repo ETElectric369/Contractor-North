@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 /**
  * THE RAIL AND THE SHEETS IN SPANISH (the agenda-in-Spanish wave, ag_rail_). Each screen the rail
@@ -112,7 +114,7 @@ describe("the rail and the sheets speak Spanish to a Spanish reader", () => {
     expect(t).toContain("1 esperando");
     expect(t).toContain("1 esperando · sin dirección aún");
     expect(t).toContain("En Pausa — el permiso");
-    expect(t).toContain("Vuelve Hoy");
+    expect(t).toContain("Recordatorio Hoy");
     expect(t).toContain("Sin Dirección Aún");
     expect(t).toContain("Sin ciudad aún");
     expect(t).not.toMatch(/waiting|No Address Yet|On Hold/);
@@ -210,6 +212,22 @@ describe("the rail and the sheets speak Spanish to a Spanish reader", () => {
     expect(t).toContain("Vuelve el 12 nov");
     expect(t).toContain("Di por qué: es el recordatorio cuando vuelva el trabajo");
     expect(t).not.toMatch(/Comes back|Pick a Day|Tomorrow/);
+  });
+
+  it("opened for a HOLD, the picker says a reminder, not a coming back, in both languages (skeptic #90 S5)", () => {
+    const props = { label: "Pick Another Day", reminder: true, todayStr: "2026-11-05", onSubmit: () => {}, onCancel: () => {} };
+    const en = text(renderToStaticMarkup(createElement(ComeBackPicker, props)));
+    expect(en).toContain("Reminder Set Nov 12");
+    expect(en).not.toContain("Comes back");
+    const sp = text(es(createElement(ComeBackPicker, props)));
+    expect(sp).toContain("Recordatorio el 12 nov");
+    expect(sp).not.toContain("Vuelve el");
+    // Every hold caller asks for it; the other callers (Needs You's Snooze, Set Aside, Move) do not.
+    const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+    expect(read("src/app/(app)/planner/hold-reminder-row.tsx")).toMatch(/<ComeBackPicker\s+reminder\b/);
+    expect(read("src/app/(app)/jobs/[id]/job-status-control.tsx")).toMatch(/<ComeBackPicker\s+reminder\b/);
+    expect(read("src/app/(app)/schedule/place-rail.tsx").match(/<ComeBackPicker\s+reminder\b/g)).toHaveLength(2);
+    expect(read("src/components/action-items/action-list.tsx")).not.toMatch(/<ComeBackPicker\s+reminder\b/);
   });
 
   it("Kind? · How long?: the kinds and the lengths in Spanish", () => {

@@ -417,7 +417,7 @@ describe("ActionList — a verb's refusal is always said, and the server's list 
 });
 
 describe("the Waiting fold", () => {
-  const w = (o: Partial<WaitingItem>): WaitingItem => ({ id: "w1", kind: "job_on_hold", title: "Fernhill Panel · J-034", why: "Waiting on the permit", backOn: "2026-10-03", href: "/jobs/j34", ...o });
+  const w = (o: Partial<WaitingItem>): WaitingItem => ({ id: "w1", kind: "job_on_hold", title: "Fernhill Panel · J-934", why: "Waiting on the permit", backOn: "2026-10-03", href: "/jobs/j34", ...o });
 
   it("drawn only when something waits; a grey count, never a badge; collapsed", () => {
     expect(renderToStaticMarkup(createElement(WaitingFold, { items: [] }))).toBe("");
@@ -434,16 +434,21 @@ describe("the Waiting fold", () => {
     expect(html).not.toContain("Waiting on the permit");
   });
 
-  it("a job held until Oct 3 waits in the fold as 'Back Oct 3', never up top", () => {
+  it("a job held until Oct 3 waits in the fold as 'Reminder Set Oct 3' (cn-v1189), never up top", () => {
     // query.ts: heldJobState(hold_until, today) === "later" → waitingRow(...), not a Now row.
-    const held = waitingRow({ id: "onhold-j47", kind: "job_on_hold", title: "Kitchen Hood Outlet · J-047", why: "Waiting on the customer", backOn: "2026-10-03", href: "/jobs/j47" })!;
-    expect(waitingLine(held)).toBe("Kitchen Hood Outlet · J-047 · Waiting on the customer · Back Oct 3");
+    const held = waitingRow({ id: "onhold-j47", kind: "job_on_hold", title: "Kitchen Hood Outlet · J-947", why: "Waiting on the customer", backOn: "2026-10-03", href: "/jobs/j47" })!;
+    expect(waitingLine(held)).toBe("Kitchen Hood Outlet · J-947 · Waiting on the customer · Reminder Set Oct 3");
     const query = readFileSync(join(process.cwd(), "src/lib/action-items/query.ts"), "utf8");
     expect(query).toMatch(/if \(withDay && state === "later"\) \{\s*const row = waitingRow\(\{ id: `onhold-\$\{j\.id\}`, kind: "job_on_hold"/);
   });
 
   it("each row says what, why and the day it comes back", () => {
-    expect(waitingLine(w({}))).toBe("Fernhill Panel · J-034 · Waiting on the permit · Back Oct 3");
+    expect(waitingLine(w({}))).toBe("Fernhill Panel · J-934 · Waiting on the permit · Reminder Set Oct 3");
+    // Every other kind keeps "Back {day}" (ag_btn_backOn is theirs, cn-v1189): a draft set aside, a snoozed row.
+    expect(waitingLine(w({ kind: "invoice_draft", title: "INV-907 · Larkspur", why: "Set Aside" }))).toBe("INV-907 · Larkspur · Set Aside · Back Oct 3");
+    expect(waitingLine(w({ kind: "materials_needed", why: "Snoozed" }), "es", translator("es"))).toBe("Fernhill Panel · J-934 · Snoozed · Vuelve 3 oct");
+    expect(waitingLine(w({}), "es", translator("es"))).toBe("Fernhill Panel · J-934 · Waiting on the permit · Recordatorio el 3 oct");
+    expect(waitingLine(w({ backOn: null }))).toBe("Fernhill Panel · J-934 · Waiting on the permit · No Reminder Set");
     const fold = readFileSync(join(process.cwd(), "src/components/action-items/waiting-fold.tsx"), "utf8");
     expect(fold).toContain('className="flex min-h-11 items-center px-5 py-1.5');
   });

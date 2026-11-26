@@ -145,6 +145,7 @@ export function RailCardRows({ i, todayStr, close }: { i: Placeable; todayStr?: 
       {i.kind === "job" && !i.onHold && (
         mode === "hold" ? (
           <ComeBackPicker
+            reminder
             label={t("ag_rail_btn_holdIt")}
             requireWhy
             autoFocus
@@ -167,6 +168,7 @@ export function RailCardRows({ i, todayStr, close }: { i: Placeable; todayStr?: 
         <>
           {mode === "snooze" ? (
             <ComeBackPicker
+              reminder
               label={t("ag_rail_btn_snooze")}
               askWhy={!i.holdReason}
               autoFocus={!i.holdReason}
@@ -499,9 +501,10 @@ export function PlaceRail({
                               {t("jb_statusOnHold")}{i.holdReason ? ` — ${i.holdReason}` : ""}
                             </Badge>
                           )}
-                          {/* THE DAY IT COMES BACK, ON THE CARD (text to visual, 0366): "Back Oct 3",
-                              amber "Back Today" once it has come (or "No Day Set" for a hold from
-                              before the day existed). No chip while the database has no day yet. */}
+                          {/* THE HOLD'S DAY, ON THE CARD (text to visual, 0366), said as a reminder
+                              (cn-v1189): "Reminder Set Oct 3", amber "Reminder Today" once it has
+                              come (or "No Reminder Set" for a hold with no day). No chip while the
+                              database has no day yet. */}
                           {i.onHold && todayStr && i.holdUntil !== undefined && (
                             <Badge tone={comeBackDue(i.holdUntil, todayStr) ? "amber" : "slate"}>{backWords(i.holdUntil, todayStr, lang, t)}</Badge>
                           )}

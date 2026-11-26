@@ -20,7 +20,7 @@
 import type { DayHours, DaySegment } from "../schedule-math";
 import { hoursOnDay, segmentDays, setDayHours } from "../schedule-math";
 import { minutesToHm } from "./fit-day";
-import { jobDayBlock, keptEndMin, readHm, type JobLength, type WorkDayMin } from "./job-block";
+import { jobDayBlock, keptEndMin, readHm, readJobBlock, type JobLength, type WorkDayMin } from "./job-block";
 
 const LAST_MINUTE = 23 * 60 + 59;
 
@@ -29,6 +29,29 @@ export function dayHoursOf(startMin: number, endMin: number): DayHours {
   const s = Math.max(0, Math.min(LAST_MINUTE - 1, Math.round(startMin)));
   const e = Math.max(s + 1, Math.min(LAST_MINUTE, Math.round(endMin)));
   return { start: minutesToHm(s), end: minutesToHm(e) };
+}
+
+/** AN ADDED DAY'S HOURS AS STORED (cn-v1189): null (the job's usual hours) when the hours given are the
+ *  very hours the day draws at the job's usual block, else the hours given (its own). */
+export function ownOrUsual(hours: DayHours, usual: DayHours): DayHours | null {
+  return hours.start === usual.start && hours.end === usual.end ? null : hours;
+}
+
+/** A job's usual hours on the company's clock (its block: readJobBlock), or null when it has no day.
+ *  What Add to Schedule opens on for a job that already has days (cn-v1189). A job ON HOLD has none:
+ *  its old block is no live plan (schedule/actions planSpan), so the sheet opens on the tapped time and
+ *  never sends the old block's length as the job's size. */
+export function usualHoursOf(p: {
+  scheduledStart: string | null | undefined;
+  scheduledEnd: string | null | undefined;
+  plannedMinutes?: number | null;
+  status?: string | null;
+  tz: string;
+  workDay: { start: string; end: string };
+}): DayHours | null {
+  if (!p.scheduledStart || p.status === "on_hold") return null;
+  const b = readJobBlock({ scheduledStart: p.scheduledStart, scheduledEnd: p.scheduledEnd ?? null, plannedMinutes: p.plannedMinutes ?? null, tz: p.tz, workDay: p.workDay });
+  return { start: b.startHm, end: b.endHm };
 }
 
 /** A day's hours as stored ("12:00:00" from Postgres' time type) → "HH:MM", or null when the pair

@@ -69,10 +69,13 @@ export function openFirst(doors: readonly MenuDoor[], boxedSaysOpen: boolean): M
  * Start Inspection, except the city's Final Inspection: nobody here starts the city's inspection, so
  * it says Open Inspection.
  */
-export function primaryOf(state: InspectionListState, o: { decidable: boolean; estimatesOn: boolean; wonNoJob?: boolean }): PrimaryKind {
+export function primaryOf(state: InspectionListState, o: { decidable: boolean; estimatesOn: boolean; wonNoJob?: boolean; captured?: boolean }): PrimaryKind {
   // A WIN WITH NO JOB IS NOT AN ENDING (cn-v1175, R8): it stays on the list and asks for its job.
   if (o.wonNoJob) return "wonStart";
   if (state === "write_up") return o.estimatesOn ? "estimate" : "open";
+  // A VISIT STARTED TODAY (cn-v1189): photos or notes on it, still Coming Up until its day passes. It
+  // has started, so it says Open Inspection, never Start Inspection.
+  if (state === "coming_up" && o.captured) return "open";
   return o.decidable ? "start" : "open";
 }
 

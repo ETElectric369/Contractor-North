@@ -13,7 +13,7 @@ import type { WordCatalog } from "./types";
  */
 export const words: WordCatalog = {
   prefix: "md_",
-  files: ["src/app/(app)/planner/page.tsx", "src/app/(app)/planner/now-card.tsx", "src/app/(app)/planner/now-tasks.tsx", "src/app/(app)/planner/your-list.tsx", "src/app/(app)/planner/do-today-button.tsx"],
+  files: ["src/app/(app)/planner/page.tsx", "src/app/(app)/planner/now-card.tsx", "src/app/(app)/planner/now-tasks.tsx", "src/app/(app)/planner/your-list.tsx", "src/app/(app)/planner/hold-reminder-row.tsx", "src/app/(app)/planner/do-today-button.tsx"],
   sameInBoth: [],
   en: {
     // ── the page ──
@@ -128,6 +128,9 @@ export const words: WordCatalog = {
     md_pinToTop: "Pin to Top (Carries Until You Unpin It)",
     md_openDoor: "Open",
     md_tasksAndReminders: "Tasks & Reminders",
+    // A HOLD WHOSE DAY HAS COME, filed with Reminders (cn-v1189): its ⋯ and what a new day says.
+    md_btn_pickAnotherDay: "Pick Another Day",
+    md_holdReminderMoved: "Reminder set for {day}. The job stays on hold.",
     md_allReminders: "All Reminders",
     md_nothingUrgent: "Nothing urgent today.",
     md_grabOne: "Grab One →",
@@ -284,6 +287,8 @@ export const words: WordCatalog = {
     md_pinToTop: "Fijar Arriba (Se Queda hasta que lo Desfijes)",
     md_openDoor: "Abrir",
     md_tasksAndReminders: "Tareas y Recordatorios",
+    md_btn_pickAnotherDay: "Elegir Otro Día",
+    md_holdReminderMoved: "Recordatorio para el {day}. El trabajo sigue en pausa.",
     md_allReminders: "Todos los Recordatorios",
     md_nothingUrgent: "Nada urgente hoy.",
     md_grabOne: "Tomar Uno →",

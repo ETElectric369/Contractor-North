@@ -130,6 +130,11 @@ export const words: WordCatalog = {
     ag_btn_noDaySet: "No Day Set",
     ag_btn_backToday: "Back Today",
     ag_btn_backOn: "Back {day}",
+    // A HOLD'S DAY IS A REMINDER (cn-v1189; the owner: "lets call it Reminder Set Nov 29"). Holds only:
+    // ag_btn_backOn stays the words of every other Waiting row.
+    ag_btn_reminderOn: "Reminder Set {day}",
+    ag_btn_reminderToday: "Reminder Today",
+    ag_btn_noReminder: "No Reminder Set",
     ag_thatJob: "That job",
     ag_offHold: "{who} was on hold. It's off hold now.",
     ag_offHoldWhy: "{who} was on hold ({why}). It's off hold now.",
@@ -249,6 +254,9 @@ export const words: WordCatalog = {
     ag_btn_noDaySet: "Sin Día",
     ag_btn_backToday: "Vuelve Hoy",
     ag_btn_backOn: "Vuelve {day}",
+    ag_btn_reminderOn: "Recordatorio el {day}",
+    ag_btn_reminderToday: "Recordatorio Hoy",
+    ag_btn_noReminder: "Sin Recordatorio",
     ag_thatJob: "Ese trabajo",
     ag_offHold: "{who} estaba en pausa. Ya no está en pausa.",
     ag_offHoldWhy: "{who} estaba en pausa ({why}). Ya no está en pausa.",

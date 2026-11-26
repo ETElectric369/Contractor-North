@@ -79,11 +79,11 @@ describe("a picked day", () => {
 });
 
 describe("the words", () => {
-  it("'Back Oct 3', 'Back Today' once it has come, and 'No Day Set' for a hold from before the day existed", () => {
-    expect(backWords("2026-10-03", SUNDAY)).toBe("Back Oct 3");
-    expect(backWords(SUNDAY, SUNDAY)).toBe("Back Today");
-    expect(backWords("2026-09-20", SUNDAY)).toBe("Back Today");
-    expect(backWords(null, SUNDAY)).toBe("No Day Set");
+  it("'Reminder Set Oct 3', 'Reminder Today' once it has come, and 'No Reminder Set' for a hold with no day (cn-v1189)", () => {
+    expect(backWords("2026-10-03", SUNDAY)).toBe("Reminder Set Oct 3");
+    expect(backWords(SUNDAY, SUNDAY)).toBe("Reminder Today");
+    expect(backWords("2026-09-20", SUNDAY)).toBe("Reminder Today");
+    expect(backWords(null, SUNDAY)).toBe("No Reminder Set");
     expect(shortDay("2027-01-04")).toBe("Jan 4");
   });
 

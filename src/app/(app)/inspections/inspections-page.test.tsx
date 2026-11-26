@@ -183,6 +183,14 @@ describe("the rule for a row's buttons (list-rows)", () => {
     }
   });
 
+  it("a visit started today with capture is Coming Up and says Open Inspection, never Start Inspection (skeptic #90 S4)", () => {
+    // Larkspur's Start Now visit with two photos: it has started, so its boxed button opens it.
+    expect(primaryOf("coming_up", { decidable: true, estimatesOn: true, captured: true })).toBe("open");
+    expect(primaryOf("coming_up", { decidable: true, estimatesOn: true, captured: false })).toBe("start");
+    // A captured visit waiting on a price keeps Create Estimate.
+    expect(primaryOf("write_up", { decidable: true, estimatesOn: true, captured: true })).toBe("estimate");
+  });
+
   it("the ⋯ by state, in order: Open (only beside Create Estimate) · Pick a Day · Move · It Happened · Not Sold · Dismiss", () => {
     const d = (s: Parameters<typeof rowDoors>[0], primary: "start" | "estimate" | "open", decidable = true, hasStart = true) => rowDoors(s, { primary, decidable, hasStart });
     // cn-v1175 (R8): a sales visit's one ending is Not Sold in every state; a work visit (the city's) keeps Dismiss.

@@ -66,7 +66,7 @@ export type ActionKind =
   | "time_stray" // a time entry left running past its day, or closed with no job — hours nobody can bill
   | "job_unbilled_work" // a job worked recently with ZERO costs/materials recorded (the 30'-of-Romex leak)
   | "materials_needed" // unpurchased take-off items on a job the crew is about to stand on (buy before the truck rolls)
-  | "job_on_hold" // a held job whose day has come (hold_until today or earlier): a Reminder, with its reason (no day: the fold, cn-v1179)
+  | "job_on_hold" // a held job: before its day (or with none) a fold row; on its day a Reminder on My Day (NeedsYou.reminders, cn-v1189); a Now row only on a database without the hold-day columns
   | "stock_short" // pieces taken from stock past what the shelf showed ($0, billing nothing) — Settle until settled or undone
   // ── "Hey you, here's a bill, what's it for?" (Bills plan, Wave A) ──
   // ONE rolled-up item ("Supplier Bills · 11") carrying a card per supplier paper that needs a
@@ -335,6 +335,31 @@ export interface NeedsYou {
   now: ActionItem[];
   waiting: WaitingItem[];
   older: ActionItem[];
+  /** The holds whose day has come, filed with Reminders (cn-v1189): never a Needs You row, never counted. */
+  reminders: HoldReminder[];
+}
+
+/**
+ * A HOLD WHOSE DAY HAS COME, FILED WITH REMINDERS (cn-v1189). The owner, from My Day: "the on hold: Back
+ * Nov 29 is confusing so if that means its a reminder then lets call it Reminder Set Nov 29 and file it
+ * with reminders and the on hold stays put". So on its day a held job is not a Needs You row and counts in
+ * no number (a Reminder never badges): My Day draws it first in Tasks & Reminders, saying the job, that it
+ * is on hold and its reason, with Pick Another Day (snoozeJobHold), Take Off Hold (setJobHold(id, null))
+ * and Open the Job. DERIVED, never stored: it is the job's own hold_until read by the one build, so there
+ * is no second copy of the day to drift, and nothing is written when the day arrives (the job stays on
+ * hold). Before its day the hold waits in the fold ("Reminder Set Nov 29"). Staff only, as the holds read is.
+ */
+export interface HoldReminder {
+  jobId: string;
+  /** The job in words, "Larkspur Deck · J-941" (jobWords). */
+  title: string;
+  jobNumber: string | null;
+  name: string | null;
+  /** The reason saved with the hold; null when none was (the row says "no reason saved"). */
+  reason: string | null;
+  /** The company's day it was set for, yyyy-mm-dd: today or earlier. */
+  holdUntil: string;
+  href: string;
 }
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
@@ -397,7 +422,8 @@ export const KIND_META: Record<ActionKind, { label: string }> = {
   // Deliberately NOT "No Costs Yet" (job_unbilled_work = nothing captured yet);
   // this one means items ARE on the take-off and still need buying.
   materials_needed: { label: "To Buy" },
-  // Only a hold whose day has come is a Now row (a later one, or one with no day, waits in the fold).
+  // A hold is a Now row only on a database without the hold-day columns: on its day it is a Reminder
+  // (NeedsYou.reminders, cn-v1189); a later one, or one with no day, waits in the fold.
   job_on_hold: { label: "Reminder" },
   stock_short: { label: "To Settle" },
   supplier_paper: { label: "To File" },

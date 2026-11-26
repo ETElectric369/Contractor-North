@@ -138,8 +138,8 @@ export async function sendDayAheadDigests(
       const decisions = holdsBack + (invR.count ?? 0) + (leadR.count ?? 0);
       if (pool.length === 0 && decisions === 0) continue; // nothing needs attention → no push
 
-      // Decision titles: the holds line first ("2 Holds Are Back", the words the pile on My Day uses;
-      // it stands for all of them), then stream order (money → leads), "+N more" for the rest.
+      // Decision titles: the holds line first ("2 Hold Reminders Today", cn-v1189: they are filed with
+      // Reminders on My Day; it stands for all of them), then stream order (money → leads), "+N more" for the rest.
       const decisionTitles: string[] = [];
       let named = 0;
       if (holdsBack > 0) {
@@ -198,7 +198,8 @@ export async function sendDayAheadDigests(
                 url: "/planner",
               }
             : {
-                title: "Needs You",
+                // Only hold reminders: they sit under Tasks & Reminders on My Day, not Needs You.
+                title: holdsBack > 0 && decisions === holdsBack ? holdsOnlyTitle() : "Needs You",
                 body: decisionLine,
                 url: "/planner",
               },
@@ -214,9 +215,23 @@ export async function sendDayAheadDigests(
   return counts;
 }
 
-/** "1 Hold Is Back", "3 Holds Are Back": the morning push's first decision line. */
-export function holdsBackLine(n: number): string {
-  return n === 1 ? "1 Hold Is Back" : `${n} Holds Are Back`;
+/**
+ * "1 Hold Reminder Today", "3 Hold Reminders Today": the morning push's first decision line, and the
+ * bell's (notifyPeople records the same line). A hold's day is a REMINDER (cn-v1189; the owner: "lets
+ * call it Reminder Set Nov 29 and file it with reminders"), so the push says reminders, never "back";
+ * they still go out. The push is written in English today (every line of it); `lang` "es" is the same
+ * line in Spanish, for the day the push learns the person's language.
+ */
+export function holdsBackLine(n: number, lang: "en" | "es" = "en"): string {
+  if (lang === "es") return n === 1 ? "1 Recordatorio de Pausa Hoy" : `${n} Recordatorios de Pausa Hoy`;
+  return n === 1 ? "1 Hold Reminder Today" : `${n} Hold Reminders Today`;
+}
+
+/** THE TITLE OF A MORNING WHOSE ONLY DECISIONS ARE HOLD REMINDERS (skeptic #90 S7): the section of My
+ *  Day they are filed in, not "Needs You" (empty, no badge, for them). English is what is sent; "es"
+ *  beside it, as holdsBackLine keeps one. */
+export function holdsOnlyTitle(lang: "en" | "es" = "en"): string {
+  return lang === "es" ? "Tareas y Recordatorios" : "Tasks & Reminders";
 }
 
 /** The holds read's count; a read that failed because 0366 isn't on the database counts 0. */

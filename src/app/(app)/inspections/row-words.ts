@@ -1,7 +1,7 @@
 import { todayStrInTz } from "@/lib/tz";
 import type { Lang } from "@/lib/locale";
 import { appointmentTypeLabel, isDecidableVisitType, visitTitle } from "@/lib/statuses";
-import { captureQuoteId, inspectionFileHref, inspectionRowWords, rowTagWords, type FiledUnder, type InspectionListState } from "@/lib/inspections";
+import { captureQuoteId, hasCaptureData, inspectionFileHref, inspectionRowWords, rowTagWords, type FiledUnder, type InspectionListState } from "@/lib/inspections";
 import { dayWords, relativeWhen } from "@/lib/action-items/dated-when";
 import { happenedSaidKey, openFirst, primaryOf, rowDoors, stateWordKey, type ListRow } from "./list-rows";
 import type { VisitOffer } from "@/lib/appointments/visit-offer";
@@ -90,7 +90,7 @@ export function inspectionRowBuilder(ctx: RowContext) {
     // cn-v1176 fix F2: the Won sheet's button only where the sheet takes the visit (won-sheet
     // wonStartShown, ONE rule); any other Won visit with no job keeps the button that opens the visit.
     const wonShown = wonStartShown({ type: a.type, outcome: a.outcome, hasJob: !!a.job_id });
-    const kind = primaryOf(state, { decidable, estimatesOn, wonNoJob: wonShown });
+    const kind = primaryOf(state, { decidable, estimatesOn, wonNoJob: wonShown, captured: hasCaptureData(a.capture) });
     const visitHref = `/appointments/${a.id}`;
     // HANGS ON NOBODY (cn-v1181, I2a): no lead, no customer, no job, no estimate written from it.
     const nobody = !a.inquiry_id && !a.customer_id && !a.job_id && !captureQuoteId(a.capture);

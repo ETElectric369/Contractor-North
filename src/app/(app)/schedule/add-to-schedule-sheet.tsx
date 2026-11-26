@@ -78,6 +78,9 @@ export type AddableJob = {
   planned_minutes?: number | null;
   assigned_to?: string[] | null;
   customers?: { name: string } | null;
+  /** The job's usual hours ("HH:MM" each, its block on the company's clock) when it already has days;
+   *  null or absent when it has none. Add to Schedule opens on them (cn-v1189). */
+  usual_hours?: { start: string; end: string } | null;
 };
 
 /** Where the sheet was opened: a day, and the half hour tapped (null: the day's "+", no spot). */
@@ -183,6 +186,26 @@ export function nextDraft(p: {
   return { hours: next, chosen: p.chosen || !("start" in p.patch) };
 }
 
+/**
+ * WHERE THE SHEET'S HOURS OPEN (cn-v1189; the owner: "The second date range has different hours"). A job
+ * that already has days opens on its usual hours, so a day added with nobody touching the time takes
+ * the job's usual hours and the writer stores none of its own (addJobDay, ownOrUsual). Every other pick
+ * opens on the tapped start and its size (defaultDraft). `fromJob` says the hours are the job's: the
+ * save sends their length, so the writer keeps the end the sheet shows.
+ */
+export function openingHours(p: {
+  tappedStart: string;
+  sizeMinutes: number | null | undefined;
+  workDay: { start: string; end: string };
+  usualHours?: { start: string; end: string } | null;
+}): { start: string; end: string; sized: boolean; fromJob: boolean } {
+  const u = p.usualHours;
+  const us = readHm(u?.start ?? "");
+  const ue = readHm(u?.end ?? "");
+  if (u && us != null && ue != null && ue > us) return { start: u.start, end: u.end, sized: true, fromJob: true };
+  return { ...defaultDraft(p.tappedStart, p.sizeMinutes, p.workDay), fromJob: false };
+}
+
 const LIST_MAX = 40;
 
 /** The day a new appointment from this sheet goes on: the Day box when it holds a date, else the
@@ -243,7 +266,10 @@ function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToS
   const people = useMemo(() => (asking && found ? capFound(found.customers, (c) => customerSays(c, words), FIND_CUSTOMER_CAP).rows : []), [asking, found, words]);
   const nothing = !inFlight.length && !past.length && !people.length;
   const wd = workDayMinutes(workDay);
-  const base = defaultDraft(tappedStart, sizeMinutes, workDay);
+  // A job with days opens on its usual hours (only while nobody has touched the time).
+  const base = openingHours({ tappedStart, sizeMinutes, workDay, usualHours: job?.usual_hours });
+  /** The hours shown are the job's usual ones: they go as a chosen length (the end the sheet shows). */
+  const held = chosen || (!draft && base.fromJob);
   const hours = draft ?? { start: base.start, end: base.end };
   const s = readHm(hours.start) ?? wd.startMin;
   const e = readHm(hours.end) ?? s + 120;
@@ -313,7 +339,7 @@ function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToS
 
   /** The time controls save into the sheet, never the database: the same rule the writer keeps. */
   async function draftSave(patch: BlockPatch) {
-    const next = nextDraft({ now: hours, chosen, sizeMinutes, workDay, patch });
+    const next = nextDraft({ now: hours, chosen: held, sizeMinutes, workDay, patch });
     if (!next) return { ok: false, error: t("ag_rail_timeDoesntWork") };
     setDraft(next.hours);
     setChosen(next.chosen);
@@ -332,7 +358,7 @@ function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToS
     if (!going || !ready) return setError(t("ag_rail_pickTheJobFirst"));
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return setError(t("ag_pickADay"));
     setError(null);
-    const length = chosen ? (allDay ? ("full" as const) : e - s) : undefined;
+    const length = held ? (allDay ? ("full" as const) : e - s) : undefined;
     const add = onIt.filter((id) => !jobCrew.includes(id));
     const remove = jobCrew.filter((id) => !onIt.includes(id));
     const payload = { day, start: hours.start, length, crew: { add, remove } };
@@ -465,13 +491,13 @@ function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToS
             startHm={hours.start}
             endHm={hours.end}
             allDay={allDay}
-            sized={chosen || base.sized}
+            sized={held || base.sized}
             workDay={workDay}
             save={draftSave}
             idPrefix="add-to-schedule"
             // The End a new start predicts: the length shown once one is chosen, else the job's size
             // (what the save will use: nextDraft).
-            plannedMinutes={chosen ? Math.max(1, e - s) : Math.max(0, Number(sizeMinutes ?? 0) || 0)}
+            plannedMinutes={held ? Math.max(1, e - s) : Math.max(0, Number(sizeMinutes ?? 0) || 0)}
             draft
           />
         </section>

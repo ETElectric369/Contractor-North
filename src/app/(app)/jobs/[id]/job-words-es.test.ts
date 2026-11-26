@@ -115,7 +115,7 @@ describe("the dock", () => {
 });
 
 describe("the status pill", () => {
-  it("a Spanish tech reads En Curso, and a held job reads En Pausa · la razón · vuelve el día; English stays In Progress / On Hold", () => {
+  it("a Spanish tech reads En Curso, and a held job reads En Pausa · la razón · recordatorio el día; English stays In Progress / On Hold", () => {
     const r = both(JobStatusControl, { id: "j1", status: "in_progress", todayStr: "2026-09-27", viewerIsStaff: false });
     expect(text(r.es)).toContain("En Curso");
     expect(text(r.en)).toContain("In Progress");
@@ -127,7 +127,10 @@ describe("the status pill", () => {
     expect(statusWords(tEs, "on_hold")).toBe("En Pausa");
     expect(statusWords(tEs, "complete")).toBe(es.jb_statusComplete);
     expect(heldWords("x", null, "2026-09-27", tEs)).toBe(`x · ${es.jb_noDaySet}`);
-    expect(heldWords("x", null, "2026-09-27")).toBe("x · no day set");
+    expect(heldWords("x", null, "2026-09-27")).toBe("x · no reminder set");
+    // cn-v1189: the held line says the day in Spanish, as a reminder ("recordatorio el 3 oct", never "vuelve Oct 3").
+    expect(text(held.es)).toContain("recordatorio el 3 oct");
+    expect(text(held.en)).toContain("reminder set Oct 3");
   });
 });
 
@@ -261,8 +264,9 @@ describe("Finish Job", () => {
 describe("the Scheduled box", () => {
   it("Agregar Rango de Fechas in Spanish; Add Date Range in English", () => {
     const WORK_DAY = { start: "09:00", end: "17:00" };
-    const block = readJobBlock({ scheduledStart: null, scheduledEnd: null, plannedMinutes: null, tz: "America/Los_Angeles", workDay: WORK_DAY });
-    const r = both(JobScheduleControl, { id: "j1", segments: [], block, workDay: WORK_DAY } as never);
+    // A job with a day: a job with none shows one blank row, and Add Date Range waits for it (cn-v1189).
+    const block = readJobBlock({ scheduledStart: "2026-09-28T17:00:00.000Z", scheduledEnd: "2026-09-28T19:00:00.000Z", plannedMinutes: null, tz: "America/Los_Angeles", workDay: WORK_DAY });
+    const r = both(JobScheduleControl, { id: "j1", segments: [{ start_date: "2026-09-28", end_date: "2026-09-28" }], block, workDay: WORK_DAY } as never);
     expect(text(r.es)).toContain("Agregar Rango de Fechas");
     expect(text(r.en)).toContain("Add Date Range");
     expect(text(r.en)).not.toContain("Agregar");

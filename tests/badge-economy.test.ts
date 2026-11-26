@@ -54,7 +54,9 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(querySrc).not.toContain("waiting.length");
     // One build hands back both lists (one cache() fan-out for the badge and the page).
     expect(querySrc).toMatch(/const actionItemsForRequest = cache\(\s*\(todayStr: string, isStaff: boolean, userId: string, tz: string, off: string\): Promise<NeedsYou> =>/);
-    expect(querySrc).toContain("return { now, waiting: fold, older: olderRows };");
+    // cn-v1189: the holds whose day has come ride back as their own list, `reminders`, which no number reads.
+    expect(querySrc).toContain("return { now, waiting: fold, older: olderRows, reminders };");
+    expect(querySrc).not.toContain("reminders.length");
   });
 
   it("tasks are gone from Needs You's grammar entirely, and so is the Convert verb (Wave 1, W1-16)", () => {
@@ -218,7 +220,8 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(digestSrc).not.toContain("scheduledJobIds");
     // The decisions headline is the card's own name, never "Needs action: 3 items"; and no number
     // (cn-v1180, audit C41): its head-count was a different set from the board's own total.
-    expect(digestSrc).toContain('title: "Needs You",');
+    // A morning of hold reminders only is titled Tasks & Reminders (skeptic #90 S7; digest-holds.test).
+    expect(digestSrc).toContain('title: holdsBack > 0 && decisions === holdsBack ? holdsOnlyTitle() : "Needs You",');
     expect(digestSrc).not.toContain("Needs You: ${");
     expect(digestSrc).not.toContain("Needs action:");
   });

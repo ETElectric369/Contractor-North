@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Plus, X } from "lucide-react";
 import { DayField } from "@/components/day-field";
-import { applyRangeEdit } from "@/lib/schedule-math";
+import { editRow, joinedRange, oneDay, rangesToSave, rangeWords, reseedRows, rowState } from "@/lib/schedule/range-rows";
 import { dayWords, type JobBlock } from "@/lib/schedule/job-block";
 import { BlockTimeControls, type BlockPatch } from "@/components/block-time-controls";
 import { useLang } from "@/components/lang-provider";
@@ -29,6 +29,13 @@ export interface ScheduleSegment {
  *   unchanged, so a worked day kept as history stays, and the start, the end and a chosen length land
  *   together.
  * Every save says where it stands; a refusal is said in words.
+ *
+ * A RANGE ROW WAITS (cn-v1189; the owner: "Add date range should wait and require a range before auto
+ * saving right now it won't even let me add the second day"). A row is sent only once both its days are
+ * set, or after One Day on a row with its first day only (lib/schedule/range-rows); a row with one day
+ * says what it waits for, and Add Date Range is not drawn while any row waits. The boxes are never
+ * disabled by a save: saves may overlap, and only the LATEST save's answer is shown, its stored ranges
+ * becoming the saved rows (a waiting row kept), with one line when touching days were joined.
  */
 export function JobScheduleControl({
   id,
@@ -51,7 +58,8 @@ export function JobScheduleControl({
   plannedMinutes?: number | null;
 }) {
   const router = useRouter();
-  const t = translator(useLang());
+  const lang = useLang();
+  const t = translator(lang);
 
   const initial: DateRange[] =
     segments && segments.length
@@ -64,29 +72,38 @@ export function JobScheduleControl({
   const [pending, startT] = useTransition();
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** "Days next to each other are one range: …", from the latest save's answer. */
+  const [joined, setJoined] = useState<string | null>(null);
+  /** Which save is the latest: an older answer never shows an error, the saved state or its rows. */
+  const lastSave = useRef(0);
 
   function persist(next: DateRange[]) {
     setError(null);
-    // update() already keeps each range non-inverted (applyRangeEdit drags the
-    // other bound along), so this righting only catches legacy inverted rows —
-    // the same one-day clamp the server applies. Never block the save over it:
-    // erroring here was the "Date range can't finish before start" bug.
-    const filled = next
-      .filter((r) => r.start)
-      .map((r) => (r.end && r.end < r.start ? { start: r.start, end: r.start } : r));
+    setJoined(null);
+    // Only the ready rows go (both days set); a waiting row stays on screen and is never sent.
+    const filled = rangesToSave(next).save;
+    const mine = ++lastSave.current;
     startT(async () => {
       try {
         // The start and the length are the block's: a day edit keeps them (undefined, undefined).
         const res = await setJobScheduleRanges(id, filled);
+        if (mine !== lastSave.current) return;
         if (!res.ok) {
           setError(res.error ?? t("jb_daysDidntSave"));
           return;
+        }
+        // What was stored replaces the saved rows; a row still waiting stays.
+        if (res.ranges) {
+          const stored = res.ranges;
+          setRanges((now) => reseedRows(stored, now));
+          const j = joinedRange(filled, stored);
+          if (j) setJoined(fillText(t("jb_rangesJoined"), { range: rangeWords(j, (d) => dayWords(d, lang), t("jb_to")) }));
         }
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
         router.refresh();
       } catch {
-        setError(t("jb_daysDidntSaveOffline"));
+        if (mine === lastSave.current) setError(t("jb_daysDidntSaveOffline"));
       }
     });
   }
@@ -95,7 +112,19 @@ export function JobScheduleControl({
     // The edited bound wins; the other follows when crossed (start pushed past
     // end drags end up, end pulled before start drags start back) — moving a
     // range is two taps in either order, never an error. Same-day stays valid.
-    const next = ranges.map((r, idx) => (idx === i ? applyRangeEdit(r, patch) : r));
+    // An emptied box on a saved row is ignored (Remove takes a range off); a year
+    // mid-typing (before 2000) waits and drags nothing (range-rows editRow).
+    const edited = editRow(ranges[i], patch);
+    if (edited === ranges[i]) return;
+    const next = ranges.map((r, idx) => (idx === i ? edited : r));
+    setRanges(next);
+    // A row saves only once both its days are set: picking the first day of a new row saves nothing.
+    if (rowState(next[i]) === "ready") persist(next);
+  }
+
+  /** One Day: a row with its first day only takes that day as its last, and saves. */
+  function takeOneDay(i: number) {
+    const next = ranges.map((r, idx) => (idx === i ? oneDay(r) : r));
     setRanges(next);
     persist(next);
   }
@@ -105,11 +134,16 @@ export function JobScheduleControl({
   }
 
   function removeRange(i: number) {
+    const gone = ranges[i];
     const next = ranges.filter((_, idx) => idx !== i);
     const ensured = next.length ? next : [{ start: "", end: "" }];
     setRanges(ensured);
-    persist(ensured);
+    // A waiting row was never saved: taking it off sends nothing.
+    if (gone && rowState(gone) === "ready") persist(ensured);
   }
+
+  /** Any row not ready (one day, or none): Add Date Range waits for it, one row at a time. */
+  const anyWaiting = ranges.some((r) => rowState(r) !== "ready");
 
   async function saveTimes(patch: BlockPatch) {
     const res = await setJobTimes(id, "start" in patch ? { start: patch.start } : { length: patch.length });
@@ -120,12 +154,14 @@ export function JobScheduleControl({
   return (
     <div className="space-y-3">
       <div className="space-y-2">
-        {ranges.map((r, i) => (
-          <div key={i} className="flex flex-wrap items-center gap-2">
+        {ranges.map((r, i) => {
+          const state = rowState(r);
+          return (
+          <div key={i} className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
             <DayField
               value={r.start}
               onChange={(iso) => update(i, { start: iso })}
-              disabled={pending}
               className="w-[150px]"
               aria-label={fillText(t("jb_startDateN"), { n: String(i + 1) })}
             />
@@ -133,7 +169,6 @@ export function JobScheduleControl({
             <DayField
               value={r.end}
               onChange={(iso) => update(i, { end: iso })}
-              disabled={pending}
               className="w-[150px]"
               aria-label={fillText(t("jb_endDateN"), { n: String(i + 1) })}
             />
@@ -149,16 +184,36 @@ export function JobScheduleControl({
               </button>
             )}
           </div>
-        ))}
+          {/* A WAITING ROW SAYS WHAT IT WAITS FOR. A lone blank row (a job with no day) is said below. */}
+          {state === "needsLast" && (
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs text-slate-500">{t("jb_rangePickLast")}</p>
+              <button
+                type="button"
+                onClick={() => takeOneDay(i)}
+                className="inline-flex min-h-11 items-center rounded-md border border-slate-200 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                {t("jb_rangeOneDay")}
+              </button>
+            </div>
+          )}
+          {(state === "needsFirst" || (state === "blank" && ranges.length > 1)) && (
+            <p className="text-xs text-slate-500">{t("jb_rangePickFirst")}</p>
+          )}
+          </div>
+          );
+        })}
 
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={addRange}
-            className="inline-flex min-h-11 items-center gap-1 text-xs font-medium text-brand hover:underline"
-          >
-            <Plus className="h-3.5 w-3.5" /> {t("jb_addDateRange")}
-          </button>
+          {!anyWaiting && (
+            <button
+              type="button"
+              onClick={addRange}
+              className="inline-flex min-h-11 items-center gap-1 text-xs font-medium text-brand hover:underline"
+            >
+              <Plus className="h-3.5 w-3.5" /> {t("jb_addDateRange")}
+            </button>
+          )}
           {pending && <span className="text-xs text-slate-400">{t("jb_saving")}</span>}
           {saved && !pending && (
             <span className="flex items-center gap-1 text-xs font-medium text-green-600">
@@ -166,6 +221,7 @@ export function JobScheduleControl({
             </span>
           )}
         </div>
+        {joined && <p className="text-xs text-slate-500">{joined}</p>}
         {error && <p className="text-xs text-red-600">{error}</p>}
       </div>
 

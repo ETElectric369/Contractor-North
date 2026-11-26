@@ -55,6 +55,7 @@ export function ComeBackPicker({
   error,
   onCancel,
   autoFocus = false,
+  reminder = false,
 }: {
   /** The button's words: "Hold It", "Snooze". */
   label: string;
@@ -71,6 +72,9 @@ export function ComeBackPicker({
   error?: string | null;
   onCancel?: () => void;
   autoFocus?: boolean;
+  /** Opened for a job ON HOLD (cn-v1189): the day is a reminder, so the line says "Reminder Set Dec 6"
+   *  / "Reminder Today", not "Comes back". Every other caller keeps the coming-back words. */
+  reminder?: boolean;
 }) {
   const id = useId();
   const lang = useLang();
@@ -149,7 +153,9 @@ export function ComeBackPicker({
       {/* The day, in words, before anything is saved (text to visual: the chip says what it means). */}
       {picked && picked.ok && todayStr && (
         <p className="text-xs text-slate-500">
-          {picked.day === todayStr ? t("ag_rail_comesBackToday") : fillText(t("ag_rail_comesBackOn"), { day: shortDay(picked.day, lang) })}
+          {picked.day === todayStr
+            ? t(reminder ? "ag_btn_reminderToday" : "ag_rail_comesBackToday")
+            : fillText(t(reminder ? "ag_btn_reminderOn" : "ag_rail_comesBackOn"), { day: shortDay(picked.day, lang) })}
         </p>
       )}
       {dateRefused && <p className="text-xs font-medium text-red-600">{dateRefused}</p>}

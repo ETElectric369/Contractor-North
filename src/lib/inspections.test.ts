@@ -4,7 +4,10 @@ import { join } from "node:path";
 import {
   bucketInspections,
   captureQuoteId,
+  doneByCapture,
   filedUnder,
+  inspectionList,
+  inspectionsToEstimate,
   hasCaptureData,
   inspectionLabel,
   inspectionRowTags,
@@ -62,7 +65,59 @@ describe("bucketInspections", () => {
     expect(b.filed).toEqual([]);
   });
 
-  it("past + capture (nobody tapped complete) counts as HAPPENED → to write up", () => {
+  /* A STARTED INSPECTION STAYS IN INSPECTIONS (cn-v1189). A field user: "Started inspection and now
+     it's gone". Start Now writes a start of now; the first photo used to file it as done. Capture alone
+     finishes a visit only once its DAY has passed (doneByCapture). Stand-in: "Larkspur", J-9xx shape. */
+  describe("a visit started twenty minutes ago (Start Now)", () => {
+    const started = new Date(NOW.getTime() - 20 * 60_000).toISOString();
+    const larkspur = (over: Partial<InspectionBucketRow> = {}) =>
+      row({ starts_at: started, inquiry_id: "inq-larkspur", capture: { photos: ["org/appointments/a/1.jpg"] }, ...over });
+    const TOMORROW = new Date(NOW.getTime() + 24 * 3600_000);
+
+    it("with a photo, today → open on Inspections (Coming Up), NOT in the write-up list", () => {
+      const r = larkspur();
+      const b = bucketInspections([r], none, none, NOW);
+      expect(b.upcoming).toEqual([r]);
+      expect(b.toWriteUp).toEqual([]);
+      expect(inspectionList(b, NOW, "UTC", { estimatesOn: true })).toEqual([{ row: r, state: "coming_up" }]);
+      expect(inspectionsToEstimate(b)).toEqual([]);
+      expect(doneByCapture(r, NOW)).toBe(false);
+    });
+
+    it("the same visit seen tomorrow → the write-up list (its day has passed)", () => {
+      const r = larkspur();
+      const b = bucketInspections([r], none, none, TOMORROW);
+      expect(b.toWriteUp).toEqual([r]);
+      expect(b.upcoming).toEqual([]);
+      expect(b.missed).toEqual([]);
+      expect(inspectionsToEstimate(b)).toEqual([r]);
+      expect(doneByCapture(r, TOMORROW)).toBe(true);
+    });
+
+    it("with an estimate written from it → filed, on its own day", () => {
+      const r = larkspur();
+      const b = bucketInspections([r], new Set(["inq-larkspur"]), none, NOW);
+      expect(b.filed).toEqual([r]);
+      expect(b.toWriteUp).toEqual([]);
+      expect(b.upcoming).toEqual([]);
+    });
+
+    it("marked done (completed) today → the write-up list at once", () => {
+      const r = larkspur({ status: "completed" });
+      const b = bucketInspections([r], none, none, NOW);
+      expect(b.toWriteUp).toEqual([r]);
+      expect(inspectionsToEstimate(b)).toEqual([r]);
+    });
+
+    it("the day edge is the COMPANY's midnight, not UTC's", () => {
+      // NOW = 11:00 AM Jul 14 Pacific. A visit at 11:30 PM Jul 13 Pacific (06:30Z) is yesterday there.
+      const lastNight = larkspur({ starts_at: "2026-07-14T06:30:00Z" });
+      expect(doneByCapture(lastNight, NOW, "America/Los_Angeles")).toBe(true);
+      expect(doneByCapture(lastNight, NOW, "UTC")).toBe(false);
+    });
+  });
+
+  it("past DAY + capture (nobody tapped complete) counts as HAPPENED → to write up", () => {
     const r = row({ starts_at: past, capture: cap });
     expect(bucketInspections([r], none, none, NOW).toWriteUp).toEqual([r]);
   });

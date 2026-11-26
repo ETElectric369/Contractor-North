@@ -16,8 +16,8 @@ const EN = translator("en");
  * WAITING (N) — Erik: Needs You shows only what he can act on NOW, and everything waiting sits in one
  * fold where each row says why and the day it comes back. "Too quiet gets things lost": nothing is in
  * here without its day (the build folds only rows waitingRow accepted), and on that day it is back on
- * Needs You. The one row with no day is a job on hold with none (cn-v1179, waitingRowNoDay): it says
- * "No Day Set", sits after the rows that have a day, and opens the job, whose status pill holds its
+ * Needs You (a job on hold: in Tasks & Reminders, cn-v1189). The one row with no day is a job on hold
+ * with none (cn-v1179, waitingRowNoDay): it says "No Reminder Set", sits after the rows that have a day, and opens the job, whose status pill holds its
  * Snooze (give it a day) and the way off hold.
  *
  * Under the Needs You list, collapsed. Its count is grey: a count of things waiting is inventory,
@@ -59,9 +59,13 @@ export function WaitingFold({ items }: { items: WaitingItem[] }) {
 }
 
 /** "Tupelo Panel · J-934 · Waiting on the permit · Back Oct 3": the day said in the reader's language.
- *  A hold with no day: "Larkspur Deck · J-041 · Waiting on the permit · No Day Set". */
-export function waitingLine(w: Pick<WaitingItem, "title" | "why" | "whyKey" | "backOn">, lang: Lang = "en", words: Words = EN): string {
-  const day = w.backOn ? fillSlots(words("ag_btn_backOn"), { day: shortDay(w.backOn, lang) }) : words("ny_btn_noDaySet");
+ *  A JOB ON HOLD says its day as a reminder (cn-v1189): "Larkspur Deck · J-961 · Waiting on the permit ·
+ *  Reminder Set Oct 3", and with no day "· No Reminder Set". Every other kind keeps "Back {day}". */
+export function waitingLine(w: Pick<WaitingItem, "title" | "why" | "whyKey" | "backOn"> & { kind?: WaitingItem["kind"] }, lang: Lang = "en", words: Words = EN): string {
+  const hold = w.kind === "job_on_hold";
+  const day = w.backOn
+    ? fillSlots(words(hold ? "ag_btn_reminderOn" : "ag_btn_backOn"), { day: shortDay(w.backOn, lang) })
+    : words(hold ? "ag_btn_noReminder" : "ny_btn_noDaySet");
   // A key the feeder handed (a hold with no reason saved) is said in the reader's language (cn-v1180).
   const why = w.whyKey ? words(w.whyKey) : w.why;
   return [w.title, why, day].filter(Boolean).join(" · ");

@@ -16,6 +16,7 @@ import { setJobHold, snoozeJobHold } from "../../schedule/actions";
 import { useToast } from "@/components/toast";
 import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
+import type { Lang } from "@/lib/locale";
 import { JOB_STATUSES, finishesTheJob, jobStatusLabel } from "@/lib/job-status";
 
 /** "in_progress" → "In Progress": the pill and the menu rows are Title Case (the clickables law). */
@@ -39,24 +40,26 @@ export const statusWords = (t: (key: string) => string, s: string | null | undef
 
 /**
  * THE HELD LINE (W1-17, NY-hold 0366): what rides beside the On Hold pill. "waiting on the permit ·
- * back Oct 3". `holdUntil` undefined means the database has no such column yet (0366 not applied):
- * then no day is said at all, never a false "no day set". null (a hold from before 0366) says so,
- * and the office's Snooze picks one. A day already come or passed is "back today": it waits on a
- * person now. Pure, so the header and its test read the same words. `t` (cn-v1138) is the viewer's
- * translator; omitted, the words are English.
+ * reminder set Oct 3" (cn-v1189: a hold's day is a reminder, the owner's words). `holdUntil` undefined
+ * means the database has no such column yet (0366 not applied): then no day is said at all, never a
+ * false "no reminder set". null (a hold from before 0366) says so, and the office's Snooze picks one. A
+ * day already come or passed is "reminder today": it waits on a person now. Pure, so the header and its
+ * test read the same words. `t` (cn-v1138) is the viewer's translator and `lang` the language the day is
+ * written in ("29 nov" in Spanish); omitted, the words are English.
  */
 export function heldWords(
   holdReason: string | null | undefined,
   holdUntil: string | null | undefined,
   todayStr: string,
   t: (key: string) => string = translator("en"),
+  lang: Lang = "en",
 ): string {
   const parts: string[] = [];
   const why = String(holdReason ?? "").trim();
   if (why) parts.push(why);
   if (holdUntil !== undefined) {
     if (!isYmd(holdUntil)) parts.push(t("jb_noDaySet"));
-    else parts.push(holdUntil <= todayStr ? t("jb_backToday") : fillText(t("jb_backOn"), { day: shortDay(holdUntil) }));
+    else parts.push(holdUntil <= todayStr ? t("jb_backToday") : fillText(t("jb_backOn"), { day: shortDay(holdUntil, lang) }));
   }
   return parts.join(" · ");
 }
@@ -96,7 +99,7 @@ export async function writeStatusPick(id: string, next: string): Promise<{ ok: b
  * ignored the pick: To Be Scheduled on a held job landed on Scheduled, ce9ba4ef.) Complete goes
  * through finishJob, the same door as Manage → Finish Job: the T&M Final draft, the nothing-new
  * check and the unbilled-work warning ride with the word, never the word alone (209451e1). While
- * held the pill reads "On Hold · waiting on the permit · back Oct 3" with a Snooze that moves the
+ * held the pill reads "On Hold · waiting on the permit · reminder set Oct 3" with a Snooze that moves the
  * day (snoozeJobHold). A refused write says why, right here (nothing silent).
  *
  * The crew: the same pill and the same words, not tappable (setJobStatus is the office's).
@@ -127,7 +130,8 @@ export function JobStatusControl({
 }) {
   const router = useRouter();
   const toast = useToast();
-  const t = translator(useLang());
+  const lang = useLang();
+  const t = translator(lang);
   const [pending, start] = useTransition();
   const [open, setOpen] = useState(false);
   /** Which picker is open under the pill: putting it on hold, or moving a hold's day. */
@@ -156,7 +160,7 @@ export function JobStatusControl({
   }, [open]);
 
   const held = status === "on_hold";
-  const words = held ? heldWords(holdReason, holdUntil, todayStr, t) : "";
+  const words = held ? heldWords(holdReason, holdUntil, todayStr, t, lang) : "";
   const tone = toneClasses(statusTone(status));
 
   function pick(next: string) {
@@ -257,6 +261,7 @@ export function JobStatusControl({
       {asking && (
         <div className="w-full max-w-sm">
           <ComeBackPicker
+            reminder
             label={asking === "hold" ? t("jb_holdIt") : t("jb_snooze")}
             requireWhy={asking === "hold"}
             askWhy={asking === "snooze" && !String(holdReason ?? "").trim()}

@@ -227,8 +227,9 @@ describe("Add to Schedule: the day joins the job, at its own hours", () => {
     expect(days("j011")).toContain("2026-09-29..2026-09-29 13:00-15:00");
     job("j011").planned_minutes = 240;
     expect((await actions.addJobDay("j011", { day: "2026-09-30" })).defaulted).toBeUndefined();
-    // No start: the work day's start.
-    expect(days("j011")).toContain("2026-09-30..2026-09-30 09:00-13:00");
+    // No start: the work day's start, for the job's size: 9 to 1, which IS what Wed draws at the job's
+    // usual hours, so it keeps none of its own (cn-v1189: an added day takes the job's usual hours).
+    expect(days("j011")).toContain("2026-09-30..2026-09-30 usual");
   });
 
   it("a job with no day yet: the day is its plan, at those hours, as its usual (no own hours)", async () => {
@@ -649,5 +650,48 @@ describe("going back to a finished job, and a new job for a place or a person", 
     expect(r.id).toBe(newJobs()[0].id);
     expect(r.note).toMatch(/^New job: 41 Larkspur Ln #5\. It's on that day, but something didn't save: .+ Tap its block to check its time and crew\.$/);
     expect(r.note).not.toContain("Waiting for a Day");
+  });
+});
+
+/**
+ * THE JOB PAGE'S RANGE ROWS AND THE SECOND DAY'S HOURS (cn-v1189; the owner: "Add date range should
+ * wait and require a range before auto saving", "The second date range has different hours"). J-901,
+ * Larkspur: Mon Oct 5, a full day (9 to 5, sized 480), on the job's usual hours.
+ */
+describe("a range needs both its days, the stored ranges come back, an added day takes the usual hours", () => {
+  function larkspur() {
+    state.db.jobs.push({ id: "j901", name: "Larkspur", status: "scheduled", scheduled_start: at("2026-10-05", "09:00"), scheduled_end: at("2026-10-05", "17:00"), planned_minutes: 480, assigned_to: [] });
+    state.db.job_schedule_segments.push({ job_id: "j901", start_date: "2026-10-05", end_date: "2026-10-05", start_time: null, end_time: null });
+  }
+
+  it("a range with one day (or none) is refused in one sentence, and nothing is written", async () => {
+    larkspur();
+    for (const half of [{ start: "2026-10-06", end: "" }, { start: "", end: "2026-10-06" }, { start: "", end: "" }]) {
+      expect(await actions.setJobScheduleRanges("j901", [{ start: "2026-10-05", end: "2026-10-05" }, half])).toEqual({
+        ok: false,
+        error: "Pick the first and last day of each date range.",
+      });
+    }
+    expect(state.writes).toEqual([]);
+    expect(days("j901")).toEqual(["2026-10-05..2026-10-05 usual"]);
+  });
+
+  it("the ranges come back as stored: Mon and Tue sent as two are one range", async () => {
+    larkspur();
+    const r = await actions.setJobScheduleRanges("j901", [{ start: "2026-10-05", end: "2026-10-05" }, { start: "2026-10-06", end: "2026-10-06" }]);
+    expect(r).toMatchObject({ ok: true, ranges: [{ start: "2026-10-05", end: "2026-10-06" }] });
+    expect(days("j901")).toEqual(["2026-10-05..2026-10-06 usual"]);
+  });
+
+  it("Add to Schedule with the job's usual hours: the new day keeps no hours of its own", async () => {
+    larkspur();
+    expect((await actions.addJobDay("j901", { day: "2026-10-07", start: "09:00", length: "full" })).ok).toBe(true);
+    expect(days("j901")).toEqual(["2026-10-05..2026-10-05 usual", "2026-10-07..2026-10-07 usual"]);
+  });
+
+  it("hours the person changed stay the day's own", async () => {
+    larkspur();
+    expect((await actions.addJobDay("j901", { day: "2026-10-07", start: "09:00", length: 240 })).ok).toBe(true);
+    expect(days("j901")).toEqual(["2026-10-05..2026-10-05 usual", "2026-10-07..2026-10-07 09:00-13:00"]);
   });
 });

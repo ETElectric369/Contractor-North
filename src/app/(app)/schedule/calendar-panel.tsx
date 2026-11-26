@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { CAL_WINDOW_BACK_DAYS, CAL_WINDOW_FWD_DAYS, segmentJobsNotLoaded } from "@/lib/schedule/cal-window";
 import { segmentCols, withDayHours } from "@/lib/schedule/segment-hours";
 import type { AddableJob } from "./add-to-schedule-sheet";
+import { usualHoursOf } from "@/lib/schedule/day-hours";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
@@ -113,11 +114,12 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
       /* ADD TO SCHEDULE's job list (the office only): every job still in flight (to be scheduled,
          scheduled, in progress, on hold), the most recently worked first, with its street, who, its
-         size (the length it starts with) and its crew. No money. */
+         size (the length it starts with), its crew, and its block (the usual hours a job with days opens
+         on, cn-v1189). No money. */
       canEdit
         ? supabase
             .from("jobs")
-            .select("id, job_number, name, status, address, city, planned_minutes, assigned_to, customers(name)")
+            .select("id, job_number, name, status, address, city, planned_minutes, assigned_to, scheduled_start, scheduled_end, customers(name)")
             .in("status", ACTIVE_JOB_STATUSES)
             .order("updated_at", { ascending: false, nullsFirst: false })
             .order("created_at", { ascending: false })
@@ -287,7 +289,12 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
         // A day can keep its own hours (0370 applied): the tile's time is This Day's.
         perDayHours={perDayHours}
         // Add to Schedule: an open spot (or a day's "+") opens the sheet with these jobs.
-        addableJobs={(addableRows ?? []) as unknown as AddableJob[]}
+        addableJobs={((addableRows ?? []) as unknown as (AddableJob & { scheduled_start?: string | null; scheduled_end?: string | null })[]).map(
+          ({ scheduled_start, scheduled_end, ...j }) => ({
+            ...j,
+            usual_hours: usualHoursOf({ scheduledStart: scheduled_start, scheduledEnd: scheduled_end, plannedMinutes: j.planned_minutes, status: j.status, tz, workDay: workDayWindowHm((org as any)?.settings) }),
+          }),
+        )}
         // Each day's crew rows (Everyone's Day), by day, and everyone the company ever had.
         dayRows={dayRowsByDay(crewRead.error ? [] : crewRead.rows)}
         people={((everyone ?? []) as { id: string; full_name: string | null; active?: boolean | null }[]).map((p) => ({ id: p.id, full_name: p.full_name, active: p.active ?? null }))}

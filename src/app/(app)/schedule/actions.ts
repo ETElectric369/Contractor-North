@@ -26,6 +26,7 @@ import {
   addDaySegment,
   carryHours,
   coversDay,
+  datesOnly,
   hoursOnDay,
   keepWorkedDays,
   moveKeepingWorkedDays,
@@ -38,7 +39,7 @@ import {
 import { actualSpans } from "@/lib/schedule/plan-vs-actual";
 import { readDayBusy } from "@/lib/schedule/day-busy";
 import { jobWords } from "@/lib/action-items/words";
-import { dayHoursOf, freezeDrawnDays, nextDayHours, readDayHours } from "@/lib/schedule/day-hours";
+import { dayHoursOf, freezeDrawnDays, nextDayHours, ownOrUsual, readDayHours } from "@/lib/schedule/day-hours";
 import { segmentCols, withDayHours, type SegmentRow } from "@/lib/schedule/segment-hours";
 import { ACTIVE_JOB_STATUSES, ENDED_JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
 import { rescheduleAppointment, unscheduleAppointment } from "../appointments/actions";
@@ -511,13 +512,20 @@ export async function setJobScheduleRanges(
   ranges: DateRange[],
   startTime?: string | null,
   length?: JobLength,
-): Promise<Result & { defaulted?: boolean }> {
+): Promise<Result & { defaulted?: boolean; ranges?: DateRange[] }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const ws = wordsOf(ctx.supabase, ctx.userId);
+  /* A RANGE NEEDS BOTH ITS DAYS (cn-v1189). This door no longer turns a missing last day into the
+     first: the job page's rows wait for both days (or One Day) and never send a half range, so one
+     that arrives is refused in one sentence, with nothing written. */
+  if ((ranges ?? []).some((r) => !/^\d{4}-\d{2}-\d{2}$/.test(String(r?.start ?? "")) || !/^\d{4}-\d{2}-\d{2}$/.test(String(r?.end ?? "")))) {
+    return { ok: false, error: await ws.say("jb_rangeNeedsBothDays") };
+  }
   const bad = lengthProblem(length);
   if (bad) return { ok: false, error: await ws.say(bad) };
-  return writeScheduleRanges(ctx.supabase, jobId, ranges, startTime, undefined, length);
+  // The ranges as stored come back (dates only, touching days joined): the job page shows them.
+  return writeScheduleRanges(ctx.supabase, jobId, ranges, startTime, undefined, length, { stored: true });
 }
 
 /** A length a writer can store, or the catalog key of the words for why not (its caller says them). */
@@ -548,8 +556,8 @@ async function writeScheduleRanges(
    *  placement back): advanceToScheduled is skipped. Private to this file, like the mirror.
    *  `listedAt`: the listed start and end exactly as they were (an Undo), instead of the block the
    *  write would work out; the length column is left alone. */
-  opts?: { freshBlock?: boolean; promote?: boolean; listedAt?: { start: string | null; end: string | null } },
-): Promise<Result & { defaulted?: boolean }> {
+  opts?: { freshBlock?: boolean; promote?: boolean; listedAt?: { start: string | null; end: string | null }; stored?: boolean },
+): Promise<Result & { defaulted?: boolean; ranges?: DateRange[] }> {
   const ws = wordsOf(supabase);
   // Keep only well-formed ranges; default a missing end to the start. A range's hours ride with it.
   const clean: DateRange[] = ranges
@@ -695,7 +703,9 @@ async function writeScheduleRanges(
     return { ok: false, error: await ws.say("ag_srv_rangeUnsaved") };
   }
   // `defaulted`: nobody gave it a length, so it went down as two hours; the caller can say so.
-  return times.defaulted ? { ok: true, defaulted: true } : { ok: true };
+  // `stored` (the job page's range editor): the days as written, dates only, touching days joined.
+  const stored = opts?.stored ? { ranges: datesOnly(days).map((r) => ({ start: r.start, end: r.end })) } : {};
+  return times.defaulted ? { ok: true, defaulted: true, ...stored } : { ok: true, ...stored };
 }
 
 /** A job's schedule as date-only segments, for read-modify-write math. Legacy
@@ -1396,8 +1406,14 @@ export async function addJobDay(
       prior: { scheduledStart: job.scheduled_start, scheduledEnd: job.scheduled_end, plannedMinutes: job.planned_minutes },
     });
     const afterMirror = { scheduledStart: after.startIso, scheduledEnd: after.endIso, plannedMinutes: after.plannedMinutes ?? job.planned_minutes };
+    /* AN ADDED DAY TAKES THE JOB'S USUAL HOURS (cn-v1189; the owner: "The second date range has
+       different hours"). When the hours handed in are exactly what the day draws at the job's usual
+       hours, the day stores NO hours of its own (null): it moves with the job's time like its other days.
+       A day keeps its own hours only when the person gave it different ones. */
+    const usualThere = jobDayBlock({ day, ...afterMirror, tz, wd, dayHours: null });
+    const ownHours = ownOrUsual(hours, dayHoursOf(usualThere.startMin, usualThere.endMin));
     const frozen = freezeDrawnDays({
-      segments: addDaySegment(segments, day, perDayHours ? hours : null),
+      segments: addDaySegment(segments, day, perDayHours ? ownHours : null),
       before: { scheduledStart: job.scheduled_start, scheduledEnd: job.scheduled_end, plannedMinutes: job.planned_minutes },
       after: afterMirror,
       tz,

@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1189", date: "2026-11-25", line: "Add Date Range on a job waits for both days before it saves. A started inspection stays in Inspections that day. A job on hold says Reminder Set, and on its day it shows with your reminders." },
   { version: "cn-v1188", date: "2026-11-23", line: "A credit read under a supplier name the app did not know was refused by File With Its Bill. It now finds the bills by their lines, names the supplier, and files the credit and the name in one tap." },
   { version: "cn-v1187", date: "2026-11-22", line: "On a phone or computer set to dark mode, the box that names which bills a credit files with showed pale words on white. It reads plainly now, and so does the usage ring." },
   { version: "cn-v1186", date: "2026-11-22", line: "A customer's page starts off: Turn On when someone needs it. Sent - Revised invoices and answered same-ticket pairs can be dismissed. A return slip finds its purchase by part number." },

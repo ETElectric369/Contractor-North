@@ -333,13 +333,13 @@ describe("the box says more, in Spanish (cn-v1151)", () => {
     );
   };
 
-  it("the state line: En Pausa · Vuelve 12 nov, short, with the hold's reason leading the note; Terminado · Pagado / Factura Abierta for the office; En Curso", () => {
+  it("the state line: En Pausa · Recordatorio el 12 nov, short, with the hold's reason leading the note; Terminado · Pagado / Factura Abierta for the office; En Curso", () => {
     const html = render();
-    expect(html).toContain('<div class="truncate font-semibold text-amber-700">En Pausa · Vuelve 12 nov</div>');
+    expect(html).toContain('<div class="truncate font-semibold text-amber-700">En Pausa · Recordatorio el 12 nov</div>');
     expect(html).not.toContain("En Pausa · Esperando el permiso");
     // The reason (the person's own words) draws as the note under the state, and the title carries it after the state.
     expect(html).toMatch(/style="-webkit-line-clamp:\d+">Esperando el permiso<\/div>/);
-    expect(html).toContain('· En Pausa · Vuelve 12 nov · Esperando el permiso"');
+    expect(html).toContain('· En Pausa · Recordatorio el 12 nov · Esperando el permiso"');
     expect(html).toContain('<div class="truncate font-semibold text-emerald-700">Terminado · Pagado</div>');
     expect(html).toContain('<div class="truncate font-semibold text-emerald-700">Terminado · Factura Abierta</div>');
     expect(html).toContain('<div class="truncate font-semibold opacity-80">En Curso</div>');
