@@ -33,9 +33,11 @@ const failed = (error: AuthError | null): SignInCheck => ({ user: null, reason: 
  *  them is a sign-out: no session at all ("none"), a session the auth server REFUSED ("refused":
  *  an expired or revoked token — a real sign-out, reported so the cause is known), or no answer
  *  at all ("failed"). A blip is looked at once more after `retryMs` — unless the first look was
- *  already slow. And "no session" on that SECOND look is still the blip: a blip on the token
- *  refresh makes auth-js drop its own copy of the session before we look again
- *  (GoTrueClient _callRefreshToken → _removeSession), so nobody is signed out by it. */
+ *  already slow. And "no session" on that SECOND look is still counted as the blip, so nobody is
+ *  signed out by it. On the installed pair a blip on the token refresh no longer drops the
+ *  session: GoTrueClient _callRefreshToken keeps it for a retryable failure (a network error, a
+ *  500–504 or a 520–530; 500, 501, 525–529 only from auth-js 2.119), and calls _removeSession
+ *  only for a refused refresh, and then only when the access token has already expired. */
 export async function checkUser(
   supabase: Pick<SupabaseClient, "auth">,
   opts: { retryMs?: number; retryOnlyUnderMs?: number } = {},
