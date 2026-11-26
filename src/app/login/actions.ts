@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { cookies, headers } from "next/headers";
+import { after } from "next/server";
 import { endSessionIfDeactivated } from "@/lib/deactivation-gate";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -9,6 +10,9 @@ import { safeNextPath } from "@/lib/safe-next";
 import { reportError } from "@/lib/observe";
 import { translator } from "@/lib/i18n";
 import { langFromAcceptLanguage } from "@/lib/request-lang";
+import { clientIp } from "@/lib/rate-limit";
+import { collaboratorHome } from "@/lib/collaborator-home";
+import { authMailRefused, mailOneTimeCode, type AuthMailKind } from "@/lib/auth-mail";
 
 /**
  * THE WORDS AN ERROR COMES BACK IN (cn-v1138). Nobody is signed in when these doors refuse, so the
@@ -19,29 +23,6 @@ import { langFromAcceptLanguage } from "@/lib/request-lang";
  */
 async function words() {
   return translator(langFromAcceptLanguage((await headers()).get("accept-language")));
-}
-
-/**
- * Where does a freshly-signed-in user with NO org belong? An external site collaborator
- * (site_collaborators seat, profile org_id NULL — cn-v459) lives on /content, never the app.
- * auth/callback already claims + routes them — but that's only the email-confirmation path;
- * with confirmations OFF, signup/login/OTP create an INSTANT session and used to dump them on
- * /planner → the (app) shell's /onboarding "create your company" wall with zero access. So
- * every session-creating action calls this: claim any grants invited to this email, then
- * return "/content" for a collaborator, null for everyone else (org members skip the RPC).
- */
-async function collaboratorHome(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-): Promise<string | null> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
-  const { data: me } = await supabase.from("profiles").select("org_id").eq("id", user.id).maybeSingle();
-  if (me?.org_id) return null; // org member → normal app, untouched
-  await supabase.rpc("claim_site_collaborations");
-  const { data: g } = await supabase.from("site_collaborators").select("org_id").eq("user_id", user.id).limit(1);
-  return g?.length ? "/content" : null;
 }
 
 /** GoTrue answers a BANNED seat with its own wording ("Invalid login credentials" on some
@@ -140,15 +121,25 @@ export async function signup(formData: FormData) {
   redirect(`/login?message=${encodeURIComponent(t("au_checkEmailConfirm"))}`);
 }
 
-export async function requestPasswordReset(formData: FormData) {
-  const supabase = await createClient();
-  const t = await words();
-  const email = String(formData.get("email") ?? "").trim();
-  if (!email) redirect(`/forgot?error=${encodeURIComponent(t("au_enterEmail"))}`);
+/**
+ * THE APP SENDS THE EMAIL ITSELF (cn-v1199, lib/auth-mail): the two limits first, the same for every
+ * address; then the mint and the send are queued in after(), past the answer, so neither what the
+ * door says nor how long it takes tells whether the address has an account. Nothing the mint or the
+ * mailer answers ever reaches the screen. True when the limits refused (the caller says so).
+ */
+async function queueAuthMail(kind: AuthMailKind, email: string): Promise<boolean> {
+  const h = await headers();
+  if (await authMailRefused(clientIp(h), email)) return true;
+  const requestLang = langFromAcceptLanguage(h.get("accept-language"));
+  after(() => mailOneTimeCode({ kind, email, requestLang, translatorFor: translator }));
+  return false;
+}
 
-  await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback?next=/reset`,
-  });
+export async function requestPasswordReset(formData: FormData) {
+  const t = await words();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  if (!email) redirect(`/forgot?error=${encodeURIComponent(t("au_enterEmail"))}`);
+  if (await queueAuthMail("reset", email)) redirect(`/forgot?error=${encodeURIComponent(t("au_tooManyEmails"))}`);
 
   // Always show success (don't reveal whether an email exists).
   redirect(`/forgot?message=${encodeURIComponent(t("au_resetOnItsWay"))}`);
@@ -178,33 +169,31 @@ export async function updatePassword(formData: FormData) {
 
 const enc = encodeURIComponent;
 
-/** Passwordless login — email the user a 6-digit code (no password to remember). Existing users
- *  only (new accounts sign up separately). The 6-digit code appears in the email IF the Supabase
- *  "Magic Link" template includes {{ .Token }}; the magic link in the same email also works. */
+/** Passwordless login — email the user a code (no password to remember). Existing users
+ *  only: the mint never makes an account (lib/auth-mail). The app's own email carries the code and
+ *  a Sign In button to /auth/confirm; every address gets the same answer, the code box. A refusal
+ *  (too many asked) keeps the code box as well: a code already in the inbox must still have
+ *  somewhere to be typed, and in the phone app an emailed button opens the browser, not the app. */
 export async function sendLoginCode(formData: FormData) {
-  const supabase = await createClient();
   const t = await words();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   if (!email) redirect(`/login?mode=code&error=${enc(t("au_enterEmail"))}`);
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: { shouldCreateUser: false, emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback` },
-  });
-  if (error) redirect(`/login?mode=code&error=${enc(error.message)}`);
+  if (await queueAuthMail("signin", email)) redirect(`/login?mode=code&email=${enc(email)}&sent=1&error=${enc(t("au_tooManyEmails"))}`);
   redirect(`/login?mode=code&email=${enc(email)}&sent=1`);
 }
 
-/** Verify the 6-digit code the user typed → establishes a session. */
+/** Verify the code the user typed → establishes a session. Its length is the auth host's setting
+ *  (6 to 10 digits), so the whole of what was typed is sent, never the first six (cn-v1199). */
 export async function verifyLoginCode(formData: FormData) {
   const supabase = await createClient();
   const t = await words();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
-  const token = String(formData.get("code") ?? "").replace(/\D/g, "").slice(0, 6);
+  const token = String(formData.get("code") ?? "").replace(/\D/g, "").slice(0, 10);
   const back = `/login?mode=code&email=${enc(email)}&sent=1`;
   if (!email || token.length < 6) redirect(`${back}&error=${enc(t("au_enterCode"))}`);
   const { error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
   if (error) redirect(`${back}&error=${enc(error.message)}`);
-  // Same deactivation gate as the password path — otherwise the 6-digit code is a way
+  // Same deactivation gate as the password path — otherwise the emailed code is a way
   // straight around it.
   if (await isDeactivated(supabase)) {
     redirect(`/login?error=${enc(t("au_deactivated"))}`);

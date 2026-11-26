@@ -463,8 +463,12 @@ describe("3. what the library hands the app's cookie writer", () => {
 });
 
 // ── 4 ────────────────────────────────────────────────────────────────────────────────────────────
-describe("4. the password-reset and code sign-in links still find their key", () => {
-  it("resetPasswordForEmail stores the fixed -code-verifier cookie; exchangeCodeForSession sends it and writes the session", async () => {
+describe("4. the emailed links still find their key", () => {
+  // Since cn-v1199 the app mints and sends the code sign-in and reset emails itself (lib/auth-mail), and
+  // their links are verified by token hash at /auth/confirm (the case after this one). What still walks
+  // /auth/callback's PKCE exchange is sign-up's confirmation link (and any reset link sent before that
+  // release); resetPasswordForEmail stands in here as the library's own way to write the verifier.
+  it("the sign-up link through /auth/callback: the fixed -code-verifier cookie is stored; exchangeCodeForSession sends it and writes the session", async () => {
     const jar = makeJar();
     h.jar = jar;
     let challenge = "";
@@ -498,6 +502,33 @@ describe("4. the password-reset and code sign-in links still find their key", ()
     expect(written?.access_token).toBe(session.access_token);
     expect(written?.user.email).toBe("dana.rook@example.com");
     for (const w of jar.writes.filter((x) => SESSION_NAME.test(x.name) && x.value !== "")) expectSessionCookieOptions(w.options);
+  });
+
+  it('the app\'s own sign-in and reset links at /auth/confirm: verifyOtp({ type: "recovery", token_hash }) through server.ts posts to /verify once and writes the session', async () => {
+    const jar = makeJar();
+    h.jar = jar;
+    const tokenHash = randomBytes(28).toString("hex");
+    const session = makeSession({ who: "Sam Tillery" });
+    const bodies: any[] = [];
+    routes["POST /auth/v1/verify"] = ({ body }) => {
+      bodies.push(body);
+      return body?.token_hash === tokenHash && body?.type === "recovery" ? json(200, session) : json(403, { code: "otp_expired", msg: "stand-in" });
+    };
+    const { error } = await (await createServerSb()).auth.verifyOtp({ type: "recovery", token_hash: tokenHash });
+    expect(error).toBeNull();
+    expect(requests).toEqual(["POST /auth/v1/verify"]);
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({ type: "recovery", token_hash: tokenHash });
+    const written = decodeStored(jar.all());
+    expect(written?.access_token).toBe(session.access_token);
+    expect(written?.user.email).toBe("sam.tillery@example.com");
+    for (const w of jar.writes.filter((x) => SESSION_NAME.test(x.name) && x.value !== "")) expectSessionCookieOptions(w.options);
+    // A used or expired hash: an error, and no session written.
+    const empty = makeJar();
+    h.jar = empty;
+    const used = await (await createServerSb()).auth.verifyOtp({ type: "recovery", token_hash: randomBytes(28).toString("hex") });
+    expect(used.error).not.toBeNull();
+    expect(decodeStored(empty.all())).toBeNull();
   });
 
   it('signOut({ scope: "local" }) through server.ts leaves no session cookie of any chunk (the deactivation gate relies on it)', async () => {

@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1199", date: "2026-11-26", line: "Email Me a Code now sends the app's own email, with the code and a Sign In button. Forgot Password? sends one with a Set My Password button." },
   { version: "cn-v1198", date: "2026-11-26", line: "When the sign-in service is having trouble, the app now says so within 8 seconds and offers Try Again, where it could wait 25 seconds or more. Two cases where such a hiccup signed you out are fixed." },
   { version: "cn-v1197", date: "2026-11-26", line: "Maintenance under the hood: the sign-in library and the data client are on their current versions. Nothing in the app looks or works differently." },
   { version: "cn-v1196", date: "2026-11-26", line: "Maintenance under the hood: the library that checks everything you and Nort enter is on its new major version. A single bill or estimate now takes up to 1,000 lines at once." },

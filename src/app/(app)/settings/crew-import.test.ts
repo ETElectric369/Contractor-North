@@ -356,8 +356,12 @@ describe("the door the link walks through (source pins)", () => {
     expect(get).toContain('<input type="hidden" name="type" value="recovery">');
     expect(get).toContain('<input type="hidden" name="next" value="${attr(next)}">');
     // The words come through the catalog in the link's or the phone's language (cn-v1138); the English is as it was.
-    expect(get).toContain('<button type="submit">${t("au_setMyPassword")}</button>');
-    expect(get).toContain('<p>${t("au_tapToSet")}</p>');
+    // cn-v1199: the app's sign-in email walks through here too (for=signin swaps the words); a crew link
+    // carries no `for`, so it reads the set-a-password words (route.test.ts renders both).
+    expect(get).toContain('const tap = signIn ? t("au_tapToSignIn") : t("au_tapToSet");');
+    expect(get).toContain('const button = signIn ? t("au_signIn") : t("au_setMyPassword");');
+    expect(get).toContain('<button type="submit">${button}</button>');
+    expect(get).toContain('<p>${tap}</p>');
     expect(get).toContain('<input type="hidden" name="lang" value="${lang}">');
     expect(dict("en").au_setMyPassword).toBe("Set My Password");
     expect(dict("en").au_tapToSet).toBe("Tap to set your password.");

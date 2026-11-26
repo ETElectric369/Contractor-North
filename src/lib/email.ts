@@ -262,20 +262,28 @@ export function renderPortalCodeEmail(input: {
  * none can leak into another company's mail. The heading, the message and the button's words go
  * through the same escape as every other email here; the button's address is escaped for an
  * attribute as well, so a quote in it cannot open a second one.
+ *
+ * The sign-in and reset emails (lib/auth-mail, cn-v1199) are notes from North too: `code` sets a
+ * sign-in code large under the heading, `foot` is the small line before the signature. Both escaped;
+ * a billing notice passes neither and reads as it did.
  */
 export function renderPlatformNoticeEmail(input: {
   heading: string;
   message: string;
   cta?: { label: string; href: string };
+  code?: string;
+  foot?: string;
 }): string {
   return `
   <div style="font-family:ui-sans-serif,system-ui,Arial,sans-serif;max-width:560px;margin:0 auto;color:#0f172a">
     <div style="border-bottom:3px solid ${PLATFORM_BRAND};padding-bottom:12px;margin-bottom:16px">
       <div style="font-size:20px;font-weight:700">Contractor North</div>
     </div>
-    <p style="font-size:16px;font-weight:600;margin:0 0 12px">${escape(input.heading)}</p>
+    <p style="font-size:16px;font-weight:600;margin:0 0 12px">${escape(input.heading)}</p>${input.code ? `
+    <p style="font-size:32px;font-weight:700;letter-spacing:6px;margin:0 0 12px;font-family:ui-monospace,Menlo,monospace">${escape(input.code)}</p>` : ""}
     <p style="font-size:14px;color:#475569;margin:0">${escape(input.message)}</p>
-    ${input.cta ? `<p style="margin:18px 0"><a href="${attr(input.cta.href)}" style="display:inline-block;background:${PLATFORM_BRAND};color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:600">${escape(input.cta.label)}</a></p>` : ""}
+    ${input.cta ? `<p style="margin:18px 0"><a href="${attr(input.cta.href)}" style="display:inline-block;background:${PLATFORM_BRAND};color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:600">${escape(input.cta.label)}</a></p>` : ""}${input.foot ? `
+    <p style="font-size:13px;color:#64748b;margin:18px 0 0">${escape(input.foot)}</p>` : ""}
     <p style="font-size:13px;color:#64748b;margin-top:24px">— Contractor North</p>
   </div>`;
 }

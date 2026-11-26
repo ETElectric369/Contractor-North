@@ -1,9 +1,10 @@
 import type { WordCatalog } from "./types";
 
 /**
- * THE DOORS BEFORE A SESSION EXISTS (au_, cn-v1138): sign-in (the password form, the 6-digit code,
+ * THE DOORS BEFORE A SESSION EXISTS (au_, cn-v1138): sign-in (the password form, the emailed code,
  * sign-up), the errors those actions answer, Set A Password (the page, its form and its action) and
- * the crew import's one-time door (/auth/confirm). With no profile to read yet, login and the
+ * the crew import's one-time door (/auth/confirm), and since cn-v1199 the app's own sign-in and reset
+ * emails (lib/auth-mail, au_mail_: the reader's profile language when the address has an account). With no profile to read yet, login and the
  * confirm door speak the phone's Accept-Language (lib/request-lang: the header's first tag, or the
  * `?lang=` the link carries); Set A Password has the session the link just made and asks callerLang.
  * The English is byte-for-byte what each screen said before. Every door label is Title Case in both
@@ -24,6 +25,7 @@ export const words: WordCatalog = {
     "src/app/auth/confirm/route.ts",
     "src/app/auth/join/page.tsx",
     "src/app/auth/join/actions.ts",
+    "src/lib/auth-mail.ts",
   ],
   sameInBoth: ["au_appName"],
   en: {
@@ -35,11 +37,11 @@ export const words: WordCatalog = {
     au_signInWithCodeHeading: "Sign in with a code",
     au_signInHeading: "Sign in",
     au_setUpSub: "Set up your account to get started.",
-    au_enterCodeSub: "Enter the 6-digit code we just emailed you.",
+    au_enterCodeSub: "Enter the code from your email.",
     au_noPasswordSub: "No password needed — we'll email you a code.",
     au_welcomeBack: "Welcome back.",
-    au_codeLabel: "6-digit code",
-    au_sentTo: "Sent to {email} — enter the code, or just tap the sign-in link in the email. Check spam if it's not there.",
+    au_codeLabel: "Code",
+    au_sentTo: "If {email} has an account, a code is on its way. Enter it here, or tap the button in the email. Check spam if it's not there.",
     au_verifySignIn: "Verify & Sign In",
     au_resendCode: "Resend Code",
     au_usePassword: "Use a Password Instead",
@@ -65,7 +67,15 @@ export const words: WordCatalog = {
     au_enterEmail: "Enter your email.",
     au_resetOnItsWay: "If that email has an account, a reset link is on its way.",
     au_password6: "Password must be at least 6 characters.",
-    au_enterCode: "Enter the 6-digit code from your email.",
+    au_enterCode: "Enter the whole code from your email.",
+    au_tooManyEmails: "Too many emails asked for. Try again in an hour.",
+    // lib/auth-mail.ts (cn-v1199): the app's own sign-in and reset emails. No digit in a subject, no
+    // minutes promised (the clock is the auth host's); the buttons are au_signIn and au_setMyPassword.
+    au_mail_signInSubject: "Your Contractor North sign-in code",
+    au_mail_signInHow: "Type it on the sign-in screen, or tap the button. It works once, for a short time.",
+    au_mail_foot: "Didn't ask for this? Ignore it. Your account stays as it is.",
+    au_mail_resetSubject: "Set a new Contractor North password",
+    au_mail_resetHow: "Tap the button to choose a new password. It works once, for a short time.",
     // set-password/page.tsx, set-password-form.tsx, actions.ts
     au_setYourPassword: "Set your password",
     au_chooseYourPassword: "Choose your password",
@@ -82,6 +92,7 @@ export const words: WordCatalog = {
     au_savedButStuck: "Your new password is saved, but this screen couldn't finish. Sign out, sign back in with it, and tell an owner or admin if it asks again.",
     // auth/confirm/route.ts
     au_tapToSet: "Tap to set your password.",
+    au_tapToSignIn: "Tap to sign in.",
     au_setMyPassword: "Set My Password",
     au_linkUsed: "That link has already been used or has expired. Sign in with a code instead.",
     // auth/join/page.tsx + actions.ts (cn-v1183): the one-step invite
@@ -116,11 +127,11 @@ export const words: WordCatalog = {
     au_signInWithCodeHeading: "Inicia sesión con un código",
     au_signInHeading: "Inicia sesión",
     au_setUpSub: "Configura tu cuenta para empezar.",
-    au_enterCodeSub: "Escribe el código de 6 dígitos que te acabamos de enviar por correo.",
+    au_enterCodeSub: "Escribe el código de tu correo.",
     au_noPasswordSub: "Sin contraseña: te enviamos un código por correo.",
     au_welcomeBack: "Qué bueno verte de nuevo.",
-    au_codeLabel: "Código de 6 dígitos",
-    au_sentTo: "Enviado a {email}: escribe el código o toca el enlace del correo. Revisa el spam si no lo ves.",
+    au_codeLabel: "Código",
+    au_sentTo: "Si {email} tiene cuenta, ya va en camino un código. Escríbelo aquí o toca el botón del correo. Revisa el spam si no lo ves.",
     au_verifySignIn: "Verificar e Iniciar Sesión",
     au_resendCode: "Reenviar Código",
     au_usePassword: "Mejor Usar una Contraseña",
@@ -145,7 +156,13 @@ export const words: WordCatalog = {
     au_enterEmail: "Escribe tu correo.",
     au_resetOnItsWay: "Si ese correo tiene cuenta, ya va en camino un enlace para restablecerla.",
     au_password6: "La contraseña debe tener al menos 6 caracteres.",
-    au_enterCode: "Escribe el código de 6 dígitos de tu correo.",
+    au_enterCode: "Escribe el código completo de tu correo.",
+    au_tooManyEmails: "Se pidieron demasiados correos. Vuelve a intentarlo en una hora.",
+    au_mail_signInSubject: "Tu código para entrar a Contractor North",
+    au_mail_signInHow: "Escríbelo en la pantalla de inicio o toca el botón. Sirve una vez y por poco tiempo.",
+    au_mail_foot: "¿No lo pediste? Ignora este correo. Tu cuenta sigue igual.",
+    au_mail_resetSubject: "Crea una nueva contraseña de Contractor North",
+    au_mail_resetHow: "Toca el botón para elegir una nueva contraseña. Sirve una vez y por poco tiempo.",
     au_setYourPassword: "Crea tu contraseña",
     au_chooseYourPassword: "Elige tu contraseña",
     au_chooseSub: "Elige tu contraseña. La usarás de ahora en adelante.",
@@ -160,6 +177,7 @@ export const words: WordCatalog = {
     au_notSignedIn: "No has iniciado sesión.",
     au_savedButStuck: "Tu contraseña nueva se guardó, pero esta pantalla no pudo terminar. Cierra sesión, vuelve a entrar con ella y avisa a un dueño o administrador si te la pide otra vez.",
     au_tapToSet: "Toca para crear tu contraseña.",
+    au_tapToSignIn: "Toca para iniciar sesión.",
     au_setMyPassword: "Crear Mi Contraseña",
     au_linkUsed: "Ese enlace ya se usó o ya venció. Inicia sesión con un código.",
     au_joinTitle: "Únete a Tu Equipo",

@@ -72,7 +72,7 @@ export default async function LoginPage({
 
           {isCode ? (
             codeSent ? (
-              // ── Enter the 6-digit code ──
+              // ── Enter the code (6 to 10 digits: the length is the auth host's setting) ──
               <form className="space-y-4">
                 <input type="hidden" name="email" value={email ?? ""} />
                 <div>
@@ -83,13 +83,15 @@ export default async function LoginPage({
                     inputMode="numeric"
                     autoComplete="one-time-code"
                     pattern="[0-9]*"
-                    maxLength={6}
+                    maxLength={10}
                     placeholder="123456"
                     required
                     autoFocus
                     className="text-center text-2xl tracking-[0.4em]"
                   />
-                  <p className="mt-1 text-xs text-slate-400">{fillText(t("au_sentTo"), { email: email ?? "" })}</p>
+                  {/* Not beside an error: after a "too many asked" refusal no new code is on its way,
+                      and the box stays for the code already in the inbox (login/actions.ts). */}
+                  {!error && <p className="mt-1 text-xs text-slate-400">{fillText(t("au_sentTo"), { email: email ?? "" })}</p>}
                 </div>
                 <FormSubmit className="w-full" size="lg" formAction={verifyLoginCode}>
                   {t("au_verifySignIn")}

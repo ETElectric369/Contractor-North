@@ -4,6 +4,7 @@ import { safeNextPath } from "@/lib/safe-next";
 import { endSessionIfDeactivated } from "@/lib/deactivation-gate";
 import { translator } from "@/lib/i18n";
 import { langBeforeSession } from "@/lib/request-lang";
+import { collaboratorHome } from "@/lib/collaborator-home";
 
 /**
  * THE TOKEN-HASH DOOR (cn-v1134): where a one-time link made on the server lands.
@@ -28,7 +29,16 @@ import { langBeforeSession } from "@/lib/request-lang";
  * (lib/request-lang). The page carries its language into the POST as a hidden field, so the
  * refusals the tap can meet read the same as the page did. The used-or-expired sentence is
  * au_linkUsed; the deactivation sentence au_deactivated (lib/deactivation-gate's one sentence).
+ *
+ * THE APP'S OWN SIGN-IN EMAIL (cn-v1199, lib/auth-mail) walks through here too, as the same recovery
+ * link: its `next` is /planner and it carries `for=signin`, the one whitelisted value that swaps the
+ * set-a-password words for the sign-in words ("Tap to sign in." and Sign In); any other value reads
+ * as before. The page carries it into the POST, which after the verify and the gate sends an
+ * org-less site collaborator to /content, as every other sign-in door does (lib/collaborator-home).
  */
+
+/** The link's `for`: only "signin" means anything; anything else is today's set-a-password page. */
+const isSignIn = (v: string | null | undefined) => v === "signin";
 
 /** A value into an HTML attribute, with the five characters that would end or change it escaped. */
 const attr = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -51,13 +61,16 @@ export async function GET(request: Request) {
   if (!tokenHash || type !== "recovery") {
     return NextResponse.redirect(`${origin}/login?mode=code&error=${encodeURIComponent(t("au_linkUsed"))}`);
   }
+  const signIn = isSignIn(searchParams.get("for"));
+  const tap = signIn ? t("au_tapToSignIn") : t("au_tapToSet");
+  const button = signIn ? t("au_signIn") : t("au_setMyPassword");
   const html = `<!doctype html>
 <html lang="${lang}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>${t("au_setMyPassword")}</title>
+<title>${button}</title>
 <style>
   body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #0f172a; }
   main { width: 100%; max-width: 24rem; margin: 1rem; padding: 1.5rem; background: #fff; border: 1px solid #e2e8f0; border-radius: 1rem; box-shadow: 0 1px 2px rgb(0 0 0 / 0.05); }
@@ -67,13 +80,14 @@ export async function GET(request: Request) {
 </head>
 <body>
 <main>
-  <p>${t("au_tapToSet")}</p>
+  <p>${tap}</p>
   <form method="post" action="/auth/confirm">
     <input type="hidden" name="token_hash" value="${attr(tokenHash)}">
     <input type="hidden" name="type" value="recovery">
     <input type="hidden" name="next" value="${attr(next)}">
-    <input type="hidden" name="lang" value="${lang}">
-    <button type="submit">${t("au_setMyPassword")}</button>
+    <input type="hidden" name="lang" value="${lang}">${signIn ? `
+    <input type="hidden" name="for" value="signin">` : ""}
+    <button type="submit">${button}</button>
   </form>
 </main>
 </body>
@@ -86,7 +100,8 @@ export async function GET(request: Request) {
  * cookies the way /auth/callback does; a deactivated account gets no session (the one gate); then
  * /set-password, or the same-app path the link asked for. A used or expired hash lands on the login
  * page with ONE way out said: sign in with a code (the office cannot re-issue a link today). 303, so the
- * browser GETs the next page instead of re-posting the form.
+ * browser GETs the next page instead of re-posting the form. A sign-in link (for=signin) lands an
+ * org-less site collaborator on /content instead (cn-v1199).
  */
 export async function POST(request: Request) {
   const { origin } = new URL(request.url);
@@ -108,6 +123,8 @@ export async function POST(request: Request) {
       if (await endSessionIfDeactivated(supabase)) {
         return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(t("au_deactivated"))}`, 303);
       }
+      const home = isSignIn(field("for")) ? await collaboratorHome(supabase) : null;
+      if (home) return NextResponse.redirect(`${origin}${home}`, 303);
       return NextResponse.redirect(`${origin}${next}`, 303);
     }
   }

@@ -7,7 +7,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * verify, never cached) and carries its language into the hidden field; POST still consumes the hash
  * exactly as cn-v1134 built it, and its refusals read as the page did.
  */
-const state = vi.hoisted(() => ({ verifyError: null as null | { message: string }, active: true, verifyCalls: [] as unknown[] }));
+const state = vi.hoisted(() => ({
+  verifyError: null as null | { message: string },
+  active: true,
+  verifyCalls: [] as unknown[],
+  // cn-v1199: the org-less site collaborator (no org_id, a content grant) a sign-in link routes to /content.
+  orgId: "org-1" as string | null,
+  collaborator: false,
+  rpcs: [] as string[],
+}));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: vi.fn(async () => ({
     auth: {
@@ -18,7 +26,18 @@ vi.mock("@/lib/supabase/server", () => ({
       getUser: async () => ({ data: { user: { id: "u1" } } }),
       signOut: vi.fn(async () => ({ error: null })),
     },
-    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { active: state.active } }) }) }) }),
+    from: (table: string) => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({ data: table === "profiles" ? { active: state.active, org_id: state.orgId } : null }),
+          limit: async () => ({ data: table === "site_collaborators" && state.collaborator ? [{ org_id: "org-2" }] : [] }),
+        }),
+      }),
+    }),
+    rpc: async (name: string) => {
+      state.rpcs.push(name);
+      return { data: null, error: null };
+    },
   })),
 }));
 
@@ -43,6 +62,9 @@ beforeEach(() => {
   state.verifyError = null;
   state.active = true;
   state.verifyCalls = [];
+  state.orgId = "org-1";
+  state.collaborator = false;
+  state.rpcs = [];
 });
 
 describe("GET, the page", () => {
@@ -117,5 +139,74 @@ describe("POST, the verify (as cn-v1134 built it)", () => {
     const res = await post({ type: "recovery", lang: "es" });
     expect(state.verifyCalls).toEqual([]);
     expect(decodeURIComponent(res.headers.get("location") ?? "")).toBe(`https://app.test/login?mode=code&error=${ES_USED}`);
+  });
+});
+
+describe("the app's own sign-in email walks through the same door (cn-v1199)", () => {
+  it("GET with for=signin: the sign-in sentence and the Sign In button, in both languages, carried into the POST; still a recovery link, still no verify", async () => {
+    const en = await (await get("?token_hash=h1&type=recovery&next=%2Fplanner&for=signin", "en-US,en")).text();
+    expect(en).toContain("<title>Sign In</title>");
+    expect(en).toContain("<p>Tap to sign in.</p>");
+    expect(en).toContain('<button type="submit">Sign In</button>');
+    expect(en).toContain('<input type="hidden" name="type" value="recovery">');
+    expect(en).toContain('<input type="hidden" name="next" value="/planner">');
+    expect(en).toContain('<input type="hidden" name="for" value="signin">');
+    expect(en).not.toContain("Set My Password");
+    const es = await (await get("?token_hash=h1&type=recovery&next=%2Fplanner&lang=es&for=signin")).text();
+    expect(es).toContain("<p>Toca para iniciar sesión.</p>");
+    expect(es).toContain('<button type="submit">Iniciar Sesión</button>');
+    expect(state.verifyCalls).toEqual([]);
+  });
+
+  it("any other value of for reads as today's set-a-password page, and carries nothing", async () => {
+    for (const v of ["SignIn", "signup", "", "signin%20"]) {
+      const html = await (await get(`?token_hash=h1&type=recovery&for=${v}`, "en-US")).text();
+      expect(html, v).toContain('<button type="submit">Set My Password</button>');
+      expect(html, v).toContain("<p>Tap to set your password.</p>");
+      expect(html, v).not.toContain('name="for"');
+    }
+  });
+
+  it("a sign-in link still needs type=recovery: a magiclink is refused before any verify", async () => {
+    const res = await get("?token_hash=h1&type=magiclink&for=signin");
+    expect(decodeURIComponent(res.headers.get("location") ?? "")).toBe(`https://app.test/login?mode=code&error=${EN_USED}`);
+    const posted = await post({ token_hash: "h1", type: "magiclink", next: "/planner", for: "signin" });
+    expect(decodeURIComponent(posted.headers.get("location") ?? "")).toBe(`https://app.test/login?mode=code&error=${EN_USED}`);
+    expect(state.verifyCalls).toEqual([]);
+  });
+
+  it("POST with for=signin verifies as recovery and lands on My Day", async () => {
+    const res = await post({ token_hash: "h1", type: "recovery", next: "/planner", for: "signin" });
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("https://app.test/planner");
+    expect(state.verifyCalls).toEqual([{ type: "recovery", token_hash: "h1" }]);
+    expect(state.rpcs).toEqual([]); // an org member skips the claim
+  });
+
+  it("an org-less site collaborator's sign-in link lands on /content after the claim; a set-a-password link does not route", async () => {
+    state.orgId = null;
+    state.collaborator = true;
+    const res = await post({ token_hash: "h1", type: "recovery", next: "/planner", for: "signin" });
+    expect(res.headers.get("location")).toBe("https://app.test/content");
+    expect(state.rpcs).toEqual(["claim_site_collaborations"]);
+    state.rpcs = [];
+    const reset = await post({ token_hash: "h1", type: "recovery", next: "/set-password" });
+    expect(reset.headers.get("location")).toBe("https://app.test/set-password");
+    expect(state.rpcs).toEqual([]);
+  });
+
+  it("a deactivated person's sign-in link gets no session and reads why", async () => {
+    state.active = false;
+    const res = await post({ token_hash: "h1", type: "recovery", next: "/planner", for: "signin" });
+    expect(decodeURIComponent(res.headers.get("location") ?? "")).toBe("https://app.test/login?error=This account has been deactivated. Contact your office.");
+  });
+
+  it("a DEACTIVATED org-less collaborator's sign-in link reads why too: the gate comes before the routing", async () => {
+    state.orgId = null;
+    state.collaborator = true;
+    state.active = false;
+    const res = await post({ token_hash: "h1", type: "recovery", next: "/planner", for: "signin" });
+    expect(decodeURIComponent(res.headers.get("location") ?? "")).toBe("https://app.test/login?error=This account has been deactivated. Contact your office.");
+    expect(state.rpcs).not.toContain("claim_site_collaborations");
   });
 });
