@@ -97,6 +97,13 @@ export async function updateSession(request: NextRequest, onOrgSite = false) {
   // A FAILED CHECK IS NOT A SIGN-OUT (lib/supabase/user-check): told apart below.
   const check = await checkUser(supabase);
   const user = check.user;
+  // A FAILED CHECK SENDS NOTHING THE LIBRARY WROTE, on any path (cn-v1198). When a refresh fails
+  // with an answer auth-js does not retry (a 409 "conflict", a 429, a gateway's HTML page) and the
+  // access token has run out, auth-js drops its copy of the session and writes that removal onto
+  // `response` through setAll. A signed-in path answers with its own 503 below, but a public path
+  // (/login, /sign-in-check, /) returned `response`: a blip deleted the session from the phone.
+  // A REFUSED session is not "failed": its removal still goes out on the login page's pass.
+  if (check.failed) response = NextResponse.next({ request });
 
   const { pathname } = request.nextUrl;
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));

@@ -65,7 +65,7 @@ vi.mock("@supabase/ssr", async (importOriginal) => {
 import { updateSession } from "@/lib/supabase/middleware";
 import { createClient as createServerSb } from "@/lib/supabase/server";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
-import { checkUser } from "@/lib/supabase/user-check";
+import { CHECK_DEADLINE_MS, checkUser } from "@/lib/supabase/user-check";
 
 // ── stand-ins ──────────────────────────────────────────────────────────────────────────────────────
 const PROJECT_URL = "https://example.supabase.co"; // resolves nowhere: every request goes to the stub
@@ -546,5 +546,223 @@ describe("5. checkUser over a real client tells a blip from a refusal", () => {
     const check = await checkUser(await createServerSb(), { retryMs: 0 });
     expect(check.reason).toBe("ok");
     expect(check.user?.id).toBe(s.user.id);
+  });
+});
+
+// ── 6 ────────────────────────────────────────────────────────────────────────────────────────────
+describe("6. the sign-in check answers within CHECK_DEADLINE_MS, through the real library (cn-v1198)", () => {
+  const D = CHECK_DEADLINE_MS;
+  const REFRESH = "POST /auth/v1/token?grant_type=refresh_token";
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+  beforeEach(() => {
+    unhandled.length = 0;
+    process.on("unhandledRejection", onUnhandled);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  });
+  afterEach(() => { process.off("unhandledRejection", onUnhandled); });
+  const watch = <T,>(p: Promise<T>) => {
+    const w = { done: false };
+    p.then(() => (w.done = true), () => (w.done = true));
+    return w;
+  };
+  /** Two real turns of the event loop (setImmediate is not faked): when Node reports an unhandled rejection. */
+  const flushReal = async () => { for (let i = 0; i < 2; i++) await new Promise((r) => setImmediate(r)); };
+  const expectTryAgain = (res: Response) => {
+    expect(res.status).toBe(503);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.headers.get("set-cookie")).toBeNull();
+  };
+
+  /** An expired session and an auth server answering 503 to every refresh. */
+  const allRefreshes503 = () => {
+    const old = makeSession({ large: true, expired: true });
+    routes[REFRESH] = () => json(503, { msg: "stand-in upstream" });
+    return updateSession(request(SIGNED_IN_PAGE, storedCookies(old)));
+  };
+
+  it("an auth server answering 503 to every refresh: the Try Again page AT 8 s, not before, after more than one and fewer than eight refreshes", async () => {
+    const p = allRefreshes503();
+    const w = watch(p);
+    await vi.advanceTimersByTimeAsync(D - 1);
+    expect(w.done, "answered before the deadline").toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(w.done, "not answered at the deadline").toBe(true);
+    const res = await p;
+    expectTryAgain(res);
+    expect(res.cookies.getAll()).toEqual([]);
+    // Observed on 2.119.2: 6 refreshes by 8 s (attempts start at 0, 0.2, 0.6, 1.4, 3.0, 6.2 s).
+    const sent = requests.filter((r) => r === REFRESH).length;
+    expect(sent).toBeGreaterThan(1);
+    expect(sent).toBeLessThan(8);
+    expect(requests.every((r) => r === REFRESH)).toBe(true);
+  });
+
+  it("after that answer, 30 more seconds: the look left behind retries on and ends, nothing throws, the answer still carries no cookie", async () => {
+    const p = allRefreshes503();
+    await vi.advanceTimersByTimeAsync(D);
+    const res = await p;
+    expectTryAgain(res);
+    const sent = requests.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+    await flushReal();
+    expect(unhandled).toEqual([]);
+    expect(res.headers.get("set-cookie")).toBeNull();
+    expect(res.cookies.getAll()).toEqual([]);
+    // Observed on 2.119.2: the library's own loop goes on to its 8th refresh after the answer was given.
+    expect(requests.length).toBeGreaterThanOrEqual(sent);
+    expect(requests.every((r) => r === REFRESH)).toBe(true);
+  });
+
+  // A 503 writes no cookie, so the case above cannot fail on a late write. Here the answer arrives
+  // LATE and DOES write (skeptic #96): the library calls the cookie writer after the middleware has
+  // answered, and the response already returned must carry none of it.
+  for (const late of ["a good session", "a 400 refusal"] as const) {
+    it(`a refresh answered at 9 s with ${late}: Try Again at 8 s, the late cookie write reaches nothing returned`, async () => {
+      const old = makeSession({ large: true, expired: true });
+      const next = makeSession({ large: false });
+      routes[REFRESH] = () => new Promise<Response>((r) => setTimeout(() => r(
+        late === "a good session" ? json(200, next) : json(400, { code: "refresh_token_not_found", msg: "stand-in" }),
+      ), 9000));
+      // After a late success the look left behind checks the new token once (harmless: no write).
+      routes["GET /auth/v1/user"] = userRoute(next);
+      const p = updateSession(request(SIGNED_IN_PAGE, storedCookies(old)));
+      await vi.advanceTimersByTimeAsync(D);
+      const res = await p;
+      expectTryAgain(res);
+      expect(h.setAllCalls, "a cookie write before the answer was given").toEqual([]);
+      const headersThen = [...res.headers];
+      await vi.advanceTimersByTimeAsync(2000);
+      await flushReal();
+      // The case is real: the library DID call the cookie writer, after the answer.
+      const lateWrites = h.setAllCalls.flatMap((a) => a[0] as { name: string; value: string }[]);
+      expect(lateWrites.length, "the library never wrote late: this case proves nothing").toBeGreaterThan(0);
+      if (late === "a good session") expect(lateWrites.some((c) => c.name === KEY && c.value !== "")).toBe(true);
+      else expect(lateWrites.filter((c) => c.value === "").map((c) => c.name).sort()).toEqual([`${KEY}.0`, `${KEY}.1`, `${KEY}.2`]);
+      // …and the response that was returned is unchanged.
+      expect([...res.headers]).toEqual(headersThen);
+      expect(res.headers.get("set-cookie")).toBeNull();
+      expect(res.cookies.getAll()).toEqual([]);
+      expect(unhandled).toEqual([]);
+      expect(vi.getTimerCount(), "a timer left pending").toBe(0);
+    });
+  }
+
+  it("a refresh the server answers on its THIRD attempt (503, 503, then a good session): through with the new session cookies, well inside the deadline", async () => {
+    const old = makeSession({ large: true, expired: true });
+    const next = makeSession({ large: false });
+    let tries = 0;
+    const good = refreshRoute(old, next);
+    routes[REFRESH] = (r) => (++tries < 3 ? json(503, { msg: "stand-in upstream" }) : good(r));
+    routes["GET /auth/v1/user"] = userRoute(next);
+    const p = updateSession(request(SIGNED_IN_PAGE, storedCookies(old)));
+    const w = watch(p);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(w.done, "a working refresh was not done within 1 s").toBe(true);
+    const res = await p;
+    expect(res.headers.get("x-middleware-next")).toBe("1");
+    expect(res.headers.get("location")).toBeNull();
+    expect(requests.filter((r) => r.startsWith("POST"))).toEqual([REFRESH, REFRESH, REFRESH]);
+    // The same writes as a first-try refresh (case 2): the new session in one cookie, the stale chunks cleared.
+    const written = res.cookies.getAll();
+    const live = written.filter((c) => c.value !== "");
+    expect(live.map((c) => c.name)).toEqual([KEY]);
+    for (const c of live) expectSessionCookieOptions(c);
+    expect(written.filter((c) => c.value === "").map((c) => c.name).sort()).toEqual([`${KEY}.0`, `${KEY}.1`, `${KEY}.2`]);
+    const stored = decodeStored(live);
+    expect(stored?.access_token).toBe(next.access_token);
+    expect(stored?.refresh_token).toBe(next.refresh_token);
+    expect(vi.getTimerCount(), "the deadline's timer left pending").toBe(0);
+  });
+
+  it("a refresh request that is NEVER answered: the Try Again page at 8 s", async () => {
+    const old = makeSession({ large: true, expired: true });
+    routes[REFRESH] = () => new Promise<Response>(() => {});
+    const p = updateSession(request(SIGNED_IN_PAGE, storedCookies(old)));
+    const w = watch(p);
+    await vi.advanceTimersByTimeAsync(D - 1);
+    expect(w.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(w.done, "not answered at the deadline").toBe(true);
+    expectTryAgain(await p);
+    expect(requests).toEqual([REFRESH]);
+    await flushReal();
+    expect(unhandled).toEqual([]);
+  });
+
+  // ── inside 6, to share its clock and its watchers ──
+  describe("a failed check sends nothing the library wrote, on any path (cn-v1198, skeptic #96)", () => {
+    // Three answers to a refresh that auth-js does NOT retry. With the access token run out, it drops
+    // its copy of the session and writes that removal through the app's setAll; none is a refusal.
+    const notRetried: [string, Route][] = [
+      // The auth server's answer when a refresh waited 5 s on another refresh's lock of the same session.
+      ["a 409 conflict", () => json(409, { code: 409, error_code: "conflict", msg: "stand-in: another refresh holds this session" })],
+      ["a 429", () => json(429, { code: "over_request_rate_limit", msg: "stand-in" })],
+      // A gateway's page in place of JSON: auth-js hands it over as AuthUnknownError.
+      ["an HTML 403 page", () => new Response("<html><body>Forbidden</body></html>", { status: 403, headers: { "content-type": "text/html" } })],
+    ];
+    const expiredWith = (path: string, answer: Route) => {
+      const old = makeSession({ large: true, expired: true });
+      routes[REFRESH] = answer;
+      const req = request(path, storedCookies(old));
+      return { req, p: settle(updateSession(req)) };
+    };
+
+    it("a 409 on a signed-in page: the Try Again page, not the login screen; sent once", async () => {
+      const res = await expiredWith(SIGNED_IN_PAGE, notRetried[0][1]).p;
+      expectTryAgain(res);
+      expect(res.cookies.getAll()).toEqual([]);
+      expect(requests).toEqual([REFRESH]);
+    });
+
+    it("a 409 on an /api/ path: the 503 to retry, not the 401", async () => {
+      const res = await expiredWith("/api/jobs", notRetried[0][1]).p;
+      expect(res.status).toBe(503);
+      expect(await res.text()).toBe("Couldn't check your sign-in just now — try again.");
+      expect(res.headers.get("location")).toBeNull();
+      expect(res.headers.get("set-cookie")).toBeNull();
+    });
+
+    for (const path of ["/login", "/"]) {
+      for (const [name, answer] of notRetried) {
+        it(`${name} on the public path ${path}: through, and the library's removal of the session is NOT sent`, async () => {
+          const { req, p } = expiredWith(path, answer);
+          const res = await p;
+          expect(res.headers.get("x-middleware-next")).toBe("1");
+          expect(res.headers.get("location")).toBeNull();
+          expect(res.headers.get("set-cookie")).toBeNull();
+          expect(res.cookies.getAll()).toEqual([]);
+          // The case is real: the library DID write a removal of every chunk, through the app's setAll…
+          const removed = h.setAllCalls.flatMap((a) => a[0] as { name: string; value: string }[]).filter((c) => c.value === "");
+          expect(removed.map((c) => c.name).sort()).toEqual([`${KEY}.0`, `${KEY}.1`, `${KEY}.2`]);
+          expect(req.cookies.get(`${KEY}.0`)?.value, "the request's own cookie was emptied by that write").toBe("");
+          expect(requests).toEqual([REFRESH]);
+          // …and the check was a FAILED one, not a refusal: the same answer on a signed-in page is Try Again.
+          h.setAllCalls.length = 0;
+          requests = [];
+          expectTryAgain(await expiredWith(SIGNED_IN_PAGE, answer).p);
+        });
+      }
+    }
+
+    it("the deadline on a public path: a refresh answered 503 for ever, on /login, goes through at 8 s with no cookie", async () => {
+      const old = makeSession({ large: true, expired: true });
+      routes[REFRESH] = () => json(503, { msg: "stand-in upstream" });
+      const p = updateSession(request("/login", storedCookies(old)));
+      const w = watch(p);
+      await vi.advanceTimersByTimeAsync(D - 1);
+      expect(w.done, "answered before the deadline").toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(w.done, "not answered at the deadline").toBe(true);
+      const res = await p;
+      expect(res.headers.get("x-middleware-next")).toBe("1");
+      expect(res.headers.get("set-cookie")).toBeNull();
+      expect(res.cookies.getAll()).toEqual([]);
+    });
+
+    // The guard that this rule did not go too far, a REFUSED refresh still clearing the session on
+    // /login, is the case of group 2 "a refused refresh token: … (on the login page's own pass)".
   });
 });
