@@ -67,6 +67,9 @@ const TRIGGERS: { key: string; help?: boolean; soon?: boolean; audience: Audienc
   // refused for staff) and the hourly long-shift job, which asks ANYONE whose own clock has run
   // LONG_SHIFT_HOURS. So everybody can receive it, and everybody gets the switch.
   { key: "clock_out", help: true, audience: "all" },
+  // The clock-in reminder (cn-v1192, api/timeclock/nudge): anyone scheduled, any role, so everybody
+  // gets the switch. OPT-IN, off until the person turns it on (the owner: "Start off").
+  { key: "clock_in", help: true, audience: "all" },
   // The office's buzz about a crew member's clock still running at LONG_SHIFT_HOURS; the bell line
   // at OFFICE_BELL_HOURS is not a push and has no switch.
   { key: "long_shift", help: true, audience: "staff" },
@@ -100,6 +103,7 @@ const DEFAULTS: Record<string, boolean> = {
   invoice_paid: true,
   day_ahead: false,
   clock_out: true,
+  clock_in: false,
   daily_report: true,
   booked: true,
   tap_to_pay: true,

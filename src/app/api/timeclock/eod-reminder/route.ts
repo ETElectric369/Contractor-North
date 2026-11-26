@@ -1,16 +1,17 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/cron-guard";
 import { sendSms, smsReadiness } from "@/lib/sms";
-import { getOrgSettings, timeclockRemindersPush, timeclockRemindersText } from "@/lib/org-settings";
+import { getOrgSettings, timeclockRemindersPush, timeclockRemindersText, workDayWindowHm } from "@/lib/org-settings";
 import { sendCloseOutNudges } from "@/lib/action-items/eod-sweep";
 import { notifyPeople } from "@/lib/notifications";
 import { loadShiftChains } from "@/lib/shift-chain";
-import { todayBoundsInTz } from "@/lib/tz";
+import { todayBoundsInTz, tzMinutesOfDay } from "@/lib/tz";
 import { reportError } from "@/lib/observe";
 import { reportBlockerAwaited } from "@/lib/observe-blocker";
-import { withoutHeldCrumb } from "@/lib/held-crumb";
 import { EOD_LOCAL_HOUR, atLocalHour, readActiveOrgs } from "@/lib/cron-orgs";
-import { asLang, fillText, localeOf, translator, type Lang } from "@/lib/i18n";
+import { readCrewDay } from "@/lib/schedule/crew-day";
+import { LAST_CLOCK_OUT_HOUR, clockSince, dueToClockOut, shiftsInPlay, type OpenShift } from "@/lib/timeclock-reminders";
+import { asLang, fillText, translator } from "@/lib/i18n";
 
 // Every company in one run, one after another: the budget every cron carries now (cn-v1130).
 export const maxDuration = 300;
@@ -18,41 +19,37 @@ export const maxDuration = 300;
 type Org = { id: string; name: string | null; settings: unknown };
 
 /**
- * End-of-day "fill out your form" reminder — HOURLY (vercel.json "0 * * * *", cn-v1130). Each
- * company is handled on the run that falls in ITS 6 PM (atLocalHour on the org's timezone setting),
- * every day; every other run counts it in `not_due_yet`. It used to run at 01:00 UTC, an hour tuned
- * to Pacific summer: on the Sunday DST ends (2026-11-01) the reminder would have moved to 5 PM, and
- * a company in any other zone never had its own evening at all.
+ * THE CLOCK-OUT REMINDER — HOURLY (vercel.json "0 * * * *", cn-v1130). Each company is looked at on
+ * the runs from ITS 6 PM through ITS 11 PM (company time, atLocalHour / tzMinutesOfDay on the org's
+ * timezone setting); every other run counts it in `not_due_yet`. The 6 PM run counts it in `due`, the
+ * runs after it in `late_checked`. The night debrief (sendCloseOutNudges) rides the 6 PM run only.
  *
- * For each company due (the service client bypasses RLS, so every query MUST be org-scoped), texts
- * active techs who, for today, either:
- *   • are still clocked in (open entry) — remind them to clock out, or
- *   • clocked out but left no notes and no job breakdown — fill out the EOD form.
+ * PRECISE (cn-v1192, the owner: "the 6pm push should only be necessary if someone is clocked in or
+ * scheduled correct? it should be precise dont you think?"). ONE rule (lib/timeclock-reminders
+ * dueToClockOut) decides who is reminded on this run, and both channels read it:
+ *   · the person is active, and their shift (by loadShiftChains: a Switch Job does not reset it) is
+ *     still open and began on the company's today;
+ *   · the shift is at least an hour old (a shift younger than that gets no reminder that evening; the
+ *     12-hour question is still the backstop);
+ *   · the 12-hour question has not asked about it;
+ *   · and this run is THEIR due hour: 6 PM, or, when the job they are clocked into right now is on
+ *     today's schedule (lib/schedule/crew-day, the Schedule's own rule) and its hours end later, the
+ *     first whole hour at or after that end. Hours that end after 11 PM get no reminder: the run after
+ *     them is tomorrow. Nobody is reminded twice: each person has one due hour.
+ * The PUSH (Push or Both, Settings → Scheduling): one "Still Clocked In" per person through
+ * notifyPeople under kind clock_out, any role, the bell line first, in the person's own language and
+ * under their own Clock-out Reminders switch; it opens the Time Clock. The TEXT (Text or Both, and
+ * texting ready, lib/sms-readiness): the same people who are techs, nb_eodStillIn. A company that
+ * cannot text yet is counted in `not_ready`. The old "fill out your end-of-day form" text is gone: it
+ * named nothing a person could do (both clock-out sheets open only at the clock-out itself).
  *
- * THE 6 PM PUSH (cn-v1190, the owner: "we need to get the clock out reminder on a push notification"
- * and "everyone gets the push notification and the boss can choose text push or both"). Before the
- * texts' own gates, a step of its own: when the company's choice (timeclockRemindersBy, Settings →
- * Scheduling) is Push or Both, every active person of the company, ANY role, whose shift (by
- * loadShiftChains: a Switch Job does not reset it) began on the company's own today and is still
- * open, and who has not already been asked the 12-hour question about it, gets ONE "Still Clocked In"
- * through notifyPeople under kind clock_out: the bell line first, the person's own language, and the
- * person's own Clock-out reminders switch. It opens the Time Clock. A shift open since yesterday is
- * not pushed again (it was pushed the evening it began, and the 12-hour question has it since). A
- * failed read stops that company's push step, is counted in `failed` and filed; a refusal from
- * notifyPeople (no bell line) is counted in `push_failed` and filed. `pushed` counts the people
- * pushed (a person who muted clock-out pushes still gets the bell line and is not counted).
- *
- * The texts go out only when the choice is Text or Both (the old box ticked off reads Push). An org that cannot text
- * yet (lib/sms-readiness) is skipped and counted in `not_ready`; the night debrief push below still
- * goes to it, since that never needed texting: it is handed every company at its 6 PM, before the
- * opt-out and readiness checks. A company whose plan has ended gets neither the texts nor the
- * debrief (cn-v1137, decision 3: readActiveOrgs drops it) and is counted in `lapsed_skipped`.
- *
- * NOTHING FAILS SILENTLY (the 2026-10-26 deep review, ops layer). The company list is whole or the
- * run is a 500 that is filed (readAllOrgs pages past PostgREST's silent 1,000-row cap and throws on
- * a failed read; one bare select made a failed read an empty run). Inside a company the techs read
- * and the entries read each throw on error: the failure is counted, filed with the orgId, and texts
- * NOBODY — `const { data }` with no error check read a failed read as "nothing to say".
+ * NOTHING FAILS SILENTLY. The company list is whole or the run is a 500 that is filed. Inside a
+ * company a failed read (the open shifts, their families, the schedule, the techs for the text) is
+ * counted in `failed`, filed with the company, and reminds NOBODY on that channel: it is never read
+ * as "nobody is on the clock" or "no hours". A refusal from notifyPeople (no bell line) is counted
+ * in `push_failed` and filed. `pushed` counts the people pushed (one who muted clock-out pushes still
+ * gets the bell line and is not counted). A company whose plan has ended is passed over
+ * (readActiveOrgs) and counted in `lapsed_skipped`.
  *
  *   GET /api/timeclock/eod-reminder   Authorization: Bearer <CRON_SECRET>
  */
@@ -61,7 +58,7 @@ export async function GET(request: Request) {
   if ("error" in guard) return guard.error;
   const { supabase } = guard;
 
-  const counts = { checked: 0, reminded: 0, not_ready: 0, due: 0, not_due_yet: 0, lapsed_skipped: 0, failed: 0, pushed: 0, push_failed: 0 };
+  const counts = { checked: 0, reminded: 0, not_ready: 0, due: 0, late_checked: 0, not_due_yet: 0, lapsed_skipped: 0, failed: 0, pushed: 0, push_failed: 0 };
   // One clock for the whole run, taken BEFORE the company read: a company late in the list (or a
   // slow read) is judged on the hour the run began, never on the one it happened to reach.
   const nowMs = Date.now();
@@ -77,14 +74,25 @@ export async function GET(request: Request) {
     await reportBlockerAwaited("cron-eod", e);
     return NextResponse.json({ ...counts, failed: 1 }, { status: 500 });
   }
-  // The companies whose own 6 PM this run is. The texts and the night debrief both ride this list.
-  // A loop, not a filter (cn-v1130, skeptic #34): a timezone Intl cannot read throws in atLocalHour,
-  // and that must cost ONE company its evening — counted, filed with the company — never the rest.
+  // The companies whose own 6 PM this run is (the reminder AND the night debrief), and those between
+  // 7 PM and 11 PM (the reminder only, for a job whose hours end later). A loop, not a filter
+  // (cn-v1130, skeptic #34): a timezone Intl cannot read throws, and that must cost ONE company its
+  // evening — counted, filed with the company — never the rest.
   const dueOrgs: Org[] = [];
+  const looked: { org: Org; hour: number }[] = [];
   for (const org of orgs) {
     try {
-      if (atLocalHour(getOrgSettings(org.settings).timezone, EOD_LOCAL_HOUR, nowMs)) dueOrgs.push(org);
-      else counts.not_due_yet++;
+      const tz = getOrgSettings(org.settings).timezone;
+      if (atLocalHour(tz, EOD_LOCAL_HOUR, nowMs)) {
+        dueOrgs.push(org);
+        looked.push({ org, hour: EOD_LOCAL_HOUR });
+        continue;
+      }
+      const hour = Math.floor(tzMinutesOfDay(new Date(nowMs), tz) / 60);
+      if (hour > EOD_LOCAL_HOUR && hour <= LAST_CLOCK_OUT_HOUR) {
+        counts.late_checked++;
+        looked.push({ org, hour });
+      } else counts.not_due_yet++;
     } catch (e) {
       counts.failed++;
       reportError("cron-eod", e, { orgId: org.id });
@@ -92,82 +100,7 @@ export async function GET(request: Request) {
   }
   counts.due = dueOrgs.length;
 
-  for (const org of dueOrgs) {
-    // THE 6 PM PUSH, its own step, before the texts' gates (cn-v1190): see the note above GET.
-    if (timeclockRemindersPush(org.settings)) await pushStillClockedIn(supabase, org, nowMs, counts);
-    if (!timeclockRemindersText(org.settings)) continue; // Push only (Settings → Scheduling): no text
-    // TEXTING NOT SET UP (lib/sms-readiness): the org's choice is kept, nothing is sent, and the
-    // skip is counted. Settings shows this option as not active and lists what is missing, so
-    // the person who ticked it reads the truth there rather than in a cron reply nobody opens.
-    if (!smsReadiness(org).ready) {
-      counts.not_ready++;
-      continue;
-    }
-    try {
-      // "Today" is the org's LOCAL day, not the (UTC-on-Vercel) server day, so a
-      // Pacific evening shift counts toward today rather than tomorrow.
-      const { dayStart } = todayBoundsInTz(getOrgSettings(org.settings).timezone);
-      const [techsR, entriesR] = await Promise.all([
-        // `language` rides the one people read (cn-v1138): each text speaks the tech's own language.
-        supabase
-          .from("profiles")
-          .select("id, full_name, phone, language")
-          .eq("org_id", org.id)
-          .eq("active", true)
-          .eq("role", "tech"),
-        supabase
-          .from("time_entries")
-          .select("profile_id, status, notes")
-          .eq("org_id", org.id)
-          // TODAY'S ROWS **OR** ANYTHING STILL OPEN (audit v921). Filtering on clock_in alone meant
-          // a punch left open from yesterday was reminded once, on Monday evening, and never again:
-          // Tuesday's fetch didn't return it, the tech's list came back empty and the loop skipped
-          // him, while the hours kept accruing. 0193 only closes a stale entry on that person's NEXT
-          // punch — if he never punches again, nothing else catches it. Still org-scoped: the
-          // service client bypasses RLS, so the org filter stays outside the or().
-          .or(`clock_in.gte.${dayStart.toISOString()},status.eq.open`),
-      ]);
-      if (techsR.error) throw techsR.error;
-      if (entriesR.error) throw entriesR.error; // a failed read is not "nothing to say": it texts nobody
-      const techs = techsR.data;
-      const entries = entriesR.data;
-      if (!techs?.length) continue;
-
-      const byTech = new Map<string, any[]>();
-      for (const e of entries ?? []) {
-        const list = byTech.get(e.profile_id) ?? [];
-        list.push(e);
-        byTech.set(e.profile_id, list);
-      }
-
-      counts.checked += techs.length;
-      for (const tech of techs) {
-        const todays = byTech.get(tech.id) ?? [];
-        if (todays.length === 0) continue; // never clocked in — handled by /nudge
-
-        const stillOpen = todays.some((e) => e.status === "open");
-        const anyDocumented = todays.some((e) => withoutHeldCrumb(e.notes)); // the clock's own take-back line is not a note
-
-        const t = translator(asLang(tech.language));
-        const name = tech.full_name ?? "";
-        let message = "";
-        if (stillOpen) {
-          message = fillText(t("nb_eodStillIn"), { name });
-        } else if (!anyDocumented) {
-          message = fillText(t("nb_eodNoForm"), { name });
-        } else {
-          continue; // done for the day
-        }
-
-        const sent = await sendSms(tech.phone, message, (org.settings as any)?.sms_from_number);
-        if (sent) counts.reminded++;
-      }
-    } catch (e) {
-      // Counted and filed with the company, never a quiet skip; the next company still gets its evening.
-      counts.failed++;
-      reportError("cron-eod", e, { orgId: org.id });
-    }
-  }
+  for (const { org, hour } of looked) await remindStillClockedIn(supabase, org, hour, nowMs, counts);
 
   // NIGHT DEBRIEF NUDGE (Erik: "i want a night debrief") — the "Close out your day" push rides
   // this run for the companies at their own 6 PM (dueOrgs, cn-v1130): staff get the day's money
@@ -187,86 +120,115 @@ export async function GET(request: Request) {
   return NextResponse.json({ ...counts, close_out });
 }
 
-/**
- * The shift's start as a clock time in the company's clock, in the reader's language: "7:00 AM",
- * and in Spanish with its article, "las 7:00 am" (or "la 1:00 pm"), so the sentence needs no rule
- * of its own. ICU's narrow no-break space is a plain space, and Spanish "a. m." is written without
- * dots (the sentence adds its own stop), the way the 12-hour question's clock says it.
- */
-function clockSince(ms: number, tz: string, lang: Lang): string {
-  const clock = new Date(ms)
-    .toLocaleTimeString(localeOf(lang), { timeZone: tz, hour: "numeric", minute: "2-digit" })
-    .replace(/[  ]/g, " ")
-    .replace(/\b([ap])\.\s?m\.$/i, "$1m");
-  if (lang !== "es") return clock;
-  return `${/^1:/.test(clock) ? "la" : "las"} ${clock}`;
-}
-
 type ShiftRow = {
   id: string;
   profile_id: string;
+  job_id: string | null;
   clock_in: string;
   split_from: string | null;
   long_shift_nudged_at: string | null;
   profiles?: { active?: boolean | null } | { active?: boolean | null }[] | null;
 };
 
+type Counts = { checked: number; reminded: number; not_ready: number; failed: number; pushed: number; push_failed: number };
+
 /**
- * THE 6 PM "STILL CLOCKED IN" PUSH for one company (cn-v1190). Every read names the company (the
- * service client bypasses RLS). A failed read (the open shifts, or their families) stops this
- * company's step, is counted and filed, and pushes NOBODY: it is never read as "nobody is on the
- * clock". One notifyPeople per person, because each push names that person's own start.
+ * THE CLOCK-OUT REMINDER for one company on one run (cn-v1192): the people due at THIS hour, by the
+ * one rule, pushed (Push or Both) and, the techs among them, texted (Text or Both, texting ready).
+ * Every read names the company (the service client bypasses RLS).
  */
-async function pushStillClockedIn(
-  supabase: Parameters<typeof loadShiftChains>[0],
-  org: Org,
-  nowMs: number,
-  counts: { failed: number; pushed: number; push_failed: number },
-): Promise<void> {
-  const tz = getOrgSettings(org.settings).timezone;
+async function remindStillClockedIn(supabase: Parameters<typeof loadShiftChains>[0], org: Org, runHour: number, nowMs: number, counts: Counts): Promise<void> {
+  const push = timeclockRemindersPush(org.settings);
+  const text = timeclockRemindersText(org.settings);
+  // TEXTING NOT SET UP (lib/sms-readiness): the org's choice is kept, nothing is texted, and the skip
+  // is counted. Settings shows the option as not active and lists what is missing.
+  const textReady = text && smsReadiness(org).ready;
+  if (text && !textReady) counts.not_ready++;
+  if (!push && !textReady) return;
+
+  const settings = getOrgSettings(org.settings);
+  const tz = settings.timezone;
   let due: { profileId: string; startMs: number }[];
   try {
-    const { dayStart } = todayBoundsInTz(tz);
+    const { dayStart, todayStr } = todayBoundsInTz(tz);
     const { data, error } = await supabase
       .from("time_entries")
-      .select("id, profile_id, clock_in, split_from, long_shift_nudged_at, profiles:profile_id(active)")
+      .select("id, profile_id, job_id, clock_in, split_from, long_shift_nudged_at, profiles:profile_id(active)")
       .eq("org_id", org.id)
       .eq("status", "open");
     if (error) throw error;
     const rows = (data ?? []) as unknown as ShiftRow[];
     // The shift's start, and whether the 12-hour question went out on any piece of it. Throws on a failed read.
     const chains = await loadShiftChains(supabase, rows, org.id);
-    const seen = new Set<string>();
-    due = [];
+    const shifts: OpenShift[] = [];
     for (const r of rows) {
-      const person = Array.isArray(r.profiles) ? (r.profiles[0] ?? null) : (r.profiles ?? null);
-      if (person?.active !== true) continue; // a removed person's phone is never pushed
       const info = chains.get(String(r.id));
-      if (!info || info.nudged) continue; // already asked the 12-hour question: one ask per clock
-      // Begun on the company's own today: a shift open since yesterday was pushed that evening.
-      if (!Number.isFinite(info.startMs) || info.startMs < dayStart.getTime() || info.startMs > nowMs) continue;
-      if (seen.has(r.profile_id)) continue;
-      seen.add(r.profile_id);
-      due.push({ profileId: r.profile_id, startMs: info.startMs });
+      if (!info) continue;
+      const person = Array.isArray(r.profiles) ? (r.profiles[0] ?? null) : (r.profiles ?? null);
+      shifts.push({
+        profileId: r.profile_id,
+        clockInMs: Date.parse(r.clock_in),
+        startMs: info.startMs,
+        jobId: r.job_id ?? null,
+        nudged: !!info.nudged,
+        active: person?.active === true, // a removed person's phone is never reminded
+      });
     }
+    const today = shiftsInPlay(shifts, { dayStartMs: dayStart.getTime(), nowMs });
+    counts.checked += new Set(today.map((s) => s.profileId)).size;
+    // The schedule is read only when someone on the clock is on a job: its hours can move their hour.
+    const crew = today.some((s) => s.jobId) ? await readCrewDay(supabase, { orgId: org.id, tz, workDay: workDayWindowHm(org.settings), day: todayStr }) : null;
+    due = dueToClockOut({
+      shifts: today,
+      jobEndMin: (jobId) => crew?.jobs.get(jobId)?.endMin ?? null,
+      runHour,
+      nowMs,
+      dayStartMs: dayStart.getTime(),
+    });
   } catch (e) {
     counts.failed++;
-    reportError("cron-eod", e, { orgId: org.id, step: "push" });
+    reportError("cron-eod", e, { orgId: org.id, step: "read" });
     return;
   }
-  for (const d of due) {
-    const res = await notifyPeople(org.id, [d.profileId], "clock_out", (lang) => {
-      const t = translator(lang);
-      return {
-        title: t("nb_eodPushTitle"),
-        body: fillText(t("nb_eodPushBody"), { since: clockSince(d.startMs, tz, lang) }),
-        url: "/timeclock",
-      };
-    });
-    counts.pushed += res.pushed.length;
-    if (!res.bell) {
-      counts.push_failed++;
-      reportError("cron-eod", new Error("The 6 PM clock-out push was refused: no bell line was written."), { orgId: org.id, step: "push" });
+  if (!due.length) return;
+
+  if (push) {
+    for (const d of due) {
+      const res = await notifyPeople(org.id, [d.profileId], "clock_out", (lang) => {
+        const t = translator(lang);
+        return {
+          title: t("nb_eodPushTitle"),
+          body: fillText(t("nb_eodPushBody"), { since: clockSince(d.startMs, tz, lang) }),
+          url: "/timeclock",
+        };
+      });
+      counts.pushed += res.pushed.length;
+      if (!res.bell) {
+        counts.push_failed++;
+        reportError("cron-eod", new Error("The clock-out push was refused: no bell line was written."), { orgId: org.id, step: "push" });
+      }
     }
+  }
+
+  if (!textReady) return;
+  try {
+    // The text's audience: the techs among the people due. `language` rides the one people read (cn-v1138).
+    const { data: techs, error } = await supabase
+      .from("profiles")
+      .select("id, full_name, phone, language")
+      .eq("org_id", org.id)
+      .eq("active", true)
+      .eq("role", "tech")
+      .in("id", due.map((d) => d.profileId));
+    if (error) throw error;
+    for (const tech of techs ?? []) {
+      const t = translator(asLang(tech.language));
+      const sent = await sendSms(tech.phone, fillText(t("nb_eodStillIn"), { name: tech.full_name ?? "" }), (org.settings as any)?.sms_from_number);
+      if (sent) counts.reminded++;
+    }
+  } catch (e) {
+    // Counted and filed with the company, never a quiet skip; the next company still gets its evening.
+    counts.failed++;
+    reportError("cron-eod", e, { orgId: org.id, step: "text" });
   }
 }

@@ -3236,9 +3236,25 @@ export async function saveEntryNotes(
   const t = translator(asLang((me as { language?: string | null } | null)?.language));
   const orgId = (me as { org_id?: string | null } | null)?.org_id ?? null;
   if (meErr || !orgId) return { ok: false, error: t("cs_couldntCheckEntry") };
+  // THE CLOCK'S SEALED LINE STAYS (cn-v1192). The box shows the note without it (withoutHeldCrumb), so
+  // writing the box over the row erased it, and a punch taken back afterwards could no longer put a
+  // held job back on hold. The stored note is read under the same guards as the write; when it carries
+  // the line, the line goes first, exactly as stored, and the box's text after it (never a second copy).
+  const { data: stored, error: readErr } = await supabase
+    .from("time_entries")
+    .select("id, notes")
+    .eq("id", entry_id)
+    .eq("profile_id", user.id)
+    .eq("org_id", orgId)
+    .is("paid_at", null)
+    .maybeSingle();
+  if (readErr) return { ok: false, error: t("cs_couldntCheckEntry") };
+  const seal = HELD_CRUMB.exec((stored as { notes?: string | null } | null)?.notes ?? "")?.[0] ?? null;
+  const typed = seal ? withoutHeldCrumb(notes) : notes;
+  const nextNotes = seal ? (typed ? `${seal}\n${typed}` : seal) : notes;
   const { data: upd, error } = await supabase
     .from("time_entries")
-    .update({ notes, translated_notes })
+    .update({ notes: nextNotes, translated_notes })
     .eq("id", entry_id)
     .eq("profile_id", user.id)
     .eq("org_id", orgId)

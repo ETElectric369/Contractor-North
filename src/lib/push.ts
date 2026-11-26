@@ -62,6 +62,9 @@ export type PushKind =
   | "invoice_paid"
   | "day_ahead"
   | "clock_out"
+  // THE CLOCK-IN REMINDER (cn-v1192): 15 minutes after a scheduled start with no punch yet. OPT-IN
+  // (the owner, asked whether it starts on or off: "Start off").
+  | "clock_in"
   | "daily_report"
   | "booked" // a customer picked a time on their /pick link — the work self-scheduled
   // Tap to Pay on iPhone: the one-shot launch announcement (Apple 3.3) and a card declined
@@ -95,6 +98,8 @@ const DEFAULTS: Record<PushKind, boolean> = {
   // NON-STAFF user who left the geofence while clocked in — Erik: "push at geofence
   // for clock out only for techs". Opt out per-user in Settings → Notifications.
   clock_out: true,
+  // Off until a person switches it on (cn-v1192, the owner: "Start off").
+  clock_in: false,
   // A crew lead's end-of-day debrief was filed — staff-facing, like quote_accepted.
   daily_report: true,
   // Work booking ITSELF is exactly the moment the boss asked to hear about.
@@ -117,7 +122,7 @@ const DEFAULTS: Record<PushKind, boolean> = {
 };
 
 /** An OPT-IN kind: off until a person switches it on (day_ahead: the morning digest and the 6 PM
- *  close-out). The Bell writes such a kind's line only for the people the push went to (notifyPeople):
+ *  close-out; clock_in: the clock-in reminder, cn-v1192). The Bell writes such a kind's line only for the people the push went to (notifyPeople):
  *  a line on the bell is the push, recorded, never a second channel for something they didn't ask for. */
 export function pushKindIsOptIn(kind: PushKind): boolean {
   return DEFAULTS[kind] === false;

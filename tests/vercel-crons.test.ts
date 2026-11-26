@@ -34,8 +34,9 @@ describe("vercel.json crons", () => {
     expect(schedule("/api/automations/reminders")).toBe(HOURLY);
   });
 
-  it("the three Time Clock crons stay hourly, and the calendar sync every fifteen minutes", () => {
-    expect(schedule("/api/timeclock/nudge")).toBe(HOURLY);
+  it("two Time Clock crons stay hourly; the clock-in reminder and the calendar sync run every fifteen minutes", () => {
+    // cn-v1192: the clock-in reminder runs each quarter hour, 15 to 30 minutes after each start.
+    expect(schedule("/api/timeclock/nudge")).toBe("*/15 * * * *");
     expect(schedule("/api/timeclock/eod-reminder")).toBe(HOURLY);
     expect(schedule("/api/timeclock/long-shift")).toBe(HOURLY);
     expect(schedule("/api/google/sync")).toBe("*/15 * * * *");

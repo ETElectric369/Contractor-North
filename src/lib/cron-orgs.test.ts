@@ -16,8 +16,8 @@ import { todayStrInTz, tzDayOfWeek } from "./tz";
  * EVERY COMPANY, WHOLE, OR A FAILURE; AND THE COMPANY'S OWN HOUR (cn-v1130, the 2026-10-26 deep
  * review's ops layer). The org-wide crons read `organizations` with one bare select (a failed read
  * was an empty run; PostgREST's silent 1,000-row cap would have dropped every company past it) and
- * ran at UTC hours tuned to Pacific summer (the 7 AM text would have moved to 6 AM the Sunday DST
- * ends). readAllOrgs pages by id and throws; atLocalHour judges the instant in the company's zone.
+ * ran at UTC hours tuned to Pacific summer (the old 7 AM text would have moved to 6 AM the Sunday DST
+ * ends; since cn-v1192 that reminder follows the schedule every 15 minutes, and no cron is at 7 AM). readAllOrgs pages by id and throws; atLocalHour judges the instant in the company's zone.
  */
 
 type Page = { data: any[] | null; error: unknown };
@@ -122,7 +122,7 @@ describe("atLocalHour", () => {
   /**
    * THE TWO DAYS THE CLOCK CHANGES (cn-v1130, skeptic #34). The texting crons run EVERY hour and a
    * company is handled on the run in its own hour, so the one thing that must hold is: across the
-   * local day, the 7 AM nudge and the 6 PM reminder each find exactly ONE run, whether the day has 25
+   * local day, a 7 AM hour (the old nudge's; any morning hour reads the same) and the 6 PM reminder each find exactly ONE run, whether the day has 25
    * hours (fall back) or 23 (spring forward). Swept over every :00 UTC instant whose Pacific calendar
    * date is the day itself, so a run on either side of the change cannot hide a miss or a repeat.
    */
@@ -142,7 +142,7 @@ describe("atLocalHour", () => {
     expect(instants).toHaveLength(25);
     expect(instants.filter((at) => atLocalHour(PACIFIC, 7, at)).length).toBe(1);
     expect(instants.filter((at) => atLocalHour(PACIFIC, 18, at)).length).toBe(1);
-    // The repeated 1 AM is the day's one double hour; the nudge's 7 AM is a Sunday, so weekdays-only skips it.
+    // The repeated 1 AM is the day's one double hour; that 7 AM is a Sunday, so weekdays-only skips it.
     expect(instants.filter((at) => atLocalHour(PACIFIC, 1, at)).length).toBe(2);
     expect(instants.filter((at) => atLocalHour(PACIFIC, 7, at, true)).length).toBe(0);
     // And it is the right instant: 7 AM is 15:00 UTC once DST has ended, 6 PM is 02:00 UTC the next day.
@@ -165,7 +165,7 @@ describe("atLocalHour", () => {
    * THE DAILY CRON AND THE REMINDERS ON THE COMPANY'S CLOCK (2026-11-02). The daily ran at 15:00 UTC
    * and the reminders at 15/19/23 UTC, tuned to Pacific summer: the day after DST ended they landed at
    * 7 AM, 11 AM and 3 PM. Both are hourly now, judged by atLocalHour: the company steps at its 8 AM,
-   * the reminders at its 8 AM, noon and 4 PM. Swept the same way as the nudge: each exactly once.
+   * the reminders at its 8 AM, noon and 4 PM. Swept the same way as the 7 AM hour above: each exactly once.
    */
   it("the daily 8 AM and the reminder hours are 8, noon and 4 PM; North's own housekeeping hour is 15:00 UTC", () => {
     expect(DAILY_LOCAL_HOUR).toBe(8);

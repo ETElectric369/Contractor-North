@@ -17,10 +17,10 @@ type Client = { from: (t: string) => any };
 
 export type OrgRow = { id: string; settings: unknown };
 
-/** The company's own 7 AM (its weekdays) for the clock-in nudge, and its own 6 PM (every day) for
- *  the end-of-day reminder and the night debrief, each judged in the org's timezone (atLocalHour).
- *  They live here, not in the route files: a route may export only handlers and segment config. */
-export const NUDGE_LOCAL_HOUR = 7;
+/** The company's own 6 PM (every day) for the clock-out reminder and the night debrief, judged in the
+ *  org's timezone (atLocalHour). It lives here, not in the route file: a route may export only
+ *  handlers and segment config. The clock-in reminder's 7 AM gate went in cn-v1192: the schedule
+ *  says when each person starts (lib/timeclock-reminders). */
 export const EOD_LOCAL_HOUR = 18;
 
 /** THE DAILY CRON'S TWO CLOCKS (2026-11-02, the day after DST ended). /api/automations/daily runs

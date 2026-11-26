@@ -683,12 +683,12 @@ export function timeclockRemindersBy(settings: unknown): TimeclockRemindBy {
   return present && !s.remind_timeclock ? "push" : "both";
 }
 
-/** The texts (7 AM, 6 PM, the 12-hour question's copy) go out under Text or Both. */
+/** The texts (the clock-in reminder's, the clock-out reminder's, and the 12-hour question's copy) go out under Text or Both. */
 export function timeclockRemindersText(settings: unknown): boolean {
   return timeclockRemindersBy(settings) !== "push";
 }
 
-/** The 6 PM "still clocked in" push goes out under Push or Both. */
+/** The two reminders' pushes (the clock-in push, and the "still clocked in" clock-out push) go out under Push or Both. */
 export function timeclockRemindersPush(settings: unknown): boolean {
   return timeclockRemindersBy(settings) !== "text";
 }

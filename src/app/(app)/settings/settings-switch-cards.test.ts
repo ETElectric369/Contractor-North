@@ -119,10 +119,10 @@ describe("Scheduler & timesheets: the Payroll block", () => {
 
 describe("Push notifications", () => {
   it("everything on: the daily report row; Daily Reports off: gone, the rest stay", () => {
-    expect(r(PushSettings, { initialPrefs: {}, role: "owner" })).toContain("Daily reports from crew leads");
+    expect(r(PushSettings, { initialPrefs: {}, role: "owner" })).toContain("Daily Reports from Crew Leads");
     const html = r(PushSettings, { initialPrefs: {}, role: "owner", features: withOff("daily_reports").features });
-    expect(html).not.toContain("Daily reports from crew leads");
-    expect(html).toContain("New inquiries / leads");
-    expect(html).toContain("Quotes accepted by a customer");
+    expect(html).not.toContain("Daily Reports from Crew Leads");
+    expect(html).toContain("New Inquiries / Leads");
+    expect(html).toContain("Quotes Accepted by a Customer");
   });
 });

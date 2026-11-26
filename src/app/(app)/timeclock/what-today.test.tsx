@@ -220,6 +220,19 @@ describe("saveEntryNotes: the caller's own unpaid shift in his company, read bac
     expect(row("e-sam-elsewhere").notes).toBeNull();
   });
 
+  // cn-v1192: the box shows the note without the clock's sealed line, so the autosave must keep it.
+  it("keeps the clock's sealed line first, exactly as stored, and never writes it twice", async () => {
+    const line = "[This punch took the job off hold. Before: {\"j\":\"j-901\",\"r\":null,\"d\":null,\"b\":null} #0123456789abcdef]";
+    row("e-sam").notes = line;
+    expect(await saveEntryNotes("e-sam", "Roughed in at Larkspur", null)).toEqual({ ok: true });
+    expect(row("e-sam").notes).toBe(`${line}\nRoughed in at Larkspur`);
+    // The box never shows the line, but a copy pasted back is not doubled; an emptied box keeps the line alone.
+    expect(await saveEntryNotes("e-sam", `${line}\nSet the panel`, null)).toEqual({ ok: true });
+    expect(row("e-sam").notes).toBe(`${line}\nSet the panel`);
+    expect(await saveEntryNotes("e-sam", "", null)).toEqual({ ok: true });
+    expect(row("e-sam").notes).toBe(line);
+  });
+
   it("the autosave reads a not-ok answer as not saved: nothing shown, the next change tries again", () => {
     const p = src("src/app/(app)/timeclock/timeclock-panel.tsx");
     expect(p).toContain("saveEntryNotes(openEntry.id, notes, null)\n        .then((r) => {\n          if (r.ok) lastSavedNotes.current = notes;\n        })");

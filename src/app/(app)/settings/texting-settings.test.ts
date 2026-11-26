@@ -44,18 +44,19 @@ describe("the timeclock reminders choice (cn-v1190: Push, Text or Both)", () => 
 
   it("the sentence under it says what a push is, what a text is, and the person's own switch", () => {
     const { after } = reminderChoice(renderToStaticMarkup(createElement(SchedulingSettings, { settings, textReady: true })));
-    // fix-1190-B (skeptic #91 S5): the push goes to a shift begun that day, and not to one the 12-hour
-    // question already asked (eod-reminder pushStillClockedIn), never "everyone still on the clock".
-    expect(after).toContain(
-      "A push is the \u201cstill clocked in\u201d reminder at 6 PM to everyone still clocked in from a shift that began that day (anyone the 12-hour question already asked isn&#x27;t pushed again).",
+    // PIN MOVED (cn-v1192): both reminders follow the schedule, and the clock-in push starts off.
+    const said = after.replace(/\s+/g, " ");
+    expect(said).toContain(
+      "A push is the clock-in reminder, 15 to 30 minutes after a person&#x27;s scheduled start when they haven&#x27;t clocked in, and the clock-out reminder, at 6 PM or when the job&#x27;s hours end if that&#x27;s later, never for a shift under an hour old.",
     );
-    expect(after).not.toContain("everyone still on the clock");
-    expect(after).toContain("7 AM");
-    expect(after).toContain("the 6 PM text to techs");
+    expect(said).toContain("A text is the same two to techs");
+    expect(said).not.toContain("7 AM");
     // The 12-hour question's text rides this choice, and the question itself always pushes.
-    expect(after).toContain("12-hour");
-    expect(after).toContain("that question always comes as a push");
-    expect(after).toContain("Each person can turn off clock-out pushes in their own Settings");
+    expect(said).toContain("12-hour");
+    expect(said).toContain("that question always comes as a push");
+    expect(said).toContain(
+      "The clock-in push is off for each person until they turn it on in their own Settings, under Push Notifications; each person can turn the clock-out push off there.",
+    );
   });
 
   it("nothing stored and the old box on (the default) reads Both; not ready says the texts aren't active yet", () => {

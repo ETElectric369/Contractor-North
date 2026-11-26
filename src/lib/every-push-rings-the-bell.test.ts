@@ -54,6 +54,8 @@ const THROUGH_NOTIFY: string[] = [
   // cn-v1190: the 6 PM "Still Clocked In" push, to everyone still on the clock, under kind clock_out
   // (the person's own Clock-out reminders switch), the bell line first, in each person's language.
   "src/app/api/timeclock/eod-reminder/route.ts",
+  // cn-v1192: the clock-in reminder's push, under kind clock_in (opt-in), in each person's language.
+  "src/app/api/timeclock/nudge/route.ts",
 ];
 
 function walk(dir: string, out: string[] = []): string[] {

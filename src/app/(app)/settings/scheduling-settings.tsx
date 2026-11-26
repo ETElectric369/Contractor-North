@@ -130,11 +130,13 @@ export function SchedulingSettings({
           </Select>
         </div>
         <p className="text-sm text-slate-600">
-          A push is the &ldquo;still clocked in&rdquo; reminder at 6 PM to everyone still clocked in from a
-          shift that began that day (anyone the 12-hour question already asked isn&apos;t pushed again). A text
-          is the 7 AM &ldquo;not clocked in&rdquo; text and the 6 PM text to techs, and the 12-hour
+          {/* cn-v1192: both reminders follow the schedule (api/timeclock/nudge and eod-reminder). */}
+          A push is the clock-in reminder, 15 to 30 minutes after a person&apos;s scheduled start when they
+          haven&apos;t clocked in, and the clock-out reminder, at 6 PM or when the job&apos;s hours end if that&apos;s
+          later, never for a shift under an hour old. A text is the same two to techs, and the 12-hour
           &ldquo;still on the clock?&rdquo; question by text too; that question always comes as a push.
-          Each person can turn off clock-out pushes in their own Settings, under Push notifications.
+          The clock-in push is off for each person until they turn it on in their own Settings, under
+          Push Notifications; each person can turn the clock-out push off there.
           {!textReady && (
             <span className="mt-0.5 block text-xs text-amber-700">
               {remindBy === "push"

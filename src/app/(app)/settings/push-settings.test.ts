@@ -36,13 +36,13 @@ const rows = (role: string | null, f?: FeatureMap) => pushTriggersFor(role, f).m
 describe("pushTriggersFor", () => {
   it("everything on (or no map): the same switches, in the same words, as before", () => {
     expect(rows("owner", ALL_ON)).toEqual(rows("owner"));
-    expect(rows("owner")).toContain("inquiry:New inquiries / leads");
-    expect(rows("owner")).toContain("daily_report:Daily reports from crew leads");
-    expect(rows("owner")).toContain("quote_accepted:Quotes accepted by a customer");
+    expect(rows("owner")).toContain("inquiry:New Inquiries / Leads");
+    expect(rows("owner")).toContain("daily_report:Daily Reports from Crew Leads");
+    expect(rows("owner")).toContain("quote_accepted:Quotes Accepted by a Customer");
   });
 
   it("Leads off: the request alert stays (requests still arrive) and says so plainly", () => {
-    expect(rows("owner", off("leads"))).toContain("inquiry:New requests from customers");
+    expect(rows("owner", off("leads"))).toContain("inquiry:New Requests from Customers");
   });
 
   it("Daily Reports off (or Crew & Payroll off): no daily report alert", () => {
@@ -51,7 +51,7 @@ describe("pushTriggersFor", () => {
   });
 
   it("Estimates off: 'Quotes accepted' stays (a sent estimate can still be accepted)", () => {
-    expect(rows("owner", off("estimates"))).toContain("quote_accepted:Quotes accepted by a customer");
+    expect(rows("owner", off("estimates"))).toContain("quote_accepted:Quotes Accepted by a Customer");
   });
 
   it("a tech never gains a staff alert from a switch", () => {
@@ -67,18 +67,19 @@ describe("pushTriggersFor", () => {
     expect(es.map((t) => t.audience)).toEqual(en.map((t) => t.audience));
     expect(pushTriggersFor("tech", ALL_ON).map((t) => t.label)).toEqual(en.map((t) => t.label));
     const by = (list: typeof en, key: string) => list.find((t) => t.key === key)!;
-    expect(by(es, "assigned").label).toBe("Trabajos y citas asignados a mí");
-    expect(by(es, "clock_out").label).toBe("Recordatorios para marcar salida");
+    expect(by(es, "assigned").label).toBe("Trabajos y Citas Asignados a Mí");
+    expect(by(es, "clock_out").label).toBe("Recordatorios para Marcar Salida");
     expect(by(en, "clock_out").help).toContain("has run 12 hours");
     expect(by(es, "clock_out").help).toContain("12 horas");
     expect(by(es, "clock_out").help).not.toContain("{hours}");
     // The 6 PM "Still Clocked In" push rides this same switch (cn-v1190), and the help says so in both.
     // fix-1190-B: only a shift begun that day, and not one the 12-hour question already asked (eod-reminder).
+    // PIN MOVED (cn-v1192): or when the job's hours end if later, and not a shift under an hour old.
     expect(by(en, "clock_out").help).toContain(
-      "At 6 PM if you're still clocked in from a shift that began that day and the 12-hour question hasn't come yet (when your company sends reminders by push)",
+      "At 6 PM, or when your job's hours end if that's later, if you're still clocked in from a shift that began that day at least an hour before and the 12-hour question hasn't come yet (when your company sends reminders by push)",
     );
     expect(by(es, "clock_out").help).toContain(
-      "A las 6 p. m. si todavía tienes entrada marcada de un turno que empezó ese día y aún no te llegó la pregunta de las 12 horas (cuando tu empresa manda los recordatorios por aviso push)",
+      "A las 6 p. m., o cuando terminan las horas de tu trabajo si es más tarde, si todavía tienes entrada marcada de un turno que empezó ese día hace al menos una hora y aún no te llegó la pregunta de las 12 horas (cuando tu empresa manda los recordatorios por aviso push)",
     );
     expect(by(en, "clock_out").help).not.toContain("{hours}");
     for (const t of es) if (t.key !== "tap_to_pay") expect(t.label, t.key).not.toBe(by(en, t.key).label);
@@ -88,9 +89,9 @@ describe("pushTriggersFor", () => {
 
   it("Spanish, the office and the owner: Leads off swaps the inquiry words; the long-shift row carries the hours; the Title Case rows stay Title Case", () => {
     const es = (role: string, f?: FeatureMap, platform = false) => pushTriggersFor(role, f, platform, "es");
-    expect(es("owner", off("leads")).find((t) => t.key === "inquiry")!.label).toBe("Nuevas solicitudes de clientes");
-    expect(es("owner").find((t) => t.key === "inquiry")!.label).toBe("Nuevas consultas / prospectos");
-    expect(es("owner").find((t) => t.key === "long_shift")!.label).toBe("Un reloj de la cuadrilla con 12 horas");
+    expect(es("owner", off("leads")).find((t) => t.key === "inquiry")!.label).toBe("Nuevas Solicitudes de Clientes");
+    expect(es("owner").find((t) => t.key === "inquiry")!.label).toBe("Nuevas Consultas / Prospectos");
+    expect(es("owner").find((t) => t.key === "long_shift")!.label).toBe("Un Reloj de la Cuadrilla con 12 Horas");
     const titleCase = (s: string) => titleCaseIn(s, "en"); // the one judge (cn-v1148)
     for (const key of ["booked", "billing", "bug_watch"]) {
       const row = es("owner", ALL_ON, true).find((t) => t.key === key)!;
@@ -281,5 +282,42 @@ describe("the Materials to Buy Today switch, drawn", () => {
     expect(row.slice(0, row.indexOf("</label>"))).toMatch(/checked=""/);
     expect(draw("en", "tech")).not.toContain("Materials to Buy Today");
     expect(draw("es", "tech")).not.toContain("Materiales por Comprar Hoy");
+  });
+});
+
+/**
+ * CLOCK-IN REMINDERS (cn-v1192): the clock-in reminder's push (api/timeclock/nudge) goes to anyone
+ * scheduled, any role, so everyone gets the switch, beside Clock-out Reminders. It STARTS OFF (the
+ * owner: "Start off"): an opt-in kind, off on the screen and on the server alike.
+ */
+describe("pushTriggersFor: the Clock-In Reminders row", () => {
+  it("is there for every role, right after Clock-Out Reminders", () => {
+    for (const role of ["owner", "admin", "office", "tech", null]) {
+      const keys = pushTriggersFor(role, ALL_ON).map((t) => t.key);
+      expect(keys, String(role)).toContain("clock_in");
+      expect(keys.indexOf("clock_in"), String(role)).toBe(keys.indexOf("clock_out") + 1);
+    }
+  });
+
+  it("says what it is, and that it starts off, in both languages; the labels Title Case", () => {
+    const en = pushTriggersFor("tech", ALL_ON, false, "en").find((t) => t.key === "clock_in")!;
+    const es = pushTriggersFor("tech", ALL_ON, false, "es").find((t) => t.key === "clock_in")!;
+    expect(en.label).toBe("Clock-In Reminders");
+    expect(es.label).toBe("Recordatorios para Marcar Entrada");
+    expect(en.help).toBe("Off until you turn it on. A reminder 15 to 30 minutes after your scheduled start if you haven't clocked in (when your company sends reminders by push).");
+    expect(es.help).toBe(
+      "Apagado hasta que lo actives. Un recordatorio entre 15 y 30 minutos después de tu hora de inicio en la agenda si no has marcado entrada (cuando tu empresa manda los recordatorios por aviso push).",
+    );
+    expect(en.audience).toBe("all");
+    expect(titleCaseIn(en.label, "en"), en.label).toBe(true);
+    expect(esTitleCase(es.label), es.label).toBe(true);
+  });
+
+  it("defaults OFF, on the screen and on the server alike", () => {
+    const src = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
+    for (const file of ["src/app/(app)/settings/push-settings.tsx", "src/lib/push.ts"]) {
+      expect(src(file), file).toMatch(/^\s*clock_in: false,$/m);
+    }
+    expect(src("src/lib/push.ts")).toMatch(/\| "clock_in"\n/);
   });
 });

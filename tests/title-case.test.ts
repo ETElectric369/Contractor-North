@@ -502,3 +502,25 @@ describe("every clickable in the app is Title Case", () => {
     expect(offenders).toEqual([]);
   }, 60_000);
 });
+
+/**
+ * EVERY PUSH SWITCH IS TITLE CASE (cn-v1192, fixer #92): the labels on Settings › Push Notifications,
+ * sh_push_<kind> and sh_pushOff_<kind>, in both languages. The newer ones were born Title Case; the
+ * older ones sat beside them in sentence case. The sh_pushHelp_* lines are sentences and are not judged.
+ */
+describe("every push switch label is Title Case, in both languages", () => {
+  const keys = Object.keys(dict("en")).filter((k) => /^sh_push(Off)?_/.test(k));
+  // Chicago: the second half of an English hyphenated compound is capitalized unless it is an article or a
+  // preposition ("Clock-Out Reminders", as the catalog's own "Undo Clock-In"). The house helper reads a
+  // compound as one word, so the labels' check adds this.
+  const hyphenTail = (v: string, lang: "en" | "es") =>
+    lang === "en" ? ([...v.matchAll(/\p{L}+-(\p{Ll}+)/gu)].map((m) => m[1]).find((w) => !["a", "an", "the", "to", "of", "in", "on", "at", "by", "for", "with"].includes(w)) ?? null) : null;
+  it("reads the labels", () => expect(keys.length).toBeGreaterThan(10));
+  it.each(["en", "es"] as const)("%s", (lang) => {
+    const offenders = keys
+      .map((k) => ({ k, v: dict(lang)[k] ?? "", word: titleCaseOffence(dict(lang)[k] ?? "", lang) ?? hyphenTail(dict(lang)[k] ?? "", lang) }))
+      .filter((o) => o.word)
+      .map((o) => `${o.k} "${o.v}" — "${o.word}"`);
+    expect(offenders).toEqual([]);
+  });
+});
