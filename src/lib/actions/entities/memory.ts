@@ -174,7 +174,9 @@ export const memoryActions: Record<string, ActionDef> = {
     label: "Forget a fact",
     description:
       "Delete ONE saved fact by its id (get ids from memory.list). Use it when they say to forget something, when a fact turned out wrong, or to make room when memory is full.",
-    input: z.object({ id: z.string().uuid("Which fact? Use memory.list to get its id.") }),
+    // The words name the id's SHAPE only, as they did on zod 3; an absent id still reads
+    // "Required" (parse-input.ts), so the assistant is told it is missing, not malformed.
+    input: z.object({ id: z.guid({ error: (iss) => (iss.code === "invalid_format" ? "Which fact? Use memory.list to get its id." : undefined) }) }),
     auth: "any",
     effect: "write",
     confirm: "destructive",

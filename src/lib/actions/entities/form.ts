@@ -12,7 +12,9 @@ export const formActions: Record<string, ActionDef> = {
     input: z.object({
       form_id: z.string(),
       job_id: z.string().nullable().optional(),
-      data: z.record(z.any()).default({}),
+      // zod 4 takes a record's key type too. A record of any value makes no issue per entry, so
+      // an oversized one is not the over-long-list problem a bound guards against: no bound.
+      data: z.record(z.string(), z.any()).default({}),
     }),
     auth: "any",
     effect: "write",

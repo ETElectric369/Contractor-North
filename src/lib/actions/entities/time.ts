@@ -291,10 +291,10 @@ export const timeActions: Record<string, ActionDef> = {
     // missing-fields channel as time.addEntry so voice asks for exactly what's absent.
     input: z
       .object({
-        entry_id: z.string().uuid(),
+        entry_id: z.guid(),
         clock_in: z.string().optional(),
         clock_out: z.string().optional(),
-        job_id: z.string().uuid().nullable().optional(),
+        job_id: z.guid().nullable().optional(),
         lunch_minutes: z.number().min(0).optional(),
       })
       .superRefine((v, ctx) => {
@@ -515,7 +515,7 @@ export const timeActions: Record<string, ActionDef> = {
       "Propose ONE cut of a finished timecard entry into two ('the last hour of <name>'s Tuesday was <job>', '<name> switched to the <job> job at <time>'). This does NOT save anything: it checks the cut and returns an href that opens the Split This Shift sheet filled in, and the person taps Split Shift. Pass entry_id (from time.listEntries), `at` = the split time as a NAIVE local time (YYYY-MM-DDTHH:MM, company timezone, no Z), and the SECOND part's job_id (uuid, resolve names with list_jobs) or job_code (Drive/Shop). If the user gave HOURS instead of a time ('the last hour'), work the clock time out from the entry's clock-in/clock-out yourself and SAY the time back. A three-job day is two cuts: propose one, let them split it, then the next. The sheet's card is put on the screen for you; speak its `speak` line.",
     input: z
       .object({
-        entry_id: z.string().uuid(),
+        entry_id: z.guid(),
         at: z.string(),
         job_id: z.string().nullable().optional(),
         job_code: z.string().nullable().optional(),

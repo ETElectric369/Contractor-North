@@ -31,8 +31,8 @@ import { officeBellOpensShelf, officeBellWords, settleRefusalWords, tookWords, t
 
 const TAKE = z
   .object({
-    itemId: z.string().uuid(),
-    jobId: z.string().uuid(),
+    itemId: z.guid(),
+    jobId: z.guid(),
     qty: z.number().finite().gt(0).max(1_000_000),
     note: z.string().trim().max(200).nullable().optional(),
     /** The sheet was filled by Nort and a person tapped Take It (recorded as the source for the office). */
@@ -40,7 +40,7 @@ const TAKE = z
   })
   .strict();
 
-const UUID = z.string().uuid();
+const UUID = z.guid();
 
 /**
  * THE CALLER'S WORDS (cn-v1138): a refusal or an answer a person reads comes back in the language on

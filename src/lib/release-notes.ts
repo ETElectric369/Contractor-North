@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1196", date: "2026-11-26", line: "Maintenance under the hood: the library that checks everything you and Nort enter is on its new major version. A single bill or estimate now takes up to 1,000 lines at once." },
   { version: "cn-v1195", date: "2026-11-26", line: "Maintenance behind the scenes: the tools that check and build each release are on their latest patches. Nothing in the app looks or works differently." },
   { version: "cn-v1194", date: "2026-11-26", line: "Maintenance under the hood: the styling toolkit and two small helpers are on their latest patches, and the Stripe connection now names its API version. Nothing looks or works differently." },
   { version: "cn-v1193", date: "2026-11-26", line: "Clock-In Reminders is now one company switch under Settings, Scheduling, off until the office turns it on. When it's on, people who are scheduled and haven't clocked in are reminded." },

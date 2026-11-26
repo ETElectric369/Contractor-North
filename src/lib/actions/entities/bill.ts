@@ -110,7 +110,12 @@ export const billActions: Record<string, ActionDef> = {
       paper_total: z.number(),
       bill_date: z.string().nullable().optional(),
       notes: z.string().nullable().optional(),
-      lines: z.array(z.object({ description: z.string(), amount: z.number().nullable().optional() })).min(1),
+      // A list has an end (cn-v1196): zod 4 refuses an over-long list before it reads one element,
+      // and only when the list has an upper bound. Production's largest bill: 24 lines.
+      lines: z
+        .array(z.object({ description: z.string(), amount: z.number().nullable().optional() }))
+        .min(1)
+        .max(1000, "A bill takes up to 1,000 lines at once. Split it into two bills."),
       // The supplier's own document the paper IS (task 2): the server checks the document is offered
       // this bill and that the number and total are its own, then ties the correction to it.
       supplier_invoice_id: z.string().nullable().optional(),

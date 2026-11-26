@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import { REGISTRY } from "./registry";
 import { computeReadiness, missingFieldPaths } from "./readiness";
+import { parseActionInput } from "./parse-input";
 
 // The fragment kernel: the ACTION schemas are the "what am I missing" engine, and an
 // update input is a true PATCH — an omitted field must never materialize as a default
@@ -36,7 +37,7 @@ describe("computeReadiness — schemas as the missing-field engine", () => {
 
   it("missingFieldPaths reports dot-joined nested paths", () => {
     const schema = z.object({ items: z.array(z.object({ description: z.string() })) });
-    const err = schema.safeParse({ items: [{}] });
+    const err = parseActionInput(schema, { items: [{}] });
     expect(err.success).toBe(false);
     if (!err.success) expect(missingFieldPaths(err.error)).toEqual(["items.0.description"]);
   });

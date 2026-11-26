@@ -30,7 +30,7 @@ const sendPushToProfiles = vi.fn(async () => {});
 vi.mock("@/lib/push", () => ({ sendPushToProfiles: (...a: unknown[]) => (sendPushToProfiles as any)(...a) }));
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
 
-import { takeFromStockAction, undoTakeAction } from "./stock-actions";
+import { settleShortAction, takeFromStockAction, undoTakeAction } from "./stock-actions";
 
 const ORG = "60195593-2e18-4230-bc8e-7a32d36d038d";
 const JOB = "8760a051-0000-4000-8000-000000000011";
@@ -187,5 +187,51 @@ describe("a Spanish-speaking caller (cn-v1138)", () => {
     member(false);
     undoTake.mockResolvedValue({ ok: true, undone: 1 });
     expect(await undoTakeAction(GROUP, JOB)).toEqual({ ok: true, message: "Undone: the pieces are back in stock." });
+  });
+});
+
+/**
+ * ZOD 4 (cn-v1196): the take's refusals still land on the same catalog words for the same bad
+ * input (the door maps by issue code and path, never by zod's own wording), and an id is accepted
+ * exactly as zod 3 accepted it — any 8-4-4-4-12 hex shape, not only an RFC version-4 id.
+ * These cases were also run against zod 3.25.76 with the same words.
+ */
+describe("the take's doors read the same on zod 4 (cn-v1196)", () => {
+  const ANY_SHAPE = "00000000-0000-0000-0000-000000000001";
+
+  it.each([
+    ["an unknown key beside a bad count", { itemId: ITEM, jobId: JOB, qty: 0, unit_cost: 1 }, "Took from Stock takes a count, never a price. Nothing was taken."],
+    ["a count that is a word", { itemId: ITEM, jobId: JOB, qty: "sixty" }, "Say how many you took."],
+    ["no count at all", { itemId: ITEM, jobId: JOB }, "Say how many you took."],
+    ["an item that is not an id", { itemId: "not-an-id", jobId: JOB, qty: 60 }, "Pick what you took out of stock."],
+    ["a job that is not an id", { itemId: ITEM, jobId: "J-901", qty: 60 }, "Pick the job these pieces went on."],
+    ["nothing at all", {}, "Pick what you took out of stock."],
+    ["a source it does not know", { itemId: ITEM, jobId: JOB, qty: 60, via: "radio" }, "That take didn't read right. Nothing was taken."],
+  ])("%s", async (_label, raw, words) => {
+    expect(await takeFromStockAction(raw)).toEqual({ ok: false, error: words });
+    expect(requireMember).not.toHaveBeenCalled();
+    expect(takeFromStock).not.toHaveBeenCalled();
+  });
+
+  it("an id of any 8-4-4-4-12 shape is taken, as it was on zod 3", async () => {
+    member(false, { id: ANY_SHAPE, job_number: "J-901", name: "Larkspur" });
+    const r = await takeFromStockAction({ itemId: ANY_SHAPE, jobId: ANY_SHAPE, qty: 2 });
+    expect(r.ok).toBe(true);
+    expect(takeFromStock).toHaveBeenCalledWith(expect.objectContaining({ itemId: ANY_SHAPE, jobId: ANY_SHAPE }));
+  });
+
+  it("Undo and Settle accept the same ids and still refuse a non-id before signing anyone in", async () => {
+    member(false);
+    undoTake.mockResolvedValue({ ok: true, undone: 1 });
+    expect((await undoTakeAction(ANY_SHAPE, ANY_SHAPE)).ok).toBe(true);
+    requireMember.mockClear();
+    expect(await undoTakeAction("J-902")).toEqual({ ok: false, error: "That take isn't one this job knows. Reload to see where it stands." });
+    expect(requireMember).not.toHaveBeenCalled();
+    requireStaff.mockResolvedValue({ error: "Office only." });
+    expect(await settleShortAction(ANY_SHAPE)).toEqual({ ok: false, error: "Office only." });
+    expect(requireStaff).toHaveBeenCalledTimes(1);
+    requireStaff.mockClear();
+    expect(await settleShortAction("Larkspur")).toEqual({ ok: false, error: "That take isn't on the stock record. Reload to see where it stands." });
+    expect(requireStaff).not.toHaveBeenCalled();
   });
 });

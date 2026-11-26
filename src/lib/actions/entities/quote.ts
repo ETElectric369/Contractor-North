@@ -199,6 +199,9 @@ export const quoteActions: Record<string, ActionDef> = {
             unit_price: z.number().default(0),
           }),
         )
+        // A list has an end (cn-v1196): zod 4 refuses an over-long list before it reads one
+        // element, and only when the list has an upper bound. Production's largest estimate: 59.
+        .max(1000, "An estimate takes up to 1,000 lines at once. Add the rest after it is saved.")
         .default([]),
     }),
     auth: "staff", // quotes/financials are staff-only (migration 0056)

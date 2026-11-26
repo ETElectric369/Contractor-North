@@ -343,7 +343,10 @@ export const invoiceActions: Record<string, ActionDef> = {
             amount: z.number().nullable().optional(),
           }),
         )
-        .min(1),
+        .min(1)
+        // A list has an end (cn-v1196): zod 4 refuses an over-long list before it reads one
+        // element, and only when the list has an upper bound. A draw schedule is a handful.
+        .max(100, "A draw schedule takes up to 100 milestones. Combine some of them."),
     }),
     auth: "staff",
     effect: "write",

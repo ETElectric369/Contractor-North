@@ -30,7 +30,7 @@ import type Anthropic from "@anthropic-ai/sdk";
  * What the sanitiser does, mechanically and safely: adds additionalProperties: false to every
  * object; keeps `required` to names that exist; moves every unsupported constraint INTO the
  * property's description so the model still reads it; turns openApi3's `nullable: true` (what
- * zod-to-json-schema emits for the registry) into a null union; turns oneOf into anyOf; strips
+ * zod's own openapi-3.0 target emits for the registry, agent-tools' toolJsonSchema) into a null union; turns oneOf into anyOf; strips
  * unknown string formats into the description; inlines local $refs. What it does NOT do: invent
  * a schema for an open map (`additionalProperties: { type: "string" }`) — that cannot be strict
  * without changing what the tool accepts, so it stays as it is and strictProblems names it.

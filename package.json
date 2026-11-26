@@ -40,8 +40,7 @@
     "tailwind-merge": "^2.6.0",
     "three": "^0.186.1",
     "web-push": "^3.6.7",
-    "zod": "^3.24.1",
-    "zod-to-json-schema": "^3.25.2"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@capacitor/cli": "8.5.1",

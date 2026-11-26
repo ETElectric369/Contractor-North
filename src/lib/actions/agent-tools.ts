@@ -1,4 +1,4 @@
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import { actionsForRole } from "./registry";
 import { actionRisk } from "./risk";
@@ -283,7 +283,7 @@ export function agentWriteToolsForRole(
   const tools: Anthropic.Tool[] = allowed.map((a) => {
     const tn = toToolName(a.name);
     map.set(tn, a.name);
-    const schema = zodToJsonSchema(a.input, { target: "openApi3" }) as {
+    const schema = toolJsonSchema(a.input) as {
       properties?: Record<string, unknown>;
       required?: string[];
     };
@@ -301,13 +301,47 @@ export function agentWriteToolsForRole(
 }
 
 /**
+ * The JSON Schema the model is shown for one action's input (cn-v1196: zod's own generator;
+ * the zod-to-json-schema helper it replaces returned `{}` for every zod 4 schema, without a
+ * word). `io: "input"` so a defaulted field is NOT required (it is optional to the caller).
+ * The `openapi-3.0` target is the one closest to what the old helper's openApi3 target emitted
+ * (`nullable: true`, `enum: [x]` for a literal) — measured against every tool of every role.
+ * Three things zod 4 writes that the old schemas did not say, put back to what they said, so
+ * the model is told exactly what it was told before:
+ *  - an object with no catchall is closed (`additionalProperties: false`), as the old helper
+ *    wrote every object at every depth; zod 4 leaves an input object open. The parse strips
+ *    unknown keys either way, so this changes what the model is TOLD, never what is accepted.
+ *  - `z.guid()` carries `format: "uuid"` and a regex of the same shape; the format alone was
+ *    what the model saw, and a pattern is a constraint strict tools would spell into words.
+ *  - `.int()` carries ±Number.MAX_SAFE_INTEGER as minimum/maximum; those bounds are the
+ *    parse's own and were never written, so they are dropped (a real bound is kept).
+ */
+export function toolJsonSchema(input: z.ZodType): Record<string, unknown> {
+  return z.toJSONSchema(input, {
+    io: "input",
+    target: "openapi-3.0",
+    override: ({ zodSchema, jsonSchema }) => {
+      const def = zodSchema._zod.def as { type: string; format?: string };
+      const js = jsonSchema as Record<string, unknown>;
+      if (def.type === "object" && js.additionalProperties === undefined) js.additionalProperties = false;
+      if (def.format === "guid" && js.format === "uuid") delete js.pattern;
+      if (js.type === "integer") {
+        if (js.maximum === Number.MAX_SAFE_INTEGER) delete js.maximum;
+        if (js.minimum === -Number.MAX_SAFE_INTEGER) delete js.minimum;
+      }
+    },
+  }) as Record<string, unknown>;
+}
+
+/**
  * Anthropic validates tool input_schema against JSON Schema draft 2020-12, but
- * zod-to-json-schema's openApi3 target emits draft-4-style BOOLEAN
+ * zod's openapi-3.0 target (toolJsonSchema, above) writes draft-4-style BOOLEAN
  * exclusiveMinimum/exclusiveMaximum (e.g. z.number().positive() →
  * { minimum: 0, exclusiveMinimum: true }) — ONE such keyword anywhere in the
  * tool array 400s the ENTIRE chat request (this took Nort down: tools.84,
  * time.addEntry's hours>0). Convert to the 2020-12 numeric form everywhere.
- * (Unknown keywords like openApi3's `nullable` are legal 2020-12 annotations
+ * Still needed on zod 4 (measured, cn-v1196): that target writes the boolean form.
+ * (Unknown keywords like OpenAPI's `nullable` are legal 2020-12 annotations
  * and pass through untouched.)
  */
 function to2020(node: unknown): unknown {

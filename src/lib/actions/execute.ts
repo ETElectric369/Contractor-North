@@ -4,7 +4,7 @@ import { REGISTRY } from "./registry";
 import { actionRisk, needsConsent } from "./risk";
 import { stepUpGate } from "@/lib/webauthn/stepup";
 import { roleCanRun } from "./perms";
-import { missingFieldPaths } from "./readiness";
+import { parseActionInput, missingFieldPaths } from "./parse-input";
 import { buildActionCtx } from "./context";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionCtx, ActionDef, ActionResult } from "./types";
@@ -73,7 +73,7 @@ export async function executeAction(
     return denied;
   }
 
-  const parsed = def.input.safeParse(rawInput);
+  const parsed = parseActionInput(def.input, rawInput);
   if (!parsed.success) {
     // Fragment kernel: never surface the bare zod word ("Required") — voice speaks this.
     // Name the ABSENT fields so the caller can ask for exactly what's still needed
