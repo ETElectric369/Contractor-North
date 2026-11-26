@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/cron-guard";
 import { sendSms, smsReadiness } from "@/lib/sms";
-import { getOrgSettings, timeclockRemindersPush, timeclockRemindersText, workDayWindowHm } from "@/lib/org-settings";
+import { clockInRemindersOn, getOrgSettings, timeclockRemindersPush, timeclockRemindersText, workDayWindowHm } from "@/lib/org-settings";
 import { notifyPeople } from "@/lib/notifications";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 import { reportError } from "@/lib/observe";
@@ -31,12 +31,19 @@ type Org = { id: string; name: string | null; settings: unknown };
  *     "you haven't clocked in");
  *   · their FIRST start today is 15 to 30 minutes before this run's quarter hour (one run per start).
  * The PUSH (Push or Both, Settings → Scheduling): one "Time to Clock In" per person through
- * notifyPeople under kind clock_in, any role, naming their own start. clock_in is OPT-IN (the owner:
- * "Start off"): only a person who turned Clock-in Reminders on is pushed, and the bell line is written
- * only for them. The TEXT (Text or Both, texting ready): the same people who are techs, nb_nudgeMorning.
+ * notifyPeople under kind clock_in, any role, naming their own start. The TEXT (Text or Both, texting
+ * ready): the same people who are techs, nb_nudgeMorning.
+ *
+ * THE COMPANY'S SWITCH (cn-v1193). The owner: "the clock in reminder setting should be controlled by
+ * the boss not the employee", and, of the reminder, "Start off". Clock-In Reminders on the Scheduling
+ * card (org-settings clockInRemindersOn, off until ticked) governs BOTH channels: a company with it off
+ * is passed over before anything of it is read, counted in `off`. With it on, everyone due is reminded,
+ * any role; nobody can mute it for themselves (lib/push COMPANY_DECIDED), and the bell line is written
+ * for every due person.
  *
  * CHEAP WHEN IDLE: the route looks at every company on every run, so the schedule is read first and
- * a company with no start due in this run's quarter hour stops there (`not_due_yet`); people and punches are read
+ * a company with the switch off stops before that (`off`), and one with no start due in this run's quarter hour
+ * stops there (`not_due_yet`); people and punches are read
  * only for a company with someone due (`due`).
  *
  * NOTHING FAILS SILENTLY. The company list is whole or the run is a 500 that is filed. Inside a
@@ -52,7 +59,7 @@ export async function GET(request: Request) {
   if ("error" in guard) return guard.error;
   const { supabase } = guard;
 
-  const counts = { checked: 0, texted: 0, pushed: 0, push_failed: 0, not_ready: 0, due: 0, not_due_yet: 0, lapsed_skipped: 0, failed: 0 };
+  const counts = { off: 0, checked: 0, texted: 0, pushed: 0, push_failed: 0, not_ready: 0, due: 0, not_due_yet: 0, lapsed_skipped: 0, failed: 0 };
   // One clock for the whole run, taken BEFORE the company read: a company late in the list (or a
   // slow read) is judged on the run's own slot, never on the minute it happened to reach.
   const nowMs = Date.now();
@@ -74,6 +81,11 @@ export async function GET(request: Request) {
     // The whole company is inside the try (cn-v1130, skeptic #34): a timezone Intl cannot read
     // throws, and that must cost one company its reminder, never the rest of the list theirs.
     try {
+      // THE COMPANY'S SWITCH FIRST (cn-v1193): off, nothing of the company is read and nobody is reminded.
+      if (!clockInRemindersOn(org.settings)) {
+        counts.off++;
+        continue;
+      }
       const tz = getOrgSettings(org.settings).timezone;
       const push = timeclockRemindersPush(org.settings);
       const text = timeclockRemindersText(org.settings);

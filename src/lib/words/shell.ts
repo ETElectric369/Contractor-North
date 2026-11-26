@@ -249,9 +249,6 @@ export const words: WordCatalog = {
     sh_push_clock_out: "Clock-Out Reminders",
     sh_pushHelp_clock_out:
       "At 6 PM, or when your job's hours end if that's later, if you're still clocked in from a shift that began that day at least an hour before and the {hours}-hour question hasn't come yet (when your company sends reminders by push), when you leave the job site still clocked in (crew only), and when your own clock has run {hours} hours.",
-    sh_push_clock_in: "Clock-In Reminders",
-    sh_pushHelp_clock_in:
-      "Off until you turn it on. A reminder 15 to 30 minutes after your scheduled start if you haven't clocked in (when your company sends reminders by push).",
     sh_push_long_shift: "A Crew Clock Running {hours} Hours",
     sh_pushHelp_long_shift: "Buzzes when somebody on your crew has been clocked in that long, so you can clock them out.",
     sh_push_daily_report: "Daily Reports from Crew Leads",
@@ -620,9 +617,6 @@ export const words: WordCatalog = {
     sh_push_clock_out: "Recordatorios para Marcar Salida",
     sh_pushHelp_clock_out:
       "A las 6 p. m., o cuando terminan las horas de tu trabajo si es más tarde, si todavía tienes entrada marcada de un turno que empezó ese día hace al menos una hora y aún no te llegó la pregunta de las {hours} horas (cuando tu empresa manda los recordatorios por aviso push), cuando sales del sitio de trabajo todavía con entrada marcada (solo cuadrilla), y cuando tu propio reloj lleva {hours} horas.",
-    sh_push_clock_in: "Recordatorios para Marcar Entrada",
-    sh_pushHelp_clock_in:
-      "Apagado hasta que lo actives. Un recordatorio entre 15 y 30 minutos después de tu hora de inicio en la agenda si no has marcado entrada (cuando tu empresa manda los recordatorios por aviso push).",
     sh_push_long_shift: "Un Reloj de la Cuadrilla con {hours} Horas",
     sh_pushHelp_long_shift: "Avisa cuando alguien de tu cuadrilla lleva tanto tiempo con entrada marcada, para que puedas marcarle la salida.",
     sh_push_daily_report: "Reportes del Día de los Jefes de Cuadrilla",

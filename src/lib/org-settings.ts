@@ -102,6 +102,10 @@ export interface OrgSettings {
   /** HOW THE TIMECLOCK REMINDERS GO OUT (cn-v1190, the owner: "everyone gets the push notification
    *  and the boss can choose text push or both"). Never read directly: timeclockRemindersBy heals it. */
   remind_timeclock_by?: TimeclockRemindBy;
+  /** CLOCK-IN REMINDERS (cn-v1193): the company's switch for the clock-in reminder (api/timeclock/nudge),
+   *  on both channels. The owner: "the clock in reminder setting should be controlled by the boss not the
+   *  employee", and, of the reminder, "Start off". Default OFF. Never read directly: clockInRemindersOn. */
+  remind_clock_in: boolean;
   /** Ask the crew for job CODES on the timeclock (the clock-in/switch code selects). false =
    *  codes off: entries carry just the JOB, and timeclock job labels lead with customer ·
    *  street address instead of the job number (the crew knows work by whose house they're at).
@@ -469,6 +473,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   geofence_logout: true,
   geofence_radius_m: 300,
   remind_timeclock: true, // matches the crons' historical "absent = on" behavior
+  remind_clock_in: false, // cn-v1193: off until the boss ticks Clock-In Reminders ("Start off")
   timeclock_job_codes: true, // codes-on = the pre-setting behavior, byte-identical
   weather_source: "device", // default: each user's own location (the crew is mobile)
   pay_schedule: "biweekly",
@@ -691,6 +696,16 @@ export function timeclockRemindersText(settings: unknown): boolean {
 /** The two reminders' pushes (the clock-in push, and the "still clocked in" clock-out push) go out under Push or Both. */
 export function timeclockRemindersPush(settings: unknown): boolean {
   return timeclockRemindersBy(settings) !== "text";
+}
+
+/**
+ * THE ONE READ OF CLOCK-IN REMINDERS (cn-v1193), from the stored jsonb or from getOrgSettings' answer
+ * alike. ONLY a stored `true` is on: absent, null, "true", 1 and anything else are off, because the
+ * owner said "Start off" and the save stores a boolean only (updateOrgSettings refuses anything else).
+ */
+export function clockInRemindersOn(settings: unknown): boolean {
+  const s = (settings && typeof settings === "object" ? settings : {}) as Record<string, unknown>;
+  return s.remind_clock_in === true;
 }
 
 export function getOrgSettings(raw: unknown): OrgSettings {

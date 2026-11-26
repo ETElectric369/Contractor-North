@@ -18,7 +18,7 @@ import { updateOrgSettings } from "./actions";
 
 /** Every door that texts, as the owner knows it. Kept here so the card and the doors agree. */
 const TEXT_DOORS = [
-  "Timeclock reminders to the crew: the clock-in reminder, the clock-out reminder, and the 12-hour “still on the clock?” question (as a text as well as a notification), when Timeclock Reminders Go Out By is Text or Both under Scheduling",
+  "Timeclock reminders to the crew: the clock-in reminder (only when Clock-In Reminders is on under Scheduling), the clock-out reminder, and the 12-hour “still on the clock?” question (as a text as well as a notification), when Timeclock Reminders Go Out By is Text or Both under Scheduling",
   "The Text buttons on invoices, estimates and receipts",
 ];
 

@@ -1219,6 +1219,7 @@ function checkInspectionDays(raw: unknown): { value: Record<string, unknown> } |
 }
 
 const TIMECLOCK_REMIND_BY_REFUSED = "Timeclock reminders didn't save: pick Push, Text or Both, then tap Save Changes.";
+const CLOCK_IN_REMINDERS_REFUSED = "Clock-in reminders didn't save: tick or untick the box, then tap Save Changes.";
 
 /** Merge a partial settings patch into organizations.settings (JSONB). STAFF get full access
  *  (protected keys stripped — they have dedicated guarded setters). An external site collaborator
@@ -1240,6 +1241,9 @@ export async function updateOrgSettings(
   // TIMECLOCK REMINDERS GO OUT BY (cn-v1190): one of the three, or refused in words, never stored.
   if (patch && "remind_timeclock_by" in patch && !isTimeclockRemindBy(patch.remind_timeclock_by))
     return { ok: false, error: TIMECLOCK_REMIND_BY_REFUSED };
+  // CLOCK-IN REMINDERS (cn-v1193): the company's box, a boolean or refused in words, never stored.
+  if (patch && "remind_clock_in" in patch && typeof patch.remind_clock_in !== "boolean")
+    return { ok: false, error: CLOCK_IN_REMINDERS_REFUSED };
   const ctx = await resolveSiteContext(orgId);
   if ("error" in ctx) return { ok: false, error: ctx.error };
 
@@ -1270,8 +1274,9 @@ export async function updateOrgSettings(
 
   // .select() SO A ZERO-ROW WRITE CANNOT REPORT SUCCESS.
   //
-  // The app's `isStaff` is owner/admin/OFFICE. The RLS policy `organizations_update` is
-  // owner/admin only. An office manager therefore matched zero rows, PostgREST returned no error
+  // The app's `isStaff` is owner/admin/OFFICE. Before migration 0181 the RLS policy
+  // `organizations_update` was owner/admin only (since 0181, restated in 0400, it allows owner,
+  // admin AND office). Back then an office manager matched zero rows, PostgREST returned no error
   // (a zero-row UPDATE is a 204, not a failure), and this said `ok: true`. Alexa Peters is office:
   // she could change TAHOE DECK's default labor rate and markups, watch the button go green, and
   // have nothing saved — with no way to tell the difference from a real save.

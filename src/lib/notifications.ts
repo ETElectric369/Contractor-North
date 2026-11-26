@@ -94,9 +94,10 @@ export async function createNotifications(
  * back to. This is the one door for a push that doesn't write its own line: it writes the bell line
  * (createNotifications) and pushes, in that order, so the line is there even when the push isn't.
  *
- *   DEFAULT-ON KINDS (every kind but day_ahead and clock_in): the line goes to every intended recipient, even one
+ *   DEFAULT-ON KINDS (every kind but day_ahead): the line goes to every intended recipient, even one
  *   who muted the push. Muting a buzz is not asking to lose the record.
- *   OPT-IN KINDS (day_ahead: the morning digest and the 6 PM close-out; clock_in, cn-v1192): the line goes only to the
+ *   clock_in is one (cn-v1193): the company's Clock-In Reminders switch decides it, nobody mutes it.
+ *   OPT-IN KINDS (day_ahead: the morning digest and the 6 PM close-out): the line goes only to the
  *   people the push went to (sendPushToProfiles' answer). Nobody who never asked for a daily digest
  *   finds one on the bell every morning.
  *

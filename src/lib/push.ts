@@ -62,8 +62,10 @@ export type PushKind =
   | "invoice_paid"
   | "day_ahead"
   | "clock_out"
-  // THE CLOCK-IN REMINDER (cn-v1192): 15 minutes after a scheduled start with no punch yet. OPT-IN
-  // (the owner, asked whether it starts on or off: "Start off").
+  // THE CLOCK-IN REMINDER (cn-v1192; the company's switch since cn-v1193): 15 to 30 minutes after a
+  // scheduled start with no punch yet. The COMPANY decides it (Clock-In Reminders on the Scheduling
+  // card, off until the boss ticks it), never the person: the owner, "the clock in reminder setting
+  // should be controlled by the boss not the employee". See COMPANY_DECIDED.
   | "clock_in"
   | "daily_report"
   | "booked" // a customer picked a time on their /pick link — the work self-scheduled
@@ -98,8 +100,9 @@ const DEFAULTS: Record<PushKind, boolean> = {
   // NON-STAFF user who left the geofence while clocked in — Erik: "push at geofence
   // for clock out only for techs". Opt out per-user in Settings → Notifications.
   clock_out: true,
-  // Off until a person switches it on (cn-v1192, the owner: "Start off").
-  clock_in: false,
+  // The company's switch decides it, not the person (cn-v1193, COMPANY_DECIDED below). True here, so it
+  // is not an opt-in kind: when the company sends it, the bell line is written for every due person.
+  clock_in: true,
   // A crew lead's end-of-day debrief was filed — staff-facing, like quote_accepted.
   daily_report: true,
   // Work booking ITSELF is exactly the moment the boss asked to hear about.
@@ -121,8 +124,19 @@ const DEFAULTS: Record<PushKind, boolean> = {
   materials_today: true,
 };
 
+/**
+ * THE KINDS THE COMPANY DECIDES (cn-v1193). The owner: "the clock in reminder setting should be
+ * controlled by the boss not the employee". A person's stored push_prefs for such a kind is never read:
+ * a value stored while cn-v1192 had a per-person switch is inert, and no crafted save can mute it. The
+ * company's own switch (org-settings) decides whether the sender runs at all; `active` still filters.
+ */
+const COMPANY_DECIDED: readonly PushKind[] = ["clock_in"];
+export function pushKindIsTheCompanys(kind: PushKind): boolean {
+  return COMPANY_DECIDED.includes(kind);
+}
+
 /** An OPT-IN kind: off until a person switches it on (day_ahead: the morning digest and the 6 PM
- *  close-out; clock_in: the clock-in reminder, cn-v1192). The Bell writes such a kind's line only for the people the push went to (notifyPeople):
+ *  close-out). The Bell writes such a kind's line only for the people the push went to (notifyPeople):
  *  a line on the bell is the push, recorded, never a second channel for something they didn't ask for. */
 export function pushKindIsOptIn(kind: PushKind): boolean {
   return DEFAULTS[kind] === false;
@@ -163,6 +177,7 @@ export async function sendPushToProfiles(
     const allowed = (profs ?? [])
       .filter((p: any) => p.active !== false)
       .filter((p: any) => {
+        if (pushKindIsTheCompanys(kind)) return true; // the company's switch, never the person's
         const pref = (p.push_prefs ?? {})[kind];
         return pref === undefined ? DEFAULTS[kind] : !!pref;
       })

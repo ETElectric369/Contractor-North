@@ -258,13 +258,16 @@ const pst = (hm: string, day = "2001-01-04") => {
 };
 
 /**
- * THE CLOCK-IN REMINDER (cn-v1192): at minute 15 of every hour, a person the SCHEDULE has on today
+ * THE CLOCK-IN REMINDER (cn-v1192): every 15 minutes, a person the SCHEDULE has on today
  * with no punch today is reminded once, on the run whose hour holds their first start plus 15 minutes.
  * Push (kind clock_in, any role) under Push or Both; the text to the techs under Text or Both.
  * Larkspur (J-901) runs 9 to 5 today with Sam Tillery (a tech) and Dana Rook (the office) on its crew.
+ * THE COMPANY'S SWITCH (cn-v1193): every case below runs with Clock-In Reminders ticked
+ * (remind_clock_in: true) unless it says otherwise; the owner, "the clock in reminder setting should be
+ * controlled by the boss not the employee".
  */
 describe("the clock-in reminder: scheduled, and not clocked in 15 minutes after the start", () => {
-  const LARKSPUR = { id: "org-1", name: "Larkspur", settings: { ...TZ }, subscription_status: "active" };
+  const LARKSPUR = { id: "org-1", name: "Larkspur", settings: { ...TZ, remind_clock_in: true }, subscription_status: "active" };
   const NINE_FIFTEEN = new Date(pst("09:15"));
   let tables: Record<string, Row[]>;
   beforeEach(() => {
@@ -291,10 +294,35 @@ describe("the clock-in reminder: scheduled, and not clocked in 15 minutes after 
     };
   });
   const run = async (settings: Record<string, unknown> = {}, over?: (q: Q) => Reply) => {
-    state.client = tableClient([{ ...LARKSPUR, settings: { ...TZ, ...settings } }], tables, over);
+    state.client = tableClient([{ ...LARKSPUR, settings: { ...LARKSPUR.settings, ...settings } }], tables, over);
     return (await nudge(req())).json();
   };
   const pushedIds = () => spies.people.map((p) => p.ids[0]);
+
+  // THE COMPANY'S SWITCH OFF (cn-v1193): nobody on either channel, and nothing of the company is read.
+  it.each([
+    ["never ticked (absent)", undefined],
+    ["unticked (false)", false],
+    ['a stored "true" (not a boolean)', "true"],
+  ])("Clock-In Reminders %s: nobody pushed or texted, no schedule, people or punches read, counted off", async (_label, value) => {
+    textingReady();
+    const tablesRead: string[] = [];
+    state.client = tableClient([{ ...LARKSPUR, settings: { ...TZ, ...(value === undefined ? {} : { remind_clock_in: value }) } }], tables, (q) => void tablesRead.push(q.table));
+    const body = await (await nudge(req())).json();
+    expect(body).toMatchObject({ off: 1, due: 0, not_due_yet: 0, checked: 0, pushed: 0, texted: 0, failed: 0 });
+    expect(spies.people).toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(tablesRead.filter((t) => t !== "organizations")).toEqual([]);
+  });
+
+  it("one company off, the next on: only the one that ticked it reminds anyone", async () => {
+    tables.jobs.push({ ...tables.jobs[0], id: "j-950", org_id: "org-2", assigned_to: ["other-1"] });
+    tables.profiles.push({ id: "other-1", org_id: "org-2", active: true, role: "tech", full_name: "Other", phone: null, language: "en" });
+    state.client = tableClient([{ ...LARKSPUR, settings: { ...TZ, remind_clock_in: false } }, { ...SECOND_ORG, settings: { ...TZ, remind_clock_in: true } }], tables);
+    const body = await (await nudge(req())).json();
+    expect(body).toMatchObject({ off: 1, due: 1, pushed: 1 });
+    expect(pushedIds()).toEqual(["other-1"]);
+  });
 
   it("Both: everyone scheduled is pushed under clock_in with their own start; the tech is texted too", async () => {
     textingReady();
@@ -455,13 +483,14 @@ describe("the clock-in reminder: scheduled, and not clocked in 15 minutes after 
     expect(reportError).toHaveBeenCalledWith("cron-nudge", expect.any(Error), { orgId: "org-1", step: "push" });
   });
 
-  it("a person who left Clock-In Reminders off (the default): the call is made, nobody counted as pushed", async () => {
+  it("a push that reached no device (notifyPeople answers nobody pushed): the call is made, nobody counted, not a failure", async () => {
     spies.peopleAnswer = () => ({ bell: true, pushed: [] });
     expect(await run({ remind_timeclock_by: "push" })).toMatchObject({ pushed: 0, push_failed: 0 });
   });
 
   it("a company whose plan has ended is not reminded and is counted; a comped one still is (cn-v1137)", async () => {
-    state.client = tableClient([{ ...LAPSED_ORG, id: "org-1" }, { ...COMPED_ORG, id: "org-1" }], tables);
+    const on = { settings: { ...TZ, remind_clock_in: true } };
+    state.client = tableClient([{ ...LAPSED_ORG, id: "org-1", ...on }, { ...COMPED_ORG, id: "org-1", ...on }], tables);
     const body = await (await nudge(req())).json();
     expect(body).toMatchObject({ lapsed_skipped: 1, due: 1, failed: 0 });
   });
@@ -480,7 +509,7 @@ describe("the clock-in reminder: scheduled, and not clocked in 15 minutes after 
   it("one company's failed schedule read costs that company alone; the next is still reminded", async () => {
     tables.jobs.push({ ...tables.jobs[0], id: "j-950", org_id: "org-2", assigned_to: ["other-1"] });
     tables.profiles.push({ id: "other-1", org_id: "org-2", active: true, role: "tech", full_name: "Other", phone: null, language: "en" });
-    state.client = tableClient([{ ...LARKSPUR, id: "org-bad" }, { ...SECOND_ORG }], tables, (q) =>
+    state.client = tableClient([{ ...LARKSPUR, id: "org-bad" }, { ...SECOND_ORG, settings: { ...TZ, remind_clock_in: true } }], tables, (q) =>
       q.table === "jobs" && q.filters.some((f) => f[0] === "eq" && f[1] === "org_id" && f[2] === "org-bad") ? { error: { message: "boom" } } : undefined,
     );
     const body = await (await nudge(req())).json();

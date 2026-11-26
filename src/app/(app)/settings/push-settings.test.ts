@@ -187,9 +187,15 @@ describe("the DEFAULTS hand copy mirrors lib/push.ts", () => {
     return Object.fromEntries([...block.matchAll(/^\s*(\w+):\s*(true|false),/gm)].map((m) => [m[1], m[2] === "true"]));
   };
 
-  it("the same kinds, each with the same default, in both files", () => {
+  // The kinds the company decides (lib/push COMPANY_DECIDED, cn-v1193) have no row and no copy here.
+  const companyDecided = () =>
+    [...(readFileSync(join(process.cwd(), "src/lib/push.ts"), "utf8").match(/const COMPANY_DECIDED[^=]*=\s*\[([^\]]*)\]/)?.[1] ?? "").matchAll(/"(\w+)"/g)].map((m) => m[1]);
+
+  it("the same kinds, each with the same default, in both files (but the company's own)", () => {
     const screen = defaultsIn("src/app/(app)/settings/push-settings.tsx");
     const server = defaultsIn("src/lib/push.ts");
+    expect(companyDecided()).toEqual(["clock_in"]);
+    for (const k of companyDecided()) delete server[k];
     expect(Object.keys(screen).length).toBeGreaterThanOrEqual(11);
     expect(screen).toEqual(server);
     expect(screen.billing).toBe(true);
@@ -286,38 +292,40 @@ describe("the Materials to Buy Today switch, drawn", () => {
 });
 
 /**
- * CLOCK-IN REMINDERS (cn-v1192): the clock-in reminder's push (api/timeclock/nudge) goes to anyone
- * scheduled, any role, so everyone gets the switch, beside Clock-out Reminders. It STARTS OFF (the
- * owner: "Start off"): an opt-in kind, off on the screen and on the server alike.
+ * NO CLOCK-IN ROW (cn-v1193). cn-v1192 drew a per-person Clock-In Reminders switch here; the owner, a
+ * release later: "the clock in reminder setting should be controlled by the boss not the employee". The
+ * reminder is the company's box on the Scheduling card now, so no role sees a switch for it, in either
+ * language, and its two catalog keys are gone.
  */
-describe("pushTriggersFor: the Clock-In Reminders row", () => {
-  it("is there for every role, right after Clock-Out Reminders", () => {
+describe("pushTriggersFor: no Clock-In Reminders row", () => {
+  it("is not there for any role, platform admin or not, with every feature on or off", () => {
     for (const role of ["owner", "admin", "office", "tech", null]) {
-      const keys = pushTriggersFor(role, ALL_ON).map((t) => t.key);
-      expect(keys, String(role)).toContain("clock_in");
-      expect(keys.indexOf("clock_in"), String(role)).toBe(keys.indexOf("clock_out") + 1);
+      for (const platform of [false, true]) {
+        for (const lang of ["en", "es"] as const) {
+          const rows = pushTriggersFor(role, ALL_ON, platform, lang);
+          expect(rows.map((t) => t.key), String(role)).not.toContain("clock_in");
+          expect(rows.map((t) => t.key), String(role)).toContain("clock_out");
+        }
+      }
     }
   });
 
-  it("says what it is, and that it starts off, in both languages; the labels Title Case", () => {
-    const en = pushTriggersFor("tech", ALL_ON, false, "en").find((t) => t.key === "clock_in")!;
-    const es = pushTriggersFor("tech", ALL_ON, false, "es").find((t) => t.key === "clock_in")!;
-    expect(en.label).toBe("Clock-In Reminders");
-    expect(es.label).toBe("Recordatorios para Marcar Entrada");
-    expect(en.help).toBe("Off until you turn it on. A reminder 15 to 30 minutes after your scheduled start if you haven't clocked in (when your company sends reminders by push).");
-    expect(es.help).toBe(
-      "Apagado hasta que lo actives. Un recordatorio entre 15 y 30 minutos después de tu hora de inicio en la agenda si no has marcado entrada (cuando tu empresa manda los recordatorios por aviso push).",
-    );
-    expect(en.audience).toBe("all");
-    expect(titleCaseIn(en.label, "en"), en.label).toBe(true);
-    expect(esTitleCase(es.label), es.label).toBe(true);
+  it("the screen draws no Clock-In switch in either language; Clock-Out Reminders stays", () => {
+    for (const lang of ["en", "es"] as const) {
+      const html = renderToStaticMarkup(
+        createElement(LangProvider, { lang, children: createElement(PushSettings, { initialPrefs: { clock_in: true }, role: "tech", platformAdmin: false }) }),
+      );
+      expect(html).not.toContain("Clock-In Reminders");
+      expect(html).not.toContain("Recordatorios para Marcar Entrada");
+      expect(html).toContain(lang === "en" ? "Clock-Out Reminders" : "Recordatorios para Marcar Salida");
+    }
   });
 
-  it("defaults OFF, on the screen and on the server alike", () => {
+  it("lib/push has the kind and names it the company's; the screen keeps no copy of its default", () => {
     const src = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
-    for (const file of ["src/app/(app)/settings/push-settings.tsx", "src/lib/push.ts"]) {
-      expect(src(file), file).toMatch(/^\s*clock_in: false,$/m);
-    }
     expect(src("src/lib/push.ts")).toMatch(/\| "clock_in"\n/);
+    expect(src("src/lib/push.ts")).toMatch(/const COMPANY_DECIDED: readonly PushKind\[\] = \["clock_in"\];/);
+    expect(src("src/lib/push.ts")).toMatch(/^\s*clock_in: true,$/m);
+    expect(src("src/app/(app)/settings/push-settings.tsx")).not.toMatch(/^\s*clock_in:/m);
   });
 });

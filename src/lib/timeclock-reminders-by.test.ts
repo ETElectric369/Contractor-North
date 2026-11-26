@@ -3,6 +3,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
   TIMECLOCK_REMIND_BY,
+  clockInRemindersOn,
   getOrgSettings,
   isTimeclockRemindBy,
   timeclockRemindersBy,
@@ -115,5 +116,67 @@ describe("the old box has one reader", () => {
     const reads = src.split("\n").filter((l) => /\.remind_timeclock\b(?!_)/.test(l));
     // PIN MOVED (fix-1190-B): a PRESENT falsy old box reads Push, exactly what the old readers did.
     expect(reads).toEqual(['  return present && !s.remind_timeclock ? "push" : "both";']);
+  });
+});
+
+/**
+ * CLOCK-IN REMINDERS (cn-v1193), the company's box. The owner: "the clock in reminder setting should be
+ * controlled by the boss not the employee", and, of the reminder, "Start off". ONLY a stored true is on.
+ */
+describe("clockInRemindersOn", () => {
+  it.each([
+    ["absent", {}, false],
+    ["false", { remind_clock_in: false }, false],
+    ["true", { remind_clock_in: true }, true],
+    ['"true"', { remind_clock_in: "true" }, false],
+    ["1", { remind_clock_in: 1 }, false],
+    ["null", { remind_clock_in: null }, false],
+  ])("stored %s reads %s, on the jsonb and on getOrgSettings' answer alike", (_label, raw, on) => {
+    expect(clockInRemindersOn(raw)).toBe(on);
+    expect(clockInRemindersOn(getOrgSettings(raw))).toBe(on);
+  });
+
+  it("no settings at all is off", () => {
+    for (const raw of [null, undefined, "x", 0]) expect(clockInRemindersOn(raw)).toBe(false);
+    expect(getOrgSettings({}).remind_clock_in).toBe(false);
+  });
+});
+
+describe("Clock-In Reminders has one reader", () => {
+  const ROOT = process.cwd();
+  function walk(dir: string, out: string[] = []): string[] {
+    for (const name of readdirSync(dir)) {
+      if (name === "node_modules" || name.startsWith(".")) continue;
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) walk(p, out);
+      else if (/\.(ts|tsx)$/.test(name) && !/\.test\.tsx?$/.test(name)) out.push(p);
+    }
+    return out;
+  }
+  const code = (text: string) =>
+    text
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .map((line) => line.replace(/(^|[^:"'`\\])\/\/.*$/, "$1"))
+      .join("\n");
+
+  it("the key appears in code only where it is defined and read, saved, and sent", () => {
+    const hits: string[] = [];
+    for (const f of walk(join(ROOT, "src"))) {
+      if (/\bremind_clock_in\b/.test(code(readFileSync(f, "utf8")))) hits.push(relative(ROOT, f));
+    }
+    expect(hits.sort()).toEqual(["src/app/(app)/settings/actions.ts", "src/app/(app)/settings/scheduling-settings.tsx", "src/lib/org-settings.ts"]);
+  });
+
+  it("it is READ only by clockInRemindersOn (and the save's type check); the card only sends it", () => {
+    const lines = (f: string) => code(readFileSync(join(ROOT, f), "utf8")).split("\n");
+    expect(lines("src/lib/org-settings.ts").filter((l) => /\.remind_clock_in\b/.test(l))).toEqual(["  return s.remind_clock_in === true;"]);
+    expect(lines("src/app/(app)/settings/actions.ts").filter((l) => /\bremind_clock_in\b/.test(l)).map((l) => l.trim())).toEqual([
+      'if (patch && "remind_clock_in" in patch && typeof patch.remind_clock_in !== "boolean")',
+    ]);
+    expect(lines("src/app/(app)/settings/scheduling-settings.tsx").filter((l) => /\bremind_clock_in\b/.test(l)).map((l) => l.trim())).toEqual([
+      "remind_clock_in: remindClockIn,",
+    ]);
+    expect(code(readFileSync(join(ROOT, "src/app/api/timeclock/nudge/route.ts"), "utf8"))).toContain("if (!clockInRemindersOn(org.settings)) {");
   });
 });

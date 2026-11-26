@@ -6,7 +6,7 @@ import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { DayField } from "@/components/day-field";
-import { timeclockRemindersBy, type OrgSettings, type TimeclockRemindBy } from "@/lib/org-settings";
+import { clockInRemindersOn, timeclockRemindersBy, type OrgSettings, type TimeclockRemindBy } from "@/lib/org-settings";
 import { TEXTING_CARD_PLACE } from "@/lib/sms-readiness";
 import { updateOrgSettings } from "./actions";
 import { setFeature } from "./features-actions";
@@ -17,6 +17,7 @@ import { setFeature } from "./features-actions";
  * timecards). The Timecards header named an approver nobody's approval was ever asked of. Save no
  * longer sends either key; updateOrgSettings merges, so a value already stored stays, unread.
  */
+
 export function SchedulingSettings({
   settings,
   textReady = true,
@@ -37,6 +38,8 @@ export function SchedulingSettings({
   const [weekStart, setWeekStart] = useState(settings.week_start);
   // ONE CHOICE OF THREE (cn-v1190), read through the one rule: the old box ticked off reads Push, on reads Both.
   const [remindBy, setRemindBy] = useState<TimeclockRemindBy>(timeclockRemindersBy(settings));
+  // CLOCK-IN REMINDERS (cn-v1193), the company's switch, read through its one rule: only a stored true is on.
+  const [remindClockIn, setRemindClockIn] = useState(clockInRemindersOn(settings));
   const [askJobCodes, setAskJobCodes] = useState(settings.timeclock_job_codes);
   const [geofence, setGeofence] = useState(settings.geofence_logout);
   const [radius, setRadius] = useState(settings.geofence_radius_m);
@@ -73,6 +76,7 @@ export function SchedulingSettings({
         work_day_end: end,
         week_start: weekStart,
         remind_timeclock_by: remindBy,
+        remind_clock_in: remindClockIn,
         geofence_logout: geofence,
         geofence_radius_m: Math.max(50, Math.round(Number(radius) || 300)),
         pay_schedule: paySchedule,
@@ -130,13 +134,13 @@ export function SchedulingSettings({
           </Select>
         </div>
         <p className="text-sm text-slate-600">
-          {/* cn-v1192: both reminders follow the schedule (api/timeclock/nudge and eod-reminder). */}
-          A push is the clock-in reminder, 15 to 30 minutes after a person&apos;s scheduled start when they
-          haven&apos;t clocked in, and the clock-out reminder, at 6 PM or when the job&apos;s hours end if that&apos;s
-          later, never for a shift under an hour old. A text is the same two to techs, and the 12-hour
-          &ldquo;still on the clock?&rdquo; question by text too; that question always comes as a push.
-          The clock-in push is off for each person until they turn it on in their own Settings, under
-          Push Notifications; each person can turn the clock-out push off there.
+          {/* cn-v1192: both reminders follow the schedule (api/timeclock/nudge and eod-reminder). cn-v1193: the
+              clock-in reminder is the company's switch below, never the person's. */}
+          A push is the clock-in reminder, when Clock-In Reminders is on below, and the clock-out reminder, at
+          6 PM or when the job&apos;s hours end if that&apos;s later, never for a shift under an hour old. A text
+          is the same two to techs, and the 12-hour &ldquo;still on the clock?&rdquo; question by text too; that
+          question always comes as a push. Each person can turn the clock-out push off in their own Settings,
+          under Push Notifications.
           {!textReady && (
             <span className="mt-0.5 block text-xs text-amber-700">
               {remindBy === "push"
@@ -146,6 +150,24 @@ export function SchedulingSettings({
             </span>
           )}
         </p>
+        {/* CLOCK-IN REMINDERS (cn-v1193). The owner: "the clock in reminder setting should be controlled by
+            the boss not the employee", and "Start off". One box in the same Save; nobody has a switch of
+            their own for it (lib/push COMPANY_DECIDED). */}
+        <label className="flex min-h-11 items-start gap-2 py-1 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={remindClockIn}
+            onChange={(e) => setRemindClockIn(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand"
+          />
+          <span>
+            <span className="font-medium text-slate-700">Clock-In Reminders</span>
+            <span className="block">
+              Remind people who are scheduled and haven&apos;t clocked in, 15 to 30 minutes after their start, by
+              the way chosen above. Off until you turn it on here; no one has their own switch for it.
+            </span>
+          </span>
+        </label>
       </div>
 
       <div className="space-y-2 border-t border-slate-100 pt-4">

@@ -67,9 +67,9 @@ const TRIGGERS: { key: string; help?: boolean; soon?: boolean; audience: Audienc
   // refused for staff) and the hourly long-shift job, which asks ANYONE whose own clock has run
   // LONG_SHIFT_HOURS. So everybody can receive it, and everybody gets the switch.
   { key: "clock_out", help: true, audience: "all" },
-  // The clock-in reminder (cn-v1192, api/timeclock/nudge): anyone scheduled, any role, so everybody
-  // gets the switch. OPT-IN, off until the person turns it on (the owner: "Start off").
-  { key: "clock_in", help: true, audience: "all" },
+  // NO clock_in ROW (cn-v1193): the clock-in reminder is the company's switch (Clock-In Reminders on the
+  // Scheduling card), never the person's. The owner: "the clock in reminder setting should be controlled
+  // by the boss not the employee". lib/push.ts never reads a person's stored clock_in (COMPANY_DECIDED).
   // The office's buzz about a crew member's clock still running at LONG_SHIFT_HOURS; the bell line
   // at OFFICE_BELL_HOURS is not a push and has no switch.
   { key: "long_shift", help: true, audience: "staff" },
@@ -95,7 +95,8 @@ const TRIGGERS: { key: string; help?: boolean; soon?: boolean; audience: Audienc
   // so a company member never sees the switch.
   { key: "bug_watch", help: true, audience: "platform" },
 ];
-// A hand copy of lib/push.ts's DEFAULTS (that file is server-only): keep the two the same.
+// A hand copy of lib/push.ts's DEFAULTS (that file is server-only): keep the two the same, for every
+// kind that has a row here. A kind the company decides (lib/push.ts COMPANY_DECIDED) has no row and no copy.
 const DEFAULTS: Record<string, boolean> = {
   assigned: true,
   inquiry: true,
@@ -103,7 +104,6 @@ const DEFAULTS: Record<string, boolean> = {
   invoice_paid: true,
   day_ahead: false,
   clock_out: true,
-  clock_in: false,
   daily_report: true,
   booked: true,
   tap_to_pay: true,

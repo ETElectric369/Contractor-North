@@ -67,3 +67,27 @@ describe("saving Timeclock Reminders Go Out By", () => {
     expect(await updateOrgSettings({ work_day_start: "08:00" })).toEqual({ ok: true });
   });
 });
+
+/**
+ * CLOCK-IN REMINDERS (cn-v1193): the company's box rides the same Save. A boolean is stored; anything
+ * else is refused in one sentence before the company is read, and nothing is written.
+ */
+describe("saving Clock-In Reminders", () => {
+  const REFUSED_CLOCK_IN = "Clock-in reminders didn't save: tick or untick the box, then tap Save Changes.";
+  it("true and false are stored, merged over the rest", async () => {
+    for (const on of [true, false]) {
+      state.updates = [];
+      expect(await updateOrgSettings({ remind_timeclock_by: "push", remind_clock_in: on })).toEqual({ ok: true });
+      expect(state.updates[0].settings).toEqual({ work_day_start: "07:00", remind_timeclock: false, remind_timeclock_by: "push", remind_clock_in: on });
+    }
+  });
+
+  it("anything that is not a boolean is refused in one sentence, nothing read or written", async () => {
+    for (const junk of ["true", "on", "", null, undefined, 1, 0, [true], { on: true }]) {
+      expect(await updateOrgSettings({ remind_timeclock_by: "push", remind_clock_in: junk }), String(junk)).toEqual({ ok: false, error: REFUSED_CLOCK_IN });
+    }
+    expect(state.updates).toEqual([]);
+    expect(state.ctx).toBe(0);
+  });
+});
+

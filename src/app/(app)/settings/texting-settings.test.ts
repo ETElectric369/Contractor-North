@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 /**
  * SETTINGS TELLS THE TRUTH ABOUT TEXTING (2026-09-24). "Text timeclock reminders" sat ticked on an
@@ -44,19 +46,20 @@ describe("the timeclock reminders choice (cn-v1190: Push, Text or Both)", () => 
 
   it("the sentence under it says what a push is, what a text is, and the person's own switch", () => {
     const { after } = reminderChoice(renderToStaticMarkup(createElement(SchedulingSettings, { settings, textReady: true })));
-    // PIN MOVED (cn-v1192): both reminders follow the schedule, and the clock-in push starts off.
+    // PIN MOVED (cn-v1192): both reminders follow the schedule. PIN MOVED (cn-v1193): the clock-in
+    // reminder is the company's box below, so the paragraph names the box and its 15 to 30 minutes move there.
     const said = after.replace(/\s+/g, " ");
     expect(said).toContain(
-      "A push is the clock-in reminder, 15 to 30 minutes after a person&#x27;s scheduled start when they haven&#x27;t clocked in, and the clock-out reminder, at 6 PM or when the job&#x27;s hours end if that&#x27;s later, never for a shift under an hour old.",
+      "A push is the clock-in reminder, when Clock-In Reminders is on below, and the clock-out reminder, at 6 PM or when the job&#x27;s hours end if that&#x27;s later, never for a shift under an hour old.",
     );
+    expect(said.slice(0, said.indexOf("</p>"))).not.toContain("15 to 30");
     expect(said).toContain("A text is the same two to techs");
     expect(said).not.toContain("7 AM");
     // The 12-hour question's text rides this choice, and the question itself always pushes.
     expect(said).toContain("12-hour");
     expect(said).toContain("that question always comes as a push");
-    expect(said).toContain(
-      "The clock-in push is off for each person until they turn it on in their own Settings, under Push Notifications; each person can turn the clock-out push off there.",
-    );
+    expect(said).toContain("Each person can turn the clock-out push off in their own Settings, under Push Notifications.");
+    expect(said).not.toContain("off for each person until they turn it on");
   });
 
   it("nothing stored and the old box on (the default) reads Both; not ready says the texts aren't active yet", () => {
@@ -88,6 +91,53 @@ describe("the timeclock reminders choice (cn-v1190: Push, Text or Both)", () => 
   });
 });
 
+/**
+ * CLOCK-IN REMINDERS (cn-v1193): the company's box, directly below the choice, in the same Save. The
+ * owner: "the clock in reminder setting should be controlled by the boss not the employee"; "Start off".
+ */
+describe("the Clock-In Reminders box", () => {
+  // PIN MOVED (cn-v1193, fixer #93): the sentence is true under Push, Text or Both (a text goes to techs
+  // only) and promises no more than the app can (a phone can silence any app).
+  const SENTENCE =
+    "Remind people who are scheduled and haven&#x27;t clocked in, 15 to 30 minutes after their start, by the way chosen above. Off until you turn it on here; no one has their own switch for it.";
+  const box = (html: string) => {
+    const at = html.indexOf(">Clock-In Reminders<");
+    const label = html.slice(html.lastIndexOf("<label", at), html.indexOf("</label>", at) + 8);
+    return { at, label, input: (label.match(/<input[^>]*>/) ?? [""])[0] };
+  };
+  const draw = (stored: Record<string, unknown>) =>
+    renderToStaticMarkup(createElement(SchedulingSettings, { settings: getOrgSettings(stored), textReady: true }));
+
+  it("is a checkbox with its exact sentence, directly below Timeclock Reminders Go Out By, a 44px row", () => {
+    const html = draw({});
+    const { at, label, input } = box(html);
+    expect(at).toBeGreaterThan(html.indexOf("Timeclock Reminders Go Out By"));
+    // Nothing sits between the choice's paragraph and the box: the next block after the box is Job codes.
+    expect(html.indexOf("Job codes on the timeclock")).toBeGreaterThan(at);
+    const between = html.slice(html.indexOf("</select>", html.indexOf("Timeclock Reminders Go Out By")), html.lastIndexOf("<label", at));
+    expect(between).not.toContain("<input");
+    expect(between).not.toContain("<label");
+    expect(input).toMatch(/type="checkbox"/);
+    expect(label).toMatch(/<label class="[^"]*\bmin-h-11\b/);
+    expect(label.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")).toContain(SENTENCE);
+  });
+
+  it("opens ticked on a stored true, and unticked on anything else (absent, false, \"true\", 1, null)", () => {
+    expect(box(draw({ remind_clock_in: true })).input).toMatch(/checked=""/);
+    for (const v of [undefined, false, "true", 1, null]) {
+      const stored = v === undefined ? {} : { remind_clock_in: v };
+      expect(box(draw(stored)).input, String(v)).not.toMatch(/checked=""/);
+    }
+  });
+
+  it("rides the one Save: the box's state is sent as remind_clock_in, read through clockInRemindersOn", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/settings/scheduling-settings.tsx"), "utf8");
+    expect(src).toContain("useState(clockInRemindersOn(settings))");
+    expect(src).toMatch(/remind_timeclock_by: remindBy,\n\s*remind_clock_in: remindClockIn,/);
+    expect(src).toContain("onChange={(e) => setRemindClockIn(e.target.checked)}");
+  });
+});
+
 describe("the Texting card", () => {
   it("not ready: says nothing is texted and lists what is missing in plain words", () => {
     const status = smsReadinessFrom({
@@ -108,6 +158,8 @@ describe("the Texting card", () => {
       createElement(TextingCard, { status: { ready: true, sender: "org_number" }, number: "+15305551234" }),
     );
     expect(html).toContain("Texting is on.");
+    // cn-v1193: the clock-in reminder's text goes out only when the company's box is ticked.
+    expect(html).toContain("the clock-in reminder (only when Clock-In Reminders is on under Scheduling), the clock-out reminder,");
     expect(html).toContain("your business&#x27;s own number");
     expect(html).not.toMatch(/isn(&#x27;|')t one the texting service can use/);
   });

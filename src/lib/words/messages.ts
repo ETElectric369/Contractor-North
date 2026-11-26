@@ -22,7 +22,7 @@ export const words: WordCatalog = {
     // /api/timeclock/nudge (cn-v1192): 15 minutes after a scheduled tech's first start, no punch yet.
     // {time} is that start in the company's clock ("9:00 AM"; in Spanish with its article, "las 9:00 am").
     nb_nudgeMorning: "Hi {name} — you were scheduled to start at {time} and haven't clocked in yet. Open Contractor North to clock in.",
-    // The same reminder as a push (kind clock_in, opt-in), to anyone scheduled.
+    // The same reminder as a push (kind clock_in), to anyone scheduled, when the company ticked Clock-In Reminders (cn-v1193).
     nb_clockInPushTitle: "Time to Clock In",
     nb_clockInPushBody: "You were scheduled to start at {time} and haven't clocked in. Tap to clock in.",
     // /api/timeclock/eod-reminder: 6 PM, or when the job's hours end if later (cn-v1192).

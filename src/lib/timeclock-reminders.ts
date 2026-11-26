@@ -14,7 +14,9 @@
  *   schedule and its hours end later, the first whole hour at or after that end. Hours that end after
  *   11 PM get no reminder: the run after them is tomorrow, and the 12-hour question is the backstop.
  *
- *   CLOCK-IN (api/timeclock/nudge, runs every 15 minutes). A person the schedule has on today, with
+ *   CLOCK-IN (api/timeclock/nudge, runs every 15 minutes; only for a company that ticked Clock-In
+ *   Reminders on the Scheduling card, cn-v1193: the owner, "the clock in reminder setting should be
+ *   controlled by the boss not the employee"). A person the schedule has on today, with
  *   no punch today and none still open, is reminded ONCE: due when slot - 30 min < first start <=
  *   slot - 15 min, the slot being the run's time floored to the quarter hour. So a 9:00 start is
  *   reminded at 9:15, an 8:30 start at 8:45, an 8:05 start at 8:30: every start has exactly one run,
