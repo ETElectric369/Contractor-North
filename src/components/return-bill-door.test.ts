@@ -121,6 +121,6 @@ describe("cn-v1188: a credit read under a name that is on no supplier", () => {
     const src = readFileSync(joinPath(process.cwd(), "src/components/return-bill-door.tsx"), "utf8");
     expect(src).toContain("setShown(joinShownOf(home));");
     expect(src).toContain("fileReturnBillWithItsBill(billId, shown)");
-    expect(src).toMatch(/if \(!r\.ok\) \{[\s\S]{0,160}if \(shown\) router\.refresh\(\);[\s\S]{0,20}return;/);
+    expect(src).toMatch(/if \(!r\.ok\) \{[\s\S]{0,260}if \(shown\) router\.refresh\(\);[\s\S]{0,20}return;/); // 260: cn-v1190 wrote the reason the refresh is kept above it
   });
 });

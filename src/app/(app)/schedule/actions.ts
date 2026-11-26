@@ -26,9 +26,9 @@ import {
   addDaySegment,
   carryHours,
   coversDay,
-  datesOnly,
   hoursOnDay,
   keepWorkedDays,
+  mergeSegments,
   moveKeepingWorkedDays,
   removeDaySegment,
   segmentDays,
@@ -522,10 +522,24 @@ export async function setJobScheduleRanges(
   if ((ranges ?? []).some((r) => !/^\d{4}-\d{2}-\d{2}$/.test(String(r?.start ?? "")) || !/^\d{4}-\d{2}-\d{2}$/.test(String(r?.end ?? "")))) {
     return { ok: false, error: await ws.say("jb_rangeNeedsBothDays") };
   }
+  /* A RANGE'S OWN HOURS (cn-v1190): null is the job's usual hours, absent is "not said" (each day keeps
+     what it has); hours said are two clock times, the end after the start, or the save is refused. */
+  if ((ranges ?? []).some((r) => r?.hours != null && !rangeHoursOk(r.hours))) {
+    return { ok: false, error: await ws.say("jb_rangeBadHours") };
+  }
   const bad = lengthProblem(length);
   if (bad) return { ok: false, error: await ws.say(bad) };
-  // The ranges as stored come back (dates only, touching days joined): the job page shows them.
+  // The ranges as stored come back (each with its hours, neighbours with the same hours joined).
   return writeScheduleRanges(ctx.supabase, jobId, ranges, startTime, undefined, length, { stored: true });
+}
+
+/** Two clock times ("HH:MM"), the end after the start. */
+function rangeHoursOk(h: unknown): boolean {
+  const o = (h ?? {}) as { start?: unknown; end?: unknown };
+  const hm = (v: unknown) => (typeof v === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(v) ? readHm(v) : null);
+  const s = hm(o.start);
+  const e = hm(o.end);
+  return s != null && e != null && e > s;
 }
 
 /** A length a writer can store, or the catalog key of the words for why not (its caller says them). */
@@ -581,6 +595,10 @@ async function writeScheduleRanges(
     return { ok: false, error: await ws.say("ag_srv_daysUnread") };
   }
   const perDayHours = priorRead.perDayHours && !priorRead.error;
+  // The job page's rows (stored) can't keep a range's own hours before 0370: said, nothing written.
+  if (opts?.stored && !perDayHours && clean.some((r) => r.hours)) {
+    return { ok: false, error: await ws.say("ag_srv_needs0370") };
+  }
 
   // Mirror the overall window onto the job FIRST — this is what every legacy
   // reader uses, and it must succeed even if the segments table isn't there.
@@ -643,6 +661,25 @@ async function writeScheduleRanges(
         },
   });
 
+  /* A RANGE'S HOURS EQUAL TO THE USUAL ARE NO HOURS OF ITS OWN (cn-v1190, the job page's rows only):
+     a day sent with hours that are exactly what it draws at the job's usual block, as this write leaves
+     it, keeps none, so it follows the job's time like its other days. Days not sent with hours keep
+     what they had (carried above), untouched here. */
+  if (opts?.stored && perDayHours && !soleOwn) {
+    const after = {
+      scheduledStart: times.startIso,
+      scheduledEnd: times.endIso,
+      plannedMinutes: times.plannedMinutes !== undefined ? times.plannedMinutes : (was.planned_minutes ?? null),
+    };
+    const wdMin = workDayMinutes({ start: dayStartHm, end: dayEndHm });
+    for (const day of segmentDays(clean.filter((r) => r.hours))) {
+      const h = hoursOnDay(days, day);
+      if (!h) continue;
+      const u = jobDayBlock({ day, ...after, tz, wd: wdMin, dayHours: null });
+      if (ownOrUsual(h, dayHoursOf(u.startMin, u.endMin)) === null) days = setDayHours(days, day, null);
+    }
+  }
+
   // The start, the end and a chosen length land TOGETHER, in one row write: a length is never saved
   // apart from the block it draws. An Undo puts the listed start and end back exactly as they were.
   const patch: Record<string, unknown> = opts?.listedAt
@@ -703,8 +740,17 @@ async function writeScheduleRanges(
     return { ok: false, error: await ws.say("ag_srv_rangeUnsaved") };
   }
   // `defaulted`: nobody gave it a length, so it went down as two hours; the caller can say so.
-  // `stored` (the job page's range editor): the days as written, dates only, touching days joined.
-  const stored = opts?.stored ? { ranges: datesOnly(days).map((r) => ({ start: r.start, end: r.end })) } : {};
+  // `stored` (the job page's range editor): the days as written, each range with its hours (null: the
+  // job's usual), neighbours joined only when their hours match (cn-v1190).
+  const stored = opts?.stored
+    ? {
+        ranges: mergeSegments(perDayHours ? days : days.map((r) => ({ start: r.start, end: r.end }))).map((r) => ({
+          start: r.start,
+          end: r.end,
+          hours: perDayHours ? (r.hours ?? null) : null,
+        })),
+      }
+    : {};
   return times.defaulted ? { ok: true, defaulted: true, ...stored } : { ok: true, ...stored };
 }
 

@@ -17,7 +17,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  */
 
 const state = vi.hoisted(() => ({ client: null as any }));
-const spies = vi.hoisted(() => ({ push: [] as any[], notify: [] as any[], closeOut: 0, closeOutOrgs: undefined as unknown, closeOutFails: false }));
+const spies = vi.hoisted(() => ({
+  push: [] as any[],
+  notify: [] as any[],
+  closeOut: 0,
+  closeOutOrgs: undefined as unknown,
+  closeOutFails: false,
+  // The 6 PM push (cn-v1190): each notifyPeople call, its words in both languages, and what it answers.
+  people: [] as { org: string; ids: string[]; kind: string; en: any; es: any }[],
+  peopleAnswer: null as null | ((ids: string[]) => { bell: boolean; pushed: string[] }),
+}));
 // The hour gate with one switch: a timezone Intl cannot read throws in atLocalHour (cn-v1130, skeptic #34).
 const gate = vi.hoisted(() => ({ throwNext: false }));
 
@@ -65,6 +74,10 @@ vi.mock("@/lib/notifications", () => ({
   createNotifications: vi.fn(async (...a: any[]) => {
     spies.notify.push(a);
     return true;
+  }),
+  notifyPeople: vi.fn(async (org: string, ids: string[], kind: string, n: any) => {
+    spies.people.push({ org, ids, kind, en: typeof n === "function" ? n("en") : n, es: typeof n === "function" ? n("es") : n });
+    return spies.peopleAnswer ? spies.peopleAnswer(ids) : { bell: true, pushed: ids };
   }),
 }));
 vi.mock("@/lib/push", () => ({
@@ -189,6 +202,8 @@ beforeEach(() => {
   spies.notify = [];
   spies.closeOut = 0;
   spies.closeOutOrgs = undefined;
+  spies.people = [];
+  spies.peopleAnswer = null;
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -366,8 +381,12 @@ describe("the evening reminder: still clocked in", () => {
     textingReady();
     state.client = fakeSupabase(failing("time_entries"));
     const body = await (await eod(req())).json();
-    expect(body).toMatchObject({ due: 1, checked: 0, reminded: 0, failed: 1 });
+    // cn-v1190: the 6 PM push reads the open shifts too (the default reads Both), so the one failed
+    // table fails both steps, each counted and filed, and nobody is pushed or texted.
+    expect(body).toMatchObject({ due: 1, checked: 0, reminded: 0, failed: 2, pushed: 0, push_failed: 0 });
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(spies.people).toEqual([]);
+    expect(reportError).toHaveBeenCalledWith("cron-eod", { message: "boom" }, { orgId: "org-1", step: "push" });
     expect(reportError).toHaveBeenCalledWith("cron-eod", { message: "boom" }, { orgId: "org-1" });
     expect(spies.closeOutOrgs).toEqual([ORG]);
   });
@@ -454,6 +473,210 @@ describe("the evening reminder: still clocked in", () => {
     const body = await (await eod(req())).json();
     expect(body).toMatchObject({ close_out: "failed", failed: 1, reminded: 1 });
     expect(reportError).toHaveBeenCalledWith("cron-close-out", expect.objectContaining({ message: "the close-out read fell over" }));
+  });
+});
+
+/**
+ * THE 6 PM PUSH AND THE OWNER'S CHOICE (cn-v1190). The owner: "we need to get the clock out reminder
+ * on a push notification" and "everyone gets the push notification and the boss can choose text push
+ * or both". At the company's 6 PM everyone still on the clock whose shift began that day, any role,
+ * gets ONE "Still Clocked In" through notifyPeople (kind clock_out, url /timeclock); the texts go only
+ * under Text or Both. The stand-in honours the reads' filters: the company, the open status, and the
+ * family read's or(). Larkspur, Snowbell and Tupelo Panel, Sam Tillery and Dana Rook are stand-ins.
+ */
+describe("the 6 PM push, and Push / Text / Both", () => {
+  const LARKSPUR = { id: "org-1", name: "Larkspur", settings: { ...TZ }, subscription_status: "active" };
+  type Row = Record<string, any>;
+  // Thursday 2001-01-04, Pacific. Today's 7 AM is 15:00 UTC.
+  const OPEN: Row[] = [
+    // Sam Tillery, a tech, in at 7:00 AM today.
+    { id: "e-sam", org_id: "org-1", profile_id: "sam", status: "open", clock_in: "2001-01-04T15:00:00.000Z", split_from: null, long_shift_nudged_at: null, profiles: { active: true } },
+    // A second open row of Sam's today (a stray the office has not closed): still ONE push for him.
+    { id: "e-sam-2", org_id: "org-1", profile_id: "sam", status: "open", clock_in: "2001-01-04T17:00:00.000Z", split_from: null, long_shift_nudged_at: null, profiles: { active: true } },
+    // Dana Rook, the office, in at 1:05 PM today.
+    { id: "e-dana", org_id: "org-1", profile_id: "dana", status: "open", clock_in: "2001-01-04T21:05:00.000Z", split_from: null, long_shift_nudged_at: null, profiles: { active: true } },
+    // The owner, in at 6:00 AM, switched job at noon: the push names the shift's start, not the switch's.
+    { id: "e-own-2", org_id: "org-1", profile_id: "owner-1", status: "open", clock_in: "2001-01-04T20:00:00.000Z", split_from: "e-own-1", long_shift_nudged_at: null, profiles: { active: true } },
+    // A removed person: never pushed.
+    { id: "e-gone", org_id: "org-1", profile_id: "gone-1", status: "open", clock_in: "2001-01-04T15:00:00.000Z", split_from: null, long_shift_nudged_at: null, profiles: { active: false } },
+    // In at 5:00 AM and already asked the 12-hour question at 5:00 PM: one ask per clock.
+    { id: "e-asked", org_id: "org-1", profile_id: "asked-1", status: "open", clock_in: "2001-01-04T13:00:00.000Z", split_from: null, long_shift_nudged_at: "2001-01-05T01:00:00.000Z", profiles: { active: true } },
+    // Open since yesterday morning: pushed that evening, not again.
+    { id: "e-yday", org_id: "org-1", profile_id: "yday-1", status: "open", clock_in: "2001-01-03T16:00:00.000Z", split_from: null, long_shift_nudged_at: null, profiles: { active: true } },
+    // Another company's clock (Snowbell): the read names the company, so never here.
+    { id: "e-other", org_id: "org-2", profile_id: "other-1", status: "open", clock_in: "2001-01-04T15:00:00.000Z", split_from: null, long_shift_nudged_at: null, profiles: { active: true } },
+    // A closed shift: not on the clock.
+    { id: "e-done", org_id: "org-1", profile_id: "done-1", status: "closed", clock_in: "2001-01-04T15:00:00.000Z", split_from: null, long_shift_nudged_at: null, profiles: { active: true } },
+  ];
+  // The owner's first piece, closed at the switch (the family read finds it); and a piece of the same
+  // id in another company, from yesterday, which the read must never hand back.
+  const KIN: Row[] = [
+    { id: "e-own-1", org_id: "org-2", profile_id: "owner-1", status: "closed", clock_in: "2001-01-03T14:00:00.000Z", clock_out: "2001-01-04T20:00:00.000Z", split_from: null, long_shift_nudged_at: null },
+    { id: "e-own-1", org_id: "org-1", profile_id: "owner-1", status: "closed", clock_in: "2001-01-04T14:00:00.000Z", clock_out: "2001-01-04T20:00:00.000Z", split_from: null, long_shift_nudged_at: null },
+  ];
+  /** The eq filters, and the family read's or(): a stand-in that answers only what was asked. */
+  const honour = (q: Q, rows: Row[]) =>
+    rows.filter((r) =>
+      q.filters.every((f) => {
+        if (f[0] === "eq") return r[f[1]] === f[2];
+        if (f[0] === "or") {
+          const ids = String(f[1]).match(/id\.in\.\(([^)]*)\)/)?.[1].split(",") ?? [];
+          return ids.includes(r.id) || ids.includes(r.split_from);
+        }
+        return true;
+      }),
+    );
+  const isPushRead = (q: Q) => q.table === "time_entries" && q.cols.includes("long_shift_nudged_at") && q.cols.includes("profiles:");
+  const isFamilyRead = (q: Q) => q.table === "time_entries" && q.cols.startsWith("id, profile_id, clock_in, clock_out");
+  const routes = (settings: Record<string, unknown>, over: (q: Q) => Reply = () => undefined) => (q: Q): Reply => {
+    const o = over(q);
+    if (o) return o;
+    if (q.table === "organizations") return orgPage(q, [{ ...LARKSPUR, settings: { ...TZ, ...settings } }]);
+    if (isPushRead(q)) return { data: honour(q, OPEN) };
+    if (isFamilyRead(q)) return { data: honour(q, KIN) };
+    // The text's own reads: Sam Tillery, a tech, still open.
+    if (q.table === "profiles") return { data: [{ id: "sam", full_name: "Sam Tillery", phone: "(000) 000-0001", language: "en" }] };
+    if (q.table === "time_entries") return { data: [{ profile_id: "sam", status: "open", notes: null }] };
+    return undefined;
+  };
+  const pushedIds = () => spies.people.map((p) => p.ids);
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(SIX_PM);
+  });
+
+  it("Push: everyone on the clock since today, any role, gets ONE push; no text goes, ready or not", async () => {
+    textingReady();
+    state.client = fakeSupabase(routes({ remind_timeclock_by: "push" }));
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ due: 1, pushed: 3, push_failed: 0, reminded: 0, not_ready: 0, failed: 0 });
+    // One call per person (each push names its own start): the tech, the office and the owner.
+    expect(pushedIds()).toEqual([["sam"], ["dana"], ["owner-1"]]);
+    for (const p of spies.people) {
+      expect(p.org).toBe("org-1");
+      expect(p.kind).toBe("clock_out");
+      expect(p.en.url).toBe("/timeclock");
+      expect(p.es.url).toBe("/timeclock");
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+    // The night debrief still rides the 6 PM run.
+    expect(spies.closeOutOrgs).toHaveLength(1);
+  });
+
+  it("the words, push-sized, in both languages, with the shift's start in the company's clock", async () => {
+    state.client = fakeSupabase(routes({ remind_timeclock_by: "push" }));
+    await eod(req());
+    const [sam, dana, owner] = spies.people;
+    expect(sam.en).toEqual({ title: "Still Clocked In", body: "You've been clocked in since 7:00 AM. Tap to clock out.", url: "/timeclock" });
+    expect(sam.es).toEqual({ title: "Sigues con Entrada Marcada", body: "Tienes entrada marcada desde las 7:00 am. Toca para marcar salida.", url: "/timeclock" });
+    expect(dana.en.body).toBe("You've been clocked in since 1:05 PM. Tap to clock out.");
+    expect(dana.es.body).toBe("Tienes entrada marcada desde la 1:05 pm. Toca para marcar salida.");
+    // After a Switch Job at noon the shift still began at 6:00 AM (loadShiftChains, this company's piece only).
+    expect(owner.en.body).toBe("You've been clocked in since 6:00 AM. Tap to clock out.");
+  });
+
+  it("Text: no push; the tech is texted as before", async () => {
+    textingReady();
+    state.client = fakeSupabase(routes({ remind_timeclock_by: "text" }));
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ pushed: 0, push_failed: 0, reminded: 1, failed: 0 });
+    expect(spies.people).toEqual([]);
+    expect(sentTexts()).toEqual([{ to: expect.any(String), body: expect.stringMatching(/still clocked in/) }]);
+  });
+
+  it("Both: the pushes and the text", async () => {
+    textingReady();
+    state.client = fakeSupabase(routes({ remind_timeclock_by: "both" }));
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ pushed: 3, reminded: 1, failed: 0 });
+    expect(pushedIds()).toEqual([["sam"], ["dana"], ["owner-1"]]);
+    expect(sentTexts()).toHaveLength(1);
+  });
+
+  it("Both, texting not set up: the pushes go, the text is skipped and counted", async () => {
+    state.client = fakeSupabase(routes({ remind_timeclock_by: "both" }));
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ pushed: 3, reminded: 0, not_ready: 1 });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("nothing stored and the old box ticked off reads Push: pushes, no text", async () => {
+    textingReady();
+    state.client = fakeSupabase(routes({ remind_timeclock: false }));
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ pushed: 3, reminded: 0, not_ready: 0 });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("nothing stored and the old box on, or absent, reads Both: pushes and the text", async () => {
+    textingReady();
+    for (const settings of [{ remind_timeclock: true }, {}]) {
+      spies.people = [];
+      fetchSpy.mockClear();
+      state.client = fakeSupabase(routes(settings));
+      const body = await (await eod(req())).json();
+      expect(body, JSON.stringify(settings)).toMatchObject({ pushed: 3, reminded: 1 });
+      expect(sentTexts()).toHaveLength(1);
+    }
+  });
+
+  it("a stored choice outranks the old box: Text with the box off still texts and does not push", async () => {
+    textingReady();
+    state.client = fakeSupabase(routes({ remind_timeclock: false, remind_timeclock_by: "text" }));
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ pushed: 0, reminded: 1 });
+  });
+
+  it("a person who muted clock-out pushes: the bell line is written and that person is not counted as pushed", async () => {
+    spies.peopleAnswer = (ids) => ({ bell: true, pushed: ids.filter((id) => id !== "dana") });
+    state.client = fakeSupabase(routes({ remind_timeclock_by: "push" }));
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ pushed: 2, push_failed: 0, failed: 0 });
+    expect(pushedIds()).toEqual([["sam"], ["dana"], ["owner-1"]]);
+  });
+
+  it("a refusal from notifyPeople (no bell line) is counted and filed with the company; the others still go", async () => {
+    spies.peopleAnswer = (ids) => (ids[0] === "dana" ? { bell: false, pushed: [] } : { bell: true, pushed: ids });
+    state.client = fakeSupabase(routes({ remind_timeclock_by: "push" }));
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ pushed: 2, push_failed: 1 });
+    expect(reportError).toHaveBeenCalledWith("cron-eod", expect.any(Error), { orgId: "org-1", step: "push" });
+  });
+
+  it("a failed read of the open shifts pushes NOBODY: counted, filed, never read as nobody on the clock; the text still goes", async () => {
+    textingReady();
+    state.client = fakeSupabase(routes({ remind_timeclock_by: "both" }, (q) => (isPushRead(q) ? { error: { message: "boom" } } : undefined)));
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ pushed: 0, push_failed: 0, failed: 1, reminded: 1 });
+    expect(spies.people).toEqual([]);
+    expect(reportError).toHaveBeenCalledWith("cron-eod", { message: "boom" }, { orgId: "org-1", step: "push" });
+  });
+
+  it("a failed family read (a switched shift's start) pushes NOBODY either", async () => {
+    state.client = fakeSupabase(routes({ remind_timeclock_by: "push" }, (q) => (isFamilyRead(q) ? { error: { message: "boom" } } : undefined)));
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ pushed: 0, failed: 1 });
+    expect(spies.people).toEqual([]);
+    expect(reportError).toHaveBeenCalledWith("cron-eod", { message: "boom" }, { orgId: "org-1", step: "push" });
+  });
+
+  it("off the company's 6 PM nobody is pushed", async () => {
+    vi.setSystemTime(FIVE_PM);
+    state.client = fakeSupabase(routes({ remind_timeclock_by: "push" }));
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ due: 0, pushed: 0 });
+    expect(spies.people).toEqual([]);
+  });
+
+  it("a company whose plan has ended is not pushed for (Tupelo Panel)", async () => {
+    state.client = fakeSupabase((q) =>
+      q.table === "organizations"
+        ? orgPage(q, [{ ...LAPSED_ORG, name: "Tupelo Panel", settings: { ...TZ, remind_timeclock_by: "push" } }])
+        : routes({ remind_timeclock_by: "push" })(q),
+    );
+    const body = await (await eod(req())).json();
+    expect(body).toMatchObject({ due: 0, lapsed_skipped: 1, pushed: 0 });
+    expect(spies.people).toEqual([]);
   });
 });
 

@@ -190,7 +190,7 @@ export function RequestPaymentSheet({
       if (opening !== openingRef.current) return;
       if (r.ok) {
         setPhase({ k: "made", seed, request: r.request, existing: r.existing });
-        router.refresh();
+        router.refresh(); // kept: the sheet also opens from Settle Up on a visit's page, which requestPayment does not revalidate
         return;
       }
       setNote(r.error || t("su_rp_didntGo"));

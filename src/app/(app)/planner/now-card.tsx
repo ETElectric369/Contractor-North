@@ -19,6 +19,8 @@ import { askAfterPunch, type WhichJobAsk } from "../timeclock/which-job-choices"
 import { noticeOnScreen, tellAppChose, type AppChoseNotice } from "../timeclock/clock-told";
 import { AppChoseJobNotice } from "../timeclock/app-chose-notice";
 import { DailyReportDebrief } from "../timeclock/daily-report-debrief";
+import { WhatTodaySheet } from "../timeclock/what-today-sheet";
+import { closeSaidNothing } from "@/lib/what-today";
 import type { CrewPulse } from "@/lib/crew-pulse";
 
 /** Best-effort on-gesture GPS with a short cap (the timeclock panel's race pattern):
@@ -93,6 +95,7 @@ export function NowCard({
   children,
   crew,
   asksReport = false,
+  asksWhat = false,
 }: {
   open: NowPunch | null;
   /** The job on the open punch, when the page could read it. */
@@ -109,6 +112,9 @@ export function NowCard({
   /** THE END-OF-DAY REPORT, asked after a clock-out here as on the Time Clock page (cn-v1174): a crew
    *  lead with Daily Reports on (lib/daily-report-rule asksForDailyReport, read by the page). */
   asksReport?: boolean;
+  /** "WHAT DID YOU DO TODAY?" (cn-v1190): a tech the report does not ask (lib/what-today asksWhatToday,
+   *  read by the page) is asked this one question after a clock-out here that kept the shift. */
+  asksWhat?: boolean;
 }) {
   const [now, setNow] = useState(() => Date.now());
   const [err, setErr] = useState<string | null>(null);
@@ -134,6 +140,10 @@ export function NowCard({
   // never be remounted.
   const [reportOpen, setReportOpen] = useState(false);
   const [reportAfterAsk, setReportAfterAsk] = useState(false);
+  // The one question (cn-v1190), the other branch of the same rule; up here for the same reason.
+  const [whatOpen, setWhatOpen] = useState(false);
+  const [whatEntry, setWhatEntry] = useState<string | null>(null);
+  const [whatAfterAsk, setWhatAfterAsk] = useState(false);
 
   // Replay a held punch the moment the connection returns (or the app is reopened).
   // THE DRAIN MOVED TO THE SHELL (audit 9, OfflineDrain): mounted here it only ran while this
@@ -254,6 +264,13 @@ export function NowCard({
           if (asksReport) {
             if (again) setReportAfterAsk(true);
             else setReportOpen(true);
+          } else if (asksWhat && closeSaidNothing(open.notes)) {
+            // Never the same question twice: the shift's note went out with this close, and words of
+            // his own in it are his answer (lib/what-today closeSaidNothing).
+            // The row clockOut closed is the one it was sent; it hands the id back only with the job question.
+            setWhatEntry(res.id ?? open.id);
+            if (again) setWhatAfterAsk(true);
+            else setWhatOpen(true);
           }
         }
       } catch {
@@ -433,10 +450,18 @@ export function NowCard({
               setReportAfterAsk(false);
               setReportOpen(true);
             }
+            if (whatAfterAsk) {
+              setWhatAfterAsk(false);
+              setWhatOpen(true);
+            }
           }}
         />
       )}
-      {asksReport ? <DailyReportDebrief open={reportOpen} onClose={() => setReportOpen(false)} /> : null}
+      {asksReport ? (
+        <DailyReportDebrief open={reportOpen} onClose={() => setReportOpen(false)} />
+      ) : asksWhat ? (
+        <WhatTodaySheet open={whatOpen} entryId={whatEntry} onClose={() => setWhatOpen(false)} />
+      ) : null}
     </Card>
   );
 }

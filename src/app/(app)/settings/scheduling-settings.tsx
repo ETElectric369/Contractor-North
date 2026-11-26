@@ -6,8 +6,8 @@ import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { DayField } from "@/components/day-field";
-import type { OrgSettings } from "@/lib/org-settings";
-import { TEXTS_NOT_READY_LINE, TEXTING_CARD_PLACE } from "@/lib/sms-readiness";
+import { timeclockRemindersBy, type OrgSettings, type TimeclockRemindBy } from "@/lib/org-settings";
+import { TEXTING_CARD_PLACE } from "@/lib/sms-readiness";
 import { updateOrgSettings } from "./actions";
 import { setFeature } from "./features-actions";
 
@@ -35,7 +35,8 @@ export function SchedulingSettings({
   const [start, setStart] = useState(settings.work_day_start);
   const [end, setEnd] = useState(settings.work_day_end);
   const [weekStart, setWeekStart] = useState(settings.week_start);
-  const [remindClock, setRemindClock] = useState(settings.remind_timeclock);
+  // ONE CHOICE OF THREE (cn-v1190), read through the one rule: the old box ticked off reads Push, on reads Both.
+  const [remindBy, setRemindBy] = useState<TimeclockRemindBy>(timeclockRemindersBy(settings));
   const [askJobCodes, setAskJobCodes] = useState(settings.timeclock_job_codes);
   const [geofence, setGeofence] = useState(settings.geofence_logout);
   const [radius, setRadius] = useState(settings.geofence_radius_m);
@@ -71,7 +72,7 @@ export function SchedulingSettings({
         work_day_start: start,
         work_day_end: end,
         week_start: weekStart,
-        remind_timeclock: remindClock,
+        remind_timeclock_by: remindBy,
         geofence_logout: geofence,
         geofence_radius_m: Math.max(50, Math.round(Number(radius) || 300)),
         pay_schedule: paySchedule,
@@ -114,33 +115,35 @@ export function SchedulingSettings({
           carries one 30-minute unpaid-lunch box, off by default. The office can set any entry to
           any number of minutes from Timecards.
         </p>
-        {/* NOT ACTIVE UNTIL IT CAN TEXT (2026-09-24). This box sat ticked on an org that could not
-            send a single text: the onboarding-truth problem. It shows the SAVED choice as it is and
-            stays changeable while texting isn't set up, with a line saying it isn't active yet: a
-            tick means "text them once texting is set up", and unticking it now keeps them off on
-            that day. Showing it unticked while it was stored ON meant the box turned itself on,
-            unseen, the day a texting number was typed. The 12-hour question's text rides this
-            same choice (api/timeclock/long-shift), so no text goes out without this box. */}
-        <label className="flex items-start gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={remindClock}
-            onChange={(e) => setRemindClock(e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand"
-          />
-          <span>
-            Text timeclock reminders to techs: a morning nudge if they haven&apos;t clocked in, an end-of-day
-            reminder to clock out and fill in the day&apos;s details, and the 12-hour &ldquo;still on the
-            clock?&rdquo; question (it always comes as a notification too).
-            {!textReady && (
-              <span className="mt-0.5 block text-xs text-amber-700">
-                Not active yet. {TEXTS_NOT_READY_LINE}{" "}
-                {remindClock ? "Ticked, they start then; untick to keep them off." : "Unticked, they stay off then too."}{" "}
-                {TEXTING_CARD_PLACE} shows what&apos;s missing.
-              </span>
-            )}
-          </span>
-        </label>
+        {/* TIMECLOCK REMINDERS GO OUT BY (cn-v1190, the owner: "everyone gets the push notification and
+            the boss can choose text push or both"). It replaced the "Text timeclock reminders" box: a
+            company that had the box off reads Push, on reads Both (lib/org-settings timeclockRemindersBy).
+            NOT ACTIVE UNTIL IT CAN TEXT (2026-09-24) still holds for the texts: the SAVED choice shows as
+            it is and stays changeable while texting isn't set up, with a line saying the texts aren't
+            active yet, so nothing turns itself on unseen the day a texting number is typed. */}
+        <div className="max-w-xs">
+          <Label htmlFor="sc-remind-by">Timeclock Reminders Go Out By</Label>
+          <Select id="sc-remind-by" className="h-11" value={remindBy} onChange={(e) => setRemindBy(e.target.value as TimeclockRemindBy)}>
+            <option value="push">Push</option>
+            <option value="text">Text</option>
+            <option value="both">Both</option>
+          </Select>
+        </div>
+        <p className="text-sm text-slate-600">
+          A push is the &ldquo;still clocked in&rdquo; reminder at 6 PM to everyone still clocked in from a
+          shift that began that day (anyone the 12-hour question already asked isn&apos;t pushed again). A text
+          is the 7 AM &ldquo;not clocked in&rdquo; text and the 6 PM text to techs, and the 12-hour
+          &ldquo;still on the clock?&rdquo; question by text too; that question always comes as a push.
+          Each person can turn off clock-out pushes in their own Settings, under Push notifications.
+          {!textReady && (
+            <span className="mt-0.5 block text-xs text-amber-700">
+              {remindBy === "push"
+                ? "Texting isn't set up yet, and with Push no texts go out."
+                : "Texts aren't active yet: they start once texting is set up. Pick Push to keep them off."}{" "}
+              {TEXTING_CARD_PLACE} shows what&apos;s missing.
+            </span>
+          )}
+        </p>
       </div>
 
       <div className="space-y-2 border-t border-slate-100 pt-4">

@@ -163,7 +163,7 @@ function isMissingColumn(err: unknown): boolean {
  * than one section. The newest columns fall off first; without them `supersedeReady` is false and
  * the picker does not render, which is the no-dead-ends rule.
  */
-async function readBillsWithLines(supabase: any, orgId: string) {
+async function readBillsWithLines(supabase: any, orgId: string, countsOnly = false) {
   // THE NEWEST COLUMNS FALL OFF FIRST, one at a time: both_real_at (0400, Both Are Real) goes before
   // superseded_by_bill_id (0271), so a database between the two still draws the picker — a stamp it
   // cannot read is a pair that asks again, never a page without its card. duplicate_dismissed_at
@@ -174,7 +174,7 @@ async function readBillsWithLines(supabase: any, orgId: string) {
     `id, supplier, supplier_account_id, bill_number, amount, amount_paid, status, bill_date, job_id, category, notes, supplier_invoice_number${newest
       .slice(drop)
       .map((c) => `, ${c}`)
-      .join("")}, jobs(job_number, name, customers(name)), bill_line_items(description)`;
+      .join("")}${countsOnly ? "" : ", jobs(job_number, name, customers(name))"}, bill_line_items(description)`;
   const read = (drop: number) =>
     supabase.from("bills").select(columns(drop)).eq("org_id", orgId).order("created_at", { ascending: false }).limit(5000);
   let res = await read(0);
@@ -196,14 +196,23 @@ export async function readReconcileWork(
   orgId: string,
   figures: ReconcileFigures | null,
   /** The page's `pick` (a bill id, uuid-checked there): a dismissed pair holding it is drawn again. */
-  opts?: { showDismissedWith?: string | null },
+  opts?: {
+    showDismissedWith?: string | null;
+    /**
+     * THE BADGE'S READ (cn-v1190, P3): only `counts` will be read off the answer, so the bills come
+     * without their job and customer, which name a row and never decide whether it is open. The bills'
+     * lines stay: a same-ticket pair is found by its line count and the invoice number read out of the
+     * lines. Every count is worked out by this same function either way.
+     */
+    countsOnly?: boolean;
+  },
 ): Promise<ReconcileWork> {
   if (!orgId) return EMPTY;
 
   const [acctRes, aliasRes, billsRes] = await Promise.all([
     supabase.from("supplier_accounts").select("id, name, account_number, branch_code").eq("org_id", orgId).order("name", { ascending: true }).limit(500),
     supabase.from("supplier_aliases").select("alias, supplier_account_id").eq("org_id", orgId).order("alias", { ascending: true }).limit(2000),
-    readBillsWithLines(supabase, orgId),
+    readBillsWithLines(supabase, orgId, !!opts?.countsOnly),
   ]);
 
   const failed: string[] = [];

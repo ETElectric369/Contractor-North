@@ -53,6 +53,7 @@ export function BlockTimeControls({
   onPending,
   onRefusal,
   draft = false,
+  live = false,
 }: {
   startHm: string;
   endHm: string;
@@ -85,6 +86,10 @@ export function BlockTimeControls({
   /** A form's draft (Add to Schedule): `save` only sets the form's hours and the form's own button
    *  writes, so nothing here says Saving… or Saved. */
   draft?: boolean;
+  /** Never disabled while a save runs (the job page's date-range rows, cn-v1190): saves may overlap and
+   *  the latest one wins, the rule cn-v1189 set for the date boxes ("Add date range is not responding"
+   *  was boxes held for as long as a save waited on the calendar push). Off: the boxes wait as before. */
+  live?: boolean;
 }) {
   const lang = useLang();
   const t = translator(lang);
@@ -211,7 +216,7 @@ export function BlockTimeControls({
             id={`${idPrefix}-start`}
             type="time"
             value={start_}
-            disabled={pending}
+            disabled={pending && !live}
             onChange={(ev) => setStart(ev.target.value)}
             onBlur={(ev) => commitStart(ev.target.value)}
             onKeyDown={(ev) => {
@@ -228,7 +233,7 @@ export function BlockTimeControls({
               id={`${idPrefix}-end`}
               type="time"
               value={end}
-              disabled={pending}
+              disabled={pending && !live}
               onChange={(ev) => setEnd(ev.target.value)}
               onBlur={(ev) => commitEnd(ev.target.value)}
               onKeyDown={(ev) => {
@@ -251,7 +256,7 @@ export function BlockTimeControls({
               <button
                 key={q.minutes}
                 type="button"
-                disabled={pending}
+                disabled={pending && !live}
                 aria-pressed={on}
                 aria-label={lengthWords(q.minutes, lang, t)}
                 onClick={() => run({ length: q.minutes }, { end: endAfter(start_, q.minutes) })}
@@ -263,7 +268,7 @@ export function BlockTimeControls({
           })}
           <button
             type="button"
-            disabled={pending}
+            disabled={pending && !live}
             aria-pressed={allDay}
             onClick={() => run({ length: "full" }, { start: workDay.start, end: workDay.end })}
             className={chip(allDay)}

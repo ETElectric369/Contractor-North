@@ -109,7 +109,7 @@ export function CreditMemoDoor({ itemId }: { itemId: string }) {
       }
       if (r.message) toast(r.message, "success", undefined, { sticky: true });
       setState({ step: "said", words: r.message ?? "Filed with its bill.", tone: "plain" });
-      router.refresh();
+      router.refresh(); // kept: the paper row also opens on Reconcile and in Snap or Note on any page, which this action does not revalidate
     });
 
   const find = () =>
@@ -121,7 +121,7 @@ export function CreditMemoDoor({ itemId }: { itemId: string }) {
       if (!r.ok) return setState({ step: "said", words: r.error ?? "The memo didn't file. Try again.", tone: "refused" });
       if (r.message) toast(r.message, "success", undefined, { sticky: true });
       setState({ step: "said", words: r.message ?? "Filed with its bill.", tone: "plain" });
-      router.refresh();
+      router.refresh(); // kept: the paper row also opens on Reconcile and in Snap or Note on any page, which this action does not revalidate
     });
 
   return <CreditMemoDoorView state={state} busy={busy} onFind={find} onPick={file} />;

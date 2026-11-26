@@ -695,3 +695,115 @@ describe("a range needs both its days, the stored ranges come back, an added day
     expect(days("j901")).toEqual(["2026-10-05..2026-10-05 usual", "2026-10-07..2026-10-07 09:00-13:00"]);
   });
 });
+
+/**
+ * EACH DATE RANGE HAS HOURS OF ITS OWN, ONE WRITER (cn-v1190; the owner: "add a date range to have its
+ * own time entry too that defaults to the hours inputed for the first date range so i can change them if
+ * i want to"). J-905, Snowbell: Mon Oct 5 to Tue Oct 6, a full day each (9 to 5, sized 480), usual hours.
+ */
+describe("the job page's rows send each range's hours through setJobScheduleRanges", () => {
+  const MON = "2026-10-05";
+  const TUE = "2026-10-06";
+  const WED = "2026-10-07";
+  function snowbell(tueOwn?: { start: string; end: string }) {
+    state.db.jobs.push({ id: "j905", name: "Snowbell", status: "scheduled", scheduled_start: at(MON, "09:00"), scheduled_end: at(TUE, "17:00"), planned_minutes: 480, assigned_to: [] });
+    if (tueOwn) {
+      state.db.job_schedule_segments.push(
+        { job_id: "j905", start_date: MON, end_date: MON, start_time: null, end_time: null },
+        { job_id: "j905", start_date: TUE, end_date: TUE, start_time: `${tueOwn.start}:00`, end_time: `${tueOwn.end}:00` },
+      );
+    } else {
+      state.db.job_schedule_segments.push({ job_id: "j905", start_date: MON, end_date: TUE, start_time: null, end_time: null });
+    }
+  }
+
+  it("a range given its own hours keeps them on its days; neighbours with different hours stay two, said as two", async () => {
+    snowbell();
+    const r = await actions.setJobScheduleRanges("j905", [
+      { start: MON, end: MON, hours: null },
+      { start: TUE, end: TUE, hours: { start: "09:00", end: "13:00" } },
+    ]);
+    expect(r).toEqual({ ok: true, ranges: [{ start: MON, end: MON, hours: null }, { start: TUE, end: TUE, hours: { start: "09:00", end: "13:00" } }] });
+    expect(days("j905")).toEqual([`${MON}..${MON} usual`, `${TUE}..${TUE} 09:00-13:00`]);
+  });
+
+  it("hours equal to what the usual block draws there store none, and the range joins its neighbour", async () => {
+    snowbell({ start: "09:00", end: "13:00" });
+    const r = await actions.setJobScheduleRanges("j905", [
+      { start: MON, end: MON, hours: null },
+      { start: TUE, end: TUE, hours: { start: "09:00", end: "17:00" } },
+    ]);
+    expect(r).toEqual({ ok: true, ranges: [{ start: MON, end: TUE, hours: null }] });
+    expect(days("j905")).toEqual([`${MON}..${TUE} usual`]);
+  });
+
+  it("a range sent without an hours field keeps each day's hours as they are (every other caller)", async () => {
+    snowbell({ start: "09:00", end: "13:00" });
+    const r = await actions.setJobScheduleRanges("j905", [{ start: MON, end: TUE }]);
+    expect(r).toEqual({ ok: true, ranges: [{ start: MON, end: MON, hours: null }, { start: TUE, end: TUE, hours: { start: "09:00", end: "13:00" } }] });
+    expect(days("j905")).toEqual([`${MON}..${MON} usual`, `${TUE}..${TUE} 09:00-13:00`]);
+  });
+
+  it("hours that are not two clock times with the end after the start are refused in one sentence, nothing written", async () => {
+    snowbell();
+    for (const hours of [{ start: "13:00", end: "09:00" }, { start: "09:00", end: "09:00" }, { start: "9am", end: "17:00" }, { start: "25:00", end: "26:00" }, { start: "09:00" }]) {
+      expect(await actions.setJobScheduleRanges("j905", [{ start: MON, end: TUE, hours: hours as never }])).toEqual({
+        ok: false,
+        error: "Set each date range's end time after its start time.",
+      });
+    }
+    expect(state.writes).toEqual([]);
+    expect(days("j905")).toEqual([`${MON}..${TUE} usual`]);
+  });
+
+  it("before 0370 a range's own hours are refused in words, nothing written", async () => {
+    snowbell();
+    state.noHours = true;
+    const r = await actions.setJobScheduleRanges("j905", [{ start: MON, end: TUE, hours: { start: "09:00", end: "13:00" } }]);
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("quick database update");
+    expect(state.writes).toEqual([]);
+  });
+
+  it("Extend Job: Wed with the last range's hours joins it as one range; with other hours it is a range of its own", async () => {
+    snowbell();
+    expect(await actions.setJobScheduleRanges("j905", [{ start: MON, end: TUE, hours: null }, { start: WED, end: WED, hours: null }])).toEqual({
+      ok: true,
+      ranges: [{ start: MON, end: WED, hours: null }],
+    });
+    expect(job("j905")).toMatchObject({ scheduled_start: at(MON, "09:00"), scheduled_end: at(WED, "17:00") });
+    state.db.jobs = [];
+    state.db.job_schedule_segments = [];
+    snowbell();
+    const r = await actions.setJobScheduleRanges("j905", [{ start: MON, end: TUE, hours: null }, { start: WED, end: WED, hours: { start: "07:00", end: "11:00" } }]);
+    expect(r).toMatchObject({ ok: true, ranges: [{ start: MON, end: TUE, hours: null }, { start: WED, end: WED, hours: { start: "07:00", end: "11:00" } }] });
+    expect(days("j905")).toEqual([`${MON}..${TUE} usual`, `${WED}..${WED} 07:00-11:00`]);
+  });
+});
+
+/**
+ * A STALE PAGE NEVER WIPES HOURS SET ELSEWHERE (skeptic #91 S1). J-901, Larkspur: Dana Rook's job page
+ * was loaded with Dec 7 to 8 and Dec 10 on the usual hours; Sam Tillery then gave Dec 10 its own 6 to 10
+ * on the Schedule's tile. Dana moves the first range's last day to Dec 9: the page sends that row (touched)
+ * with the hours it showed, and Dec 10 (untouched) with no hours field.
+ */
+describe("the job page's save sends hours only on the rows the person touched", () => {
+  it("Dec 10 keeps Sam's hours and stays a range of its own, as at cn-v1189", async () => {
+    const { editRow, rowsToSend } = await import("@/lib/schedule/range-rows");
+    state.db.jobs.push({ id: "j901", name: "Larkspur", status: "scheduled", scheduled_start: at("2026-12-07", "09:00"), scheduled_end: at("2026-12-10", "17:00"), planned_minutes: 480, assigned_to: [] });
+    state.db.job_schedule_segments.push(
+      { job_id: "j901", start_date: "2026-12-07", end_date: "2026-12-08", start_time: null, end_time: null },
+      { job_id: "j901", start_date: "2026-12-10", end_date: "2026-12-10", start_time: "06:00:00", end_time: "10:00:00" },
+    );
+    // The page's rows as loaded, before Sam's change.
+    const stale = [{ start: "2026-12-07", end: "2026-12-08", hours: null }, { start: "2026-12-10", end: "2026-12-10", hours: null }];
+    const sent = rowsToSend([editRow(stale[0], { end: "2026-12-09" }), stale[1]]);
+    expect(sent).toEqual([{ start: "2026-12-07", end: "2026-12-09", hours: null }, { start: "2026-12-10", end: "2026-12-10" }]);
+    const r = await actions.setJobScheduleRanges("j901", sent);
+    expect(r).toMatchObject({
+      ok: true,
+      ranges: [{ start: "2026-12-07", end: "2026-12-09", hours: null }, { start: "2026-12-10", end: "2026-12-10", hours: { start: "06:00", end: "10:00" } }],
+    });
+    expect(days("j901")).toEqual(["2026-12-07..2026-12-09 usual", "2026-12-10..2026-12-10 06:00-10:00"]);
+  });
+});

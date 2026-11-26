@@ -94,11 +94,13 @@ export function ReturnBillDoor({ billId }: { billId: string }) {
       setState(fileAnswerStep(r));
       if (!r.ok) {
         // A name may have been filed before the credit was refused: the page is read again (S4).
+        // kept: a refusal after the name was filed revalidates the job, not /bills (cn-v1190).
         if (shown) router.refresh();
         return;
       }
       if (r.message) toast(r.message, "success", undefined, { sticky: true });
-      router.refresh();
+      // No second refresh here (cn-v1190): the one success path of fileReturnBillWithItsBill revalidates
+      // /bills and the credit's job (this door is drawn on those two pages only), so the page comes back drawn.
     });
 
   return <ReturnBillDoorView state={state} busy={busy} onFind={find} onPick={file} />;

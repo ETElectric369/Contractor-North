@@ -95,8 +95,13 @@ export interface OrgSettings {
    *  end-of-day clock-out/EOD-form reminder). Default ON; the crons skip an org that
    *  turns this off. Settings → Scheduling owns the toggle. A stored ON is only a CHOICE: until
    *  the org can text (lib/sms-readiness) the crons skip it and count the skip, and Settings shows
-   *  the option as not active. */
+   *  the option as not active.
+   *  THE OLD BOX (cn-v1190): read nowhere but timeclockRemindersBy below, which falls back on it when
+   *  remind_timeclock_by is not stored. Kept, never rewritten: it is what an older company still says. */
   remind_timeclock: boolean;
+  /** HOW THE TIMECLOCK REMINDERS GO OUT (cn-v1190, the owner: "everyone gets the push notification
+   *  and the boss can choose text push or both"). Never read directly: timeclockRemindersBy heals it. */
+  remind_timeclock_by?: TimeclockRemindBy;
   /** Ask the crew for job CODES on the timeclock (the clock-in/switch code selects). false =
    *  codes off: entries carry just the JOB, and timeclock job labels lead with customer ·
    *  street address instead of the job number (the crew knows work by whose house they're at).
@@ -645,6 +650,47 @@ function isValidTz(tz: unknown): boolean {
   } catch {
     return false;
   }
+}
+
+/** How the timeclock reminders go out (cn-v1190): the 6 PM push, the texts, or both. */
+export type TimeclockRemindBy = "push" | "text" | "both";
+export const TIMECLOCK_REMIND_BY: readonly TimeclockRemindBy[] = ["push", "text", "both"];
+
+/** Is this one of the three choices? The settings save refuses anything else. */
+export function isTimeclockRemindBy(v: unknown): v is TimeclockRemindBy {
+  return v === "push" || v === "text" || v === "both";
+}
+
+/**
+ * THE ONE READ OF THE CHOICE (cn-v1190), healed on every read, from the stored jsonb or from
+ * getOrgSettings' answer alike. A stored value that is one of the three is itself. Anything else
+ * (nothing stored, a value from nowhere) falls back on the old "Text timeclock reminders" box: a
+ * company that ticked it OFF wanted no texts, so it reads Push; a company that left it on (or never
+ * touched it) had the texts, and now has the push beside them, so it reads Both. The old box is
+ * read nowhere else.
+ *
+ * EXACTLY WHAT THE OLD BOX DID (fix-1190-B): every reader at cn-v1189 asked
+ * `!getOrgSettings(s).remind_timeclock`, where an absent key takes the default (on) and a PRESENT
+ * key, whatever it holds, is kept. So a present falsy value (false, and also null, 0, "") texted
+ * nobody, and reads Push here; an absent key or a truthy value texted, and reads Both. No company
+ * starts getting texts it did not get before, and the raw stored settings and getOrgSettings' answer
+ * give the same choice.
+ */
+export function timeclockRemindersBy(settings: unknown): TimeclockRemindBy {
+  const s = (settings && typeof settings === "object" ? settings : {}) as Record<string, unknown>;
+  if (isTimeclockRemindBy(s.remind_timeclock_by)) return s.remind_timeclock_by;
+  const present = Object.prototype.hasOwnProperty.call(s, "remind_timeclock");
+  return present && !s.remind_timeclock ? "push" : "both";
+}
+
+/** The texts (7 AM, 6 PM, the 12-hour question's copy) go out under Text or Both. */
+export function timeclockRemindersText(settings: unknown): boolean {
+  return timeclockRemindersBy(settings) !== "push";
+}
+
+/** The 6 PM "still clocked in" push goes out under Push or Both. */
+export function timeclockRemindersPush(settings: unknown): boolean {
+  return timeclockRemindersBy(settings) !== "text";
 }
 
 export function getOrgSettings(raw: unknown): OrgSettings {

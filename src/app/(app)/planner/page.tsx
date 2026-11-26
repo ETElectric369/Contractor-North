@@ -38,6 +38,7 @@ import { QuickCostButton } from "@/components/quick-cost-button";
 import { MarkReportReviewedButton } from "./mark-report-reviewed-button";
 import type { DailyReportSummary } from "../timeclock/actions";
 import { asksForDailyReport, reportJobName, reportLanding } from "@/lib/daily-report-rule";
+import { asksWhatToday } from "@/lib/what-today";
 import { OPEN_TASK_JOB, isMissingColumn, whereJobTaskOpen } from "@/lib/job-tasks";
 import { loadShiftChains } from "@/lib/shift-chain";
 import { reportError } from "@/lib/observe";
@@ -978,6 +979,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       <NowCard
         userId={user?.id ?? null}
         asksReport={asksReport}
+        asksWhat={asksWhatToday({ staff: isStaff, asksReport })}
         crew={crewForCard(crewR, user?.id ?? null, tz, todayStr)}
         open={
           openEntry

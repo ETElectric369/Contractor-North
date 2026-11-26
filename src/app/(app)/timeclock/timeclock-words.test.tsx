@@ -62,7 +62,7 @@ const openPunch = {
 } as never;
 
 describe("the catalog names the clock's client side", () => {
-  it("lists the twelve screens (My Pay Periods' three since cn-v1166), every key is tc_, and the shared headline is in both languages", () => {
+  it("lists the thirteen screens (My Pay Periods' three since cn-v1166, the one clock-out question since cn-v1190), every key is tc_, and the shared headline is in both languages", () => {
     expect(words.files).toEqual([
       "src/app/(app)/timeclock/page.tsx",
       "src/app/(app)/timeclock/timeclock-panel.tsx",
@@ -73,6 +73,7 @@ describe("the catalog names the clock's client side", () => {
       "src/app/(app)/timeclock/next-up.tsx",
       "src/app/(app)/timeclock/app-chose-notice.tsx",
       "src/app/(app)/timeclock/daily-report-debrief.tsx",
+      "src/app/(app)/timeclock/what-today-sheet.tsx",
       "src/app/(app)/timeclock/pay/page.tsx",
       "src/app/(app)/timeclock/pay/[period]/page.tsx",
       "src/app/(app)/timeclock/pay/my-pay-views.tsx",

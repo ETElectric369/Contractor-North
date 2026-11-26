@@ -20,42 +20,70 @@ import { smsReadinessFrom } from "@/lib/sms-readiness";
 // The stored choice is ON (the default), as it is on ET Electric today.
 const settings = getOrgSettings({});
 
-/** The timeclock reminder's checkbox: its attributes, and the words after it. */
-function reminderBox(html: string) {
-  const at = html.indexOf("Text timeclock reminders");
-  const input = html.slice(html.lastIndexOf("<input", at), at);
-  return { input, after: html.slice(at, at + 600) };
+/** The timeclock reminders' choice (cn-v1190): its select, which option is chosen, and the words after it. */
+function reminderChoice(html: string) {
+  const at = html.indexOf("Timeclock Reminders Go Out By");
+  const select = html.slice(html.indexOf("<select", at), html.indexOf("</select>", at) + 9);
+  const chosen = (select.match(/<option value="(\w+)" selected="">/) ?? [])[1];
+  const after = html.slice(html.indexOf("</select>", at), html.indexOf("</select>", at) + 1200);
+  return { select, chosen, after };
 }
 
-describe("the timeclock reminder option", () => {
-  it("not ready: the saved choice shows as it is, stays changeable, and says it isn't active yet", () => {
-    const html = renderToStaticMarkup(createElement(SchedulingSettings, { settings, textReady: false }));
-    const { input, after } = reminderBox(html);
-    // Stored ON reads ON: the box never turns itself on, unseen, the day texting is set up.
-    expect(input).toMatch(/ checked=""/);
-    expect(input).not.toMatch(/ disabled=""/);
-    expect(after).toMatch(/Not active yet\. Texts start once texting is set up\. Ticked, they start then; untick to keep them off\./);
-    expect(after).toMatch(/Settings, Customers, Texting shows what(&#x27;|')s missing\./);
-    // The 12-hour question's text rides this box, so the box says so.
-    expect(after).toContain("12-hour");
+describe("the timeclock reminders choice (cn-v1190: Push, Text or Both)", () => {
+  it("one choice of three in the same card, the old checkbox gone", () => {
+    const html = renderToStaticMarkup(createElement(SchedulingSettings, { settings, textReady: true }));
+    const { select } = reminderChoice(html);
+    expect(html).toContain('for="sc-remind-by">Timeclock Reminders Go Out By</label>');
+    // A 44px tap target (h-11), not the house select's 40.
+    expect(select).toMatch(/<select class="[^"]*\bh-11\b[^"]*" id="sc-remind-by"/);
+    expect(select).not.toMatch(/\bh-10\b/);
+    expect(select).toMatch(/<option value="push"[^>]*>Push<\/option><option value="text"[^>]*>Text<\/option><option value="both"[^>]*>Both<\/option>/);
+    expect(select).not.toMatch(/ disabled=""/);
+    expect(html).not.toContain("Text timeclock reminders");
   });
 
-  it("not ready and unticked: says they stay off then too", () => {
+  it("the sentence under it says what a push is, what a text is, and the person's own switch", () => {
+    const { after } = reminderChoice(renderToStaticMarkup(createElement(SchedulingSettings, { settings, textReady: true })));
+    // fix-1190-B (skeptic #91 S5): the push goes to a shift begun that day, and not to one the 12-hour
+    // question already asked (eod-reminder pushStillClockedIn), never "everyone still on the clock".
+    expect(after).toContain(
+      "A push is the \u201cstill clocked in\u201d reminder at 6 PM to everyone still clocked in from a shift that began that day (anyone the 12-hour question already asked isn&#x27;t pushed again).",
+    );
+    expect(after).not.toContain("everyone still on the clock");
+    expect(after).toContain("7 AM");
+    expect(after).toContain("the 6 PM text to techs");
+    // The 12-hour question's text rides this choice, and the question itself always pushes.
+    expect(after).toContain("12-hour");
+    expect(after).toContain("that question always comes as a push");
+    expect(after).toContain("Each person can turn off clock-out pushes in their own Settings");
+  });
+
+  it("nothing stored and the old box on (the default) reads Both; not ready says the texts aren't active yet", () => {
+    const html = renderToStaticMarkup(createElement(SchedulingSettings, { settings, textReady: false }));
+    const { chosen, after } = reminderChoice(html);
+    expect(chosen).toBe("both");
+    expect(after).toMatch(/Texts aren(&#x27;|')t active yet: they start once texting is set up\. Pick Push to keep them off\. Settings, Customers, Texting shows/);
+    expect(after).not.toMatch(/They start then/);
+    expect(after).toMatch(/Settings, Customers, Texting shows what(&#x27;|')s missing\./);
+  });
+
+  it("the old box ticked off reads Push; not ready says no texts go out with Push", () => {
     const html = renderToStaticMarkup(
       createElement(SchedulingSettings, { settings: { ...settings, remind_timeclock: false }, textReady: false }),
     );
-    const { input, after } = reminderBox(html);
-    expect(input).not.toMatch(/ checked=""/);
-    expect(input).not.toMatch(/ disabled=""/);
-    expect(after).toContain("Unticked, they stay off then too.");
+    const { chosen, after } = reminderChoice(html);
+    expect(chosen).toBe("push");
+    expect(after).toMatch(/Texting isn(&#x27;|')t set up yet, and with Push no texts go out\. Settings, Customers, Texting shows/);
+    expect(after).not.toMatch(/active yet/);
   });
 
-  it("ready: the stored choice shows, and it can be changed", () => {
-    const html = renderToStaticMarkup(createElement(SchedulingSettings, { settings, textReady: true }));
-    const { input, after } = reminderBox(html);
-    expect(input).toMatch(/ checked=""/);
-    expect(input).not.toMatch(/ disabled=""/);
-    expect(after).not.toMatch(/Not active/);
+  it("a stored choice is itself (Text), and ready says nothing about texting", () => {
+    const html = renderToStaticMarkup(
+      createElement(SchedulingSettings, { settings: { ...settings, remind_timeclock: false, remind_timeclock_by: "text" }, textReady: true }),
+    );
+    const { chosen, after } = reminderChoice(html);
+    expect(chosen).toBe("text");
+    expect(after).not.toMatch(/active yet|isn(&#x27;|')t set up/);
   });
 });
 

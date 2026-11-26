@@ -72,6 +72,15 @@ describe("pushTriggersFor", () => {
     expect(by(en, "clock_out").help).toContain("has run 12 hours");
     expect(by(es, "clock_out").help).toContain("12 horas");
     expect(by(es, "clock_out").help).not.toContain("{hours}");
+    // The 6 PM "Still Clocked In" push rides this same switch (cn-v1190), and the help says so in both.
+    // fix-1190-B: only a shift begun that day, and not one the 12-hour question already asked (eod-reminder).
+    expect(by(en, "clock_out").help).toContain(
+      "At 6 PM if you're still clocked in from a shift that began that day and the 12-hour question hasn't come yet (when your company sends reminders by push)",
+    );
+    expect(by(es, "clock_out").help).toContain(
+      "A las 6 p. m. si todavía tienes entrada marcada de un turno que empezó ese día y aún no te llegó la pregunta de las 12 horas (cuando tu empresa manda los recordatorios por aviso push)",
+    );
+    expect(by(en, "clock_out").help).not.toContain("{hours}");
     for (const t of es) if (t.key !== "tap_to_pay") expect(t.label, t.key).not.toBe(by(en, t.key).label);
     // Apple's words, the same in both (a staff row: the owner's list has it).
     expect(by(pushTriggersFor("owner", ALL_ON, false, "es"), "tap_to_pay").label).toBe("Tap to Pay on iPhone");

@@ -51,6 +51,9 @@ const THROUGH_NOTIFY: string[] = [
   // cn-v1138: "you're on this job" is a function of the language; notifyPeople groups the crew by it
   // and writes each group its own line (type "assigned", as before) before its own push.
   "src/lib/crew-notify.ts",
+  // cn-v1190: the 6 PM "Still Clocked In" push, to everyone still on the clock, under kind clock_out
+  // (the person's own Clock-out reminders switch), the bell line first, in each person's language.
+  "src/app/api/timeclock/eod-reminder/route.ts",
 ];
 
 function walk(dir: string, out: string[] = []): string[] {

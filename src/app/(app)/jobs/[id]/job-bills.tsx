@@ -511,7 +511,7 @@ export function JobBills({
           onDone={(message) => {
             setReadAgainBill(null);
             toast(message, "success");
-            router.refresh();
+            router.refresh(); // kept: Read Again's Undo step can answer ok without a revalidation (organize undoPaperwork)
           }}
         />
       )}
@@ -536,7 +536,6 @@ function JobBillEditModal({
   /** This bill is a correction (0381): how it was bought follows that bill, so it is not offered. */
   follows?: string | null;
 }) {
-  const router = useRouter();
   const [pending, start] = useTransition();
   const [supplier, setSupplier] = useState(bill.supplier);
   const [billNumber, setBillNumber] = useState(bill.bill_number ?? "");
@@ -577,13 +576,13 @@ function JobBillEditModal({
         scope_category: scope || null,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
+      // No second refresh here (cn-v1190): both of updateBill's success paths revalidate the bill's job
+      // (this page: the tab lists this job's bills) and /bills, and that hands the page back drawn.
       if (res.warning) {
         setBilledNote(res.warning);
-        router.refresh();
         return;
       }
       onClose();
-      router.refresh();
     });
   }
 

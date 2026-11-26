@@ -24,6 +24,10 @@ export const words: WordCatalog = {
     // /api/timeclock/eod-reminder: the company's 6 PM.
     nb_eodStillIn: "Hi {name} — you're still clocked in. Please clock out and fill out your end-of-day form in Contractor North.",
     nb_eodNoForm: "Hi {name} — please fill out your end-of-day form (what you worked on today) in Contractor North.",
+    // The 6 PM push (cn-v1190), to anyone still on the clock whose shift began today: {since} is the
+    // shift's start in the company's clock ("7:00 AM"; in Spanish with its article, "las 7:00 am").
+    nb_eodPushTitle: "Still Clocked In",
+    nb_eodPushBody: "You've been clocked in since {since}. Tap to clock out.",
     // /api/timeclock/long-shift, the person whose clock it is. The lead names the shift's start, and
     // after a Switch Job the piece's job with the time the switch put him there (audit v994 SW1).
     nb_crewClockedInSince: "You've been clocked in since {since}",
@@ -55,6 +59,8 @@ export const words: WordCatalog = {
     nb_nudgeMorning: "¡Buenos días, {name}! Aún no marcas entrada. Abre Contractor North para marcar entrada.",
     nb_eodStillIn: "Hola, {name}: sigues con entrada marcada. Marca salida y llena tu reporte del día en Contractor North.",
     nb_eodNoForm: "Hola, {name}: llena tu reporte del día (en qué trabajaste hoy) en Contractor North.",
+    nb_eodPushTitle: "Sigues con Entrada Marcada",
+    nb_eodPushBody: "Tienes entrada marcada desde {since}. Toca para marcar salida.",
     nb_crewClockedInSince: "Tienes entrada marcada desde {since}",
     nb_crewClockedInAtSince: "Tienes entrada marcada en {label} desde {since}",
     nb_crewOnClockSince: "Llevas en el reloj desde {since}",

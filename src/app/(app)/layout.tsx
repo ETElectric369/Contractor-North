@@ -388,7 +388,8 @@ export default async function AppLayout({
   const reconcileP: Promise<number> = (async () => {
     if (!isStaff || !profile.org_id) return 0;
     try {
-      const work = await readReconcileWork(supabase, profile.org_id, null);
+      // countsOnly (cn-v1190): the bills come without the job and customer names, which no count reads.
+      const work = await readReconcileWork(supabase, profile.org_id, null, { countsOnly: true });
       return reconcileBadge(work.counts);
     } catch (e) {
       reportError("app-layout:reconcile-badge", e);

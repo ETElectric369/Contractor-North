@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/cron-guard";
 import { sendSms, smsReadiness } from "@/lib/sms";
-import { getOrgSettings } from "@/lib/org-settings";
+import { getOrgSettings, timeclockRemindersText } from "@/lib/org-settings";
 import { todayBoundsInTz } from "@/lib/tz";
 import { reportError } from "@/lib/observe";
 import { reportBlockerAwaited } from "@/lib/observe-blocker";
@@ -22,8 +22,9 @@ type Org = { id: string; name: string | null; settings: unknown };
  *
  * For each company due (the service client bypasses RLS, so every query MUST be org-scoped —
  * otherwise one global pass would text every tenant's techs), finds active techs who have NOT
- * clocked in today and texts them. Per-org opt-out via settings.remind_timeclock === false (default
- * on). An org that cannot text yet (lib/sms-readiness) is skipped and counted in `not_ready`. A
+ * clocked in today and texts them, only when the company's Timeclock Reminders Go Out By (Settings →
+ * Scheduling; lib/org-settings timeclockRemindersText) is Text or Both: under Push no text goes out.
+ * An org that cannot text yet (lib/sms-readiness) is skipped and counted in `not_ready`. A
  * company whose plan has ended is never texted for (cn-v1137, decision 3: readActiveOrgs drops it)
  * and is counted in `lapsed_skipped`.
  *
@@ -69,7 +70,7 @@ export async function GET(request: Request) {
         continue;
       }
       counts.due++;
-      if (!getOrgSettings(org.settings).remind_timeclock) continue; // per-org opt-out (Settings → Scheduling)
+      if (!timeclockRemindersText(org.settings)) continue; // the company sends these by Push only (Settings → Scheduling, cn-v1190)
       // TEXTING NOT SET UP (lib/sms-readiness): the org's choice is kept, nothing is sent, and the
       // skip is counted. Settings shows this option as not active and lists what is missing, so
       // the person who ticked it reads the truth there rather than in a cron reply nobody opens.

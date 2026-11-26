@@ -13,7 +13,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("../../schedule/actions", () => ({ setJobScheduleRanges: vi.fn(), setJobTimes: vi.fn() }));
 
-import { JobScheduleControl } from "./job-schedule-control";
+import { ExtendJobPanel, JobScheduleControl } from "./job-schedule-control";
 import { readJobBlock } from "@/lib/schedule/job-block";
 import { tzDateTimeUtc } from "@/lib/tz";
 import { LangProvider } from "@/components/lang-provider";
@@ -62,7 +62,7 @@ describe("the job page's Scheduled box: the length beside the start", () => {
       }),
     );
     expect(text(html)).toContain(
-      "Its own hours: Mon, Sep 28 12:00 PM – 5:00 PM. The time below is the usual hours of its other days; tap a day's block on the schedule to change that day.",
+      "Its own hours: Mon, Sep 28 12:00 PM – 5:00 PM. The time below is the usual hours of its other days; each date range above can keep hours of its own.",
     );
     expect(text(box({ start: at("2026-09-28", "10:00"), end: at("2026-09-28", "12:00") }))).not.toContain("Its own hours");
   });
@@ -106,7 +106,10 @@ describe("where each edit goes (source)", () => {
 
   it("a day edit keeps the job's start and length, and a refused save is said in words", () => {
     expect(src).toContain("await setJobScheduleRanges(id, filled);");
-    expect(src).toContain('setError(res.error ?? t("jb_daysDidntSave"))');
+    // cn-v1190: one save for a day edit, a row's hours and Extend Job; the refusal is said under the
+    // rows unless the caller (a row's time entry, Extend Job's door) says it.
+    expect(src).toContain('const words = res.error ?? t("jb_daysDidntSave");');
+    expect(src).toContain("if (!quiet) setError(words);");
   });
 
   it("the page hands it the block on the company's clock", () => {
@@ -114,9 +117,11 @@ describe("where each edit goes (source)", () => {
     // The days as days (never split where one keeps its own hours), and the days that keep their own
     // hours in words (0370): the time control sets the usual hours of the others, and says so.
     expect(page).toMatch(
-      /<JobScheduleControl\s+id=\{j\.id\}\s+segments=\{scheduleDays\}\s+ownDays=\{ownDays\.map\(\(o\) => o\.words\)\}\s+block=\{block\}\s+workDay=\{workDay\}\s+plannedMinutes=\{j\.planned_minutes \?\? null\}\s*\/>/,
+      /<JobScheduleControl\s+id=\{j\.id\}\s+segments=\{scheduleRows\}\s+ownDays=\{ownDays\.map\(\(o\) => o\.words\)\}\s+block=\{block\}\s+workDay=\{workDay\}\s+plannedMinutes=\{j\.planned_minutes \?\? null\}\s+status=\{j\.status \?\? null\}\s+today=\{todayStrInTz\(tz\)\}\s+daysUnread=\{!!scheduleSegmentsErr\}\s*\/>/,
     );
+    // The crew's words still read the days as days; the editor's rows carry each range's hours (cn-v1190).
     expect(page).toContain("const scheduleDays = datesOnly(");
+    expect(page).toContain("const scheduleRows = rowsOfSegments(segRows)");
     // The size reaches the Start box, so the end it predicts is the end the writer keeps.
     expect(src).toContain("plannedMinutes={plannedMinutes}");
     expect(page).toMatch(/const block = readJobBlock\(\{\s*scheduledStart: j\.scheduled_start \?\? null,\s*scheduledEnd: j\.scheduled_end \?\? null,\s*plannedMinutes: j\.planned_minutes \?\? null,\s*tz,\s*workDay,/);
@@ -196,15 +201,263 @@ describe("when a save happens, and whose answer shows (source)", () => {
   const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-schedule-control.tsx"), "utf8");
 
   it("only the ready rows are sent, and a date edit saves only once its row is ready", () => {
-    expect(src).toContain("const filled = rangesToSave(next).save;");
+    expect(src).toContain("const filled = rowsToSend(next);");
     expect(src).toContain('if (rowState(next[i]) === "ready") persist(next);');
     expect(src).not.toMatch(/disabled=\{pending\}/);
   });
 
   it("only the latest save's answer shows; what was stored replaces the saved rows, a waiting row kept, and a join is said", () => {
     expect(src).toContain("const mine = ++lastSave.current;");
-    expect(src).toContain("if (mine !== lastSave.current) return;");
+    expect(src).toContain("if (mine !== lastSave.current) return { ok: true };");
     expect(src).toContain("setRanges((now) => reseedRows(stored, now));");
     expect(src).toContain('setJoined(fillText(t("jb_rangesJoined"), { range: rangeWords(j, (d) => dayWords(d, lang), t("jb_to")) }));');
+  });
+});
+
+/**
+ * EACH DATE RANGE HAS HOURS OF ITS OWN, AND EXTEND JOB (cn-v1190; the owner: "add a date range to have
+ * its own time entry too that defaults to the hours inputed for the first date range so i can change them
+ * if i want to", "lets call it Extend Job with date and time selector defaulted to today with the same
+ * hours"). J-907, Larkspur: Mon Oct 5 on the usual hours (9 to 5), Tue Oct 6 with its own 9 to 1.
+ */
+describe("each range's own time entry, and the Extend Job door", () => {
+  const OWN = { start: "09:00", end: "13:00" };
+  const SEGS = [
+    { start_date: "2026-10-05", end_date: "2026-10-05", hours: null },
+    { start_date: "2026-10-06", end_date: "2026-10-06", hours: OWN },
+  ];
+  const draw = (p: { status?: string | null; lang?: "en" | "es"; segments?: typeof SEGS } = {}) =>
+    renderToStaticMarkup(
+      createElement(
+        LangProvider,
+        { lang: p.lang ?? "en" } as never,
+        createElement(JobScheduleControl, {
+          id: "j907",
+          segments: p.segments ?? SEGS,
+          block: readJobBlock({ scheduledStart: at("2026-10-05", "09:00"), scheduledEnd: at("2026-10-06", "17:00"), plannedMinutes: 480, tz: LA, workDay: WORK_DAY }),
+          workDay: WORK_DAY,
+          plannedMinutes: 480,
+          status: p.status === undefined ? "scheduled" : p.status,
+          today: "2026-10-05",
+        }),
+      ),
+    );
+  const times = (html: string) => (html.match(/<input[^>]*type="time"[^>]*>/g) ?? []).map((b) => /value="([^"]*)"/.exec(b)?.[1]);
+
+  it("every row draws the same time control, opening on its own hours or the job's usual hours, and says which", () => {
+    const html = draw();
+    // Row 1 (usual), row 2 (its own), then the job's usual hours below.
+    expect(times(html)).toEqual(["09:00", "17:00", "09:00", "13:00", "09:00", "17:00"]);
+    expect(text(html)).toContain("The job's usual hours.");
+    expect(text(html)).toContain("This date range's own hours.");
+    expect(html).toContain('id="job-j907-range-0-start"');
+    expect(html).toContain('id="job-j907-range-1-start"');
+    for (const d of doors(html)) expect(d, d).toMatch(/\b(min-)?h-11\b/);
+  });
+
+  it("in Spanish", () => {
+    const html = draw({ lang: "es" });
+    expect(text(html)).toContain("El horario habitual del trabajo.");
+    expect(text(html)).toContain("Horario propio de este rango de fechas.");
+    expect(html).toMatch(/<button[^>]*class="[^"]*\bmin-h-11\b[^"]*"[^>]*>.*Extender el Trabajo<\/button>/);
+  });
+
+  it("Extend Job is drawn for a job in flight with a day, never on hold, finished or cancelled", () => {
+    for (const s of ["to_be_scheduled", "scheduled", "in_progress"]) expect(text(draw({ status: s }))).toContain("Extend Job");
+    for (const s of ["on_hold", "complete", "cancelled", null]) expect(text(draw({ status: s }))).not.toContain("Extend Job");
+    // No day saved (a row still waiting for its last day): nothing to extend yet.
+    expect(text(draw({ segments: [{ start_date: "2026-10-08", end_date: "", hours: null }] }))).not.toContain("Extend Job");
+    expect(draw()).toMatch(/<button[^>]*class="[^"]*\bmin-h-11\b[^"]*"[^>]*>.*Extend Job<\/button>/);
+  });
+
+  const panel = (lang: "en" | "es", p: { hours?: { start: string; end: string } | null; error?: string | null } = {}) =>
+    renderToStaticMarkup(
+      createElement(
+        LangProvider,
+        { lang } as never,
+        createElement(ExtendJobPanel, {
+          id: "j907",
+          day: "2026-10-07",
+          hours: p.hours ?? null,
+          today: "2026-10-05",
+          block: readJobBlock({ scheduledStart: at("2026-10-05", "09:00"), scheduledEnd: at("2026-10-06", "17:00"), plannedMinutes: 480, tz: LA, workDay: WORK_DAY }),
+          workDay: WORK_DAY,
+          plannedMinutes: 480,
+          error: p.error ?? null,
+          onDay: () => undefined,
+          saveHours: async () => ({ ok: true }),
+          onSave: () => undefined,
+          onCancel: () => undefined,
+        }),
+      ),
+    );
+
+  it("the door: ONE day box from today, ONE time entry on the last range's hours, Extend Job and Cancel, all 44px", () => {
+    const html = panel("en", { hours: OWN });
+    const dayBoxes = html.match(/<input[^>]*type="date"[^>]*>/g) ?? [];
+    expect(dayBoxes).toHaveLength(1);
+    expect(dayBoxes[0]).toContain('value="2026-10-07"');
+    expect(dayBoxes[0]).toContain('min="2026-10-05"');
+    expect(dayBoxes[0]).toContain('aria-label="Day to add"');
+    expect(times(html)).toEqual(["09:00", "13:00"]);
+    expect(html).toMatch(/<button[^>]*>Extend Job<\/button>/);
+    expect(html).toMatch(/<button[^>]*>Cancel<\/button>/);
+    expect(text(html)).toContain("One more day, with the hours of its last date range.");
+    for (const d of doors(html)) expect(d, d).toMatch(/\b(min-)?h-11\b/);
+    // The usual hours when the last range has none.
+    expect(times(panel("en"))).toEqual(["09:00", "17:00"]);
+  });
+
+  it("the door in Spanish, and its refusal said", () => {
+    const html = panel("es", { error: "El trabajo ya tiene mié, 7 oct: elige otro día." });
+    expect(html).toMatch(/<button[^>]*>Extender el Trabajo<\/button>/);
+    expect(html).toMatch(/<button[^>]*>Cancelar<\/button>/);
+    expect(html).toContain('aria-label="Día que se agrega"');
+    expect(text(html)).toContain("Un día más, con el horario de su último rango de fechas.");
+    expect(text(html)).toContain("El trabajo ya tiene mié, 7 oct: elige otro día.");
+  });
+});
+
+/**
+ * FIXES TO cn-v1190 (skeptic #91). J-908, Tupelo Panel: Mon Oct 5 to Wed Oct 7 on the usual 9 to 5.
+ */
+describe("a lone row draws no second time entry (S3)", () => {
+  const draw = (segments: { start_date: string; end_date: string; hours: { start: string; end: string } | null }[], lang: "en" | "es" = "en") =>
+    renderToStaticMarkup(
+      createElement(
+        LangProvider,
+        { lang } as never,
+        createElement(JobScheduleControl, {
+          id: "j908",
+          segments,
+          block: readJobBlock({ scheduledStart: at("2026-10-05", "09:00"), scheduledEnd: at("2026-10-07", "17:00"), plannedMinutes: 480, tz: LA, workDay: WORK_DAY }),
+          workDay: WORK_DAY,
+          plannedMinutes: 480,
+          status: "scheduled",
+          today: "2026-10-05",
+        }),
+      ),
+    );
+  const times = (html: string) => (html.match(/<input[^>]*type="time"[^>]*>/g) ?? []).map((b) => /value="([^"]*)"/.exec(b)?.[1]);
+
+  it("one row with no hours of its own: its date boxes, and the usual-hours block below is its time entry", () => {
+    const html = draw([{ start_date: "2026-10-05", end_date: "2026-10-07", hours: null }]);
+    expect(times(html)).toEqual(["09:00", "17:00"]);
+    expect(html).not.toContain('id="job-j908-range-0-start"');
+    expect(text(html)).not.toContain("The job's usual hours.");
+    expect(text(html)).not.toContain("This date range's own hours.");
+  });
+
+  it("one row WITH hours of its own draws its time entry, and says so", () => {
+    const html = draw([{ start_date: "2026-10-05", end_date: "2026-10-07", hours: { start: "07:00", end: "11:00" } }]);
+    expect(times(html)).toEqual(["07:00", "11:00", "09:00", "17:00"]);
+    expect(text(html)).toContain("This date range's own hours.");
+  });
+
+  it("two rows each draw a time entry, the usual one too", () => {
+    const html = draw([
+      { start_date: "2026-10-05", end_date: "2026-10-06", hours: null },
+      { start_date: "2026-10-08", end_date: "2026-10-08", hours: null },
+    ]);
+    expect(times(html)).toEqual(["09:00", "17:00", "09:00", "17:00", "09:00", "17:00"]);
+    expect(html).toContain('id="job-j908-range-1-start"');
+    expect(text(draw([{ start_date: "2026-10-05", end_date: "2026-10-06", hours: null }, { start_date: "2026-10-08", end_date: "2026-10-08", hours: null }], "es"))).toContain(
+      "El horario habitual del trabajo.",
+    );
+  });
+});
+
+describe("a failed read of the job's days saves nothing (A-5)", () => {
+  const draw = (lang: "en" | "es") =>
+    renderToStaticMarkup(
+      createElement(
+        LangProvider,
+        { lang } as never,
+        createElement(JobScheduleControl, {
+          id: "j909",
+          segments: [],
+          daysUnread: true,
+          block: readJobBlock({ scheduledStart: at("2026-10-05", "09:00"), scheduledEnd: at("2026-10-07", "17:00"), plannedMinutes: 480, tz: LA, workDay: WORK_DAY }),
+          workDay: WORK_DAY,
+          plannedMinutes: 480,
+          status: "scheduled",
+          today: "2026-10-05",
+        }),
+      ),
+    );
+
+  it("one sentence in place of the rows, Add Date Range and Extend Job; the usual hours stay", () => {
+    const html = draw("en");
+    expect(text(html)).toContain("This job's days couldn't be read just now. Reload the page.");
+    expect(html).not.toMatch(/type="date"/);
+    expect(text(html)).not.toContain("Add Date Range");
+    expect(text(html)).not.toContain("Extend Job");
+    expect(html).toContain('id="job-j909-start"');
+  });
+
+  it("in Spanish", () => {
+    const html = draw("es");
+    expect(text(html)).toContain("No se pudieron leer los días de este trabajo. Vuelve a cargar la página.");
+    expect(html).not.toMatch(/type="date"/);
+    expect(text(html)).not.toContain("Extender el Trabajo");
+  });
+
+  it("the page keeps the read's error and hands the control the flag", () => {
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/page.tsx"), "utf8");
+    expect(page).toContain("{ data: scheduleSegments, error: scheduleSegmentsErr },");
+    expect(page).toContain("daysUnread={!!scheduleSegmentsErr}");
+  });
+});
+
+describe("a row's time entry is never disabled while a save runs (A-4)", () => {
+  const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-schedule-control.tsx"), "utf8");
+  const btc = readFileSync(join(process.cwd(), "src/components/block-time-controls.tsx"), "utf8");
+
+  it("the rows' time entries are live; the job's usual-hours block waits as before", () => {
+    // Every box and chip of the shared control honours `live`.
+    expect(btc.match(/disabled=\{[^}]*\}/g)).toEqual(Array(4).fill("disabled={pending && !live}"));
+    expect(btc).toContain("live = false,");
+    const row = src.slice(src.indexOf("save={(patch) => saveRowHours(i, patch)}") - 900, src.indexOf("save={(patch) => saveRowHours(i, patch)}") + 400);
+    expect(row).toMatch(/<BlockTimeControls[\s\S]*\blive\b[\s\S]*\/>/);
+    const usual = src.slice(src.indexOf("save={saveTimes}") - 600, src.indexOf("save={saveTimes}") + 200);
+    expect(usual).not.toMatch(/\blive\b/);
+  });
+});
+
+describe("hours ride only on a row the person touched (S1, source)", () => {
+  const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-schedule-control.tsx"), "utf8");
+
+  it("the save sends rowsToSend; a row's hours, Extend Job and a new row are touched; the flag clears only on the winning re-seed", () => {
+    expect(src).toContain("const filled = rowsToSend(next);");
+    expect(src).toContain("{ ...r, hours, touched: true }");
+    expect(src).toContain("const add: RangeRow = { start: extend.day, end: extend.day, hours: extend.hours, touched: true };");
+    expect(src).toContain('setRanges((r) => [...r, { start: "", end: "", hours: null, touched: true }]);');
+    // A superseded save returns BEFORE the re-seed: its rows stay touched for the later save.
+    const latest = src.indexOf("if (mine !== lastSave.current) return { ok: true };");
+    const reseed = src.indexOf("setRanges((now) => reseedRows(stored, now));");
+    expect(latest).toBeGreaterThan(0);
+    expect(reseed).toBeGreaterThan(latest);
+  });
+});
+
+describe("a range's hours and Extend Job go through the one save (source)", () => {
+  const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-schedule-control.tsx"), "utf8");
+
+  it("a row's time entry sets that row's hours and saves it only once it is ready; refused, the hours go back", () => {
+    expect(src).toContain("save={(patch) => saveRowHours(i, patch)}");
+    expect(src).toContain("const hours = rowHoursAfter({ row, usual, plannedMinutes, patch, wd });");
+    expect(src).toContain('if (rowState(next[i]) !== "ready") return { ok: true };');
+    expect(src).toContain("const res = await save(next, true);");
+    expect(src).toContain("draft={state !== \"ready\"}");
+  });
+
+  it("Extend Job: refused in one sentence for a day the job has, then the same save, and the door closes", () => {
+    expect(src).toContain("const why = extendRefusal(ranges, extend.day, todayYmd);");
+    expect(src).toContain('fillText(t("jb_extendHasDay"), { day: dayWords(extend.day, lang) })');
+    expect(src).toContain("setExtend(extendDefaults(ranges, todayYmd));");
+    expect(src).toMatch(/const res = await save\(next, true\);\s+extendBusy\.current = false;[\s\S]*?setExtend\(null\);/);
+    expect(src).toContain('const EXTENDABLE = ["to_be_scheduled", "scheduled", "in_progress"];');
+    // Never a Modal: the door is drawn in place.
+    expect(src).not.toMatch(/<Modal\b/);
   });
 });

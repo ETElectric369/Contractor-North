@@ -31,6 +31,8 @@ import { ClockStartPicker } from "./clock-start-picker";
 import { MAX_SHIFT_HOURS, isLongOpenShift, startedEarlierDay, stopProblem } from "@/lib/long-shift";
 import { NewJobInline, type CreatedJob } from "./new-job-inline";
 import { DailyReportDebrief } from "./daily-report-debrief";
+import { WhatTodaySheet } from "./what-today-sheet";
+import { asksWhatToday, closeSaidNothing } from "@/lib/what-today";
 import { WhichJobSheet } from "../planner/which-job";
 import { askAfterPunch, type WhichJobAsk } from "./which-job-choices";
 import { noticeOnScreen, tellAppChose, type AppChoseNotice } from "./clock-told";
@@ -162,6 +164,13 @@ export function TimeclockPanel({
   // under it. A crew lead's debrief waits for this sheet to close, so two sheets never stack.
   const [ask, setAsk] = useState<WhichJobAsk | null>(null);
   const [debriefAfterAsk, setDebriefAfterAsk] = useState(false);
+  // "What did you do today?" (cn-v1190, lib/what-today): the other branch of the same rule. A tech the
+  // lead's report does not ask gets this one question after his own clock-out kept the shift; up
+  // here for the same reason as the debrief, and after the job question when there is one.
+  const asksWhat = asksWhatToday({ staff: isStaff, asksReport: crewLead });
+  const [whatOpen, setWhatOpen] = useState(false);
+  const [whatEntry, setWhatEntry] = useState<string | null>(null);
+  const [whatAfterAsk, setWhatAfterAsk] = useState(false);
   // The clock put the punch on a job nobody picked: say which one, right here in the clocked-in view
   // where the gps note already lands, with the Change door (clock-told: tellAppChose). Up here with
   // `ask` because the panel swaps branches under it after a punch.
@@ -436,6 +445,14 @@ export function TimeclockPanel({
           if (crewLead) {
             if (again) setDebriefAfterAsk(true);
             else setDebriefOpen(true);
+          } else if (asksWhat && closeSaidNothing(notes)) {
+            // Never the same question twice: words typed in Details' "What did you do today?" box went
+            // out as this close's note, so he has answered (lib/what-today closeSaidNothing).
+            // The row clockOut closed is the one it was sent (entry_id); it hands the id back only
+            // with the job question, so the sent id is the shift's.
+            setWhatEntry(res.id ?? openEntry.id);
+            if (again) setWhatAfterAsk(true);
+            else setWhatOpen(true);
           }
         }
       } catch {
@@ -464,10 +481,18 @@ export function TimeclockPanel({
               setDebriefAfterAsk(false);
               setDebriefOpen(true);
             }
+            if (whatAfterAsk) {
+              setWhatAfterAsk(false);
+              setWhatOpen(true);
+            }
           }}
         />
       )}
-      {crewLead ? <DailyReportDebrief open={debriefOpen} onClose={() => setDebriefOpen(false)} /> : null}
+      {crewLead ? (
+        <DailyReportDebrief open={debriefOpen} onClose={() => setDebriefOpen(false)} />
+      ) : asksWhat ? (
+        <WhatTodaySheet open={whatOpen} entryId={whatEntry} onClose={() => setWhatOpen(false)} />
+      ) : null}
     </>
   );
 

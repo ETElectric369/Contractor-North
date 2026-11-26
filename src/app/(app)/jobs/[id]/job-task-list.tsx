@@ -160,7 +160,7 @@ export function JobTaskList({
       write: setMaterialItemPurchased,
       show: (on) => setBought((s) => withId(s, line.id, on)),
       say: toast,
-      refresh: () => router.refresh(),
+      refresh: () => router.refresh(), // kept: setMaterialItemPurchased revalidates /materials/[id] only, not this job's page
       words: {
         ticked: fillText(t("mt_tickItem"), { tick: t("mt_bought"), item: name }),
         undo: t("jb_undo"),
@@ -204,12 +204,13 @@ export function JobTaskList({
             void undoCheckOff(toggleTask, task, closed, jobId).then((back) => {
               if (!back.ok) setOverride((m) => new Map(m).set(task.id, true));
               if (back.say) toast(back.say.text, back.say.tone);
-              router.refresh();
+              router.refresh(); // kept: an Undo that fails part-way answers without a revalidation
             });
           },
         });
       }
-      router.refresh();
+      // No second refresh here (cn-v1190): toggleTask revalidates this job's page on its one success path,
+      // and an action that revalidated hands the page back already drawn.
     });
   }
 
@@ -225,7 +226,7 @@ export function JobTaskList({
       }
       // NOTHING SILENT: the flag sends the task somewhere he is not looking, so the toast says where.
       toast(next ? t("jb_flaggedToast") : t("jb_unflaggedToast"), "success");
-      router.refresh();
+      // No second refresh here (cn-v1190): setJobTaskFlag revalidates this job's page on its one success path.
     });
   }
 
@@ -447,7 +448,7 @@ function AddTaskLine({ jobId, orgId, photoDoor, bordered }: { jobId: string; org
       if (res.duplicate) toast(res.speak ?? t("jb_alreadyOnList"), "info");
       else toast(t("jb_addedToTasks"), "success");
       setTitle("");
-      router.refresh();
+      router.refresh(); // kept: createTask answers a duplicate ok without a revalidation
     });
   }
 
@@ -527,7 +528,7 @@ function DonePhotoButton({ orgId, jobId, taskId }: { orgId: string; jobId: strin
       const res = await setTaskDonePhoto(taskId, path, { jobId });
       if (!res.ok) toast(res.error ?? t("jb_photoNotOnTask"), "error");
       else toast(t("jb_photoAdded"), "success");
-      router.refresh();
+      router.refresh(); // kept: it runs after a refusal too, which revalidates nothing, and the file is already up
     } catch (err: any) {
       toast(err?.message ?? t("jb_photoDidntUpload"), "error");
     } finally {
@@ -562,7 +563,6 @@ function TaskEditSheet({
   canDelete: boolean;
   onClose: () => void;
 }) {
-  const router = useRouter();
   const toast = useToast();
   const t = translator(useLang());
   const [title, setTitle] = useState(task.title);
@@ -586,7 +586,7 @@ function TaskEditSheet({
         return;
       }
       onClose();
-      router.refresh();
+      // No second refresh here (cn-v1190): updateTask revalidates this job's page on its one success path.
     });
   }
 
@@ -600,7 +600,7 @@ function TaskEditSheet({
       }
       toast(t("jb_taskDeleted"), "success");
       onClose();
-      router.refresh();
+      // No second refresh here (cn-v1190): deleteTask revalidates this job's page on its one success path.
     });
   }
 

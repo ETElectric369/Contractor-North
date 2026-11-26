@@ -199,7 +199,7 @@ describe("a length is saved before the placement reads it", () => {
 describe("the range writer takes a length too", () => {
   it("Full Day through setJobScheduleRanges: the company's day, sized as a day", async () => {
     state.db.jobs.push({ id: "r1", status: "to_be_scheduled", scheduled_start: null, scheduled_end: null, planned_minutes: null });
-    expect(await actions.setJobScheduleRanges("r1", [{ start: "2026-09-28", end: "2026-09-28" }], undefined, "full")).toEqual({ ok: true, ranges: [{ start: "2026-09-28", end: "2026-09-28" }] });
+    expect(await actions.setJobScheduleRanges("r1", [{ start: "2026-09-28", end: "2026-09-28" }], undefined, "full")).toEqual({ ok: true, ranges: [{ start: "2026-09-28", end: "2026-09-28", hours: null }] });
     expect(job("r1")).toMatchObject({ scheduled_start: at("2026-09-28", "09:00"), scheduled_end: at("2026-09-28", "17:00"), planned_minutes: 480 });
   });
 

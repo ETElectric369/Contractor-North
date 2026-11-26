@@ -247,7 +247,8 @@ export const words: WordCatalog = {
     sh_push_invoice_paid: "Invoices paid",
     sh_push_day_ahead: "My day ahead (morning summary)",
     sh_push_clock_out: "Clock-out reminders",
-    sh_pushHelp_clock_out: "When you leave the job site still clocked in (crew only), and when your own clock has run {hours} hours.",
+    sh_pushHelp_clock_out:
+      "At 6 PM if you're still clocked in from a shift that began that day and the {hours}-hour question hasn't come yet (when your company sends reminders by push), when you leave the job site still clocked in (crew only), and when your own clock has run {hours} hours.",
     sh_push_long_shift: "A crew clock running {hours} hours",
     sh_pushHelp_long_shift: "Buzzes when somebody on your crew has been clocked in that long, so you can clock them out.",
     sh_push_daily_report: "Daily reports from crew leads",
@@ -615,7 +616,7 @@ export const words: WordCatalog = {
     sh_push_day_ahead: "Mi día por delante (resumen de la mañana)",
     sh_push_clock_out: "Recordatorios para marcar salida",
     sh_pushHelp_clock_out:
-      "Cuando sales del sitio de trabajo todavía con entrada marcada (solo cuadrilla), y cuando tu propio reloj lleva {hours} horas.",
+      "A las 6 p. m. si todavía tienes entrada marcada de un turno que empezó ese día y aún no te llegó la pregunta de las {hours} horas (cuando tu empresa manda los recordatorios por aviso push), cuando sales del sitio de trabajo todavía con entrada marcada (solo cuadrilla), y cuando tu propio reloj lleva {hours} horas.",
     sh_push_long_shift: "Un reloj de la cuadrilla con {hours} horas",
     sh_pushHelp_long_shift: "Avisa cuando alguien de tu cuadrilla lleva tanto tiempo con entrada marcada, para que puedas marcarle la salida.",
     sh_push_daily_report: "Reportes del día de los jefes de cuadrilla",

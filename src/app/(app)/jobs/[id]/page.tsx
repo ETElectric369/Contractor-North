@@ -3,7 +3,7 @@ import { storyForJob } from "@/lib/story";
 import { changedSinceSent, invoiceStatusLabel } from "@/lib/invoice-revision";
 import { SettleUpButton } from "@/components/settle-up-button";
 import { PaidAheadCard, RequestPaymentButton } from "@/components/request-payment";
-import { readPaymentRequestSeed } from "../../billing/request-actions";
+import { readPaymentRequestSeedAs } from "@/lib/payment-request-seed";
 import { payDoorFacts } from "@/lib/payment-request";
 import { OpenInspectorButton } from "./open-inspector-button";
 import Link from "next/link";
@@ -79,10 +79,12 @@ import { AddTimeEntry } from "../../timecards/add-time-entry";
 import { NoJobPunches, type NearPunches } from "./no-job-punches";
 import { jobCrewIds, nearJobWindow, readNoJobPunchesNearJob } from "@/lib/no-job-hours";
 import { EditEntryButton } from "../../timecards/edit-entry-button";
+import { withoutHeldCrumb } from "@/lib/held-crumb";
 import { JobStatusControl } from "./job-status-control";
 import { ProposeDatesButton } from "./propose-dates-button";
 import { JobContacts } from "./job-contacts";
 import { JobScheduleControl } from "./job-schedule-control";
+import { rowsOfSegments } from "@/lib/schedule/range-rows";
 import { JobActionDock } from "./job-action-dock";
 import { PaymentScheduleCard } from "./payment-schedule-card";
 import { ContractCard } from "./contract-card";
@@ -286,7 +288,7 @@ export default async function JobDetailPage({
   const liveBillIds = ((bills ?? []) as any[]).map((b: any) => String(b.id));
   const [
     { data: pendingProposal },
-    { data: scheduleSegments },
+    { data: scheduleSegments, error: scheduleSegmentsErr },
     { data: jobLists },
     { data: jobAppts, error: jobApptsErr },
     { data: jobContactsRaw },
@@ -395,6 +397,43 @@ export default async function JobDetailPage({
     ((quotes ?? []) as { status?: string | null }[]).some((q) => isLiveQuote(q.status)),
   );
   const pilesOn = billsActuals || (viewerIsStaff && importsActuals);
+  // ── THREE READS STARTED HERE AND AWAITED WHERE THEY ARE USED (cn-v1190, P1) ──────────────────
+  // Everything Billable's money read and the payment-request seed used to start only after every wave
+  // below had finished, one after the other. They need nothing those waves read, so they start here.
+  // THE RUNNING TOTAL for the Overview's UnbilledCard — the hours and bills no non-void
+  // invoice has claimed, the arithmetic Nort's job-numbers tool speaks. Rides the wave below
+  // (it needs only the job id) and only on a job that BILLS its actuals (billsActuals, above), or,
+  // for the office's Costs tab piles, one whose next New Invoice pulls them (pilesOn): anywhere
+  // else the figure isn't what the door would draft, so the page doesn't read it. A failure here
+  // must not take the job page down with it (the 60mph rule): logged, and the card says it
+  // couldn't total and names the tabs. The payment-request seed reads this same result.
+  const unbilledP = pilesOn
+      ? unbilledWorkForJob(supabase, id).catch((e) => {
+          reportError("jobs.[id].unbilledWork", e, { jobId: id });
+          return null;
+        })
+      : Promise.resolve(null);
+  // Everything Billable's two conditions (their reasons are written where the read is used, below).
+  // A payment schedule is exactly a job with milestones: the page's scheduleView is scheduleStatus(...),
+  // always an object, when there are any, and null when there are none.
+  const billableWanted = viewerIsStaff && !importsActuals && !(paymentMilestones ?? []).length && (j as any).billing_type !== "tm";
+  const partWanted = viewerIsStaff && (!!quotesErr || (quotes ?? []).length > 0);
+  // Promise.resolve sends the query now (a query builder is sent only when something waits on it).
+  const billsReadP = billableWanted || partWanted
+    ? Promise.resolve(
+        supabase
+          .from("invoices")
+          .select("id, subtotal, tax, invoice_items(line_kind, line_total, import_source)")
+          .eq("job_id", id)
+          .or(`line_kind.eq.discount,import_source.eq.${PREPAID_CREDIT}`, { referencedTable: "invoice_items" }),
+      )
+    : Promise.resolve({ data: [] as { id: string; subtotal: number | null; tax: number | null; invoice_items: { line_kind: string | null; line_total: number | null; import_source: string | null }[] | null }[], error: null });
+  // PAID AHEAD's seed, read with what this page already holds: the signed-in client, the company the job
+  // was read in, the viewer's language and the running total above (lib/payment-request-seed). The
+  // office door readPaymentRequestSeed reads the same function after its own caller check.
+  const requestSeedP = viewerIsStaff
+    ? readPaymentRequestSeedAs(supabase, { orgId: (j.org_id as string | null) ?? null, lang: asLang(lang) }, j.id, unbilledP).catch(() => null)
+    : Promise.resolve(null);
   const [
     { data: canonicalItems },
     { data: permits, error: permitsErr },
@@ -482,19 +521,8 @@ export default async function JobDetailPage({
     invoiceIds.length
       ? supabase.from("customer_credits").select("amount").eq("disposition", "refund").in("invoice_id", invoiceIds)
       : Promise.resolve({ data: [] as any[] }),
-    // THE RUNNING TOTAL for the Overview's UnbilledCard — the hours and bills no non-void
-    // invoice has claimed, the arithmetic Nort's job-numbers tool speaks. Rides this wave
-    // (it needs only the job id) and only on a job that BILLS its actuals (billsActuals, above), or,
-    // for the office's Costs tab piles, one whose next New Invoice pulls them (pilesOn): anywhere
-    // else the figure isn't what the door would draft, so the page doesn't read it. A failure here
-    // must not take the job page down with it (the 60mph rule): logged, and the card says it
-    // couldn't total and names the tabs.
-    pilesOn
-      ? unbilledWorkForJob(supabase, id).catch((e) => {
-          reportError("jobs.[id].unbilledWork", e, { jobId: id });
-          return null;
-        })
-      : Promise.resolve(null),
+    // THE RUNNING TOTAL (unbilledP, started just above this wave so the payment-request seed can share it).
+    unbilledP,
     // THE JOB'S PETTY CASH IS COST HERE TOO (0286 build). /analytics and Nort have counted it since
     // audit v800 (computeJobProfitRows), and this hub did not, so one job carried two profits. Staff
     // only by RLS (0056), which is fine: the Costs tab is staff-only. `replenish` is the tin being
@@ -848,6 +876,8 @@ export default async function JobDetailPage({
      below sets the job's usual hours, every OTHER day. */
   const segRows = (scheduleSegments ?? []) as unknown as SegmentRow[];
   const scheduleDays = datesOnly(segRows.map((s) => ({ start: s.start_date, end: s.end_date }))).map((s) => ({ start_date: s.start, end_date: s.end }));
+  // The range editor's rows WITH each range's hours (cn-v1190): neighbours with different hours are two rows.
+  const scheduleRows = rowsOfSegments(segRows).map((r) => ({ start_date: r.start, end_date: r.end, hours: r.hours ?? null }));
   const ownDays = [...(ownHoursByJobDay(segRows.map((s) => ({ ...s, job_id: id }))).get(id) ?? new Map<string, DayHours>()).entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([day, h]) => ({ day, hours: h, words: `${dayWords(day)} ${hmWords(h.start)} – ${hmWords(h.end)}` }));
@@ -1026,17 +1056,10 @@ export default async function JobDetailPage({
   // estimate reads as more work than it billed (lib/everything-billable, cn-v1181). A failed read is
   // said on the tile (billableUnread), never a figure that silently left the discounts or the tax out.
   // Only where the tile is drawn: the office, a job billed by its contract (not its work), no schedule.
-  const billableWanted = viewerIsStaff && !importsActuals && !scheduleView && (j as any).billing_type !== "tm";
   // THE NEW INVOICE SHEET'S PART BASE is the same rule's figure on EVERY job with an estimate (the Part
   // door bills that figure whatever the tile shows), so the money read is made for those jobs too.
-  const partWanted = viewerIsStaff && (!!quotesErr || (quotes ?? []).length > 0);
-  const billsRead = billableWanted || partWanted
-    ? await supabase
-        .from("invoices")
-        .select("id, subtotal, tax, invoice_items(line_kind, line_total, import_source)")
-        .eq("job_id", id)
-        .or(`line_kind.eq.discount,import_source.eq.${PREPAID_CREDIT}`, { referencedTable: "invoice_items" })
-    : { data: [] as { id: string; subtotal: number | null; tax: number | null; invoice_items: { line_kind: string | null; line_total: number | null; import_source: string | null }[] | null }[], error: null };
+  // (billableWanted, partWanted and the read itself start above the third wave: billsReadP, cn-v1190.)
+  const billsRead = await billsReadP;
   const billMoney = new Map<string, { subtotal: number | null; tax: number | null; discount: number; prepaidCredit: number }>();
   for (const r of (billsRead.data ?? []) as { id: string; subtotal: number | null; tax: number | null; invoice_items: { line_kind: string | null; line_total: number | null; import_source: string | null }[] | null }[]) {
     const discount = (r.invoice_items ?? []).filter((l) => l.line_kind === "discount").reduce((s, l) => s + (Number(l.line_total) || 0), 0);
@@ -1069,7 +1092,7 @@ export default async function JobDetailPage({
   const payDoor = payDoorFacts(org as Parameters<typeof payDoorFacts>[0]);
   // PAID AHEAD (cn-v1177): the job's payment requests, read through the form's own seed (one read, one
   // shape), for the office only. A failed read is said on the tab, never an empty card.
-  const requestSeed = viewerIsStaff ? await readPaymentRequestSeed(j.id).catch(() => null) : null;
+  const requestSeed = await requestSeedP;
   // The header's Get Paid no longer takes a paid-ahead figure from here (cn-v1179): the one this page had
   // was the requests' leftToNet, money only ASKED, and the sheet said it over bills that took nothing off.
   // The sheet reads the true figure for the bill the payment lands on when it opens (readGetPaidFacts).
@@ -1492,11 +1515,14 @@ export default async function JobDetailPage({
                       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
                         <JobScheduleControl
                           id={j.id}
-                          segments={scheduleDays}
+                          segments={scheduleRows}
                           ownDays={ownDays.map((o) => o.words)}
                           block={block}
                           workDay={workDay}
                           plannedMinutes={j.planned_minutes ?? null}
+                          status={j.status ?? null}
+                          today={todayStrInTz(tz)}
+                          daysUnread={!!scheduleSegmentsErr}
                         />
                         {/* OFFER DATES, beside the dates it fills (W1-17: out of Manage, not cut). Only
                             while the job can still be scheduled. */}
@@ -1832,6 +1858,9 @@ export default async function JobDetailPage({
                     ) : e.split_from || splitParents.has(e.id) ? (
                       <Badge tone="blue" className="ml-2">{t("jb_partOfSplitShift")}</Badge>
                     ) : null}
+                    {/* The shift's note under it (cn-v1190): what the person said he did, the tech's one
+                        clock-out question included, as Timecards prints it (timecard-stack). Words only. */}
+                    {withoutHeldCrumb(e.notes) && <p className="mt-0.5 whitespace-pre-wrap text-xs text-slate-500">{withoutHeldCrumb(e.notes)}</p>}
                   </div>
                   <div className="flex items-center gap-1.5">
                     <span className="font-medium text-slate-800">

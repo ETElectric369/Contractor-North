@@ -20,6 +20,8 @@ export const words: WordCatalog = {
     "src/app/(app)/timeclock/next-up.tsx",
     "src/app/(app)/timeclock/app-chose-notice.tsx",
     "src/app/(app)/timeclock/daily-report-debrief.tsx",
+    // cn-v1190: the one question after a tech's own clock-out.
+    "src/app/(app)/timeclock/what-today-sheet.tsx",
     // MY PAY PERIODS (cn-v1166): the list, one period, and the pieces both draw.
     "src/app/(app)/timeclock/pay/page.tsx",
     "src/app/(app)/timeclock/pay/[period]/page.tsx",
@@ -143,6 +145,14 @@ export const words: WordCatalog = {
     tc_done: "Done",
     tc_fileReport: "File Report",
     tc_skip: "Skip",
+    // "WHAT DID YOU DO TODAY?" AFTER A TECH'S OWN CLOCK-OUT (cn-v1190, what-today-sheet): the sheet's
+    // heading says the clock already stopped; the question is tc_whatToday, Save is sh_save, Try
+    // Again is sh_tryAgain, Skip is tc_skip. The three refusals each name one action.
+    tc_wtTitle: "Clocked Out",
+    tc_wtSaved: "Added to today's shift.",
+    tc_wtNotSaved: "Your answer didn't save. It's still in the box: tap Try Again.",
+    tc_wtNoShift: "That shift isn't on your timecard, so nothing was saved. Ask the office to add your answer.",
+    tc_wtPaid: "That shift is already paid, so nothing was saved. Ask the office to add your answer.",
     tc_confirmedByNort: "Confirmed by Nort — filed for the office.",
     tc_officeReadsMyDay: "The office reads it on their My Day.",
     tc_whatYouDidToday: "What you did today",
@@ -383,6 +393,11 @@ export const words: WordCatalog = {
     tc_done: "Hecho",
     tc_fileReport: "Enviar Reporte",
     tc_skip: "Omitir",
+    tc_wtTitle: "Salida Marcada",
+    tc_wtSaved: "Se agregó a tu turno de hoy.",
+    tc_wtNotSaved: "Tu respuesta no se guardó. Sigue en el cuadro: toca Intentar de Nuevo.",
+    tc_wtNoShift: "Ese turno no está en tu tarjeta de horas, así que no se guardó nada. Pide a la oficina que agregue tu respuesta.",
+    tc_wtPaid: "Ese turno ya está pagado, así que no se guardó nada. Pide a la oficina que agregue tu respuesta.",
     tc_confirmedByNort: "Confirmado por Nort: enviado a la oficina.",
     tc_officeReadsMyDay: "La oficina lo lee en su Mi Día.",
     tc_whatYouDidToday: "Lo que hiciste hoy",

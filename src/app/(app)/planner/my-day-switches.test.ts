@@ -412,7 +412,8 @@ describe("My Day's cards (structural: the page is a server component over the da
     expect(page).toContain("asksReport={asksReport}");
     const card = readFileSync(join(process.cwd(), "src/app/(app)/planner/now-card.tsx"), "utf8");
     expect(card).toContain('import { DailyReportDebrief } from "../timeclock/daily-report-debrief";');
-    expect(card).toContain("{asksReport ? <DailyReportDebrief open={reportOpen} onClose={() => setReportOpen(false)} /> : null}");
+    // cn-v1190: the report's sheet, or (the other branch of the same rule) the one question for a tech it does not ask.
+    expect(card).toContain("{asksReport ? (\n        <DailyReportDebrief open={reportOpen} onClose={() => setReportOpen(false)} />\n      ) : asksWhat ? (");
     // After the job question when there is one, so two sheets never stack.
     expect(card).toContain("if (again) setReportAfterAsk(true);");
     const clock = readFileSync(join(process.cwd(), "src/app/(app)/timeclock/page.tsx"), "utf8");

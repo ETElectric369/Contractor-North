@@ -78,8 +78,12 @@ describe("requestPayment", () => {
 describe("the seed carries the pay door", () => {
   it("fills payDoor from the company row through lib/payment-request payDoorFacts, never a second formula", () => {
     const src = readFileSync(join(process.cwd(), "src/app/(app)/billing/request-actions.ts"), "utf8");
-    expect(src).toContain('supabase.from("organizations").select(PAY_DOOR_ORG_COLUMNS).eq("id", orgId).maybeSingle()');
-    expect(src).toContain("...(org ? { payDoor: payDoorFacts(org as Parameters<typeof payDoorFacts>[0]) } : {}),");
+    // The seed's reading lives in lib/payment-request-seed since cn-v1190 (the door checks its caller,
+    // then reads through it; the job page reads it directly with what it already holds).
+    const seed = readFileSync(join(process.cwd(), "src/lib/payment-request-seed.ts"), "utf8");
+    expect(seed).toContain('supabase.from("organizations").select(PAY_DOOR_ORG_COLUMNS).eq("id", orgId).maybeSingle()');
+    expect(seed).toContain("...(org ? { payDoor: payDoorFacts(org as Parameters<typeof payDoorFacts>[0]) } : {}),");
+    expect(src).toContain("return readPaymentRequestSeedAs(supabase, { orgId, lang: await callerLang(supabase, userId) }, jobId);");
     expect(src).toContain("payDoor?: PayDoorFacts;");
     expect(src).not.toMatch(/from "@\/components\//); // a "use server" file imports no client file
   });

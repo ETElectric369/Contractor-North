@@ -253,7 +253,7 @@ export function ReceiptLines({
       }
       toast(returned ? "Marked returned: off the customer's bill" : "Marked kept", "success");
       if (res.note) toast(res.note, "info");
-      router.refresh();
+      router.refresh(); // kept: these lines also open in the Already Billed sheet on My Day and on an invoice, which this action does not revalidate
       onChanged?.();
     });
   }
@@ -272,7 +272,7 @@ export function ReceiptLines({
         `${line.shelf!.pieces} ${line.shelf!.unit} is taken out of stock, and its ${formatCurrency(line.shelf!.cost)} is back on the job. What the customer is billed didn't change.`,
         "success",
       );
-      router.refresh();
+      router.refresh(); // kept: takeRollOffShelf revalidates /inventory and /bills only, never the job page or the sheet's pages
       onChanged?.();
     });
   }
@@ -302,7 +302,7 @@ export function ReceiptLines({
           onClick: () => flip(lineId, !next),
         });
       }
-      router.refresh();
+      router.refresh(); // kept: these lines also open in the Already Billed sheet on My Day and on an invoice, which this action does not revalidate
       onChanged?.();
     });
   }
@@ -340,7 +340,7 @@ export function ReceiptLines({
       if (res.note) toast(res.note, "info");
       else if (next.billedAmount == null) toast("Back to billing the whole line", "success");
       else toast(`This job is billed ${formatCurrency(next.billedAmount)} of that line`, "success");
-      router.refresh();
+      router.refresh(); // kept: these lines also open in the Already Billed sheet on My Day and on an invoice, which this action does not revalidate
       onChanged?.();
     });
   }
@@ -603,7 +603,7 @@ export function ReceiptLines({
           onDone={(message) => {
             setAskReadAgain(false);
             toast(message, "success");
-            router.refresh();
+            router.refresh(); // kept: Read Again's Undo step can answer ok without a revalidation (organize undoPaperwork)
             onChanged?.();
           }}
         />
@@ -629,7 +629,7 @@ export function ReceiptLines({
           onDone={(message) => {
             setShelving(null);
             toast(message, "success");
-            router.refresh();
+            router.refresh(); // kept: putRestOnShelf revalidates the job page only, not /bills where these lines are drawn
             onChanged?.();
           }}
         />

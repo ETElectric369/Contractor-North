@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/cron-guard";
-import { getOrgSettings } from "@/lib/org-settings";
+import { getOrgSettings, timeclockRemindersText } from "@/lib/org-settings";
 import { reportError } from "@/lib/observe";
 import { reportBlockerAwaited } from "@/lib/observe-blocker";
 import { createNotifications } from "@/lib/notifications";
@@ -29,9 +29,9 @@ export const maxDuration = 300;
  *   LONG_SHIFT_HOURS (12): the person whose clock it is is asked (push and bell, and a text when
  *     the org can text: lib/sms-readiness) while he still remembers when he stopped, and the
  *     office's phones buzz. The push is the primary; the text reaches a phone whose app is not
- *     signed in or has pushes off. The text rides the org's "Text timeclock reminders" box
- *     (Settings, Scheduling). Until texting is set up, or with that box unticked, the text is
- *     skipped and counted.
+ *     signed in or has pushes off. The text rides the company's Timeclock Reminders Go Out By
+ *     (Settings, Scheduling; lib/org-settings timeclockRemindersText): it goes under Text or Both.
+ *     Until texting is set up, or under Push, the text is skipped and counted; the push goes whatever the choice.
  *     Pushes and texts never go out between 9 PM and 6 AM org-local; the 6 AM run does them. Brian's 1:37 PM clock-in puts the office's line on the
  *     bell at 11:37 PM, reaches twelve hours at 1:37 AM inside the hold, and is asked at 6:00 AM,
  *     16.4 hours in and still under the 18-hour ceiling his own picker allows.
@@ -293,9 +293,9 @@ export async function GET(request: Request) {
           // THE SAME QUESTION BY TEXT, when the org can text and he has a number. Readiness is
           // asked once per org (texting ready = the same answer for every row).
           const phone = (f.person?.phone ?? "").trim();
-          if (phone && !getOrgSettings(org.settings).remind_timeclock) {
-            // The owner's "Text timeclock reminders" box is off (Settings, Scheduling): this text
-            // rides that box, so no text goes out without one he can see. The push above stands.
+          if (phone && !timeclockRemindersText(org.settings)) {
+            // The company's Timeclock Reminders Go Out By is Push (Settings, Scheduling): this text
+            // rides that choice, so no text goes out without one the owner can see. The push above stands.
             counts.text_off++;
           } else if (phone) {
             if (!(texting ??= smsReadiness(org)).ready) {

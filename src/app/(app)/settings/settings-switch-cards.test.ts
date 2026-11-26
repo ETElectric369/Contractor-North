@@ -112,6 +112,8 @@ describe("Scheduler & timesheets: the Payroll block", () => {
     // The rest of the card, and the Job Codes switch, stay.
     expect(html).toContain("Geofence auto clock-out");
     expect(html).toContain("Ask the crew for job codes");
+    // The timeclock reminders' one choice of three (cn-v1190) is no switch's: it is drawn either way.
+    expect(html).toContain("Timeclock Reminders Go Out By");
   });
 });
 

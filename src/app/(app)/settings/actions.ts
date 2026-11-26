@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { revokeQboToken } from "@/lib/quickbooks";
 import { bustOrgPdfs } from "@/lib/pdf-cache";
 import { normalizeDocStyle } from "@/lib/doc-style";
+import { isTimeclockRemindBy } from "@/lib/org-settings";
 import { emptyToNull } from "@/lib/forms";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
@@ -1217,6 +1218,8 @@ function checkInspectionDays(raw: unknown): { value: Record<string, unknown> } |
   };
 }
 
+const TIMECLOCK_REMIND_BY_REFUSED = "Timeclock reminders didn't save: pick Push, Text or Both, then tap Save Changes.";
+
 /** Merge a partial settings patch into organizations.settings (JSONB). STAFF get full access
  *  (protected keys stripped — they have dedicated guarded setters). An external site collaborator
  *  is routed through the update_site_content RPC, which merges ONLY the whitelisted marketing keys
@@ -1234,6 +1237,9 @@ export async function updateOrgSettings(
     if ("error" in checked) return { ok: false, error: checked.error };
     inspectionDays = checked.value;
   }
+  // TIMECLOCK REMINDERS GO OUT BY (cn-v1190): one of the three, or refused in words, never stored.
+  if (patch && "remind_timeclock_by" in patch && !isTimeclockRemindBy(patch.remind_timeclock_by))
+    return { ok: false, error: TIMECLOCK_REMIND_BY_REFUSED };
   const ctx = await resolveSiteContext(orgId);
   if ("error" in ctx) return { ok: false, error: ctx.error };
 

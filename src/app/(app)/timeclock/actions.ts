@@ -3,6 +3,7 @@ import { dbError } from "@/lib/db-error";
 import { heldSealOk, sealHeld } from "@/lib/held-seal";
 import { reportError } from "@/lib/observe";
 import { HELD_CRUMB, withoutHeldCrumb } from "@/lib/held-crumb";
+import { withWhatToday } from "@/lib/what-today";
 
 import { revalidatePath } from "next/cache";
 import { isStaffRole } from "@/lib/actions/perms";
@@ -3213,21 +3214,113 @@ export async function fileShiftAsCompanyTime(input: {
   };
 }
 
-/** Save the "what did you do today?" note (and optional translation) mid-shift. */
+/**
+ * Save the "what did you do today?" note (and optional translation) mid-shift. Its one caller is the
+ * Time Clock panel's autosave of the person's OWN open row, so it writes only that (fix-1190-B, skeptic
+ * #91 S7): the caller's own row (`profile_id`), in his company (`org_id`, read from his profile), not
+ * paid, read back. Row security alone let any office seat overwrite any crew member's note, paid rows
+ * included, and a write that changed nothing answered ok. Zero rows is said: a paid row of his own is
+ * tc_wtPaid, anything else tc_wtNoShift (the sentences addWhatTodayNote says for the same cases).
+ */
 export async function saveEntryNotes(
   entry_id: string,
   notes: string,
   translated_notes: string | null,
 ): Promise<ClockResult> {
   const supabase = await createClient();
-  const { error } = await supabase
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: en("cs_notSignedIn") };
+  const { data: me, error: meErr } = await supabase.from("profiles").select("org_id, language").eq("id", user.id).maybeSingle();
+  const t = translator(asLang((me as { language?: string | null } | null)?.language));
+  const orgId = (me as { org_id?: string | null } | null)?.org_id ?? null;
+  if (meErr || !orgId) return { ok: false, error: t("cs_couldntCheckEntry") };
+  const { data: upd, error } = await supabase
     .from("time_entries")
     .update({ notes, translated_notes })
-    .eq("id", entry_id);
+    .eq("id", entry_id)
+    .eq("profile_id", user.id)
+    .eq("org_id", orgId)
+    .is("paid_at", null)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!upd?.length) {
+    const { data: mine } = await supabase
+      .from("time_entries")
+      .select("id, paid_at")
+      .eq("id", entry_id)
+      .eq("profile_id", user.id)
+      .eq("org_id", orgId)
+      .maybeSingle();
+    return { ok: false, error: t((mine as { paid_at?: string | null } | null)?.paid_at ? "tc_wtPaid" : "tc_wtNoShift") };
+  }
   revalidatePath("/timeclock");
   revalidatePath("/planner"); // notes/job changes surface on My Day
   return { ok: true };
+}
+
+/**
+ * "WHAT DID YOU DO TODAY?", ANSWERED AFTER THE CLOCK STOPPED (cn-v1190; lib/what-today). The sheet
+ * that opens after a tech's own clock-out hands back the entry the close was about and the answer.
+ * A public endpoint, so it checks everything itself:
+ *   · the caller is signed in, and his company is read from his own profile and named on the read
+ *     and the write (three companies share one database);
+ *   · the caller's OWN entry only: `profile_id` is the caller on the read and on the write, so
+ *     another person's row is zero rows, said in one sentence;
+ *   · a paid row is refused in one sentence (the database's 0169 guard refuses it too);
+ *   · the answer is ADDED to the note (withWhatToday), never over it: the clock's crumbs stay whole,
+ *     and an answer already there is not doubled (nothing is written, and the answer is ok);
+ *   · the translated copy goes, as saveEntryNotes' only caller has it go: it was of the old note;
+ *   · the write is read back (.select("id")); zero rows is said.
+ * An empty answer writes nothing. Nothing here touches the clock: the shift closed before the sheet.
+ */
+export async function addWhatTodayNote(input: { entry_id: string; answer: string }): Promise<ClockResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: en("cs_notSignedIn") };
+  const said = String(input?.answer ?? "").trim();
+  if (!said) return { ok: true };
+  const entryId = String(input?.entry_id ?? "");
+  const { data: me, error: meErr } = await supabase.from("profiles").select("org_id, language").eq("id", user.id).maybeSingle();
+  const lang = asLang((me as { language?: string | null } | null)?.language);
+  const t = translator(lang);
+  const orgId = (me as { org_id?: string | null } | null)?.org_id ?? null;
+  if (meErr || !orgId) return { ok: false, error: t("tc_wtNotSaved") };
+
+  const { data: row, error: readErr } = await supabase
+    .from("time_entries")
+    .select("id, notes, paid_at, job_id")
+    .eq("id", entryId)
+    .eq("profile_id", user.id)
+    .eq("org_id", orgId)
+    .maybeSingle();
+  if (readErr) return { ok: false, error: t("tc_wtNotSaved") };
+  const ent = row as { id?: string; notes?: string | null; paid_at?: string | null; job_id?: string | null } | null;
+  if (!ent?.id) return { ok: false, error: t("tc_wtNoShift") };
+  if (ent.paid_at) return { ok: false, error: t("tc_wtPaid") };
+
+  const before = (ent.notes ?? "").trim();
+  const next = withWhatToday(ent.notes, said);
+  if (next === before) return { ok: true };
+
+  const { data: upd, error } = await supabase
+    .from("time_entries")
+    .update({ notes: next, translated_notes: null })
+    .eq("id", entryId)
+    .eq("profile_id", user.id)
+    .eq("org_id", orgId)
+    .is("paid_at", null)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!upd?.length) return { ok: false, error: t("tc_wtNoShift") };
+  revalidatePath("/timeclock");
+  revalidatePath("/timecards");
+  revalidatePath("/planner");
+  if (ent.job_id) revalidatePath(`/jobs/${ent.job_id}`);
+  return { ok: true, id: ent.id };
 }
 
 /**
