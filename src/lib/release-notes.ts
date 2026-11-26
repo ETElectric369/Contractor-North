@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1194", date: "2026-11-26", line: "Maintenance under the hood: the styling toolkit and two small helpers are on their latest patches, and the Stripe connection now names its API version. Nothing looks or works differently." },
   { version: "cn-v1193", date: "2026-11-26", line: "Clock-In Reminders is now one company switch under Settings, Scheduling, off until the office turns it on. When it's on, people who are scheduled and haven't clocked in are reminded." },
   { version: "cn-v1192", date: "2026-11-26", line: "Time clock reminders follow the schedule: a clock-in reminder 15 to 30 minutes after a scheduled start, and the clock-out reminder waits until your job's hours end." },
   { version: "cn-v1191", date: "2026-11-25", line: "A security update under the hood: the framework the app runs on and the tool that cleans website text are on patched versions. Nothing looks or works differently." },

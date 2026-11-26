@@ -60,6 +60,12 @@ const ALLOWED: Record<string, Allowance> = {
   // to this guard while it lived inside a regular expression literal, which is the only reason this
   // allowance is new rather than old.
   "src/lib/bank-money-in.ts": { words: /^clover$/i },
+  // A PAYMENT PROCESSOR'S OWN NAME FOR ITS API VERSION (cn-v1194). Stripe names each version with a date
+  // and a plant, and this version's plant is one of the example words above. Nobody reads the string: it
+  // is sent to Stripe as the version the client speaks, and it cannot be respelled. Allowed inside that
+  // one string only, so the word still fails anywhere else in the file; when the version moves, the new
+  // name is read by this guard like any other string.
+  "src/lib/stripe.ts": { words: /^acacia$/i, within: "2025-02-24.acacia" },
 };
 
 function allows(a: Allowance | undefined, word: string, s: string): boolean {

@@ -39,6 +39,17 @@ export function stripeConfigAlarm(): void {
   reportBlocker("stripe:config", new Error("STRIPE_SECRET_KEY is missing: the paywall is off and card payments are down"));
 }
 
+/**
+ * THE API VERSION IS NAMED HERE, ONCE (cn-v1194). Until this release the client was built with the key
+ * alone, so it spoke whatever version the installed SDK happened to be built for, and an SDK upgrade
+ * would have moved every call in the app to a newer Stripe API without one line of this app changing.
+ * The string below is the one the installed SDK (17.7) was already using, so naming it changes nothing
+ * today. It moves by hand and on purpose: read Stripe's changelog between the two versions first.
+ * NOT governed by this: webhook events, which arrive in the version set on each webhook endpoint in the
+ * Stripe dashboard, and the card reader plugin, which carries its own SDK.
+ */
+export const STRIPE_API_VERSION = "2025-02-24.acacia";
+
 let _stripe: Stripe | null = null;
 
 export function getStripe(): Stripe {
@@ -46,7 +57,7 @@ export function getStripe(): Stripe {
     throw new Error("STRIPE_SECRET_KEY is not configured.");
   }
   if (!_stripe) {
-    _stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+    _stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: STRIPE_API_VERSION });
   }
   return _stripe;
 }
