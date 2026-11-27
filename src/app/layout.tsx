@@ -3,6 +3,7 @@ import { Geist } from "next/font/google";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import { PwaRegister } from "@/components/pwa-register";
+import { ReleaseOnReturn } from "@/components/release-on-return";
 import { BackLinkTracker } from "@/components/back-link";
 import { TurnsSideways } from "@/components/turns-sideways";
 
@@ -66,6 +67,9 @@ export default function RootLayout({
         
         {children}
         <PwaRegister />
+        {/* The phone app has no service worker for PwaRegister to act on: this is its half of the
+            same promise, a release taken when the app comes back into view (cn-v1205). */}
+        <ReleaseOnReturn />
         {/* Watches client-side route changes so <BackLink> knows real in-app
             history exists (root layout = never unmounts, covers /print too). */}
         <BackLinkTracker />

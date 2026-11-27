@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1205", date: "2026-11-27", line: "The phone app now picks up a new version when you come back to it, not only after being closed and reopened. It waits if you are typing, a sheet is open, or a scan, photo or card payment is under way." },
   { version: "cn-v1204", date: "2026-11-27", line: "Screenshots on bug reports are drawn more faithfully: cards, placeholders and multi-line text. The bug button no longer waits on the picture for more than 8 seconds." },
   { version: "cn-v1203", date: "2026-11-27", line: "Change My Password now asks for your current password. Forgot it? Send yourself a reset link from the same row. Changing your own login email asks for it too." },
   { version: "cn-v1202", date: "2026-11-26", line: "New in Settings › You: Change My Password. One place to change your own password, for every role. The subscribe and page-not-found screens show the app's icon." },

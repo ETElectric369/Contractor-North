@@ -2,6 +2,7 @@
 
 import { isNativeShell } from "@/lib/native-shell";
 import { say, type Words } from "@/lib/lang-words";
+import { holdReleaseReload } from "@/lib/release-on-return";
 
 /**
  * MEASURE WITH THE CAMERA — the page's door to MeasurePlugin.swift (LiDAR rung 1, field feedback
@@ -104,11 +105,15 @@ export function photoFile(b64: unknown, mime: unknown, name: string): File | nul
  *  is said in the reader's language when the caller hands `lang` + `words`; the plugin's own sentence (a
  *  rejection) is shown as it came. */
 export async function measureNative(mode: MeasureMode, lang?: string | null, words?: Words): Promise<MeasureResult> {
+  holdReleaseReload();
+  // No release reload for fifteen minutes from this line: the screen's result lands in this page (cn-v1205).
   const p = plugin();
   if (!p?.measure) return { ok: false, refused: say(lang, words, "vi_measureNeedsIphone", "Measure needs the North app on an iPhone.") };
   let r: Awaited<ReturnType<NonNullable<Plugin["measure"]>>>;
   try {
     r = await p.measure({ mode });
+    // Fifteen minutes again from the screen's close, before the result is used (cn-v1205).
+    holdReleaseReload();
   } catch (e: unknown) {
     const msg = (e as { message?: unknown })?.message;
     return { ok: false, refused: typeof msg === "string" && msg.trim() ? msg : say(lang, words, "vi_couldntOpenMeasure", "Couldn't open Measure. Try again, or type the measurement.") };

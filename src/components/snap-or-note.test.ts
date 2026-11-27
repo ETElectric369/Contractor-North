@@ -6,6 +6,7 @@ import { deflateRawSync } from "node:zlib";
 import { renderToStaticMarkup } from "react-dom/server";
 import { buildZip } from "@/lib/zip-write";
 import { patchZipEntry, withDeclaredSize, withEncryptedEntry } from "@/test/zip-fixtures";
+import { reloadWouldLoseWork } from "@/lib/release-on-return";
 
 /**
  * SNAP OR NOTE: ONE PAPER DOOR (W1-30). One queue for the app and one set of rules for every way in.
@@ -285,9 +286,12 @@ describe("the office's files: one queue, one set of rules", () => {
     expect(lines().some((l) => l.tone === "busy")).toBe(true);
     // The + asks this before any full reload (which would drop them).
     expect(snapStillSending()).toBe(2);
+    // …and so does a release reload (cn-v1205).
+    expect(reloadWouldLoseWork()).toBe(true);
     release();
     await running;
     expect(snapStillSending()).toBe(0);
+    expect(reloadWouldLoseWork()).toBe(false);
     expect(lines().map((l) => l.tone)).toEqual(["ok", "ok"]);
     expect(m.addPaperwork).toHaveBeenCalledTimes(2);
   });

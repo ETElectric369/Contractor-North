@@ -12,6 +12,7 @@ import { ToastProvider } from "@/components/toast";
 import { useFileDragActive } from "@/components/drop-target";
 import { useDictation } from "@/lib/use-dictation";
 import { createClient } from "@/lib/supabase/client";
+import { holdReloadWhile } from "@/lib/release-on-return";
 import { prepareImageForUpload } from "@/lib/image-prep";
 import { sha256Hex } from "@/lib/content-hash";
 import { isPdfBytes, readPdf } from "@/lib/pdf-text";
@@ -157,6 +158,8 @@ export function closeSnapOrNote() {
 
 let queue: { id: number; file: File; jobId?: string | null }[] = [];
 let running: Promise<void> | null = null;
+// Both release reloads, the browser's and the phone app's, wait while a file is still sending (cn-v1205).
+holdReloadWhile(() => snapStillSending() > 0);
 let seq = 0;
 /** Every line id at or under this belongs to someone who is no longer signed in here: dropped. */
 let floor = 0;

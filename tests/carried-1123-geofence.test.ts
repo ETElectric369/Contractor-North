@@ -79,7 +79,7 @@ describe("The pending exit is cleared on read, then dropped when the sheet is bu
     expect(g).toContain("takeKeptRef.current = () => { const k = keptExitRef.current; if (k) takeExit(k); };\n    takeKeptRef.current();");
     expect(g).toContain("      cancelled = true;\n      takeKeptRef.current = () => {};");
     // a sheet that closes frees the place
-    expect(g).toContain('if (phase === "idle") takeKeptRef.current();\n  }, [phase]);');
+    expect(g).toMatch(/if \(phase === "idle"\) \{\n[^\n]*\n\s+takeKeptRef\.current\(\);\n\s+\}\n\s+\}, \[phase\]\);/);
     // another trip's exit means nothing at this site
     expect(g).toContain("keptExitRef.current = null; // an exit from the last trip's site means nothing at this one");
     // the old early return that deleted the exit is gone

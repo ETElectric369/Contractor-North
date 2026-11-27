@@ -47,6 +47,7 @@ import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
 import { measureLabelWordsIn, measuredRowLabelIn } from "@/lib/inspection/measured-label";
 import { keepModelInPlus, registerMeasureHost, type MeasureHost } from "@/lib/quick-measure";
+import { holdReloadWhile } from "@/lib/release-on-return";
 import { WonSheet } from "./won-sheet";
 import { addressWithoutWon } from "@/lib/appointments/inspection-page";
 
@@ -81,6 +82,11 @@ export function canAdoptModel(kept: KeptModel | null, busy: boolean): boolean {
  *  landed one owes only the visit's row, which only this visit can write, so it stays as it was. */
 export function modelForThePlus(kept: KeptModel | null, office: boolean): KeptModel | null {
   return office && kept && kept.landed === null ? kept : null;
+}
+/** A RELEASE RELOAD WOULD LOSE WORK ONLY THIS PAGE HOLDS (cn-v1205): a kept model, answers or a
+ *  capture patch waiting in the debounce or a failed write's retry, or a write still out. */
+export function inspectorHoldsWork(s: { kept: unknown; answersDirty: boolean; capturePatch: Record<string, unknown>; inflight: unknown }): boolean {
+  return s.kept !== null || s.answersDirty || Object.keys(s.capturePatch).length > 0 || s.inflight !== null;
 }
 
 /** A numeric field that can be EMPTY. Deliberately not NumberInput: its value is a `number` and
@@ -1008,6 +1014,20 @@ export function Inspector({
     unsentModelRef.current = k;
     setKeptModel(k);
   }
+  // Both release reloads wait while this page holds work it alone has (cn-v1205). Refs, not state:
+  // the check is asked outside any render.
+  useEffect(
+    () =>
+      holdReloadWhile(() =>
+        inspectorHoldsWork({
+          kept: unsentModelRef.current,
+          answersDirty: answersDirty.current,
+          capturePatch: capturePatchRef.current,
+          inflight: inflightRef.current,
+        }),
+      ),
+    [],
+  );
   /** Set by upload(): the files that REACHED storage whose row did not save. The two faults are
    *  different, and the retry for the row never sends the file a second time. */
   const uploadLandedRef = useRef<CapturePhoto[]>([]);

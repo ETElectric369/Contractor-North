@@ -1,6 +1,7 @@
 "use client";
 
 import { isNativeShell } from "@/lib/native-shell";
+import { holdReleaseReload } from "@/lib/release-on-return";
 
 /**
  * APNs registration, from the web app running inside the native shell (2026-09-09).
@@ -144,7 +145,12 @@ export async function onNativePushTap(go: (url: string) => void): Promise<() => 
     const url = a?.notification?.data?.url;
     // Only ever navigate INSIDE the app: the payload is data from the network, and a bare
     // href from it would let a malformed push send the crew to another origin.
-    if (typeof url === "string" && url.startsWith("/") && !url.startsWith("//")) go(url);
+    if (typeof url === "string" && url.startsWith("/") && !url.startsWith("//")) {
+      // The tap is delivered as the app comes back, beside the release check: a reload must not
+      // land on the old address while the navigation to the tapped thing is on its way (cn-v1205).
+      holdReleaseReload(Date.now(), 30_000);
+      go(url);
+    }
   };
   let sub: { remove: () => Promise<void> } | null = null;
   let live = true;

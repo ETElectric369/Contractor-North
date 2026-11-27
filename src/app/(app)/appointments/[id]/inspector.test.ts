@@ -33,7 +33,9 @@ vi.mock("@/components/address-autocomplete", () => ({
   AddressAutocomplete: () => createElement("input", { "data-address-box": "yes" }),
 }));
 
-import { Inspector } from "./inspector";
+import { Inspector, inspectorHoldsWork } from "./inspector";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { sheetsWithoutMoney, type InspectionAccess } from "@/lib/inspection/inspection-access";
 
 const SHEET = {
@@ -603,5 +605,29 @@ describe("the task sheet, the skeptic's round: the note holds, an orphaned measu
     expect(html).toMatch(/id="task-t1" class="scroll-mt-16/);
     expect(html).toMatch(/class="mt-3 scroll-mt-16" id="insp-where"/);
     expect(html).toMatch(/id="insp-photos" class="scroll-mt-16"/);
+  });
+});
+
+describe("a release reload waits while the Inspector holds work only this page has (cn-v1205)", () => {
+  const idle = { kept: null, answersDirty: false, capturePatch: {}, inflight: null };
+  it("idle holds nothing; a kept model, answers waiting, a capture patch waiting or a write out each hold", () => {
+    expect(inspectorHoldsWork(idle)).toBe(false);
+    expect(inspectorHoldsWork({ ...idle, kept: { path: "/tmp/scan.usdz" } })).toBe(true);
+    expect(inspectorHoldsWork({ ...idle, answersDirty: true })).toBe(true);
+    expect(inspectorHoldsWork({ ...idle, capturePatch: { notes: "x" } })).toBe(true);
+    expect(inspectorHoldsWork({ ...idle, inflight: Promise.resolve(true) })).toBe(true);
+  });
+
+  it("the page registers that check once, from its refs, and takes it back on unmount", () => {
+    const text = readFileSync(join(process.cwd(), "src/app/(app)/appointments/[id]/inspector.tsx"), "utf8");
+    expect(text).toContain('import { holdReloadWhile } from "@/lib/release-on-return";');
+    const at = text.indexOf("holdReloadWhile(() =>");
+    expect(at).toBeGreaterThan(0);
+    expect(text.split("holdReloadWhile(").length).toBe(2);
+    const call = text.slice(text.lastIndexOf("useEffect(", at), at + 400);
+    // An arrow that RETURNS the registration: React calls what it returns on unmount.
+    expect(call).toMatch(/useEffect\(\s*\(\) =>\s*holdReloadWhile\(/);
+    for (const ref of ["unsentModelRef.current", "answersDirty.current", "capturePatchRef.current", "inflightRef.current"]) expect(call).toContain(ref);
+    expect(call).toContain("[],");
   });
 });

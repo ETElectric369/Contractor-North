@@ -1,6 +1,7 @@
 import { measureNative, type MeasureMode } from "@/lib/native-measure";
 import { discardScan, scan3dNative } from "@/lib/native-scan";
 import type { Words } from "@/lib/lang-words";
+import { holdReloadWhile } from "@/lib/release-on-return";
 
 /**
  * MEASURE FROM THE + (cn-v1160). The owner, 2026-11-10: "i think we should add a quick measure button
@@ -25,7 +26,8 @@ import type { Words } from "@/lib/lang-words";
  * This file is the store and the rules, with no React, no catalog (a file under src/lib imports no
  * catalog: words are handed in) and no database. The store is module memory: it survives moving
  * between pages (a soft navigation) and nothing else. A reload loses a held model, which is why the
- * +'s own full reload waits while one is held (measureHeld).
+ * +'s own full reload waits while one is held (measureHeld), and so do both release reloads
+ * (holdReloadWhile, below).
  */
 
 /** What a row in the + asks for. */
@@ -174,6 +176,8 @@ export function heldModel(): HeldModel | null {
 export function measureHeld(): boolean {
   return store.held !== null;
 }
+// Both release reloads, the browser's and the phone app's, wait while a model is held (cn-v1205).
+holdReloadWhile(measureHeld);
 
 /** The sheet closed. A figure goes (he was told); a model stays held. */
 export function closeMeasureSheet(): void {

@@ -132,7 +132,7 @@ describe("source pins: the plugin, the bridge and the monitor", () => {
     const g = read("src/components/geofence-monitor.tsx");
     expect(g).toContain("const lang = useLang();\n  const t = translator(lang);\n  const jobLabel = jobLabelProp ?? t(\"gf_theJobSite\");");
     expect(g).toContain("void armFence(fenceArmOptions({ entryId, lat: anchorLat, lng: anchorLng, radiusM, label: jobLabel, notify }, t)).then(dark);");
-    expect(g).toContain('void takePendingExit(t("gf_theJobSite")).then((e) => { if (e) takeExit(e); });');
+    expect(g).toContain('void takePendingExit(t("gf_theJobSite"))\n        .then((e) => { if (e) takeExit(e); })');
     expect(g).toContain('void onFenceExit(takeExit, t("gf_theJobSite")).then((s) => { if (cancelled) s(); else stop = s; });');
     expect(g).toContain('if (res.ended || /not clocked in|already ended/i.test(res.error ?? "")) {');
     expect(g).toContain('speakSmart(t("gf_clockedOutYouLeftSpoken"));');

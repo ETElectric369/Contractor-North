@@ -15,6 +15,7 @@ const bridge = vi.hoisted(() => ({
 vi.mock("@/lib/native-measure", () => ({ measureNative: bridge.measureNative }));
 vi.mock("@/lib/native-scan", () => ({ scan3dNative: bridge.scan3dNative, discardScan: bridge.discardScan }));
 
+import { reloadWouldLoseWork } from "@/lib/release-on-return";
 import {
   clearMeasureFigure,
   closeMeasureSheet,
@@ -632,6 +633,16 @@ describe("the Inspector is leaving with a model it never sent", () => {
   it("the shots are kept when the Inspector knows them", () => {
     expect(keepModelInPlus({ model: usdz(), path: PATH, shots: 31 })).toBe(true);
     expect(heldModel()?.shots).toBe(31);
+  });
+});
+
+describe("a release reload waits while a model is held (cn-v1205)", () => {
+  it("the store registers itself once, and the reload rule reads it at the moment it asks", () => {
+    expect(reloadWouldLoseWork()).toBe(false);
+    expect(keepModelInPlus({ model: usdz(), path: PATH })).toBe(true);
+    expect(reloadWouldLoseWork()).toBe(true);
+    releaseHeldModel();
+    expect(reloadWouldLoseWork()).toBe(false);
   });
 });
 

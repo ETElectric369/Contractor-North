@@ -21,6 +21,7 @@ import { fillText, translator } from "@/lib/i18n";
 import { trace } from "@/lib/nort/trace";
 import type { GeoPoint } from "@/lib/types";
 import { FENCE_REPORT_EVENT } from "@/lib/fence-report-event";
+import { holdReloadWhile } from "@/lib/release-on-return";
 
 /**
  * May the fence read the phone's location without a tap? Off the shell, the web rule (geo.ts: a live
@@ -303,6 +304,16 @@ export function exitHandoff(s: {
  * shell's own "Still on the clock?" already rang for an exit it saw (`alreadyRang`), and the server's
  * "Clock out?" is the same alert on the same phone. Once per entry per page-life, as before.
  */
+/**
+ * A RELEASE RELOAD WOULD LOSE THE FENCE'S WORK (cn-v1205, skeptic #101's finding 2). The phone forgets
+ * an exit the moment the page reads it, so from that read until the person answers, the exit lives
+ * only in this page: a read from the phone still out, an exit kept for the next free sheet, an exit
+ * put on the sheet, or the sheet itself up (the wake prompt included). Pure: the monitor hands it its refs.
+ */
+export function fenceHoldsReload(s: { taking: number; kept: unknown; exitOnSheet: boolean; phase: GeofencePhase }): boolean {
+  return s.taking > 0 || s.kept !== null || s.exitOnSheet || s.phase !== "idle";
+}
+
 export function shouldPushExit(s: { sentFor: string | null; entryId: string; alreadyRang: boolean }): boolean {
   return s.sentFor !== s.entryId && !s.alreadyRang;
 }
@@ -427,6 +438,10 @@ export function GeofenceMonitor({
   // The exit already on the sheet ("entry|moment"): iOS hands the same one over twice while the app is
   // awake (the live event, then the next foreground read) and the second must not pull him back.
   const handledExitRef = useRef("");
+  /** Reads of the phone's pending exit still out (cn-v1205): counted up before the read starts. */
+  const takingExitRef = useRef(0);
+  /** An exit the phone handed over is on the sheet and not yet answered (cn-v1205). */
+  const exitOnSheetRef = useRef(false);
 
   const [phase, setPhase] = useState<Phase>("idle");
   const phaseRef = useRef(phase);
@@ -515,6 +530,7 @@ export function GeofenceMonitor({
     firstOutsideMsRef.current = null;
     promptShownAtRef.current = 0;
     keptExitRef.current = null; // an exit from the last trip's site means nothing at this one
+    exitOnSheetRef.current = false;
     setPhase("idle");
     setError(null);
     setClosedAt(null);
@@ -1123,6 +1139,7 @@ export function GeofenceMonitor({
         return;
       }
       handledExitRef.current = key;
+      exitOnSheetRef.current = true;
       // `notify`: the shell's "Still on the clock?" rang for this exit (or one within the half hour), so the
       // server's "Clock out?" must not ring it twice (#43).
       if (how === "open") openPrompt("wake", notify);
@@ -1134,13 +1151,21 @@ export function GeofenceMonitor({
     };
     takeKeptRef.current = () => { const k = keptExitRef.current; if (k) takeExit(k); };
     takeKeptRef.current(); // an exit the last effect read and could not place
-    void takePendingExit(t("gf_theJobSite")).then((e) => { if (e) takeExit(e); });
+    // Counted BEFORE the read starts, synchronously (cn-v1205): from the moment the phone lets go of
+    // an exit until the sheet holds it, a release reload would lose it (fenceHoldsReload).
+    const takeFromPhone = () => {
+      takingExitRef.current += 1;
+      void takePendingExit(t("gf_theJobSite"))
+        .then((e) => { if (e) takeExit(e); })
+        .finally(() => { takingExitRef.current -= 1; });
+    };
+    takeFromPhone();
     let stop: () => void = () => {};
     // A listener that arrives after this effect was torn down must not be left listening.
     void onFenceExit(takeExit, t("gf_theJobSite")).then((s) => { if (cancelled) s(); else stop = s; });
     const onVis = () => {
       if (document.visibilityState !== "visible") return;
-      void takePendingExit(t("gf_theJobSite")).then((e) => { if (e) takeExit(e); });
+      takeFromPhone();
       void fenceReadiness().then(dark); // the Always prompt may have been answered while we were away
     };
     document.addEventListener("visibilitychange", onVis);
@@ -1158,8 +1183,25 @@ export function GeofenceMonitor({
   }, [tripKey, anchorLat, anchorLng, radiusM, lang]);
   // A sheet that closes (he came back inside, or answered) frees the place a kept exit was waiting for.
   useEffect(() => {
-    if (phase === "idle") takeKeptRef.current();
+    if (phase === "idle") {
+      exitOnSheetRef.current = false; // answered, or he came back inside
+      takeKeptRef.current();
+    }
   }, [phase]);
+  // Both release reloads wait while the fence holds work only this page has (cn-v1205). Refs: the
+  // check is asked outside any render.
+  useEffect(
+    () =>
+      holdReloadWhile(() =>
+        fenceHoldsReload({
+          taking: takingExitRef.current,
+          kept: keptExitRef.current,
+          exitOnSheet: exitOnSheetRef.current,
+          phase: phaseRef.current,
+        }),
+      ),
+    [],
+  );
   // Clock-out unmounts the monitor (the layout renders it only while an entry is open): the
   // region goes with it.
   useEffect(() => () => { void disarmFence(); }, []);

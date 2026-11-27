@@ -5,6 +5,7 @@ const FIRST_CLAIM_WINDOW_MS = 10_000;
 
 import { useEffect } from "react";
 import { isPlatformApexHost } from "@/lib/platform-site";
+import { unsafeToReloadNow } from "@/lib/release-on-return";
 
 /**
  * Registers the service worker (installable + offline) and — crucially — reloads
@@ -30,26 +31,19 @@ export function PwaRegister() {
     // field has focus, HOLD the reload and retry on a short interval — it then
     // fires the moment the user is between screens instead of mid-form. The
     // typed content itself is also draft-persisted (useDraft), but not every
-    // form is wired, so the gate is the first line of defense.
-    const midTyping = () => {
-      if (document.body.classList.contains("modal-open")) return true;
-      const el = document.activeElement as HTMLElement | null;
-      if (!el) return false;
-      return (
-        el.tagName === "INPUT" ||
-        el.tagName === "TEXTAREA" ||
-        el.tagName === "SELECT" ||
-        el.isContentEditable
-      );
-    };
+    // form is wired, so the gate is the first line of defense. The rule itself is unsafeToReloadNow
+    // in lib/release-on-return, shared with the phone app's reload (cn-v1205). Since cn-v1205 it also
+    // waits while a hold is on or a screen has registered work that only this page holds (a held 3D
+    // model, photos still sending, the Inspector's unsaved answers, the site fence's card): a
+    // deliberate change to this browser path, so a tab's reload after a release cannot drop them.
     let deferredReload: ReturnType<typeof setInterval> | undefined;
     const reloadWhenSafe = () => {
-      if (!midTyping()) {
+      if (!unsafeToReloadNow()) {
         window.location.reload();
         return;
       }
       deferredReload = setInterval(() => {
-        if (midTyping()) return;
+        if (unsafeToReloadNow()) return;
         clearInterval(deferredReload);
         window.location.reload();
       }, 3000);

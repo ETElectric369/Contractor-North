@@ -108,4 +108,21 @@ describe("onNativePushTap", () => {
     push.tap("https://evil.example/x");
     expect(go).not.toHaveBeenCalled();
   });
+
+  it("a tapped notification holds a release reload for thirty seconds before it navigates (cn-v1205)", async () => {
+    const { onNativePushTap } = await import("./native-push");
+    const { clearReleaseHold, releaseReloadHeld } = await import("./release-on-return");
+    clearReleaseHold();
+    const heldAtGo: boolean[] = [];
+    await onNativePushTap(() => heldAtGo.push(releaseReloadHeld(Date.now())));
+    const before = Date.now();
+    push.tap("/jobs/abc");
+    expect(heldAtGo).toEqual([true]);
+    expect(releaseReloadHeld(before + 29_000)).toBe(true);
+    expect(releaseReloadHeld(Date.now() + 30_001)).toBe(false);
+    // A push that would leave the app holds nothing.
+    clearReleaseHold();
+    push.tap("https://evil.example/x");
+    expect(releaseReloadHeld(Date.now())).toBe(false);
+  });
 });

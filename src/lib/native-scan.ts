@@ -2,6 +2,7 @@
 
 import { isNativeShell } from "@/lib/native-shell";
 import { say, type Words } from "@/lib/lang-words";
+import { holdReleaseReload } from "@/lib/release-on-return";
 
 /**
  * LIDAR — 3D SCAN: the page's door to ScanPlugin.swift. Erik 2026-10-16, after Polycam: "collect
@@ -199,11 +200,16 @@ export function jobFilingWords(e: unknown, lang?: string | null, words?: Words):
  *  A refusal is said in the reader's language when the caller hands `lang` + `words`; the plugin's own
  *  sentence (a rejection) is shown as it came. */
 export async function scan3dNative(now = Date.now(), lang?: string | null, words?: Words): Promise<ModelScanResult> {
+  holdReleaseReload();
+  // No release reload for fifteen minutes from this line: the screen's result lands in this page (cn-v1205).
   const p = plugin();
   if (!p?.scan3d) return { ok: false, refused: say(lang, words, "vi_scanNeedsLidarIphone", "3D Scan needs the North app on an iPhone with a LiDAR sensor.") };
   let r: Record<string, unknown>;
   try {
     r = await p.scan3d();
+    // Fifteen minutes again from the screen's close: a long walk must not leave the pull of the model
+    // (up to 200 MB) to an expired hold (cn-v1205).
+    holdReleaseReload();
   } catch (e: unknown) {
     const msg = (e as { message?: unknown })?.message;
     return { ok: false, refused: typeof msg === "string" && msg.trim() ? msg : say(lang, words, "vi_couldntOpenScan", "Couldn't open 3D Scan. Try again.") };

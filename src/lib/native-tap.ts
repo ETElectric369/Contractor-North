@@ -3,6 +3,7 @@
 import { isNativeShell } from "@/lib/native-shell";
 import { ensureTerminalLocation, tapToPayContext, type TapToPayContext } from "@/app/(app)/billing/tap-actions";
 import { reportClientError } from "@/app/report-client-error";
+import { holdReleaseReload } from "@/lib/release-on-return";
 
 /**
  * TAP TO PAY ON IPHONE, from the web app running inside the native shell (2026-09-10).
@@ -1506,6 +1507,9 @@ const ENABLE_CONNECT_MS = 480_000;
  * not-supported from update-iOS from no-network, each with its fix.
  */
 export async function enableTapToPay(): Promise<TapEnableResult> {
+  holdReleaseReload();
+  // No release reload for fifteen minutes from this line: Apple's terms sheet and its sign-in can
+  // take minutes, and a reload would cut the connect (cn-v1205).
   const p = plugin();
   if (!p) return { ok: false, error: NOT_IN_BUILD };
   if (inFlight) {
@@ -1639,6 +1643,8 @@ export async function collectTapPayment(input: {
   paymentIntentId: string;
   amount: number;
 }): Promise<TapCollectResult> {
+  holdReleaseReload();
+  // No release reload for fifteen minutes from this line: the screen's result lands in this page (cn-v1205).
   const p = plugin();
   if (!p) return { ok: false, error: NOT_IN_BUILD };
   if (!input.clientSecret) return { ok: false, error: "This payment wasn't started properly — go back and try again." };
