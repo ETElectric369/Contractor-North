@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { installErrorCapture, getLogs } from "@/lib/bug-buffer";
 import { createBugReport, listBugReports, setBugReportStatus, type BugReport } from "@/app/(app)/bug-report-actions";
-import { captureScale, pickCopy } from "@/lib/bug-shot-copy";
+import { CAPTURE_DEADLINE_MS, CAPTURE_IMAGE_WAIT_MS, captureScale, pickCopy, withDeadline } from "@/lib/bug-shot-copy";
 
 /** THE PICTURE IN THE ROW (0412): the same canvas as a JPEG data URL the row itself keeps, so a
  *  plain read of the report shows the picture. At the capture's own width first; the size loop is
@@ -31,10 +31,13 @@ function copyOf(canvas: HTMLCanvasElement): string | null {
   }
 }
 
+type Shot = { blob: Blob | null; copy: string | null };
+const NO_SHOT: Shot = { blob: null, copy: null };
+
 /** Grab a screenshot of what's on screen right now (oklch-safe via html2canvas-pro), as a
  *  compact JPEG, and the same picture for the row (copyOf). Best-effort — returns nulls on any
  *  failure so a report never blocks on it. */
-async function captureScreen(): Promise<{ blob: Blob | null; copy: string | null }> {
+async function drawScreen(): Promise<Shot> {
   try {
     const html2canvas = (await import("html2canvas-pro")).default;
     const canvas = await html2canvas(document.body, {
@@ -42,6 +45,8 @@ async function captureScreen(): Promise<{ blob: Blob | null; copy: string | null
       // Readable on a phone: a 390-px screen at 0.6 came out 234 px wide (lib/bug-shot-copy).
       scale: captureScale(window.innerWidth),
       useCORS: true,
+      // One slow picture on the page costs that picture, not the whole capture (lib/bug-shot-copy).
+      imageTimeout: CAPTURE_IMAGE_WAIT_MS,
       logging: false,
       // Skip the report button itself (and anything else flagged) so it's not in the shot.
       ignoreElements: (el) => (el as HTMLElement)?.getAttribute?.("data-bug-ignore") === "1",
@@ -55,8 +60,15 @@ async function captureScreen(): Promise<{ blob: Blob | null; copy: string | null
     const blob = await new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), "image/jpeg", 0.6));
     return { blob, copy: copyOf(canvas) };
   } catch {
-    return { blob: null, copy: null };
+    return NO_SHOT;
   }
+}
+
+/** THE CAPTURE UNDER ITS ONE DEADLINE (cn-v1204): the library's download and its drawing had no
+ *  clock, so the bug button could spin with the panel never opening. Past the deadline the panel
+ *  opens with no picture; whatever lands later is dropped. */
+function captureScreen(): Promise<Shot> {
+  return withDeadline(drawScreen(), CAPTURE_DEADLINE_MS, NO_SHOT);
 }
 
 /** One-tap Report a Problem, for EVERYONE in the company (Wave 0; the insert policy always let any
@@ -220,15 +232,18 @@ export function BugReporter({
             <div className="space-y-2">
               <Textarea rows={3} autoFocus placeholder="What happened? (e.g. clock-out wouldn't save)" value={note} onChange={(e) => setNote(e.target.value)} />
               <p className="text-xs text-slate-400">
-                {collaborator ? (
+                {/* A screenshot is named only when there is one (cn-v1204): the capture is best-effort
+                    and has a deadline, and the line used to name a screenshot either way. One is
+                    attached when there is the file to upload or the copy kept on the row. */}
+                {collaborator || (!shotRef.current && !copyRef.current) ? (
                   <>
                     Auto-attached: this page (<span className="font-mono">{pathname}</span>)
                     {errCount > 0 ? `, ${errCount} console error${errCount > 1 ? "s" : ""}` : ""}, your name + browser.
                   </>
                 ) : (
                   <>
-                    Auto-attached: a <span className="font-medium text-slate-500">screenshot</span> of this screen
-                    {shotRef.current ? " ✓" : ""}, this page (<span className="font-mono">{pathname}</span>)
+                    Auto-attached: a <span className="font-medium text-slate-500">screenshot</span> of this screen ✓, this page (
+                    <span className="font-mono">{pathname}</span>)
                     {errCount > 0 ? `, ${errCount} console error${errCount > 1 ? "s" : ""}` : ""}, your name + browser.
                   </>
                 )}

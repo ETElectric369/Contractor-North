@@ -43,6 +43,40 @@ export function captureScale(innerWidth: number): number {
   return Math.min(1, Math.max(0.6, 640 / innerWidth));
 }
 
+/**
+ * THE CAPTURE'S ONE DEADLINE (cn-v1204). The picture is best-effort, and the report must never wait
+ * on it without a clock. The screenshot library is downloaded when the bug button is tapped and then
+ * draws the page in the browser; neither step had a limit, so on a weak signal, or with a picture on
+ * the page that would not load, the button could spin and the panel never open. Eight seconds for
+ * the whole capture, the download included; past it the panel opens with no picture and a capture
+ * that lands later is dropped. A capture on a phone was measured at a quarter to half a second.
+ */
+export const CAPTURE_DEADLINE_MS = 8000;
+
+/**
+ * HOW LONG THE CAPTURE WAITS FOR ONE PICTURE ON THE PAGE (the library's imageTimeout; its own default
+ * is 15 seconds, longer than the deadline above). Past this the library draws the page without that
+ * picture, so one slow picture costs itself and not the whole screenshot.
+ */
+export const CAPTURE_IMAGE_WAIT_MS = 4000;
+
+/** `work`'s own answer, or `late` when it has not settled in `ms` or has failed. Never rejects. */
+export function withDeadline<T>(work: Promise<T>, ms: number, late: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const timer = setTimeout(() => resolve(late), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(late);
+      },
+    );
+  });
+}
+
 /** Is this something the row may keep? A JPEG data URL with something after the prefix, under the cap. */
 export function isCopy(v: unknown): v is string {
   return typeof v === "string" && v.length > COPY_PREFIX.length && v.length <= COPY_MAX_CHARS && v.startsWith(COPY_PREFIX);
