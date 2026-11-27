@@ -5,8 +5,7 @@ import Link from "next/link";
 import { Play, Square, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { getPosition } from "@/lib/geo";
-import type { GeoPoint } from "@/lib/types";
+import { punchGps } from "@/lib/punch-gps";
 import { enqueue, listPending, remove as removeQueued } from "@/lib/offline/queue";
 import { clockIn, clockOut } from "../timeclock/actions";
 import { lunchMinutesFor } from "@/lib/lunch-rule";
@@ -23,16 +22,9 @@ import { WhatTodaySheet } from "../timeclock/what-today-sheet";
 import { closeSaidNothing } from "@/lib/what-today";
 import type { CrewPulse } from "@/lib/crew-pulse";
 
-/** Best-effort on-gesture GPS with a short cap (the timeclock panel's race pattern):
- *  the punch never waits out the full 8s highAccuracy fix — if the fix lands inside
- *  the window it's stamped, otherwise we punch now without it. The tap that punches
- *  IS the user gesture (THE iOS rule in geo.ts), so no awaits ahead of this call. */
-async function getGps(capMs: number): Promise<GeoPoint | null> {
-  const fix = getPosition({ enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }).then((r) =>
-    r.status === "ok" ? { lat: r.coords.lat, lng: r.coords.lng, accuracy: r.accuracy } : null,
-  );
-  return Promise.race([fix, new Promise<GeoPoint | null>((res) => setTimeout(() => res(null), capMs))]);
-}
+/** Best-effort on-gesture GPS with a short cap: the one punch read every door uses (lib/punch-gps,
+ *  cn-v1201) — if the fix lands inside the window it's stamped, otherwise we punch now without it.
+ *  The tap that punches IS the user gesture (THE iOS rule in geo.ts), so no awaits ahead of it. */
 
 // The offline line (md_offline, lib/words/myday — "No connection — try again when you have bars."
 // in English) is read through t() inside the card since cn-v1138, so a Spanish-speaking tech reads it
@@ -196,7 +188,7 @@ export function NowCard({
   function doClockIn() {
     setErr(null);
     start(async () => {
-      const gps = await getGps(2500);
+      const { gps } = await punchGps(2500);
       // The instant they TAPPED. Everything downstream treats this as the truth of when work
       // started; the server bounds and labels it (resolveOfflinePunchTime).
       const pressedAt = new Date().toISOString();
@@ -241,7 +233,7 @@ export function NowCard({
     if (!open) return;
     setErr(null);
     start(async () => {
-      const gps = await getGps(3000);
+      const { gps } = await punchGps(3000);
       try {
         const res = await clockOut({
           entry_id: open.id,

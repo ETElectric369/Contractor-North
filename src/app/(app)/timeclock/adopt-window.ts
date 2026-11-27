@@ -19,6 +19,30 @@
 export const ADOPT_AFTER_CLOCK_IN_MS = 15 * 60_000;
 export const ADOPT_AFTER_SWITCH_MS = 45 * 60_000;
 
+/**
+ * ONE NUMBER PER RULE ABOUT HOW ROUGH A POSITION MAY BE (cn-v1201). They were literals in four places.
+ *
+ *  - PHONE_ANCHOR_MAX_M: the phone's own limit for a position that may become the fence's centre:
+ *    the monitor adopts nothing rougher, and the punch's read (lib/punch-gps) calls a rougher one a
+ *    miss ("rough"). Tighter than the server's, so what the phone sends the server takes.
+ *  - SERVER_FIX_MAX_M: the server keeps no position rougher than this, on a clock-in, a switch or
+ *    a late stamp (adoptGeofenceAnchor refuses it; clockIn and switchJob store no position instead).
+ *    A punch is never refused for lack of a position.
+ */
+export const PHONE_ANCHOR_MAX_M = 150;
+export const SERVER_FIX_MAX_M = 200;
+
+/** The server's one rule for keeping a punch's position: real, finite numbers, and an accuracy that
+ *  is unknown or at most SERVER_FIX_MAX_M. Pure. */
+export function keepsFix(gps: { lat?: unknown; lng?: unknown; accuracy?: unknown } | null | undefined): boolean {
+  return (
+    gps != null &&
+    typeof gps.lat === "number" && typeof gps.lng === "number" &&
+    Number.isFinite(gps.lat) && Number.isFinite(gps.lng) &&
+    (gps.accuracy == null || (typeof gps.accuracy === "number" && gps.accuracy <= SERVER_FIX_MAX_M))
+  );
+}
+
 /** The adoption window for the current trip: the wider post-switch window when a
  *  mid-shift switch has opened a fresh trip this shift, otherwise the clock-in window. */
 export function adoptWindowMs(switched: boolean): number {

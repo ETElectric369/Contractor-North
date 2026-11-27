@@ -45,7 +45,7 @@ import {
   type LunchPart,
 } from "./close-math";
 import { loadShiftChains, type ShiftInfo } from "@/lib/shift-chain";
-import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS, adoptOpensAtMs } from "./adopt-window";
+import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS, SERVER_FIX_MAX_M, adoptOpensAtMs, keepsFix } from "./adopt-window";
 import { WHICH_JOB_COLUMNS, closedPickable, whichJobLabel, type ChoiceJob } from "./which-job-choices";
 import { isReportKeyMissing, reportJobFor } from "@/lib/daily-report-rule";
 import { punchJobLabel, unreadJobLabel, type AppPickSource, type PunchJob } from "./clock-told";
@@ -506,18 +506,24 @@ async function clockInInner(
   // A held job is read now, beside the insert, because the wake below clears the hold it would read.
   const heldRead = jobId ? heldJobBefore(supabase, jobId) : null;
 
+  // THE SAME RULE AS SWITCH JOB AND THE LATE STAMP (cn-v1201, adopt-window keepsFix): a position
+  // rougher than SERVER_FIX_MAX_M says nothing about where the job is, and stored as gps_in it would
+  // become the fence's centre and stop the late stamp from ever replacing it. So it is not kept; the
+  // punch itself is never refused for lack of a position.
+  const keptGps = keepsFix(input.gps) ? input.gps : null;
+
   // The DB has a unique index preventing two open entries; surface a friendly msg.
   // The row comes back so the door knows WHICH punch to ask about when it landed on no job.
   const { data: made, error } = await supabase.from("time_entries").insert({
     profile_id: user.id,
     job_id: jobId,
     job_code: input.job_code,
-    gps_in: input.gps,
+    gps_in: keptGps,
     clock_in: clockInIso,
     status: "open",
     // 'offline' outranks the others: it says the SERVER CLOCK wasn't the authority for this time,
     // which is the fact the office needs when reading the card.
-    source: offlinePunch ? "offline" : backdated ? "manual" : input.gps ? "app" : "manual",
+    source: offlinePunch ? "offline" : backdated ? "manual" : keptGps ? "app" : "manual",
   }).select("id").maybeSingle();
 
   // "You're already clocked in" now lives in dbError's constraint map, not in a string test here.
@@ -775,11 +781,8 @@ export async function switchJob(input: {
   // THE ANCHOR MOVES WITH THE JOB. The geofence fences on the entry's gps_in; a switch that left
   // it on site A let the live watch auto-close the shift at the time the tech drove to site B.
   const gps = input.gps;
-  const usableFix =
-    gps != null &&
-    typeof gps.lat === "number" && typeof gps.lng === "number" &&
-    Number.isFinite(gps.lat) && Number.isFinite(gps.lng) &&
-    (gps.accuracy == null || gps.accuracy <= 200);
+  // At most SERVER_FIX_MAX_M, the one rule clockIn and the late stamp read too (adopt-window keepsFix).
+  const usableFix = keepsFix(gps);
   const nowIso = new Date().toISOString();
   const fix = usableFix ? { lat: gps!.lat, lng: gps!.lng, accuracy: gps!.accuracy ?? null, captured_at: nowIso } : null;
 
@@ -1388,7 +1391,7 @@ export async function adoptGeofenceAnchor(entryId: string, gps: GeoPoint): Promi
     return { ok: false, error: t("cs_badCoordinates") };
   }
   // A fix fuzzier than this proves nothing about where the job is — refuse it.
-  if (gps.accuracy != null && gps.accuracy > 200) return { ok: false, error: t("cs_fixTooFuzzy") };
+  if (gps.accuracy != null && gps.accuracy > SERVER_FIX_MAX_M) return { ok: false, error: t("cs_fixTooFuzzy") };
 
   const { data: open } = await supabase
     .from("time_entries")

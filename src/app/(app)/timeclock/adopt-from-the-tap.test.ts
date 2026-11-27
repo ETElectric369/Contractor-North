@@ -235,7 +235,7 @@ describe("the monitor and the layout (pinned at the source)", () => {
     expect(monitor).toContain('import { adoptOpensAtMs, adoptTick, adoptWindowMs } from "@/app/(app)/timeclock/adopt-window";');
     expect(monitor).toContain("const opensMs = adoptOpensAtMs({ clockInMs: ciMs, madeAtMs: madeAtIso ? Date.parse(madeAtIso) : null, source });");
     expect(monitor).toContain("return { fromMs: Math.max(opensMs, tripStartMsRef.current || 0), windowMs: adoptWindowMs(switched) };");
-    expect(monitor.split("adoptWindow()").length - 1).toBe(3); // the check, the tick, the first arming
+    expect(monitor.split("adoptWindow()").length - 1).toBe(5); // the check, the tick, the first arming, the trace row and the gate's refusal (cn-v1201)
     expect(actions).toContain("const openedAt = Math.max(opensMs, swMs ?? 0);");
   });
 
@@ -251,7 +251,8 @@ describe("the monitor and the layout (pinned at the source)", () => {
     expect(monitor).toContain("windowClosed(!!fromMs);");
     const tick = monitor.slice(monitor.indexOf("const tick = () => {"), monitor.indexOf("if (typeof anchorLat !== \"number\" || typeof anchorLng !== \"number\") {\n      const w = adoptWindow();"));
     expect(tick).toContain("if (cancelled || doneRef.current || serverClosed) return;");
-    expect(tick).toContain('if (next.kind === "closed") {\n        void mayReadLocation().then((may) => {\n          if (may && !cancelled && !doneRef.current) windowClosed();');
+    // Since cn-v1201 a refusal of the gate there still leaves the trace's row (gateRefused), never the line.
+    expect(tick).toContain('if (next.kind === "closed") {\n        void mayReadLocation().then((may) => {\n          if (cancelled || doneRef.current) return;\n          if (may) windowClosed();\n          else gateRefused();');
     expect(tick).toContain("if (next.check) void check();\n      retry = setTimeout(tick, next.againInMs);");
     // The decision is the pure function's; the monitor passes it the throttle the check itself uses.
     expect(tick).toContain("lastCheckMs: lastWakeCheckRef.current, throttleMs: WAKE_THROTTLE_MS");
@@ -263,7 +264,10 @@ describe("the monitor and the layout (pinned at the source)", () => {
     expect(monitor).toContain("let serverClosed = false;");
     expect(monitor.split("serverClosed = true;").length - 1).toBe(1);
     expect(monitor).toContain(
-      'const res = await adoptGeofenceAnchor(entryId, fix);\n          trace("fence adopt", res.ok ? "ok" : res.windowClosed ? "window closed" : "refused");\n          if (cancelled) return;\n          if (res.ok) setAnchor(fix); // arms the live watch\n          else if (res.windowClosed) {\n            serverClosed = true;\n            windowClosed();\n          }',
+      'const res = await adoptGeofenceAnchor(entryId, fix);\n          trace("fence adopt", res.ok ? "ok" : res.windowClosed ? "window closed" : "refused");\n          if (cancelled) return;\n          if (res.ok) {\n            setAnchor(fix); // arms the live watch',
+    );
+    expect(monitor).toContain(
+      '} else if (res.windowClosed) {\n            serverClosed = true;\n            windowClosed();\n          }',
     );
     // The check stops before it reads anything (no location read, no throttle slot taken)...
     expect(monitor).toContain("const check = async () => {\n      if (cancelled || doneRef.current || serverClosed) return;");
@@ -285,7 +289,7 @@ describe("the monitor and the layout (pinned at the source)", () => {
       expect(text, name).not.toContain("punch\n// instantly with no GPS at all");
     }
     // What they do, at the source: each reads a fix before it punches.
-    expect(src("src/app/(app)/planner/now-card.tsx")).toContain("const gps = await getGps(2500);");
+    expect(src("src/app/(app)/planner/now-card.tsx")).toContain("const { gps } = await punchGps(2500);"); // the one punch read since cn-v1201
     expect(src("src/app/(app)/jobs/[id]/job-time-button.tsx")).toContain("const gps = await gpsBestEffort();\n      return clockIn({ job_id: jobId, job_code: null, gps, clock_in_at: startAt || null });");
     expect(src("src/app/(app)/appointments/[id]/visit-start-card.tsx")).toContain("const gps = await gpsBestEffort();");
   });

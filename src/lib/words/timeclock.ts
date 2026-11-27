@@ -83,7 +83,11 @@ export const words: WordCatalog = {
     tc_offline: "No connection — your entry is kept, try again when you have bars.",
     tc_createdJob: "Created {name}",
     tc_couldNotClockIn: "Could not clock in.",
-    tc_gpsNote: "Clocked in — location wasn't ready, so this punch isn't GPS-stamped.",
+    // A clock-in with no position says why (cn-v1201): location off for North, or still looking, with
+    // {minutes} the fence's clock-in window (adopt-window); the fence's late stamp then says it landed.
+    tc_locationOffNote: "Clocked in. Location is off for North, so this punch has no location. Turn it on in Settings.",
+    tc_noLocationYet: "Clocked in. No location yet. Keep North open and it keeps trying for {minutes} minutes.",
+    tc_locationAdded: "Location added to this punch.",
     tc_couldNotSwitch: "Could not switch jobs.",
     tc_theNewJob: "the new job",
     tc_couldNotClockOut: "Could not clock out.",
@@ -336,7 +340,9 @@ export const words: WordCatalog = {
     tc_offline: "Sin conexión: tu entrada se guardó, intenta de nuevo cuando tengas señal.",
     tc_createdJob: "Se creó {name}",
     tc_couldNotClockIn: "No se pudo marcar entrada.",
-    tc_gpsNote: "Entrada marcada: la ubicación no estaba lista, así que esta marcación no tiene sello GPS.",
+    tc_locationOffNote: "Entrada marcada. La ubicación está apagada para North, así que esta marcación no tiene ubicación. Enciéndela en Configuración.",
+    tc_noLocationYet: "Entrada marcada. Aún no hay ubicación. Deja North abierto: seguirá buscándola durante {minutes} minutos.",
+    tc_locationAdded: "Ubicación agregada a esta marcación.",
     tc_couldNotSwitch: "No se pudo cambiar de trabajo.",
     tc_theNewJob: "el trabajo nuevo",
     tc_couldNotClockOut: "No se pudo marcar salida.",

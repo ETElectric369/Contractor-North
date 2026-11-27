@@ -12,7 +12,7 @@ import { todayStrInTz } from "@/lib/tz";
 import { formatTime } from "@/lib/utils";
 import { localeOf } from "@/lib/locale";
 import { LONG_SHIFT_HOURS, isLongOpenShift } from "@/lib/long-shift";
-import { getPosition } from "@/lib/geo";
+import { punchGps } from "@/lib/punch-gps";
 import { useLang } from "@/components/lang-provider";
 import { fillNodes } from "@/components/fill-nodes";
 import { fillText, translator } from "@/lib/i18n";
@@ -43,12 +43,9 @@ export interface OpenEntry {
  *  denied, timeout, no hardware — silently falls back to null; clock-in never
  *  waits more than a few seconds and never blocks on location. */
 async function gpsBestEffort(): Promise<GeoPoint | null> {
-  try {
-    const r = await getPosition({ timeout: 4_000 });
-    return r.status === "ok" ? { lat: r.coords.lat, lng: r.coords.lng, accuracy: r.accuracy } : null;
-  } catch {
-    return null;
-  }
+  // The one punch read (lib/punch-gps, cn-v1201), capped at 4 s: it waited up to the phone's own
+  // 10 s in the shell before. Never rejects; no position is never a lost punch.
+  return (await punchGps(4_000)).gps;
 }
 
 // ONE CLOCK FACE FOR SERVER AND BROWSER (React #418): the company's timezone, spelled out. The old

@@ -42,7 +42,7 @@ import { useLang } from "@/components/lang-provider";
 import { fillNodes } from "@/components/fill-nodes";
 import { fillText, translator } from "@/lib/i18n";
 import { formatDateTime, formatTime } from "@/lib/utils";
-import { getPosition } from "@/lib/geo";
+import { punchGps } from "@/lib/punch-gps";
 import type { GeoPoint } from "@/lib/types";
 import { clockOffered, clockWords, jobIsFinished, jobShort, startedAtProblem } from "@/lib/appointments/visit-start";
 import { ClockStartPicker, pickerInstant, pickerParts } from "../../timeclock/clock-start-picker";
@@ -97,12 +97,9 @@ export function visitTimeOffered(
 
 /** The tap is the user gesture (the iOS-PWA rule), so a fix can be asked for; never waits long. */
 async function gpsBestEffort(): Promise<GeoPoint | null> {
-  try {
-    const r = await getPosition({ timeout: 4_000 });
-    return r.status === "ok" ? { lat: r.coords.lat, lng: r.coords.lng, accuracy: r.accuracy } : null;
-  } catch {
-    return null;
-  }
+  // The one punch read (lib/punch-gps, cn-v1201), capped at 4 s: it waited up to the phone's own
+  // 10 s in the shell before. Never rejects; no position is never a lost punch.
+  return (await punchGps(4_000)).gps;
 }
 
 const btn = "h-11 w-full justify-center sm:w-auto";

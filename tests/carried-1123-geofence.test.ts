@@ -219,9 +219,10 @@ describe("Turn On Location: the fence says it is waiting, and the tap is the ges
     // The arm the tap reaches is the live effect's own, and it is let go when the effect is.
     expect(g).toContain("armRef.current = () => void arm();\n    void arm();");
     expect(g).toContain("disposed = true;\n      armRef.current = () => {};");
-    // The clock-in words on Time Clock are untouched (read through the catalog since cn-v1138).
+    // The clock-in note on Time Clock says WHY there is no position since cn-v1201 (the one sentence
+    // that covered every cause is gone; timeclock/punch-location-1201.test holds the new words).
     const panel = readFileSync(path.join(ROOT, "src/app/(app)/timeclock/timeclock-panel.tsx"), "utf8");
-    expect(panel).toContain('if (!gps) setGpsNote(t("tc_gpsNote"));');
-    expect(dict("en").tc_gpsNote).toBe("Clocked in — location wasn't ready, so this punch isn't GPS-stamped.");
+    expect(panel).toContain("if (!gps) setGpsNote(noteFor(miss));");
+    expect(dict("en").tc_gpsNote).toBeUndefined();
   });
 });

@@ -36,8 +36,9 @@ import { rateLimited } from "@/lib/rate-limit";
  * for seeing a crash on a customer's quote link.
  */
 
-/** The five error boundaries + the one widget that report from the client. Anything else is
- *  not a caller of ours, whatever it claims to be. */
+/** Every caller that reports from the client: the error boundaries, the weather widget, and the
+ *  named phone-side paths below, each with its reason. Anything else is not a caller of ours,
+ *  whatever it claims to be. */
 const CLIENT_SOURCES = new Set([
   "global-error",
   "error-boundary",
@@ -56,6 +57,10 @@ const CLIENT_SOURCES = new Set([
   // The in-browser camera modal (Erik 2026-09-24, "camera was black"): a camera that won't open,
   // never sends a picture, or sends a black one. Error name and camera count only, never a picture.
   "camera",
+  // The punch's location (cn-v1201, 2026-11-26: "it said it couldnt secure a gps coordinate"): one
+  // trace row when a clock-in's window closes with no position, or when the fence stamps it late.
+  // Codes and counts only (lib/punch-trace), never a coordinate, an address, a job or an entry id.
+  "geo",
 ]);
 
 /** Well above a real crash loop on a bad deploy, well below "the log is now useless". */

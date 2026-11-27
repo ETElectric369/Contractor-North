@@ -24,6 +24,19 @@
  * phone's authorization, never from the WebView. An older shell (no such method) and Safari keep the
  * WebView path, with the cn-v1124 shell gate (shellMayReadLocation) in front of a silent read.
  * mayReadLocation() is THE gate every off-gesture reader asks; onResume() is the one wake signal.
+ *
+ * A PUNCH ASKS THE PHONE FOR A HUNDRED METRES (cn-v1201, 2026-11-26, "i was at the job today when i
+ * clocked in and it said it couldnt secure a gps coordinate"). Since the read moved to CoreLocation
+ * (cn-v1142) a punch asked at Best accuracy, and a Best read waits for GPS to settle: often longer
+ * than the punch's few-second cap, and indoors it can run out the phone's own 10 s and answer
+ * "timeout". A hundred-metre read answered at once on the owner's phone (about 20 m) where Best had
+ * timed out, and a job site is far wider than that. So getPunchPosition() asks the shell for a
+ * hundred metres whatever the caller passes; a browser and an older shell keep the caller's own
+ * options (an Android phone's punch does not get coarser). A fix from the phone's OWN read also
+ * carries its age (fixAgeMs, from CoreLocation's timestamp), so a cached position can be told from a
+ * fresh one. The WebView path never carries it: a browser already enforces maximumAge itself, and a
+ * WebView's timestamp is not trustworthy on every device (a clock set by hand, a fix stamped in
+ * another clock), so an age read from it could throw away a good fix.
  */
 
 import { isNativeShell } from "@/lib/native-shell";
@@ -31,7 +44,9 @@ import { isNativeShell } from "@/lib/native-shell";
 export type GeoCoords = { lat: number; lng: number };
 
 export type GeoResult =
-  | { status: "ok"; coords: GeoCoords; accuracy: number; ts: number }
+  /** `fixAgeMs`: how old the fix was when it came back (cn-v1201), ONLY from the shell's native read
+   *  (CoreLocation's timestamp); absent when it gives none, and never set on the WebView path. */
+  | { status: "ok"; coords: GeoCoords; accuracy: number; ts: number; fixAgeMs?: number }
   | { status: "denied" }
   | { status: "timeout" }
   | { status: "unavailable" }
@@ -229,17 +244,28 @@ function errCode(e: unknown): string {
   return String(o?.code ?? o?.message ?? "");
 }
 
+/** How old a native fix is, from CoreLocation's timestamp (ms since 1970); undefined when there is
+ *  none. The native read only: the WebView path never sets an age (see the header). */
+function ageOf(timestamp: unknown): number | undefined {
+  if (typeof timestamp !== "number" || !Number.isFinite(timestamp) || timestamp <= 0) return undefined;
+  return Math.max(0, Date.now() - timestamp);
+}
+function okResult(coords: GeoCoords, accuracy: number, timestamp: unknown): GeoResult {
+  const fixAgeMs = ageOf(timestamp);
+  return fixAgeMs === undefined ? { status: "ok", coords, accuracy, ts: Date.now() } : { status: "ok", coords, accuracy, ts: Date.now(), fixAgeMs };
+}
+
 /** The phone's own read (GeofencePlugin.currentPosition). null = hand over to the WebView path.
- *  The caller's own enableHighAccuracy rides along (2026-11-16): only an explicit false asks the
- *  phone for a hundred metres (the weather's city-level read); anything else asks for Best. */
-async function nativePosition(p: NativeGeo, opts?: PositionOptions): Promise<GeoResult | null> {
+ *  `highAccuracy` false asks the phone for a hundred metres (2026-11-16: the weather's city-level
+ *  read; cn-v1201: every punch, getPunchPosition); true asks for Best. */
+async function nativePosition(p: NativeGeo, highAccuracy: boolean): Promise<GeoResult | null> {
   try {
-    const r = await p.currentPosition!({ timeout: 10_000, highAccuracy: opts?.enableHighAccuracy !== false });
+    const r = await p.currentPosition!({ timeout: 10_000, highAccuracy });
     if (typeof r?.latitude !== "number" || typeof r?.longitude !== "number") return { status: "unavailable" };
     const coords = { lat: r.latitude, lng: r.longitude };
     const accuracy = typeof r.accuracy === "number" ? r.accuracy : 0;
     recordFix(coords, accuracy);
-    return { status: "ok", coords, accuracy, ts: Date.now() };
+    return okResult(coords, accuracy, r.timestamp);
   } catch (e) {
     const code = errCode(e);
     if (code === "denied") {
@@ -263,10 +289,41 @@ async function nativePosition(p: NativeGeo, opts?: PositionOptions): Promise<Geo
 export async function getPosition(opts?: PositionOptions): Promise<GeoResult> {
   const p = hasNativeRead() ? shellPlugin() : null;
   if (p) {
-    const r = await nativePosition(p, opts);
+    // The caller's own enableHighAccuracy rides along (2026-11-16): only an explicit false is coarse.
+    const r = await nativePosition(p, opts?.enableHighAccuracy !== false);
     if (r) return r;
   }
   return webPosition(opts);
+}
+
+/**
+ * THE PUNCH'S READ (cn-v1201; see the header). getPosition's shape and promises, but in a shell that
+ * reads natively the phone is asked for a hundred metres whatever `opts` says; "not asked yet" and an
+ * older plugin hand over to the WebView path with the caller's own options, as getPosition does. In a
+ * browser or an older shell, the WebView path with the caller's options, unchanged. Like getPosition,
+ * the first native or WebView call starts synchronously, so a tap that calls this keeps its gesture.
+ */
+export async function getPunchPosition(opts?: PositionOptions): Promise<GeoResult> {
+  const p = hasNativeRead() ? shellPlugin() : null;
+  if (p) {
+    const r = await nativePosition(p, false);
+    if (r) return r;
+  }
+  return webPosition(opts);
+}
+
+/** The shell's authorization word (always, whenInUse, denied, restricted, notDetermined), or null off
+ *  the shell, on an unknown word or when the phone does not answer. Never throws (cn-v1201: the punch
+ *  location trace says which permission the phone had). */
+export async function shellAuthorization(): Promise<string | null> {
+  const p = shellPlugin();
+  if (!p) return null;
+  try {
+    const a = (await p.status())?.authorization;
+    return a === "always" || a === "whenInUse" || a === "denied" || a === "restricted" || a === "notDetermined" ? a : null;
+  } catch {
+    return null;
+  }
 }
 
 function webPosition(opts?: PositionOptions): Promise<GeoResult> {
@@ -277,6 +334,7 @@ function webPosition(opts?: PositionOptions): Promise<GeoResult> {
       (p) => {
         const coords = { lat: p.coords.latitude, lng: p.coords.longitude };
         recordFix(coords, p.coords.accuracy ?? 0); // memoize the grant + refresh the shared last-fix cache
+        // No fixAgeMs here (cn-v1201): the browser enforces maximumAge itself (see the header).
         resolve({ status: "ok", coords, accuracy: p.coords.accuracy ?? 0, ts: Date.now() });
       },
       (err) => {

@@ -22,8 +22,10 @@ import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 import { fillText, localeOf, translator } from "@/lib/i18n";
 import { useDictation } from "@/lib/use-dictation";
 import { drivingDistanceMiles } from "@/lib/google-maps";
-import { getPosition } from "@/lib/geo";
-import type { GeoPoint, JobCode, TimeEntry } from "@/lib/types";
+import { PUNCH_LOCATION_EVENT, punchGps, punchLocationOutcome, punchNoteAfter, type PunchMiss, type PunchNote } from "@/lib/punch-gps";
+import { canOpenLocationSettings, openLocationSettings } from "@/lib/native-geofence";
+import { ADOPT_AFTER_CLOCK_IN_MS } from "./adopt-window";
+import type { JobCode, TimeEntry } from "@/lib/types";
 import { useToast } from "@/components/toast";
 import { clockIn, clockOut, switchJob, saveEntryNotes } from "./actions";
 import { switchMovesWholePunch } from "./switch-window";
@@ -51,34 +53,26 @@ interface JobOption {
   codes?: string[]; // this job's template codes (undefined = all org codes)
 }
 
-// Route through the shared geo helper (one option set, real secure-context/permission handling) instead
-// of a third hand-rolled getCurrentPosition. Still returns null on failure — but the caller now SHOWS
-// that the punch wasn't GPS-stamped instead of silently stamping gps:null.
+// EVERY PUNCH READS THE PHONE THROUGH ONE HELPER (lib/punch-gps, cn-v1201): one option set, a short
+// cap, and the reason for a miss (denied, timeout, rough, cap...) instead of a bare null.
 //
 // The punch tap is also the app's legitimate FIRST-GRANT moment for location (THE iOS RULE in geo.ts):
-// doClockIn/doClockOut call this synchronously in their tap's transition, so getCurrentPosition fires
-// inside the gesture — the one shape iOS honors with a real permission popup — and a successful fix
-// memoizes the grant (geo:granted) inside geo.ts, which weather + the geofence monitor then read
-// silently forever after. Don't add awaits ahead of this call.
+// doClockIn / doSwitchJob / doClockOut call punchGps synchronously in their tap's transition, so the
+// read starts inside the gesture — the one shape iOS honors with a real permission popup — and a
+// successful fix memoizes the grant (geo:granted) inside geo.ts, which weather + the geofence monitor
+// then read silently forever after. Don't add awaits ahead of this call.
 //
-// `capMs` caps how long the PUNCH waits on GPS. The clock-in punch passes a short cap so the field crew
-// isn't held hostage by an 8s highAccuracy fix on bad reception (My Day's, the job page's and the visit
-// page's clock-ins ask too, each with a short cap of its own) — if the fix lands inside the window it's
-// stamped, otherwise we punch now and warn that the punch isn't location-stamped, and the site fence
-// asks again for the next fifteen minutes (geofence-monitor, timeclock/adopt-window). Clock-out caps too (3s) — the button used to sit
-// disabled and silent for the full 8s fix.
-async function getGps(capMs?: number): Promise<GeoPoint | null> {
-  // NEVER REJECTS (v800). Every caller awaits this OUTSIDE its try — so a rejected geolocation
-  // promise (permission revoked mid-shift, a browser that throws instead of resolving) escaped
-  // the transition and tore the whole timeclock down to the error boundary. No GPS is a warning;
-  // it is never a reason to lose the punch.
-  const fix = getPosition({ enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 })
-    .then((r) => (r.status === "ok" ? { lat: r.coords.lat, lng: r.coords.lng, accuracy: r.accuracy } : null))
-    .catch(() => null);
-  if (!capMs) return fix;
-  // Race the real fix against a short cap; whichever resolves first wins (null = punch now, no GPS).
-  return Promise.race([fix, new Promise<GeoPoint | null>((res) => setTimeout(() => res(null), capMs))]);
-}
+// The cap is how long the PUNCH waits on the phone (2.5 s in, 2.5 s on a switch, 3 s out): the crew is
+// never held hostage by a slow fix. A fix inside the cap is stamped; otherwise the punch goes now with
+// no position, the note below says why, and the site fence asks again for the next fifteen minutes
+// (geofence-monitor, timeclock/adopt-window). In the shell the phone is asked for a hundred metres
+// (geo.ts getPunchPosition), which answers at once where a Best read waited for GPS to settle.
+
+/** What the note after a clock-in with no position says (cn-v1201): location off, still looking, or
+ *  the fence's late stamp landed while the note was up. How the fence's event moves it is
+ *  punchNoteAfter (lib/punch-gps), pure and tested. */
+type GpsNote = PunchNote;
+const noteFor = (miss: PunchMiss | null): GpsNote | null => (miss === null ? null : miss === "denied" ? "denied" : "waiting");
 
 // Shown when a punch can't reach the server — the form state is kept, so nothing is
 // lost; the tech taps again with signal (the await used to throw straight to the
@@ -145,7 +139,36 @@ export function TimeclockPanel({
     toast(fillText(t("tc_createdJob"), { name: j.name }), "success");
   }
   const [error, setError] = useState<string | null>(null);
-  const [gpsNote, setGpsNote] = useState<string | null>(null); // "punch wasn't GPS-stamped" — surfaced, not silent
+  const [gpsNote, setGpsNote] = useState<GpsNote | null>(null); // a punch with no position says why, never silent
+  // THE NOTE IS NEVER LEFT SAYING SOMETHING UNTRUE (cn-v1201). The fence's one event moves it in place
+  // (no refresh, no toast): the late stamp landed ("Location added", only when a note is up), the
+  // window closed with no position (a "still looking" note goes; the fence's own line says the rest),
+  // or the gate refused a read (a "still looking" note becomes the location-off one).
+  useEffect(() => {
+    const onPunchLocation = (e: Event) => setGpsNote((n) => punchNoteAfter(n, punchLocationOutcome(e)));
+    window.addEventListener(PUNCH_LOCATION_EVENT, onPunchLocation);
+    return () => window.removeEventListener(PUNCH_LOCATION_EVENT, onPunchLocation);
+  }, []);
+  /** "Location added" is a confirmation: drawn calm (the panel's green), never amber. */
+  const gpsNoteTone = gpsNote === "added" ? "text-green-700" : "text-amber-600";
+  /** The shell has the Open Settings door (2026-11-16); read after mount, so the first render is the server's. */
+  const [canSettings, setCanSettings] = useState(false);
+  useEffect(() => setCanSettings(canOpenLocationSettings()), []);
+  const gpsNoteText =
+    gpsNote === "denied"
+      ? t("tc_locationOffNote")
+      : gpsNote === "added"
+        ? t("tc_locationAdded")
+        : gpsNote === "waiting"
+          ? fillText(t("tc_noLocationYet"), { minutes: String(Math.round(ADOPT_AFTER_CLOCK_IN_MS / 60_000)) })
+          : null;
+  /** Beside the location-off sentence, the shell's own Open Settings door, with its existing words. */
+  const settingsDoor =
+    gpsNote === "denied" && canSettings ? (
+      <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => void openLocationSettings()}>
+        {t("sh_btn_openSettings")}
+      </Button>
+    ) : null;
   const [pending, start] = useTransition();
   // SIMPLE BY DEFAULT FOR EVERYONE (Erik, cn-v502): Clock Out is ONE tap for every role, and
   // the job was resolved at clock-in. A day on two jobs is two entries (Switch Job), never a
@@ -249,10 +272,9 @@ export function TimeclockPanel({
     setError(null);
     setGpsNote(null);
     start(async () => {
-      // PUNCH FIRST. Don't make the crew wait out an 8s highAccuracy fix to start their day —
-      // give GPS a short window (2.5s) and punch regardless; if the fix lands in time it's
-      // stamped, otherwise the entry is created now and we warn it isn't location-stamped.
-      const gps = await getGps(2500);
+      // PUNCH FIRST. Give the phone a short window (2.5s) and punch regardless; if the fix lands in
+      // time it's stamped, otherwise the entry is created now and the note says why there is none.
+      const { gps, miss } = await punchGps(2500);
       try {
         const res = await clockIn({
           job_id: jobId || null,
@@ -270,10 +292,10 @@ export function TimeclockPanel({
           // A held job came off hold with this punch (its reason and day are cleared): say so, and
           // keep it until it is read, the same as Switch Job and Clock Out.
           if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
-          // GPS is optional, but don't pretend it was captured — if it's off/denied/slow, say the
-          // punch isn't location-stamped (this used to fall through to gps:null silently). The note
-          // now renders in the clocked-in view too, so the crew actually sees it post-punch.
-          if (!gps) setGpsNote(t("tc_gpsNote"));
+          // GPS is optional, but don't pretend it was captured: location off is said as off (with
+          // the Settings door where the shell has one), anything else as "still looking", and the
+          // fence replaces it when its late stamp lands. It renders in the clocked-in view too.
+          if (!gps) setGpsNote(noteFor(miss));
         }
       } catch {
         // Dead spot / airplane mode — don't throw to the error boundary; the form
@@ -331,12 +353,13 @@ export function TimeclockPanel({
   function doSwitchJob() {
     if (!openEntry || !switchJobId) return;
     setError(null);
+    setGpsNote(null); // a new punch: the last one's note no longer describes anything (cn-v1201)
     startSwitch(async () => {
       try {
         // Same short cap as the punch: give GPS 2.5s and switch regardless. The fix becomes the new
         // part's geofence anchor; no fix means no anchor (never the old site's centre left armed),
         // and the monitor re-adopts once there's a good fix at the new site.
-        const gps = await getGps(2500);
+        const { gps } = await punchGps(2500);
         const res = await switchJob({
           entry_id: openEntry.id,
           job_id: switchJobId,
@@ -392,10 +415,11 @@ export function TimeclockPanel({
   function doClockOut(at?: string) {
     if (!openEntry) return;
     setError(null);
+    setGpsNote(null); // the shift is ending: a clock-in's note no longer describes anything (cn-v1201)
     start(async () => {
-      // Same short GPS cap as clock-in — the button used to sit disabled and
-      // silent for up to the full 8s highAccuracy round-trip.
-      const gps = await getGps(3000);
+      // Same short cap as clock-in (lib/punch-gps): the button never sits disabled and silent for
+      // as long as the phone's own read may take.
+      const { gps } = await punchGps(3000);
       const onPrevious = lunchOnPrevious && !!previousPiece && lunchToUse > 0;
       try {
         const res = await clockOut({
@@ -668,12 +692,15 @@ export function TimeclockPanel({
             )}
           </div>
 
-          {/* Surface the "punch wasn't GPS-stamped" warning HERE — after a punch the panel
+          {/* Surface the no-location note HERE (why the punch has none, cn-v1201) — after a punch the panel
               re-renders into this clocked-in branch, so the note set on clock-in is now visible. */}
-          {gpsNote && (
-            <p className="flex items-center justify-center gap-1.5 text-center text-sm text-amber-600">
-              <MapPin className="h-4 w-4 shrink-0" /> {gpsNote}
-            </p>
+          {gpsNoteText && (
+            <div className={`flex flex-wrap items-center justify-center gap-2 text-center text-sm ${gpsNoteTone}`}>
+              <p className="flex items-center justify-center gap-1.5">
+                <MapPin className="h-4 w-4 shrink-0" /> {gpsNoteText}
+              </p>
+              {settingsDoor}
+            </div>
           )}
 
           {/* THE JOB NOBODY PICKED, SAID OUT LOUD — the same sentence and the same Change door as My
@@ -1009,7 +1036,12 @@ export function TimeclockPanel({
         )}
 
         {error && <p className="text-sm text-red-600">{error}</p>}
-        {gpsNote && <p className="text-sm text-amber-600">{gpsNote}</p>}
+        {gpsNoteText && (
+          <div className={`flex flex-wrap items-center gap-2 text-sm ${gpsNoteTone}`}>
+            <p>{gpsNoteText}</p>
+            {settingsDoor}
+          </div>
+        )}
 
         <Button size="lg" className="w-full" onClick={doClockIn} disabled={pending}>
           {pending ? (

@@ -6,13 +6,15 @@ import { usePathname, useRouter } from "next/navigation";
 import { Loader2, MapPin } from "lucide-react";
 import { adoptGeofenceAnchor, geoClockOut, notifyGeofenceExit } from "@/app/(app)/timeclock/actions";
 import { adoptOpensAtMs, adoptTick, adoptWindowMs } from "@/app/(app)/timeclock/adopt-window";
+import { firePunchLocation, fixWord, lastPunchMiss } from "@/lib/punch-gps";
+import { newPunchTally, punchTracePayload, sendPunchTrace, tallyCheck, type PunchOutcome, type PunchTally } from "@/lib/punch-trace";
 import { ClockStartPicker } from "@/app/(app)/timeclock/clock-start-picker";
 import { isLongOpenShift, pickWithinCeiling, stopWindow } from "@/lib/long-shift";
 import { splitClock } from "@/lib/split-preview";
 import { fallbackArmed, type GeofencePhase } from "./geofence-fallback";
 import { Button } from "@/components/ui/button";
 import { speakSmart } from "@/lib/tts";
-import { geoPermission, getPosition, shellMayReadLocation, watchPosition } from "@/lib/geo";
+import { geoPermission, getPosition, getPunchPosition, hasNativeRead, nativeDeclares, shellAuthorization, shellMayReadLocation, watchPosition } from "@/lib/geo";
 import { armFence, canOpenLocationSettings, disarmFence, fenceArmOptions, fenceReadiness, onFenceExit, openLocationSettings, takePendingExit, type FenceReadiness, type PendingExit } from "@/lib/native-geofence";
 import { useLang } from "@/components/lang-provider";
 import { fillText, translator } from "@/lib/i18n";
@@ -227,6 +229,27 @@ export function markLostSeen(entryId: string) {
   }
 }
 
+// THE PUNCH'S LOCATION TRACE IS ONE ROW PER MOMENT OF A TRIP (cn-v1201, lib/punch-trace). The check
+// says the window closed on every wake after it closed, and iOS reloads the page on most reopens, so
+// the trip's mark is kept on the phone (the same way as Got It above) as well as in memory. The mark
+// stays on the phone and in memory: it is never in the row, the title or the console.
+const GEO_TRACE_KEY = "cn-geofence-trace-sent";
+const geoTraceSent = new Set<string>();
+export function firstGeoTrace(tripKey: string, outcome: PunchOutcome): boolean {
+  const mark = `${tripKey}#${outcome}`;
+  if (geoTraceSent.has(mark)) return false;
+  geoTraceSent.add(mark);
+  try {
+    const seen: unknown = JSON.parse(localStorage.getItem(GEO_TRACE_KEY) ?? "[]");
+    const list = Array.isArray(seen) ? seen.filter((x): x is string => typeof x === "string") : [];
+    if (list.includes(mark)) return false;
+    localStorage.setItem(GEO_TRACE_KEY, JSON.stringify([...list, mark].slice(-6)));
+  } catch {
+    /* private mode etc. — memory alone keeps it to one row per page load */
+  }
+  return true;
+}
+
 type Phase = GeofencePhase;
 
 /**
@@ -293,7 +316,7 @@ export function shouldPushExit(s: { sentFor: string | null; entryId: string; alr
  *     did not answer inside the punch's few-second cap, a punch that outran the iOS
  *     permission dialog, the assistant's clock-in), the first good fix within 15 min of
  *     the clock-in is adopted and persisted (adoptGeofenceAnchor), so the fence works for
- *     EVERY clock-in, not just the GPS-stamped one. The 15 minutes count from the TAP
+ *     EVERY clock-in, not just one whose punch got a position. The 15 minutes count from the TAP
  *     (the row's made-at time), not from a start that was typed or rounded back, and
  *     while they run the phone is asked again once a minute (cn-v1169).
  *  2. LIVE WATCH — while the app is open, watchPosition tracks the fence. Confirmed
@@ -460,6 +483,10 @@ export function GeofenceMonitor({
   // job change under us. Anchor adoption is measured from here, not from clock-in, or a
   // switch-cleared anchor could never be re-armed and the fence would stay dead all day.
   const tripStartMsRef = useRef(Date.parse(clockInIso) || Date.now());
+  // What each adoption check of THIS trip got (cn-v1201, lib/punch-trace): counts and the best
+  // accuracy only, for the one trace row. A new trip starts a new tally.
+  const tallyRef = useRef<{ key: string; tally: PunchTally }>({ key: tripKey, tally: newPunchTally() });
+  if (tallyRef.current.key !== tripKey) tallyRef.current = { key: tripKey, tally: newPunchTally() };
   useEffect(() => {
     const newTrip = tripKeyRef.current !== tripKey;
     tripKeyRef.current = tripKey;
@@ -847,10 +874,44 @@ export function GeofenceMonitor({
       return { fromMs: Math.max(opensMs, tripStartMsRef.current || 0), windowMs: adoptWindowMs(switched) };
     };
     /** NOTHING SILENT: the window closed with no anchor, so the fence is off for this clock-in, and
-     *  that is said (unless nothing is known about when the window opened: then there is nothing to say). */
+     *  that is said (unless nothing is known about when the window opened: then there is nothing to say).
+     *  The Time Clock removes its "still looking" note (cn-v1201: the fence's own line says the rest). */
     const windowClosed = (known = true) => {
       trace("fence window closed");
-      if (known && !cancelled) setAnchorLost(true);
+      if (known && !cancelled) {
+        setAnchorLost(true);
+        leaveTrace("no-position");
+        firePunchLocation("closed");
+      }
+    };
+    /**
+     * THE GATE REFUSED A READ WHILE THERE IS NO ANCHOR (cn-v1201): location is off or was never
+     * allowed. The Time Clock's "still looking" note becomes the location-off note, and once the
+     * window has closed the trace's no-position row is sent all the same (it holds no position, so it
+     * needs no read). The fence's "couldn't get a location" line is NOT shown here: a phone whose
+     * location cannot be read has its own line.
+     */
+    const gateRefused = () => {
+      if (cancelled || doneRef.current) return;
+      firePunchLocation("off");
+      const { fromMs, windowMs } = adoptWindow();
+      if (fromMs && Date.now() - fromMs > windowMs) leaveTrace("no-position");
+    };
+    /**
+     * THE REASON IS LEFT BEHIND (cn-v1201, lib/punch-trace): one row when the window closes with no
+     * position, one when the late stamp lands. Codes and counts only; once per trip and moment.
+     */
+    const leaveTrace = (outcome: PunchOutcome) => {
+      if (!firstGeoTrace(tripKey, outcome)) return;
+      const { fromMs } = adoptWindow();
+      const tally = tallyRef.current.tally;
+      const tap = lastPunchMiss(fromMs);
+      const nowMs = Date.now();
+      void shellAuthorization().then((auth) =>
+        sendPunchTrace(
+          punchTracePayload({ outcome, tap, tally, openedMs: fromMs, nowMs, native: hasNativeRead(), shell1116: nativeDeclares("Geofence", "openSettings"), auth }),
+        ),
+      );
     };
     /**
      * THE SERVER'S WINDOW IS THE AUTHORITY (cn-v1169, skeptic #72). This phone's count can be WIDER
@@ -882,6 +943,10 @@ export function GeofenceMonitor({
         trace("fence check", `${may ? "may read" : "no read"} anchor=${typeof anchorLat === "number" ? "yes" : "none"}`);
         if (!may) {
           if (lastWakeCheckRef.current === now) lastWakeCheckRef.current = 0;
+          if (typeof anchorLat !== "number" || typeof anchorLng !== "number") {
+            tallyCheck(tallyRef.current.tally, "noRead");
+            gateRefused();
+          }
           return;
         }
         if (cancelled || doneRef.current || phaseRef.current !== "idle") return;
@@ -894,15 +959,36 @@ export function GeofenceMonitor({
             windowClosed(!!fromMs);
             return;
           }
-          const r = await getPosition({ enableHighAccuracy: true, timeout: 4_000, maximumAge: 30_000 });
-          trace("fence fix", r.status === "ok" ? `ok acc=${Math.round(r.accuracy ?? 0)}` : r.status);
-          if (cancelled || doneRef.current || r.status !== "ok" || (r.accuracy ?? 0) > 150) return;
+          // The punch's own read first (cn-v1201): a hundred metres in the shell. A fix rougher than
+          // the phone's anchor limit is "rough", one older than STALE_FIX_MS "stale", an invalid
+          // accuracy "rough" (fixWord, the punch's own rule): counted for the trace, never adopted.
+          // NEVER WORSE THAN BEFORE: in a shell that reads natively, when that read is not "ok" (and
+          // location is not off), ONE read follows at once through getPosition with the same options
+          // (a Best read, the read this branch made before cn-v1201), and that one is adopted when
+          // ITS word is "ok". In a browser the two are the same read, so nothing follows there.
+          const ADOPT_READ: PositionOptions = { enableHighAccuracy: true, timeout: 4_000, maximumAge: 30_000 };
+          let r = await getPunchPosition(ADOPT_READ);
+          let word = fixWord(r);
+          trace("fence fix", r.status === "ok" ? `${word} acc=${Math.round(r.accuracy ?? 0)}` : r.status);
+          tallyCheck(tallyRef.current.tally, word, r.status === "ok" ? r.accuracy : null);
+          if (hasNativeRead() && word !== "ok" && word !== "denied") {
+            if (cancelled || doneRef.current) return;
+            r = await getPosition(ADOPT_READ);
+            word = fixWord(r);
+            trace("fence sharp fix", r.status === "ok" ? `${word} acc=${Math.round(r.accuracy ?? 0)}` : r.status);
+            tallyCheck(tallyRef.current.tally, word === "ok" ? "sharpOk" : "sharpMiss", r.status === "ok" ? r.accuracy : null);
+          }
+          if (cancelled || doneRef.current || r.status !== "ok" || word !== "ok") return;
           const fix = { lat: r.coords.lat, lng: r.coords.lng, accuracy: r.accuracy };
           const res = await adoptGeofenceAnchor(entryId, fix);
           trace("fence adopt", res.ok ? "ok" : res.windowClosed ? "window closed" : "refused");
           if (cancelled) return;
-          if (res.ok) setAnchor(fix); // arms the live watch
-          else if (res.windowClosed) {
+          if (res.ok) {
+            setAnchor(fix); // arms the live watch
+            leaveTrace("stamped-late");
+            // The Time Clock swaps its no-location note for "Location added" (cn-v1201).
+            firePunchLocation("added");
+          } else if (res.windowClosed) {
             serverClosed = true;
             windowClosed();
           }
@@ -910,7 +996,10 @@ export function GeofenceMonitor({
         }
 
         if (now < snoozedUntil(entryId)) return;
-        // One quick capped fix — never hangs the wake past ~4s.
+        // One quick capped fix: a browser's own 4 s timeout; in the shell the phone's own timer is
+        // 10 s whatever `timeout` says. A sharp read on purpose (NOT the punch's hundred metres,
+        // cn-v1201): a rough fix here could raise a false "looks like you left" sheet, and that sheet
+        // can close a shift when nobody answers.
         const r = await getPosition({ enableHighAccuracy: true, timeout: 4_000, maximumAge: 30_000 });
         if (cancelled || doneRef.current || phaseRef.current !== "idle") return;
         if (r.status !== "ok") return; // denied/timeout — nothing honest to conclude
@@ -958,7 +1047,9 @@ export function GeofenceMonitor({
       if (next.kind === "stop") return;
       if (next.kind === "closed") {
         void mayReadLocation().then((may) => {
-          if (may && !cancelled && !doneRef.current) windowClosed();
+          if (cancelled || doneRef.current) return;
+          if (may) windowClosed();
+          else gateRefused(); // cn-v1201: the trace is not silent for a phone whose location is off
         });
         return;
       }

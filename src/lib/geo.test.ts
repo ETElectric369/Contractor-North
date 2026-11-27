@@ -223,3 +223,102 @@ describe("one cache: gps:last, ≤ 10 minutes, never across a resume", () => {
     expect(sub).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * THE PUNCH'S READ (cn-v1201, "it said it couldnt secure a gps coordinate"). In a shell that reads
+ * natively a punch asks the phone for a hundred metres whatever its caller passes (a Best read waited
+ * for GPS to settle and ran out the punch's cap); a browser keeps the caller's own options. A fix
+ * from the phone's own read carries its age; a WebView fix never does. Positions here are plainly fake.
+ */
+describe("getPunchPosition: a hundred metres in the shell, the caller's options elsewhere", () => {
+  const PUNCH = { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 };
+  it("the shell is asked with highAccuracy false whatever the caller passes", async () => {
+    fake.currentPosition.mockImplementation(async () => ({ latitude: 0.5, longitude: 1.5, accuracy: 20 }));
+    const g = await load();
+    for (const o of [PUNCH, { enableHighAccuracy: true }, undefined, {}]) {
+      const r = await g.getPunchPosition(o);
+      expect(r).toMatchObject({ status: "ok", accuracy: 20 });
+      expect(fake.currentPosition).toHaveBeenLastCalledWith({ timeout: 10_000, highAccuracy: false });
+    }
+    expect(webGet).not.toHaveBeenCalled();
+  });
+  it("the first call starts synchronously, inside the caller's tap (no await ahead of it)", async () => {
+    const g = await load();
+    const pending = g.getPunchPosition(PUNCH);
+    expect(fake.currentPosition).toHaveBeenCalledTimes(1);
+    await pending;
+    shell.on = false;
+    const pendingWeb = g.getPunchPosition(PUNCH);
+    expect(webGet).toHaveBeenCalledTimes(1);
+    await pendingWeb;
+  });
+  it("in a browser and in an older shell, the WebView with the caller's own options, unchanged", async () => {
+    shell.on = false;
+    const g = await load();
+    await g.getPunchPosition(PUNCH);
+    expect(webGet.mock.calls[0][2]).toEqual(PUNCH);
+    expect(fake.currentPosition).not.toHaveBeenCalled();
+    shell.on = true;
+    withHeaders(["arm", "status"]);
+    await g.getPunchPosition(PUNCH);
+    expect(webGet.mock.calls[1][2]).toEqual(PUNCH);
+    expect(fake.currentPosition).not.toHaveBeenCalled();
+  });
+  it("'not asked yet' and an older plugin hand over to the WebView with the caller's options", async () => {
+    const g = await load();
+    fake.currentPosition.mockRejectedValueOnce({ code: "not-determined", message: "not-determined" });
+    expect((await g.getPunchPosition(PUNCH)).status).toBe("ok");
+    expect(webGet.mock.calls[0][2]).toEqual(PUNCH);
+    fake.currentPosition.mockRejectedValueOnce({ code: "UNIMPLEMENTED", message: "not implemented" });
+    expect((await g.getPunchPosition(PUNCH)).status).toBe("ok");
+    expect(webGet).toHaveBeenCalledTimes(2);
+    fake.currentPosition.mockRejectedValueOnce({ code: "denied", message: "denied" });
+    expect((await g.getPunchPosition(PUNCH)).status).toBe("denied");
+    fake.currentPosition.mockRejectedValueOnce({ code: "timeout", message: "timeout" });
+    expect((await g.getPunchPosition(PUNCH)).status).toBe("timeout");
+    expect(webGet).toHaveBeenCalledTimes(2);
+  });
+  it("a native fix carries its age from CoreLocation's timestamp; absent when there is none", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-26T16:00:00Z"));
+    const now = Date.now();
+    const g = await load();
+    fake.currentPosition.mockResolvedValueOnce({ latitude: 0.5, longitude: 1.5, accuracy: 20, timestamp: now - 45_000 });
+    expect(await g.getPunchPosition(PUNCH)).toMatchObject({ status: "ok", fixAgeMs: 45_000 });
+    fake.currentPosition.mockResolvedValueOnce({ latitude: 0.5, longitude: 1.5, accuracy: 20 });
+    expect("fixAgeMs" in (await g.getPunchPosition(PUNCH))).toBe(false);
+    // getPosition carries it too (an optional field; nothing else in the result changes).
+    fake.currentPosition.mockResolvedValueOnce({ latitude: 0.5, longitude: 1.5, accuracy: 20, timestamp: now - 2_000 });
+    expect(await g.getPosition()).toMatchObject({ status: "ok", fixAgeMs: 2_000 });
+  });
+  it("a WebView fix never carries fixAgeMs, whatever position.timestamp holds (the browser enforces maximumAge)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-26T16:00:00Z"));
+    const now = Date.now();
+    shell.on = false;
+    const g = await load();
+    for (const timestamp of [now - 60_000, now - 2_000, now + 90_000, 1, undefined]) {
+      webGet.mockImplementationOnce((ok: (p: unknown) => void) => ok({ coords: { latitude: 0.5, longitude: 1.5, accuracy: 30 }, timestamp }));
+      const r = await g.getPunchPosition(PUNCH);
+      expect(r.status).toBe("ok");
+      expect("fixAgeMs" in r).toBe(false);
+      webGet.mockImplementationOnce((ok: (p: unknown) => void) => ok({ coords: { latitude: 0.5, longitude: 1.5, accuracy: 30 }, timestamp }));
+      expect("fixAgeMs" in (await g.getPosition(PUNCH))).toBe(false);
+    }
+  });
+  it("getPosition itself is unchanged: Best unless the caller says false", async () => {
+    const g = await load();
+    await g.getPosition(PUNCH);
+    expect(fake.currentPosition).toHaveBeenLastCalledWith({ timeout: 10_000, highAccuracy: true });
+  });
+  it("shellAuthorization names the phone's word, null off the shell or on anything else", async () => {
+    const g = await load();
+    expect(await g.shellAuthorization()).toBe("always");
+    fake.status.mockResolvedValueOnce({ authorization: "somethingElse" });
+    expect(await g.shellAuthorization()).toBeNull();
+    fake.status.mockRejectedValueOnce(new Error("gone"));
+    expect(await g.shellAuthorization()).toBeNull();
+    shell.on = false;
+    expect(await g.shellAuthorization()).toBeNull();
+  });
+});

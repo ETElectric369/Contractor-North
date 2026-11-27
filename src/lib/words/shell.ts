@@ -47,6 +47,8 @@ export const words: WordCatalog = {
     "src/components/weather-widget.tsx",
     // The fence's idle line reads one shell word, Open Settings (sh_btn_openSettings, 2026-11-16).
     "src/components/geofence-monitor.tsx",
+    // The Time Clock's location-off note draws the same Open Settings door beside it (cn-v1201).
+    "src/app/(app)/timeclock/timeclock-panel.tsx",
   ],
   // "Plan" is the same word; Tap to Pay on iPhone is Apple's name; Nort is Nort; the two maps apps are their names;
   // "Admin" is the tile that was Money (cn-v1172), kept short in Spanish too because the dock tile is narrow.
