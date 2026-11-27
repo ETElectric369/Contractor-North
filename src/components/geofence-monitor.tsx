@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Loader2, MapPin } from "lucide-react";
 import { adoptGeofenceAnchor, geoClockOut, notifyGeofenceExit } from "@/app/(app)/timeclock/actions";
 import { adoptOpensAtMs, adoptTick, adoptWindowMs } from "@/app/(app)/timeclock/adopt-window";
-import { firePunchLocation, fixWord, lastPunchMiss } from "@/lib/punch-gps";
+import { firePunchLocation, fixWord, lastPunchMiss, STALE_FIX_MS } from "@/lib/punch-gps";
 import { newPunchTally, punchTracePayload, sendPunchTrace, tallyCheck, type PunchOutcome, type PunchTally } from "@/lib/punch-trace";
 import { ClockStartPicker } from "@/app/(app)/timeclock/clock-start-picker";
 import { isLongOpenShift, pickWithinCeiling, stopWindow } from "@/lib/long-shift";
@@ -22,6 +22,7 @@ import { trace } from "@/lib/nort/trace";
 import type { GeoPoint } from "@/lib/types";
 import { FENCE_REPORT_EVENT } from "@/lib/fence-report-event";
 import { holdReloadWhile } from "@/lib/release-on-return";
+import { liveFixDoor } from "@/lib/fence-live";
 
 /**
  * May the fence read the phone's location without a tap? Off the shell, the web rule (geo.ts: a live
@@ -334,7 +335,9 @@ export function shouldPushExit(s: { sentFor: string | null; entryId: string; alr
  *     at-site → outside past the grace window ⇒ the prompt sheet opens. If it sits
  *     unanswered 5 min with GPS still outside, the entry closes at the time they were
  *     last OBSERVED at the site (never a guess — and never over-bills). The watch
- *     re-arms on visibility, since iOS kills it on suspension.
+ *     re-arms on every return to the app: in a browser iOS kills the WebView's watch on
+ *     suspension, and in the shell the phone-fed watch skips its reads while hidden.
+ *     A rough (hundred-metre) fix may say inside; only a sharp read may say outside.
  *  3. WAKE EXIT-CHECK — on visibility/focus/route-change/mount (throttled), one quick
  *     capped fix; outside the fence ⇒ the same prompt sheet. This is what catches the
  *     drove-off-with-the-app-closed shift (the 30-hour Brian case) the moment the app
@@ -406,7 +409,8 @@ export function GeofenceMonitor({
    *
    * The auto-close fires at `lastInsideMsRef`, "the last time we saw you at the site". That is a
    * sound conservative choice ONLY while the fix stream is continuous. iOS suspends a PWA in a
-   * pocket and kills watchPosition; `seenInsideRef` stays true and `lastInsideMsRef` stays at
+   * pocket and kills watchPosition (in the phone app the phone-fed watch reads nothing while the
+   * page is out of view, cn-v1208); `seenInsideRef` stays true and `lastInsideMsRef` stays at
    * 07:20. Brian drives home at 16:00, the page wakes in the same page-life, the watch re-arms
    * OUTSIDE the fence, and four minutes later the monitor closes his shift at 07:20 — twenty
    * recorded minutes for a nine-hour day.
@@ -418,6 +422,8 @@ export function GeofenceMonitor({
   const streamGapRef = useRef(false);
   const firstOutsideMsRef = useRef<number | null>(null);
   const lastFixRef = useRef<GeoPoint | null>(null); // stamps gps_out on close
+  // The live watch's one sharp read that proves an exit is out (cn-v1208, liveFixDoor): at most one.
+  const sharpProofOutRef = useRef(false);
   const promptShownAtRef = useRef(0);
   const promptSourceRef = useRef<"live" | "wake">("wake");
   const lastWakeCheckRef = useRef(0);
@@ -700,20 +706,29 @@ export function GeofenceMonitor({
   }
 
   // ── 2. LIVE WATCH ──────────────────────────────────────────────────────────────
+  // ROUGH READS MAY SAY "INSIDE"; ONLY A SHARP READ MAY SAY "OUTSIDE" (cn-v1208). In a shell whose
+  // native read honors a hundred metres (geo.ts hasCoarseRead) the watch is fed by that read, every
+  // fix marked `rough`. This watch's sheet is the only one that can close a shift by itself, and a
+  // rough fix can be wrong while it claims a small uncertainty (an out-of-date Wi-Fi position
+  // indoors), so a rough fix that would count as outside is not used at all: one sharp read is asked
+  // instead and only its answer counts, and only while it is fresh (liveFixDoor, lib/fence-live). A
+  // fix with no mark (a browser, an older shell) counts as before.
   useEffect(() => {
+    // A browser with no geolocation object has no watch to run. Where the phone feeds the watch this
+    // object is not used, but WKWebView always has it, so the gate never stops the watch in the shell.
     if (typeof navigator === "undefined" || !navigator.geolocation) return;
     if (typeof anchorLat !== "number" || typeof anchorLng !== "number") return;
     const center = { lat: anchorLat, lng: anchorLng };
     const graceMs = Math.max(60_000, graceMin * 60_000);
     const ignoreAccuracy = Math.max(radiusM, ACCURACY_FLOOR_M);
+    let disposed = false;
 
-    const onFix = (fix: { coords: { lat: number; lng: number }; accuracy: number }) => {
-      if (doneRef.current) return;
-      const acc = fix.accuracy || 0;
-      if (acc > ignoreAccuracy) return;
+    // A usable fix that may decide (an unmarked one, a rough one that says inside, or the sharp
+    // proof's answer): the one place the live watch's logic runs.
+    const count = (fix: { coords: { lat: number; lng: number }; accuracy: number }, d: number) => {
+      const acc = fix.accuracy;
       const here = fix.coords;
       lastFixRef.current = { lat: here.lat, lng: here.lng, accuracy: acc };
-      const d = haversineM(center, here);
       const now = Date.now();
       // A silence longer than a few fix intervals means the watch was DEAD, not that he stood
       // still. Everything we "know" about where he was is from before the silence.
@@ -771,6 +786,21 @@ export function GeofenceMonitor({
         submit(lastFixRef.current, new Date(lastInsideMsRef.current).toISOString(), true);
       }
     };
+    const onFix = liveFixDoor({
+      alive: () => !disposed && !doneRef.current,
+      trip: () => tripKeyRef.current,
+      ignoreAccuracyM: ignoreAccuracy,
+      radiusM,
+      distanceM: (c) => haversineM(center, c),
+      proofOut: sharpProofOutRef,
+      // THE GATE STAYS IN FRONT OF THIS READ TOO: it is never inside a tap, and getPosition hands a
+      // phone that has not been asked over to the WebView, the one place this watch must never go.
+      askSharp: async () =>
+        (await mayReadLocation()) ? getPosition({ enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 }) : { status: "unavailable" },
+      now: () => Date.now(),
+      staleMs: STALE_FIX_MS,
+      count,
+    });
     const onErr = (s: string) => {
       // Don't swallow: a watch that never arms (GPS off / permission revoked mid-shift)
       // means the fence can't track movement. The wake check still runs its own fixes.
@@ -787,7 +817,6 @@ export function GeofenceMonitor({
     // off-gesture permission prompt, which the installed PWA silently denies and can PERSIST. Only arm
     // once the permission is granted (live, or memoized by the clock-in tap's fix); until then the
     // fence stays honestly quiet, and the rearm path below self-heals the moment a grant lands.
-    let disposed = false;
     let warnedGate = false;
     let stop: () => void = () => {};
     const arm = async () => {
@@ -805,6 +834,10 @@ export function GeofenceMonitor({
         return;
       }
       if (disposed || doneRef.current) return;
+      // THE GATE JUST SAID YES, SO "LOCATION IS OFF" IS NO LONGER TRUE (cn-v1208). The line that says
+      // so offers Open Settings; a person who turned location back on there and came back kept
+      // reading that it was off until the page was loaded again, because nothing ever cleared it.
+      setWatchOff(false);
       setWaitingGrant(false);
       stop();
       stop = watchPosition(onFix, onErr, opts);
@@ -812,8 +845,10 @@ export function GeofenceMonitor({
     };
     armRef.current = () => void arm();
     void arm();
-    // iOS quietly kills the watch when the PWA suspends — re-arm it on every return
-    // to the foreground (the old monitor never did, so it went deaf after one pocket).
+    // Re-arm the watch on every return to the foreground (the old monitor never did, so it went deaf
+    // after one pocket): in a browser iOS quietly kills the WebView's watch when the page suspends;
+    // in the shell the phone-fed watch skips its reads while the page is hidden, and re-arming starts
+    // it over with a fresh first read.
     const rearm = () => {
       if (document.visibilityState !== "visible" || doneRef.current) return;
       void arm();
@@ -1016,10 +1051,17 @@ export function GeofenceMonitor({
         // 10 s whatever `timeout` says. A sharp read on purpose (NOT the punch's hundred metres,
         // cn-v1201): a rough fix here could raise a false "looks like you left" sheet, and that sheet
         // can close a shift when nobody answers.
+        const askedMs = Date.now();
         const r = await getPosition({ enableHighAccuracy: true, timeout: 4_000, maximumAge: 30_000 });
         if (cancelled || doneRef.current || phaseRef.current !== "idle") return;
         if (r.status !== "ok") return; // denied/timeout — nothing honest to conclude
         const acc = r.accuracy ?? 0;
+        // AN ANSWER ABOUT THEN IS NOT AN ANSWER ABOUT NOW (cn-v1208). A phone pocketed while this
+        // read is out hands its answer over when the app comes back, hours later, and the lines
+        // below would stamp "at the site" with that later moment. No read takes this long (the
+        // phone's own timer is 10 s, 20 s behind another read), so an answer that lands later than
+        // this slept on the way and concludes nothing. The fix's own age is NOT read here (cn-v1201).
+        if (Date.now() - askedMs > STALE_FIX_MS) return;
         if (acc > Math.max(radiusM, ACCURACY_FLOOR_M)) return; // junk fix proves nothing
         lastFixRef.current = { lat: r.coords.lat, lng: r.coords.lng, accuracy: acc };
         const d = haversineM({ lat: anchorLat, lng: anchorLng }, r.coords);

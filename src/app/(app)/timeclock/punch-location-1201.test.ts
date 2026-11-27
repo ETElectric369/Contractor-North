@@ -189,7 +189,7 @@ describe("R2 + R3 · every punch door and both fence reads use the punch's read"
     expect(check).not.toMatch(/>\s*150\b/);
     expect(g).toContain("void getPosition({ enableHighAccuracy: true, timeout: 20_000, maximumAge: 0 }).then((r) => {");
   });
-  it("the wake's exit check reads as it did before cn-v1201: getPosition, the same options, no stale line", () => {
+  it("the wake's exit check reads as it did before cn-v1201: getPosition, the same options, no fix-age line (cn-v1208 added one rule: an answer that lands later than any read can take is dropped)", () => {
     const g = src("src/components/geofence-monitor.tsx");
     const check = g.slice(g.indexOf("const check = async () => {"), g.indexOf("checkRef.current = () => void check();"));
     const exit = check.slice(check.indexOf("if (now < snoozedUntil(entryId)) return;"));
@@ -198,7 +198,8 @@ describe("R2 + R3 · every punch door and both fence reads use the punch's read"
     );
     expect(exit).not.toContain("getPunchPosition");
     expect(exit).not.toContain("fixAgeMs");
-    expect(g).toContain('import { firePunchLocation, fixWord, lastPunchMiss } from "@/lib/punch-gps";');
+    expect(exit).toContain("if (Date.now() - askedMs > STALE_FIX_MS) return;");
+    expect(g).toContain('import { firePunchLocation, fixWord, lastPunchMiss, STALE_FIX_MS } from "@/lib/punch-gps";');
     // Its comment is true: in the shell the phone's own timer is 10 s whatever `timeout` says.
     expect(exit).toContain("in the shell the phone's own timer is\n        // 10 s whatever `timeout` says.");
   });

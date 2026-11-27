@@ -19,7 +19,8 @@
  * ONE POSITION SOURCE, INSIDE THE APP TOO (2026-11-04, "the weather is stuck on home"; "it still asked
  * after Always Allow"). Inside the shell the WebView keeps its own per-site permission on top of the
  * phone's, keeps answering "prompt" after location was allowed, and can raise its OWN alert. So in a
- * shell whose GeofencePlugin offers `currentPosition`, getPosition() reads the phone through CoreLocation
+ * shell whose GeofencePlugin offers `currentPosition`, getPosition() (and since cn-v1208 the live
+ * watch, watchPosition()) reads the phone through CoreLocation
  * (GeofencePlugin.swift — it never asks for permission itself) and geoPermission() answers from the
  * phone's authorization, never from the WebView. An older shell (no such method) and Safari keep the
  * WebView path, with the cn-v1124 shell gate (shellMayReadLocation) in front of a silent read.
@@ -37,6 +38,19 @@
  * fresh one. The WebView path never carries it: a browser already enforces maximumAge itself, and a
  * WebView's timestamp is not trustworthy on every device (a clock set by hand, a fix stamped in
  * another clock), so an age read from it could throw away a good fix.
+ *
+ * THE FENCE'S LIVE WATCH READS THROUGH THE PHONE TOO (cn-v1208, 2026-11-27, "the gps worked clocking
+ * into the job I'm pretty sure but then when it refreshed it asked me to allow my location again and
+ * always allow isn't showing"). cn-v1142 moved the one-shot reads to the phone but left watchPosition()
+ * on the WebView, and the fence arms it on every page load and every return to the app as soon as the
+ * phone's authorization says yes: the WebView, holding no grant of its own, asked again. So in a shell
+ * whose native read honors a hundred metres (hasCoarseRead) watchPosition() is fed by the phone's own
+ * hundred-metre read, the first WATCH_FIRST_MS after the call and then one every WATCH_EVERY_MS after
+ * the last ends, each only while the page is visible; it never hands over to the WebView. Each of its
+ * fixes is marked `rough: true`, and the fence never lets a rough fix alone say "outside"
+ * (geofence-monitor, LIVE WATCH). A browser, a shell with no native read, and a shell whose native
+ * read is Best only (the builds of 2026-11-04 to 11-16) keep the WebView's own watch, unchanged, with
+ * no mark: there the WebView can still ask, until that phone takes a newer build of the app.
  */
 
 import { isNativeShell } from "@/lib/native-shell";
@@ -127,6 +141,17 @@ export function nativeDeclares(plugin: string, method: string): boolean {
 /** True inside a shell whose plugin reads the phone's position itself (CoreLocation). */
 export function hasNativeRead(): boolean {
   return !!shellPlugin() && nativeDeclares("Geofence", "currentPosition");
+}
+
+/**
+ * A shell whose native read honors `highAccuracy: false`, a hundred metres (the 2026-11-16 build).
+ * `openSettings` arrived in that same build and is its mark; the punch trace reads the build the same
+ * way. A shell with the native read but without it (the builds of 2026-11-04 to 11-16) reads at Best
+ * whatever it is asked. The live watch needs this (cn-v1208): fed by a phone that reads only at Best,
+ * each of its reads could take the phone's whole ten seconds indoors.
+ */
+export function hasCoarseRead(): boolean {
+  return hasNativeRead() && nativeDeclares("Geofence", "openSettings");
 }
 
 /**
@@ -255,16 +280,19 @@ function okResult(coords: GeoCoords, accuracy: number, timestamp: unknown): GeoR
   return fixAgeMs === undefined ? { status: "ok", coords, accuracy, ts: Date.now() } : { status: "ok", coords, accuracy, ts: Date.now(), fixAgeMs };
 }
 
-/** The phone's own read (GeofencePlugin.currentPosition). null = hand over to the WebView path.
+/** The phone's own read (GeofencePlugin.currentPosition). null = the one-shot reads hand over to the
+ *  WebView path; the live watch stops instead (cn-v1208, never the WebView).
  *  `highAccuracy` false asks the phone for a hundred metres (2026-11-16: the weather's city-level
- *  read; cn-v1201: every punch, getPunchPosition); true asks for Best. */
+ *  read; cn-v1201: every punch, getPunchPosition; cn-v1208: every live-watch read); true asks for Best. */
 async function nativePosition(p: NativeGeo, highAccuracy: boolean): Promise<GeoResult | null> {
   try {
     const r = await p.currentPosition!({ timeout: 10_000, highAccuracy });
     if (typeof r?.latitude !== "number" || typeof r?.longitude !== "number") return { status: "unavailable" };
     const coords = { lat: r.latitude, lng: r.longitude };
     const accuracy = typeof r.accuracy === "number" ? r.accuracy : 0;
-    recordFix(coords, accuracy);
+    // A fix that is not a position is never kept as the shared last fix (cn-v1208: the live watch
+    // now reads here several times a minute, and the weather reads that fix as where the phone is).
+    if (!notAPosition({ coords, accuracy })) recordFix(coords, accuracy);
     return okResult(coords, accuracy, r.timestamp);
   } catch (e) {
     const code = errCode(e);
@@ -273,9 +301,10 @@ async function nativePosition(p: NativeGeo, highAccuracy: boolean): Promise<GeoR
       return { status: "denied" };
     }
     if (code === "timeout") return { status: "timeout" };
-    // The phone has not been asked yet: the native side never asks (that is a tap's job), so the
-    // WebView path runs — callers only get here inside a tap, because the gate says "prompt".
-    // An older plugin without the method: the WebView path too.
+    // The phone has not been asked yet: the native side never asks (that is a tap's job), so a
+    // one-shot read's WebView path runs — callers only get here inside a tap, because the gate says
+    // "prompt". An older plugin without the method: the WebView path too. (The live watch never
+    // hands over: on null it says "unavailable" and stops, cn-v1208.)
     if (code === "not-determined" || /UNIMPLEMENTED|not implemented/i.test(code)) return null;
     return { status: "unavailable" };
   }
@@ -349,16 +378,119 @@ function webPosition(opts?: PositionOptions): Promise<GeoResult> {
   });
 }
 
+/** The phone-fed watch's pace (cn-v1208): the next read starts this long after the last one ENDS.
+ *  A read itself can take up to the phone's 10 s, so a cycle is 15 to 25 s: two to four reads fall
+ *  in the fence monitor's smallest clock, its 60 s grace window. A punch tapped while a watch read
+ *  is still out joins that read on the phone and gets only the time it has left (the phone's one
+ *  shared read; changing that needs a new app build). */
+export const WATCH_EVERY_MS = 15_000;
+
+/** The phone-fed watch's FIRST read is due this long after the call, not at once (cn-v1208, see
+ *  nativeWatch). */
+export const WATCH_FIRST_MS = 2_000;
+
+/** A watch fix. `rough`: true on every fix of the phone-fed watch (a hundred-metre read, cn-v1208);
+ *  the WebView's watch never sets it. */
+type WatchFix = (r: { coords: GeoCoords; accuracy: number; ts: number; rough?: boolean }) => void;
+type WatchError = (status: "denied" | "timeout" | "unavailable" | "insecure") => void;
+
+/** A fix that is not a position: an accuracy that is not a finite number of zero or more
+ *  (CoreLocation marks an invalid fix with a negative one), or a coordinate that is not finite.
+ *  Exported for the fence's sharp proof (lib/fence-live), which reads through getPosition. */
+export function notAPosition(r: { coords: GeoCoords; accuracy: number }): boolean {
+  return !(Number.isFinite(r.accuracy) && r.accuracy >= 0) || !Number.isFinite(r.coords.lat) || !Number.isFinite(r.coords.lng);
+}
+
+/**
+ * THE LIVE WATCH IN A SHELL WHOSE NATIVE READ HONORS A HUNDRED METRES (cn-v1208; see the header). The first read is due
+ * WATCH_FIRST_MS after the call, and each next one WATCH_EVERY_MS after the last read ends, so reads
+ * never overlap; every read, the first too, that falls due while the page is hidden is skipped and
+ * asked again one interval later. WHY THE FIRST READ WAITS: the monitor arms this watch on every
+ * return to the app, and on every return the wake exit check asks the phone for a SHARP read. The
+ * phone keeps one read at a time (GeofencePlugin.swift, currentPosition): a sharp caller that comes
+ * while a coarse read is out is held until it ends and then waits for a Best read of its own, while a
+ * coarse caller may ride a sharp read already out. So the watch waits, the wake check reaches the
+ * phone first, and the watch's first read rides it.
+ * Every read asks the phone for a hundred metres, whatever opts.enableHighAccuracy says: a Best read
+ * waits for GPS and indoors can run out the phone's own 10 s (the cn-v1201 lesson above). Each fix is
+ * marked `rough: true`, so the fence may count it as INSIDE but asks one sharp read of its own before
+ * a fix counts as OUTSIDE (geofence-monitor, LIVE WATCH). A fix that is not a position (notAPosition)
+ * is dropped silently, and so is a fix older than a finite opts.maximumAge (a fix with no age is
+ * passed on). "denied", and a phone not asked yet or a plugin without the method (nativePosition's
+ * null, said as "unavailable"), stop the watch; a timeout or an unavailable read is said and the
+ * watch goes on. It never hands over to the WebView. The next read is set before a callback runs and
+ * a callback's throw is caught and warned in fixed words, so a throwing callback neither ends the
+ * watch nor vanishes. The cleanup stops the timer, and a read that answers after it calls neither
+ * callback.
+ */
+function nativeWatch(p: NativeGeo, onFix: WatchFix, onError: WatchError, opts?: PositionOptions): () => void {
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const maxAge = typeof opts?.maximumAge === "number" && Number.isFinite(opts.maximumAge) ? opts.maximumAge : null;
+  const call = (fn: () => void) => {
+    try {
+      fn();
+    } catch {
+      // Fixed words only: the error could carry a position.
+      console.warn("[geo] a live-watch callback threw");
+    }
+  };
+  const later = () => {
+    if (!stopped) timer = setTimeout(due, WATCH_EVERY_MS);
+  };
+  const due = () => {
+    timer = null;
+    if (stopped) return;
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") return later();
+    read();
+  };
+  const read = () => {
+    void nativePosition(p, false).then((r) => {
+      if (stopped) return;
+      if (!r) {
+        stopped = true;
+        call(() => onError("unavailable"));
+        return;
+      }
+      if (r.status === "denied") {
+        stopped = true;
+        call(() => onError("denied"));
+        return;
+      }
+      later(); // scheduled before the callback, so a callback that throws cannot end the watch
+      // nativePosition never answers "insecure" (that is the WebView's word); the type allows it, so
+      // were it ever to, it is said and the watch goes on, like a timeout.
+      if (r.status !== "ok") return call(() => onError(r.status));
+      if (notAPosition(r)) return;
+      if (maxAge !== null && r.fixAgeMs !== undefined && r.fixAgeMs > maxAge) return;
+      call(() => onFix({ coords: r.coords, accuracy: r.accuracy, ts: r.ts, rough: true }));
+    });
+  };
+  timer = setTimeout(due, WATCH_FIRST_MS);
+  return () => {
+    stopped = true;
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+  };
+}
+
 /**
  * Continuous watch with a REAL error handler (callers used to pass `() => {}`, so a watch that never
  * armed — GPS off, permission revoked mid-session — failed completely silently). Returns a cleanup fn
- * (no-op if geolocation is unavailable). `onError` receives the same discriminated status.
+ * (no-op if geolocation is unavailable). `onError` receives the same discriminated status. In a shell
+ * whose native read honors a hundred metres the phone feeds it (nativeWatch, cn-v1208), every fix
+ * marked `rough: true`, and the WebView is never asked; elsewhere, the WebView's own watch, whose
+ * fixes carry no mark.
  */
 export function watchPosition(
-  onFix: (r: { coords: GeoCoords; accuracy: number; ts: number }) => void,
+  onFix: (r: { coords: GeoCoords; accuracy: number; ts: number; rough?: boolean }) => void,
   onError: (status: "denied" | "timeout" | "unavailable" | "insecure") => void,
   opts?: PositionOptions,
 ): () => void {
+  // Only a shell whose read honors a hundred metres (hasCoarseRead). A shell that reads natively but
+  // only at Best keeps the WebView's watch below, exactly as before.
+  const p = hasCoarseRead() ? shellPlugin() : null;
+  if (p) return nativeWatch(p, onFix, onError, opts);
   if (typeof navigator === "undefined" || !navigator.geolocation) {
     onError("unavailable");
     return () => {};

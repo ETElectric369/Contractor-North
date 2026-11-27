@@ -14,6 +14,8 @@ type Fake = { arm: () => void; status: ReturnType<typeof vi.fn>; currentPosition
 let fake: Fake;
 let store: Map<string, string>;
 let webGet: ReturnType<typeof vi.fn>;
+let webWatch: ReturnType<typeof vi.fn>;
+let webClear: ReturnType<typeof vi.fn>;
 let permState: string;
 let docListeners: Record<string, (() => void)[]>;
 let visibility = "visible";
@@ -37,6 +39,9 @@ beforeEach(() => {
     currentPosition: vi.fn(async () => ({ latitude: 39.3, longitude: -120.2, accuracy: 15, timestamp: Date.now() })),
   };
   webGet = vi.fn((ok: (p: unknown) => void) => ok({ coords: { latitude: 1, longitude: 2, accuracy: 30 } }));
+  webWatch = vi.fn(() => 7);
+  webClear = vi.fn();
+  visibility = "visible";
   vi.stubGlobal("window", { isSecureContext: true });
   vi.stubGlobal("localStorage", {
     getItem: (k: string) => store.get(k) ?? null,
@@ -45,7 +50,7 @@ beforeEach(() => {
   });
   vi.stubGlobal("navigator", {
     userAgent: "test",
-    geolocation: { getCurrentPosition: webGet },
+    geolocation: { getCurrentPosition: webGet, watchPosition: webWatch, clearWatch: webClear },
     permissions: { query: async () => ({ state: permState }) },
   });
   vi.stubGlobal("document", {
@@ -186,6 +191,27 @@ describe("one cache: gps:last, ≤ 10 minutes, never across a resume", () => {
     expect(g.lastFix()).toBeNull();
     expect(g.LAST_FIX_MAX_MS).toBe(10 * 60 * 1000);
   });
+  it("cn-v1208: a fix that is not a position is never kept as the shared last fix; the read itself answers as before", async () => {
+    const g = await load();
+    const bads = [
+      { latitude: 39.3, longitude: -120.2, accuracy: -1 },
+      { latitude: 39.3, longitude: -120.2, accuracy: Number.NaN },
+      { latitude: Number.NaN, longitude: -120.2, accuracy: 15 },
+      { latitude: 39.3, longitude: Number.POSITIVE_INFINITY, accuracy: 15 },
+    ];
+    for (const [i, bad] of bads.entries()) {
+      fake.currentPosition.mockResolvedValueOnce({ ...bad, timestamp: Date.now() });
+      const r = await g.getPunchPosition();
+      expect(r.status, `row ${i}`).toBe("ok"); // what such a fix is worth stays the caller's rule (fixWord, the watch, the fence)
+      expect(store.has("gps:last"), `row ${i}`).toBe(false);
+      expect(g.lastFix(), `row ${i}`).toBeNull();
+    }
+    await g.getPosition(); // a real position is kept, as before
+    expect(JSON.parse(store.get("gps:last")!)).toMatchObject({ lat: 39.3, lng: -120.2, accuracy: 15 });
+    expect(g.notAPosition({ coords: { lat: 39.3, lng: -120.2 }, accuracy: 0 })).toBe(false);
+    expect(g.notAPosition({ coords: { lat: 39.3, lng: -120.2 }, accuracy: -1 })).toBe(true);
+  });
+
   it("a fix written before cn-v1142 ({ ts }) still reads; a long-window reader keeps it", async () => {
     store.set("gps:last", JSON.stringify({ lat: 3, lng: 4, ts: Date.now() - 60 * 60_000 }));
     const g = await load();
@@ -320,5 +346,338 @@ describe("getPunchPosition: a hundred metres in the shell, the caller's options 
     expect(await g.shellAuthorization()).toBeNull();
     shell.on = false;
     expect(await g.shellAuthorization()).toBeNull();
+  });
+});
+
+/**
+ * THE FENCE'S LIVE WATCH READS THROUGH THE PHONE (cn-v1208, "when it refreshed it asked me to allow my
+ * location again"). In a shell that reads natively, watchPosition() is fed by the phone's own
+ * hundred-metre read: the first WATCH_FIRST_MS after the call, then one WATCH_EVERY_MS after each read
+ * ends, each only while the page is visible, never the WebView; every fix is marked rough, a fix that
+ * is not a position is dropped, and a throwing callback is warned in fixed words and never ends the
+ * watch. A browser, an older shell, and a shell whose native read is Best only keep the WebView's own
+ * watch. Positions here are plainly fake.
+ */
+describe("watchPosition: the phone feeds it in the shell, the WebView elsewhere", () => {
+  const OPTS = { enableHighAccuracy: true, maximumAge: 30_000, timeout: 60_000 }; // the fence's own options
+  // Today's shell: the native read AND the 2026-11-16 build's mark (it honors a hundred metres).
+  beforeEach(() => withHeaders(["arm", "disarm", "readPendingExit", "status", "currentPosition", "openSettings"]));
+  const flush = () => vi.advanceTimersByTimeAsync(0);
+  /** The first read is due WATCH_FIRST_MS (2 s) after the call; this runs the clock to it and lets it answer. */
+  const first = () => vi.advanceTimersByTimeAsync(2_000);
+  const fix = (timestamp?: number) => ({ latitude: 0.5, longitude: 1.5, accuracy: 20, ...(timestamp === undefined ? {} : { timestamp }) });
+  const noWeb = () => {
+    expect(webWatch).not.toHaveBeenCalled();
+    expect(webGet).not.toHaveBeenCalled();
+  };
+
+  it("R1/R6: in the shell the phone is read, a cleanup comes back, and the WebView's watch and read are never called", async () => {
+    vi.useFakeTimers();
+    const g = await load();
+    const onFix = vi.fn();
+    const onErr = vi.fn();
+    const stop = g.watchPosition(onFix, onErr, OPTS);
+    expect(typeof stop).toBe("function");
+    await first();
+    expect(onFix).toHaveBeenCalledWith({ coords: { lat: 39.3, lng: -120.2 }, accuracy: 15, ts: expect.any(Number), rough: true });
+    expect(Object.keys(onFix.mock.calls[0][0]).sort()).toEqual(["accuracy", "coords", "rough", "ts"]);
+    // errors, a not-asked phone and many intervals later: still never the WebView
+    fake.currentPosition.mockRejectedValueOnce({ code: "timeout", message: "timeout" });
+    await vi.advanceTimersByTimeAsync(g.WATCH_EVERY_MS * 3);
+    fake.currentPosition.mockRejectedValueOnce({ code: "not-determined", message: "not-determined" });
+    await vi.advanceTimersByTimeAsync(g.WATCH_EVERY_MS * 3);
+    stop();
+    expect(onErr).toHaveBeenCalledWith("timeout");
+    expect(onErr).toHaveBeenLastCalledWith("unavailable");
+    noWeb();
+    expect(webClear).not.toHaveBeenCalled();
+  });
+
+  it("hasCoarseRead: the native read AND the 2026-11-16 build's mark, never one alone, never off the shell", async () => {
+    const g = await load();
+    expect(g.hasCoarseRead()).toBe(true);
+    withHeaders(["arm", "disarm", "readPendingExit", "status", "currentPosition"]);
+    expect(g.hasNativeRead()).toBe(true);
+    expect(g.hasCoarseRead()).toBe(false);
+    withHeaders(["arm", "status", "openSettings"]);
+    expect(g.hasCoarseRead()).toBe(false);
+    withHeaders(["arm", "disarm", "readPendingExit", "status", "currentPosition", "openSettings"]);
+    shell.on = false;
+    expect(g.hasCoarseRead()).toBe(false);
+  });
+
+  it("R1: the browser path is untouched — Safari, an older shell, and a shell whose native read is Best only keep the WebView's own watch with the caller's options, and no rough mark", async () => {
+    for (const where of ["safari", "older shell", "best-only shell"]) {
+      webWatch.mockClear();
+      webClear.mockClear();
+      fake.currentPosition.mockClear();
+      if (where === "safari") shell.on = false;
+      else {
+        shell.on = true;
+        // "best-only": the builds of 2026-11-04 to 11-16 read natively but ignore highAccuracy false.
+        withHeaders(where === "older shell" ? ["arm", "status"] : ["arm", "disarm", "readPendingExit", "status", "currentPosition"]);
+      }
+      const g = await load();
+      const onFix = vi.fn();
+      const onErr = vi.fn();
+      const stop = g.watchPosition(onFix, onErr, OPTS);
+      expect(webWatch).toHaveBeenCalledTimes(1);
+      expect(webWatch.mock.calls[0][2]).toBe(OPTS);
+      const [ok, bad] = webWatch.mock.calls[0] as [(p: unknown) => void, (e: unknown) => void];
+      ok({ coords: { latitude: 0.5, longitude: 1.5, accuracy: 30 }, timestamp: 1 });
+      expect(onFix).toHaveBeenCalledWith({ coords: { lat: 0.5, lng: 1.5 }, accuracy: 30, ts: expect.any(Number) });
+      expect("rough" in onFix.mock.calls[0][0]).toBe(false);
+      bad({ code: 1, PERMISSION_DENIED: 1, TIMEOUT: 3 });
+      bad({ code: 3, PERMISSION_DENIED: 1, TIMEOUT: 3 });
+      bad({ code: 2, PERMISSION_DENIED: 1, TIMEOUT: 3 });
+      expect(onErr.mock.calls.map((c) => c[0])).toEqual(["denied", "timeout", "unavailable"]);
+      stop();
+      expect(webClear).toHaveBeenCalledWith(7);
+      expect(fake.currentPosition).not.toHaveBeenCalled();
+    }
+  });
+
+  it("R2/F3: the first read is due WATCH_FIRST_MS (2 s) after the call, not at once; then WATCH_EVERY_MS (15 s) after the last one ends", async () => {
+    vi.useFakeTimers();
+    const g = await load();
+    expect(g.WATCH_FIRST_MS).toBe(2_000);
+    expect(g.WATCH_EVERY_MS).toBe(15_000);
+    const onFix = vi.fn();
+    const stop = g.watchPosition(onFix, vi.fn(), OPTS);
+    expect(fake.currentPosition).not.toHaveBeenCalled(); // not at once: the wake check's sharp read goes first
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(fake.currentPosition).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fake.currentPosition).toHaveBeenCalledTimes(1);
+    expect(onFix).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(fake.currentPosition).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fake.currentPosition).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(fake.currentPosition).toHaveBeenCalledTimes(3);
+    expect(onFix).toHaveBeenCalledTimes(3);
+    stop();
+    noWeb();
+  });
+
+  it("F3: the first read obeys the hidden rule too — skipped while hidden, asked one interval later", async () => {
+    vi.useFakeTimers();
+    visibility = "hidden";
+    const g = await load();
+    const stop = g.watchPosition(vi.fn(), vi.fn(), OPTS);
+    await vi.advanceTimersByTimeAsync(2_000 + 15_000 * 3);
+    expect(fake.currentPosition).not.toHaveBeenCalled();
+    visibility = "visible";
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(fake.currentPosition).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it("R2: reads never overlap — a slow read holds the next one until it ends", async () => {
+    vi.useFakeTimers();
+    let answer: (v: unknown) => void = () => {};
+    fake.currentPosition.mockImplementationOnce(() => new Promise((res) => (answer = res)));
+    const g = await load();
+    const onFix = vi.fn();
+    const stop = g.watchPosition(onFix, vi.fn(), OPTS);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fake.currentPosition).toHaveBeenCalledTimes(1);
+    answer(fix(Date.now()));
+    await flush();
+    expect(onFix).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(fake.currentPosition).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fake.currentPosition).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it("R2: hidden skips — a read due while the page is hidden is skipped and asked again one interval later", async () => {
+    vi.useFakeTimers();
+    const g = await load();
+    const stop = g.watchPosition(vi.fn(), vi.fn(), OPTS);
+    await first();
+    visibility = "hidden";
+    await vi.advanceTimersByTimeAsync(15_000 * 4);
+    expect(fake.currentPosition).toHaveBeenCalledTimes(1);
+    visibility = "visible";
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(fake.currentPosition).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fake.currentPosition).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it("R2: the cleanup stops the timer, and cleanup silences a late answer", async () => {
+    vi.useFakeTimers();
+    const g = await load();
+    const onFix = vi.fn();
+    const onErr = vi.fn();
+    const before = g.watchPosition(vi.fn(), vi.fn(), OPTS);
+    expect(vi.getTimerCount()).toBe(1); // the first read waits on its timer
+    before();
+    expect(vi.getTimerCount()).toBe(0); // a cleanup before the first read stops it
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(fake.currentPosition).not.toHaveBeenCalled();
+    const stop = g.watchPosition(onFix, onErr, OPTS);
+    await first();
+    expect(vi.getTimerCount()).toBe(1); // the next read waits on its timer
+    stop();
+    expect(vi.getTimerCount()).toBe(0); // the cleanup stopped it
+    await vi.advanceTimersByTimeAsync(15_000 * 4);
+    expect(fake.currentPosition).toHaveBeenCalledTimes(1);
+    for (const late of [{ ok: fix(Date.now()) }, { err: { code: "denied", message: "denied" } }, { err: { code: "timeout", message: "timeout" } }]) {
+      let answer: (v: unknown) => void = () => {};
+      let refuse: (e: unknown) => void = () => {};
+      fake.currentPosition.mockImplementationOnce(() => new Promise((res, rej) => ((answer = res), (refuse = rej))));
+      const f = vi.fn();
+      const e = vi.fn();
+      const s = g.watchPosition(f, e, OPTS);
+      await first(); // the read is out
+      s();
+      if ("ok" in late) answer(late.ok);
+      else refuse(late.err);
+      await vi.advanceTimersByTimeAsync(15_000 * 2);
+      expect(f).not.toHaveBeenCalled();
+      expect(e).not.toHaveBeenCalled();
+    }
+    expect(onFix).toHaveBeenCalledTimes(1);
+    expect(onErr).not.toHaveBeenCalled();
+    expect(fake.currentPosition).toHaveBeenCalledTimes(4); // one per watch that reached its first read, none after a cleanup
+  });
+
+  it("R3: every read asks the phone for a hundred metres, whatever enableHighAccuracy says", async () => {
+    vi.useFakeTimers();
+    const g = await load();
+    for (const o of [OPTS, { enableHighAccuracy: true }, undefined, { enableHighAccuracy: false }]) {
+      fake.currentPosition.mockClear();
+      const stop = g.watchPosition(vi.fn(), vi.fn(), o);
+      await vi.advanceTimersByTimeAsync(2_000 + 15_000);
+      expect(fake.currentPosition).toHaveBeenCalledTimes(2);
+      for (const c of fake.currentPosition.mock.calls) expect(c[0]).toEqual({ timeout: 10_000, highAccuracy: false });
+      stop();
+    }
+  });
+
+  it("R4: a stale fix is dropped (older than a finite maximumAge); exactly the limit and no age pass", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-27T16:00:00Z"));
+    const g = await load();
+    const onFix = vi.fn();
+    const onErr = vi.fn();
+    fake.currentPosition
+      .mockImplementationOnce(async () => fix(Date.now() - 30_001))
+      .mockImplementationOnce(async () => fix(Date.now() - 30_000))
+      .mockImplementationOnce(async () => fix());
+    const stop = g.watchPosition(onFix, onErr, OPTS);
+    await first();
+    expect(onFix).not.toHaveBeenCalled();
+    expect(onErr).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(onFix).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(onFix).toHaveBeenCalledTimes(2);
+    expect(onErr).not.toHaveBeenCalled();
+    stop();
+    // no finite maximumAge: an hour-old fix is passed on
+    for (const o of [undefined, { maximumAge: Infinity }]) {
+      fake.currentPosition.mockImplementationOnce(async () => fix(Date.now() - 3_600_000));
+      const f = vi.fn();
+      const s = g.watchPosition(f, vi.fn(), o);
+      await first();
+      expect(f).toHaveBeenCalledTimes(1);
+      s();
+    }
+  });
+
+  it("F2: a fix that is not a position is dropped silently — accuracy negative or not finite, a coordinate not finite — and the watch goes on", async () => {
+    vi.useFakeTimers();
+    const g = await load();
+    const bad = [
+      { latitude: 0.5, longitude: 1.5, accuracy: -1 },
+      { latitude: 0.5, longitude: 1.5, accuracy: NaN },
+      { latitude: 0.5, longitude: 1.5, accuracy: Infinity },
+      { latitude: NaN, longitude: 1.5, accuracy: 20 },
+      { latitude: 0.5, longitude: Infinity, accuracy: 20 },
+    ];
+    for (const b of bad) fake.currentPosition.mockImplementationOnce(async () => b);
+    fake.currentPosition.mockImplementationOnce(async () => ({ latitude: 0.5, longitude: 1.5, accuracy: 0 })); // zero is a position
+    const onFix = vi.fn();
+    const onErr = vi.fn();
+    const stop = g.watchPosition(onFix, onErr, OPTS);
+    await first();
+    await vi.advanceTimersByTimeAsync(15_000 * bad.length);
+    expect(fake.currentPosition).toHaveBeenCalledTimes(bad.length + 1);
+    expect(onErr).not.toHaveBeenCalled();
+    expect(onFix.mock.calls).toEqual([[{ coords: { lat: 0.5, lng: 1.5 }, accuracy: 0, ts: expect.any(Number), rough: true }]]);
+    stop();
+  });
+
+  it("F4: a callback that throws does not end the watch and is warned in fixed words only, never the error", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const g = await load();
+    const onFix = vi.fn(() => {
+      throw new Error("a position could be in here");
+    });
+    const onErr = vi.fn(() => {
+      throw new Error("a position could be in here");
+    });
+    fake.currentPosition.mockImplementationOnce(async () => fix()).mockRejectedValueOnce({ code: "timeout", message: "timeout" });
+    const stop = g.watchPosition(onFix, onErr, OPTS);
+    await first();
+    await vi.advanceTimersByTimeAsync(15_000 * 2);
+    expect(onFix).toHaveBeenCalledTimes(2); // the read after the throw came
+    expect(onErr).toHaveBeenCalledTimes(1);
+    expect(fake.currentPosition).toHaveBeenCalledTimes(3);
+    expect(warn.mock.calls).toEqual([["[geo] a live-watch callback threw"], ["[geo] a live-watch callback threw"], ["[geo] a live-watch callback threw"]]);
+    stop();
+    warn.mockRestore();
+  });
+
+  it("R5: denied stops it — said once, and no read after it", async () => {
+    vi.useFakeTimers();
+    fake.currentPosition.mockRejectedValueOnce({ code: "denied", message: "denied" });
+    const g = await load();
+    const onErr = vi.fn();
+    g.watchPosition(vi.fn(), onErr, OPTS);
+    await vi.advanceTimersByTimeAsync(15_000 * 10);
+    expect(onErr.mock.calls).toEqual([["denied"]]);
+    expect(fake.currentPosition).toHaveBeenCalledTimes(1);
+    noWeb();
+  });
+
+  it("R5: a timeout and an unavailable read are said and the watch goes on", async () => {
+    vi.useFakeTimers();
+    fake.currentPosition
+      .mockRejectedValueOnce({ code: "timeout", message: "timeout" })
+      .mockImplementationOnce(async () => ({})) // no position: unavailable
+      .mockRejectedValueOnce(new Error("something else"));
+    const g = await load();
+    const onFix = vi.fn();
+    const onErr = vi.fn();
+    const stop = g.watchPosition(onFix, onErr, OPTS);
+    await vi.advanceTimersByTimeAsync(2_000 + 15_000 * 3);
+    expect(onErr.mock.calls.map((c) => c[0])).toEqual(["timeout", "unavailable", "unavailable"]);
+    expect(fake.currentPosition).toHaveBeenCalledTimes(4);
+    expect(onFix).toHaveBeenCalledTimes(1);
+    stop();
+    noWeb();
+  });
+
+  it("R5: a phone not asked yet, or a plugin without the method → 'unavailable' once and STOP, never the WebView", async () => {
+    vi.useFakeTimers();
+    const g = await load();
+    for (const code of ["not-determined", "UNIMPLEMENTED"]) {
+      fake.currentPosition.mockClear();
+      fake.currentPosition.mockRejectedValueOnce({ code, message: code });
+      const onErr = vi.fn();
+      g.watchPosition(vi.fn(), onErr, OPTS);
+      await vi.advanceTimersByTimeAsync(15_000 * 10);
+      expect(onErr.mock.calls).toEqual([["unavailable"]]);
+      expect(fake.currentPosition).toHaveBeenCalledTimes(1);
+    }
+    noWeb();
   });
 });

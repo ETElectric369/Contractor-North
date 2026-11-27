@@ -65,7 +65,7 @@ describe("the monitor's two reads go through one gate, and the fence says what i
   it("one gate: the shell's answer first, then the web rule", () => {
     expect(m).toContain('return (await shellMayReadLocation()) ?? ((await geoPermission()) === "granted");');
     expect(m).not.toContain('if ((await geoPermission()) !== "granted") {');
-    expect((m.match(/await mayReadLocation\(\)/g) ?? []).length).toBe(2); // the wake check + the live watch
+    expect((m.match(/await mayReadLocation\(\)/g) ?? []).length).toBe(3); // the wake check + the live watch + the live watch's sharp read (cn-v1208)
   });
   it("trace lines for the check, the fix, the adoption, the closed window and the watch", () => {
     for (const t of ['trace("fence check"', 'trace("fence fix"', 'trace("fence adopt"', 'trace("fence window closed")', 'trace("fence watch", "armed")']) {
