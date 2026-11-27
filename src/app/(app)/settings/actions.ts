@@ -802,7 +802,10 @@ export async function updateMember(
 }
 
 /** Owner/admin resets a member's login email and/or password (needs the
- *  service-role key). The owner hands the new password to the employee. */
+ *  service-role key). The owner hands the new password to the employee.
+ *  NOT ONE'S OWN PASSWORD (cn-v1202): a password for the caller's own id is refused before any
+ *  admin call, because a person's own password has one door (Settings › You › Change My Password),
+ *  and this admin path can end the session doing the change. The caller's own email still changes here. */
 export async function updateMemberAuth(
   id: string,
   patch: { email?: string; password?: string },
@@ -826,6 +829,9 @@ export async function updateMemberAuth(
   // the owner may rewrite the owner's login (their own).
   if ((target as { role?: string }).role === "owner" && me.role !== "owner") {
     return { ok: false, error: "Only the owner can change the owner's login." };
+  }
+  if (id === user.id && patch.password) {
+    return { ok: false, error: "Change your own password in Settings › You › Change My Password." };
   }
 
   const { adminConfigured, createAdminClient } = await import("@/lib/supabase/admin");

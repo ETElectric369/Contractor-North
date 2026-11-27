@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input";
  *      explicit token — "email"/"name"/"organization" when it honestly is one, "off" otherwise,
  *      "new-password" on a teammate's password;
  *      (the four sign-in doors below are left exactly as they are and are not judged by this rule);
- *   3. only the four sign-in doors (login, reset, set-password, the portal's sign-in) may say
+ *   3. only the four sign-in doors (login, set-password, Settings' Change My Password, the portal's sign-in) may say
  *      "username" or "current-password";
  *   4. on those four doors a password field (<PasswordInput>, or type="password") declares
  *      "new-password" or "current-password" — never the <Input> default "off", which hides it from
@@ -36,8 +36,8 @@ const ROOT = process.cwd();
 
 const SIGN_IN_FILES = [
   "src/app/login/page.tsx",
-  "src/app/reset/page.tsx",
   "src/app/set-password/set-password-form.tsx",
+  "src/app/(app)/settings/change-password.tsx",
   "src/components/portal/portal-sign-in.tsx",
 ];
 const INPUT_TAGS = new Set(["input", "Input", "PasswordInput", "PhoneInput"]);
@@ -165,7 +165,7 @@ describe("the checker reads the shapes a field takes", () => {
   });
 
   it("a sign-in door's password field must say new-password or current-password", () => {
-    const door = "src/app/reset/page.tsx";
+    const door = "src/app/set-password/set-password-form.tsx";
     expect(checkFields(`const A = () => <PasswordInput id="password" name="password" />;`, door).problems).toHaveLength(1);
     expect(checkFields(`const A = () => <PasswordInput autoComplete="off" />;`, door).problems).toHaveLength(1);
     expect(checkFields(`const A = () => <Input type="password" />;`, door).problems).toHaveLength(1);
@@ -212,4 +212,25 @@ describe("every field in the app declares what it is", () => {
     const offenders = results.flatMap((r) => r.problems.map((p) => `${r.file}:${p.line} <${p.tag}> ${p.problem}`));
     expect(offenders).toEqual([]);
   }, 60_000);
+});
+
+describe("a new-password form names its account (cn-v1202)", () => {
+  // A password manager files a new password under the account the form names; without a username
+  // field it may save it nameless and keep offering the old one at sign-in.
+  for (const f of ["src/app/(app)/settings/change-password.tsx", "src/app/set-password/set-password-form.tsx"]) {
+    it(`${f} carries a hidden username field with autoComplete="username"`, () => {
+      const src = readFileSync(join(ROOT, f), "utf8");
+      const sf = ts.createSourceFile(f, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+      const found: string[] = [];
+      const visit = (n: ts.Node) => {
+        if ((ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) && n.tagName.getText(sf) === "input") {
+          const a = new Map(n.attributes.properties.filter(ts.isJsxAttribute).map((p) => [p.name.getText(sf), p.initializer?.getText(sf) ?? ""]));
+          if (a.get("autoComplete") === '"username"' && a.get("name") === '"username"') found.push(a.get("type") ?? "");
+        }
+        ts.forEachChild(n, visit);
+      };
+      visit(sf);
+      expect(found).toEqual(['"text"']);
+    });
+  }
 });

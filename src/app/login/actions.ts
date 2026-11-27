@@ -145,28 +145,6 @@ export async function requestPasswordReset(formData: FormData) {
   redirect(`/forgot?message=${encodeURIComponent(t("au_resetOnItsWay"))}`);
 }
 
-export async function updatePassword(formData: FormData) {
-  const supabase = await createClient();
-  const t = await words();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/forgot");
-
-  const password = String(formData.get("password") ?? "");
-  if (password.length < 6) {
-    redirect(`/reset?error=${encodeURIComponent(t("au_password6"))}`);
-  }
-
-  const { error } = await supabase.auth.updateUser({ password });
-  if (error) {
-    redirect(`/reset?error=${encodeURIComponent(error.message)}`);
-  }
-
-  revalidatePath("/", "layout");
-  redirect("/planner");
-}
-
 const enc = encodeURIComponent;
 
 /** Passwordless login — email the user a code (no password to remember). Existing users

@@ -29,7 +29,7 @@ export default async function SetPasswordPage() {
           <h1 className="text-lg font-semibold text-slate-900">{t("au_chooseYourPassword")}</h1>
           <p className="mt-1 text-sm text-slate-500">{t("au_chooseSub")}</p>
           <div className="mt-5">
-            <SetPasswordForm />
+            <SetPasswordForm email={user.email ?? ""} />
           </div>
         </div>
       </div>

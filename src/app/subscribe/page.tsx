@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import { NO_INDEX } from "@/lib/no-index";
 import { shellFromUserAgent } from "@/lib/native-shell";
 import { PICK_PLAN_WEB_ONLY } from "@/app/(app)/settings/billing-doors";
-import { Zap, LogOut } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { billingEnabled } from "@/lib/stripe";
 import { accessState, isCompedOrg, type AccessState, type BillingOrg } from "@/lib/subscription";
@@ -108,9 +108,8 @@ export default async function SubscribePage({
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand to-brand-dark px-4">
       <div className="w-full max-w-3xl">
         <div className="mb-8 text-center text-white">
-          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 backdrop-blur">
-            <Zap className="h-7 w-7" />
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/icon-192.png" alt="Contractor North" className="mx-auto mb-3 h-16 w-16 rounded-2xl shadow-lg ring-1 ring-white/15" />
           <h1 className="text-2xl font-bold tracking-tight">{headline}</h1>
           <p className="mt-1 text-sm text-white/80">{subline}</p>
         </div>

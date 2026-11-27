@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Pencil, Eye, EyeOff, UserCog } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -36,7 +37,10 @@ interface Member {
  *  fill in the inspection on a visit they're on, and that reads no switch, so the office must
  *  always be able to grant it and take it away. `dailyReports` (the 0352 switch) only picks the
  *  box's line: off, it says nothing about a clock-out report. The home address and commute
- *  baseline stay whatever the switches: the Tax Report's mileage deduction reads them. */
+ *  baseline stay whatever the switches: the Tax Report's mileage deduction reads them.
+ *  ONE DOOR FOR ONE'S OWN PASSWORD (cn-v1202): on the person's own row the password box is not
+ *  drawn, only a link to Settings › You › Change My Password, because a person's own password has
+ *  one door, and this admin path (updateUserById) can end the very session making the change. */
 export function EditMemberButton({
   member,
   isSelf,
@@ -223,15 +227,27 @@ export function EditMemberButton({
               <Label htmlFor="m-email">Email</Label>
               <Input id="m-email" type="email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} disabled={!authConfigured} />
             </div>
-            <div className="mt-3">
-              <Label htmlFor="m-pw">New password (optional)</Label>
-              <div className="flex gap-2">
-                <Input id="m-pw" type={showPw ? "text" : "password"} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Leave blank to keep" disabled={!authConfigured} />
-                <Button type="button" size="sm" variant="outline" onClick={() => setShowPw((v) => !v)} disabled={!authConfigured} aria-label="Toggle password">
-                  {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
+            {isSelf ? (
+              // One door for one's own password (cn-v1202): Settings › You › Change My Password. The
+              // words match the catalog's English sh_changeMyPassword and sh_you (pinned by a test).
+              <p className="mt-3 text-sm text-slate-500">
+                To change your own password, use{" "}
+                <Link href="/settings?tab=you" className="font-medium text-brand underline">
+                  Change My Password
+                </Link>{" "}
+                in Settings › You.
+              </p>
+            ) : (
+              <div className="mt-3">
+                <Label htmlFor="m-pw">New password (optional)</Label>
+                <div className="flex gap-2">
+                  <Input id="m-pw" type={showPw ? "text" : "password"} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Leave blank to keep" disabled={!authConfigured} />
+                  <Button type="button" size="sm" variant="outline" onClick={() => setShowPw((v) => !v)} disabled={!authConfigured} aria-label="Toggle password">
+                    {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </Modal>

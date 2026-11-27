@@ -9,7 +9,9 @@ import { useLang } from "@/components/lang-provider";
 import { translator } from "@/lib/i18n";
 import { updateMyPassword } from "./actions";
 
-export function SetPasswordForm() {
+/** `email` (cn-v1202): the signed-in person's address, from the page's own getUser, drawn as a
+ *  hidden username field so a password manager files the new password under this account. */
+export function SetPasswordForm({ email = "" }: { email?: string }) {
   const router = useRouter();
   // The page mounts a LangProvider from the person's profile (cn-v1138); outside one it is English.
   const t = translator(useLang());
@@ -33,6 +35,7 @@ export function SetPasswordForm() {
 
   return (
     <form onSubmit={submit} className="space-y-4">
+      {email && <input type="text" name="username" autoComplete="username" value={email} readOnly tabIndex={-1} aria-hidden="true" style={{ display: "none" }} />}
       <div>
         <Label htmlFor="pw">{t("au_newPassword")}</Label>
         <Input id="pw" type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder={t("au_atLeast8")} autoFocus />

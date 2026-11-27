@@ -39,6 +39,7 @@ export const words: WordCatalog = {
     "src/app/(app)/settings/nort-tone.tsx",
     "src/app/(app)/settings/nort-greeting.tsx",
     "src/app/(app)/settings/passkey-manager.tsx",
+    "src/app/(app)/settings/change-password.tsx",
     "src/app/(app)/settings/avatar-upload.tsx",
     "src/app/(app)/settings/lead-sources.tsx",
     "src/components/feature-off-line.tsx",
@@ -340,6 +341,13 @@ export const words: WordCatalog = {
     sh_waitingForTap: "Waiting for Your Tap…",
     sh_addAnotherPasskey: "Add Another Passkey",
     sh_setUpPasskey: "Set Up Face ID / Passkey",
+
+    // ── Change My Password (change-password.tsx, cn-v1202): the row under the passkeys ──
+    sh_changeMyPassword: "Change My Password",
+    sh_savePassword: "Save Password",
+    sh_btn_cancel: "Cancel",
+    sh_passwordChangedOthers: "Password changed. Your other devices will ask you to sign in again.",
+    sh_passwordChanged: "Password changed.",
 
     // ── Your photo (avatar-upload.tsx) ──
     sh_changePhotoTitle: "Change photo",
@@ -704,6 +712,12 @@ export const words: WordCatalog = {
     sh_waitingForTap: "Esperando Tu Toque…",
     sh_addAnotherPasskey: "Agregar Otra Llave de Acceso",
     sh_setUpPasskey: "Configurar Face ID / Llave de Acceso",
+
+    sh_changeMyPassword: "Cambiar Mi Contraseña",
+    sh_savePassword: "Guardar Contraseña",
+    sh_btn_cancel: "Cancelar",
+    sh_passwordChangedOthers: "Contraseña cambiada. Tus otros dispositivos te pedirán iniciar sesión otra vez.",
+    sh_passwordChanged: "Contraseña cambiada.",
 
     sh_changePhotoTitle: "Cambiar foto",
     sh_changePhoto: "Cambiar Foto",

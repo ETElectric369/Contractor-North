@@ -11,8 +11,8 @@ import { CONTENT_ROOTS } from "@/lib/site-content-roots";
  */
 // Every REAL top-level app/site route segment (mirrors the route dirs under src/app, incl. the (app)
 // route-group children which are all served at root). A page slug matching any of these would either
-// shadow the route or — for routes linked/reachable on an org host, esp. the login → forgot → reset
-// password flow — be captured by the page resolver and dead-end at the homepage. Adding a new
+// shadow the route or — for routes linked/reachable on an org host, esp. the login → forgot → set-password
+// flow — be captured by the page resolver and dead-end at the homepage. Adding a new
 // top-level route means adding it here. Marketing slugs people actually want (about, portfolio,
 // services, faq, gallery, reviews…) are NOT app routes, so they stay available.
 export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
@@ -20,6 +20,7 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   // The homepage itself is "/" — a /home (or /index, /homepage) decoy page must be impossible
   "home", "index", "homepage",
   // Auth / onboarding (the login flow is the one app path reachable from an org's public site)
+  // "reset" names no page since cn-v1202 (the reset email lands on /set-password); it stays reserved.
   "login", "logout", "forgot", "reset", "set-password", "account-deactivated", "onboarding",
   "subscribe", "auth",
   // The Try Again screen the (app) layout sends a person to when the sign-in check got NO ANSWER

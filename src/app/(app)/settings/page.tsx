@@ -69,6 +69,7 @@ import { QuotePlaybookForm } from "./quote-playbook-form";
 import { AvatarUpload } from "./avatar-upload";
 import { CodeTemplatesManager } from "./code-templates-manager";
 import { PasskeyManager } from "./passkey-manager";
+import { ChangePassword } from "./change-password";
 import { NortTone } from "./nort-tone";
 import { NortGreeting } from "./nort-greeting";
 import { YourData } from "./your-data";
@@ -431,6 +432,7 @@ export default async function SettingsPage({
           <div className="mt-5 border-t border-slate-100 pt-4">
             <div className="mb-2 text-sm font-medium text-slate-700">{t("sh_signInSecurity")}</div>
             <PasskeyManager passkeys={passkeys} />
+            <ChangePassword email={profile?.email ?? ""} />
           </div>
         </Section>
         <Section title={t("sh_pushNotifications")}>

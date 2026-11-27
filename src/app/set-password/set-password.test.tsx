@@ -22,6 +22,7 @@ vi.mock("@/lib/supabase/server", () => ({
     auth: {
       getUser: async () => ({ data: { user: state.user } }),
       updateUser: async () => ({ error: state.updateError }),
+      signOut: async () => ({ error: null }),
     },
     from: () => ({
       select: () => ({ eq: () => ({ limit: () => ({ maybeSingle: async () => ({ data: { language: state.language }, error: null }) }) }) }),
@@ -78,8 +79,23 @@ describe("the action's refusals", () => {
     expect(await updateMyPassword("short")).toEqual({ ok: false, error: "La contraseña debe tener al menos 8 caracteres." });
     state.language = "en";
     expect(await updateMyPassword("short")).toEqual({ ok: false, error: "Password must be at least 8 characters." });
-    expect(await updateMyPassword("long enough 1")).toEqual({ ok: true });
+    expect(await updateMyPassword("long enough 1")).toEqual({ ok: true, othersSignedOut: true }); // cn-v1202: the other sessions signed out
     state.user = null;
     expect(await updateMyPassword("long enough 1")).toEqual({ ok: false, error: "Not signed in." });
+  });
+});
+
+describe("the first-password form after a save whose flag stuck (cn-v1202)", () => {
+  it("still shows the action's sentence, reading only ok and error (saved is the Settings row's business), and names its account from the page's own getUser", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(`${process.cwd()}/src/app/set-password/set-password-form.tsx`, "utf8");
+    // The form reads only ok and error: a saved answer with ok false shows its sentence.
+    expect(src).toContain('if (!res.ok) return setError(res.error ?? t("au_couldNotUpdate"));');
+    expect(src).not.toMatch(/\.saved\b/);
+    const page = renderToStaticMarkup(await SetPasswordPage());
+    expect(page).not.toContain('name="username"'); // the stand-in user has no email
+    state.user = { id: "larkspur", email: "sam@example.com" } as { id: string };
+    const named = renderToStaticMarkup(await SetPasswordPage());
+    expect(named).toMatch(/<form[^>]*><input[^>]*name="username"[^>]*value="sam@example.com"/);
   });
 });

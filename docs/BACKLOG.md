@@ -21,7 +21,9 @@ Size: XS (<1h) · S (≈half day) · M (≈1–2 days) · L (multi-day).
 - ⬜ **XS — Show/hide password toggle** on login + signup (the "eye" icon).
 - ⬜ **S — Forgot password** flow: "Forgot password?" link → email reset
   (Supabase `resetPasswordForEmail`) → `/reset` page to set a new one. Uses
-  Supabase's built-in email, no extra service needed.
+  Supabase's built-in email, no extra service needed. (Since cn-v1199 the app
+  sends the reset email itself and its button lands on `/set-password`; the old
+  `/reset` page was removed in cn-v1202.)
 
 ## 2. Leads & follow-up
 - 🟡 **S — Leads section**: customers already have a `lead` status. Add a Leads

@@ -329,3 +329,11 @@ describe("the bounce and the failed read", () => {
     expect(reportError).toHaveBeenCalledWith("subscribe:org-read", state.orgError, { orgId: "org-1" });
   });
 });
+
+describe("the mark above the headline (cn-v1202)", () => {
+  it("is the app icon the sign-in page draws, not a bolt", async () => {
+    const html = await render();
+    expect(html).toMatch(/<img[^>]*src="\/icon-192\.png"[^>]*alt="Contractor North"/);
+    expect(html).not.toMatch(/lucide-zap/);
+  });
+});

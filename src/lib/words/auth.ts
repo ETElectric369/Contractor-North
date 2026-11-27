@@ -5,7 +5,8 @@ import type { WordCatalog } from "./types";
  * sign-up), the errors those actions answer, Set A Password (the page, its form and its action) and
  * the crew import's one-time door (/auth/confirm), and since cn-v1199 the app's own sign-in and reset
  * emails (lib/auth-mail, au_mail_: the reader's profile language when the address has an account), and since cn-v1200
- * the Forgot Password page (forgot/page.tsx: one page for the browser and the phone app). With no profile to read yet, login and the
+ * the Forgot Password page (forgot/page.tsx: one page for the browser and the phone app), and since cn-v1202 the boxes and
+ * refusals of Settings › You › Change My Password (settings/change-password.tsx). With no profile to read yet, login and the
  * confirm door speak the phone's Accept-Language (lib/request-lang: the header's first tag, or the
  * `?lang=` the link carries); Set A Password has the session the link just made and asks callerLang.
  * The English is byte-for-byte what each screen said before. Every door label is Title Case in both
@@ -28,6 +29,7 @@ export const words: WordCatalog = {
     "src/app/auth/join/actions.ts",
     "src/lib/auth-mail.ts",
     "src/app/forgot/page.tsx",
+    "src/app/(app)/settings/change-password.tsx",
   ],
   sameInBoth: ["au_appName"],
   en: {
@@ -92,6 +94,9 @@ export const words: WordCatalog = {
     au_password8: "Password must be at least 8 characters.",
     au_passwordsDontMatch: "The passwords don't match.",
     au_couldNotUpdate: "Could not update your password.",
+    au_samePassword: "That's the password you have now. Pick a new one.",
+    au_signInFreshToChange: "To change it, sign out, choose \"{door}\" on the sign-in screen, and change it here.",
+    au_passwordTooLong: "That password is too long. Use a shorter one.",
     au_newPassword: "New password",
     au_atLeast8: "At least 8 characters",
     au_confirmPassword: "Confirm password",
@@ -184,6 +189,9 @@ export const words: WordCatalog = {
     au_password8: "La contraseña debe tener al menos 8 caracteres.",
     au_passwordsDontMatch: "Las contraseñas no coinciden.",
     au_couldNotUpdate: "No se pudo cambiar tu contraseña.",
+    au_samePassword: "Esa es la contraseña que ya tienes. Elige otra.",
+    au_signInFreshToChange: "Para cambiarla, cierra sesión, elige \"{door}\" en la pantalla de inicio de sesión y cámbiala aquí.",
+    au_passwordTooLong: "Esa contraseña es demasiado larga. Usa una más corta.",
     au_newPassword: "Contraseña nueva",
     au_atLeast8: "Al menos 8 caracteres",
     au_confirmPassword: "Confirma la contraseña",

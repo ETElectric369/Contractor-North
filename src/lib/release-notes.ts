@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1202", date: "2026-11-26", line: "New in Settings › You: Change My Password. One place to change your own password, for every role. The subscribe and page-not-found screens show the app's icon." },
   { version: "cn-v1201", date: "2026-11-26", line: "Clock In in the phone app now asks the phone for a location within a hundred metres, not a pinpoint. With no location, the note says why and what to do." },
   { version: "cn-v1200", date: "2026-11-26", line: "Forgot Password? now shows the same form in the phone app as in a browser, in your phone's language, and with the app's icon." },
   { version: "cn-v1199", date: "2026-11-26", line: "Email Me a Code now sends the app's own email, with the code and a Sign In button. Forgot Password? sends one with a Set My Password button." },

@@ -477,7 +477,7 @@ describe("4. the emailed links still find their key", () => {
       challenge = body.code_challenge;
       return json(200, {});
     };
-    const start = await (await createServerSb()).auth.resetPasswordForEmail("dana.rook@example.com", { redirectTo: `${APP}/auth/callback?next=/reset` });
+    const start = await (await createServerSb()).auth.resetPasswordForEmail("dana.rook@example.com", { redirectTo: `${APP}/auth/callback?next=/planner` });
     expect(start.error).toBeNull();
     // 0.12.7 also writes a per-flow slot and an index cookie (auth 2.111.0); 0.5.2 writes only this
     // one. The rule for both: the fixed key the callback reads (it passes no flow id) is there.
@@ -796,4 +796,31 @@ describe("6. the sign-in check answers within CHECK_DEADLINE_MS, through the rea
     // The guard that this rule did not go too far, a REFUSED refresh still clearing the session on
     // /login, is the case of group 2 "a refused refresh token: … (on the login page's own pass)".
   });
+});
+
+// ── 7 ────────────────────────────────────────────────────────────────────────────────────────────
+describe("7. Change My Password signs the OTHER sessions out and keeps this one (cn-v1202)", () => {
+  // set-password/actions updateMyPassword calls signOut({ scope: "others" }) on server.ts's client after
+  // a save. auth-js removes the stored session only for "local" and "global"; "others" asks the auth
+  // server to end every other session, by one POST to /logout?scope=others with this session's token.
+  for (const large of [false, true]) {
+    it(`server.ts createClient, ${large ? "chunked" : "one cookie"}: one request, to the logout endpoint with scope=others and this access token; no cookie written or cleared`, async () => {
+      const s = makeSession({ large, who: "Larkspur Meadow" });
+      const cookies = storedCookies(s);
+      const jar = makeJar(cookies);
+      h.jar = jar;
+      const seen: { scope: string | null; auth: string | null }[] = [];
+      routes["POST /auth/v1/logout"] = ({ url, headers }) => {
+        seen.push({ scope: url.searchParams.get("scope"), auth: headers.get("authorization") });
+        return new Response(null, { status: 204, headers: { "x-supabase-api-version": "2024-01-01" } });
+      };
+      const { error } = await (await createServerSb()).auth.signOut({ scope: "others" });
+      expect(error).toBeNull();
+      expect(requests).toEqual(["POST /auth/v1/logout"]);
+      expect(seen).toEqual([{ scope: "others", auth: `Bearer ${s.access_token}` }]);
+      expect(jar.writes).toEqual([]);
+      expect(jar.all()).toEqual(cookies);
+      expect(decodeStored(jar.all())?.access_token).toBe(s.access_token);
+    });
+  }
 });
