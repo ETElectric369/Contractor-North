@@ -6,9 +6,12 @@ import { join } from "node:path";
 
 /**
  * CHANGE MY PASSWORD (cn-v1202): ONE row in Settings › You › Sign-in & security. Closed it is one
- * button; open, two password boxes (new-password, so a password manager offers and saves it), Save
- * and Cancel; done, the row closes and says whether the other devices were signed out; a refusal
- * stays under the boxes and keeps what was typed. The unit project has no DOM, so the row's hooks
+ * button; open, three password boxes (cn-v1203: the current password first, current-password, with
+ * "Forgot it?" and a small Send Reset Link button under it that emails the person's own address,
+ * inside the app, never a link to /forgot; then the new one twice, new-password, so a
+ * password manager offers and saves it), Save and Cancel; done, the row closes, empties all three
+ * and says whether the other devices were signed out; a refusal stays under the boxes and keeps
+ * what was typed in all three. The unit project has no DOM, so the row's hooks
  * are a small hand-held stand-in: each draw calls the component, the test presses what it drew
  * (an onClick, an onChange, the form's onSubmit), and the next draw reads the new state. The drawn
  * tree is then rendered by the real react-dom. Every clickable is Title Case in both languages.
@@ -42,7 +45,11 @@ vi.mock("react", async (orig) => {
 });
 vi.mock("@/components/lang-provider", () => ({ useLang: () => h.lang }));
 const updateMyPassword = vi.fn();
-vi.mock("@/app/set-password/actions", () => ({ updateMyPassword: (...a: unknown[]) => updateMyPassword(...a) }));
+const emailMyResetLink = vi.fn();
+vi.mock("@/app/set-password/actions", () => ({
+  updateMyPassword: (...a: unknown[]) => updateMyPassword(...a),
+  emailMyResetLink: (...a: unknown[]) => emailMyResetLink(...a),
+}));
 
 import { ChangePassword } from "./change-password";
 import { dict } from "@/lib/i18n";
@@ -75,8 +82,11 @@ function openRow() {
   all(tree).find((e) => typeof e.props.onClick === "function")!.props.onClick();
   return draw();
 }
-function type(pw: string, confirm: string) {
+/** The current password the cases type, built at run time. */
+const CURRENT = () => ` ${["snowbell", "ridge", String(8 * 9)].join("-")} `;
+function type(pw: string, confirm: string, current: string = CURRENT()) {
   const tree = draw();
+  byId(tree, "cp-cur").props.onChange({ target: { value: current } });
   byId(tree, "cp-pw").props.onChange({ target: { value: pw } });
   byId(tree, "cp-pw2").props.onChange({ target: { value: confirm } });
 }
@@ -92,11 +102,12 @@ beforeEach(() => {
   h.isPending = false;
   h.props = {};
   updateMyPassword.mockReset();
+  emailMyResetLink.mockReset();
 });
 
 describe("the row in both languages", () => {
   for (const lang of ["en", "es"] as const) {
-    it(`${lang}: closed is one button; open is two new-password boxes, Save and Cancel; every clickable Title Case`, () => {
+    it(`${lang}: closed is one button; open is the current box and two new-password boxes, Save and Cancel; every clickable Title Case`, () => {
       h.lang = lang;
       const d = dict(lang);
       const closed = draw();
@@ -104,14 +115,16 @@ describe("the row in both languages", () => {
       expect(html(closed)).not.toContain("<input");
       const open = openRow();
       const out = html(open);
-      expect(buttons(open)).toEqual([d.sh_savePassword, d.sh_btn_cancel]);
+      expect(buttons(open)).toEqual([d.au_sendResetLink, d.sh_savePassword, d.sh_btn_cancel]);
       expect(out.match(/<input[^>]*type="password"[^>]*autoComplete="new-password"|<input[^>]*autoComplete="new-password"[^>]*type="password"/gi)).toHaveLength(2);
+      expect(out.match(/<input[^>]*type="password"[^>]*autoComplete="current-password"|<input[^>]*autoComplete="current-password"[^>]*type="password"/gi)).toHaveLength(1);
+      expect(words(out)).toContain(d.au_currentPassword);
       expect(words(out)).toContain(d.au_newPassword);
       expect(words(out)).toContain(d.au_confirmPassword);
       expect(out).toContain(`placeholder="${d.au_atLeast8}"`);
       for (const b of [...buttons(closed), ...buttons(open)]) expect(titleCaseIn(b, lang), b).toBe(true);
-      if (lang === "es") expect(buttons(open).concat(buttons(closed))).toEqual(["Guardar Contraseña", "Cancelar", "Cambiar Mi Contraseña"]);
-      else expect(buttons(open).concat(buttons(closed))).toEqual(["Save Password", "Cancel", "Change My Password"]);
+      if (lang === "es") expect(buttons(open).concat(buttons(closed))).toEqual(["Enviar Enlace", "Guardar Contraseña", "Cancelar", "Cambiar Mi Contraseña"]);
+      else expect(buttons(open).concat(buttons(closed))).toEqual(["Send Reset Link", "Save Password", "Cancel", "Change My Password"]);
     });
   }
 });
@@ -143,12 +156,13 @@ describe("the save", () => {
     submit();
     await settle();
     expect(updateMyPassword).toHaveBeenCalledTimes(1);
-    expect(updateMyPassword).toHaveBeenCalledWith(pw);
+    expect(updateMyPassword.mock.calls).toEqual([[pw, CURRENT()]]);
     const done = draw();
     expect(html(done)).not.toContain("<input");
     expect(words(html(done))).toContain("Password changed. Your other devices will ask you to sign in again.");
     expect(buttons(done)).toEqual(["Change My Password"]);
     const reopened = openRow();
+    expect(byId(reopened, "cp-cur").props.value).toBe("");
     expect(byId(reopened, "cp-pw").props.value).toBe("");
     expect(byId(reopened, "cp-pw2").props.value).toBe("");
   });
@@ -191,6 +205,7 @@ describe("the save", () => {
     await settle();
     const tree = draw();
     expect(html(tree)).toMatch(new RegExp(`<p class="[^"]*text-red-600[^"]*"[^>]*>${sentence.replace(/'/g, "&#x27;").replace(/\./g, "\\.")}</p>`));
+    expect(byId(tree, "cp-cur").props.value).toBe(CURRENT());
     expect(byId(tree, "cp-pw").props.value).toBe(pw);
     expect(byId(tree, "cp-pw2").props.value).toBe(pw);
   });
@@ -293,9 +308,9 @@ describe("the small promises", () => {
     type("short", "short");
     submit();
     expect(words(html(draw()))).toContain(dict("en").au_password8);
-    const cancel = all(draw()).find((e) => e.props.type === "button" && typeof e.props.onClick === "function")!;
-    cancel.props.onClick();
+    cancelOf(draw()).props.onClick();
     const reopened = openRow();
+    expect(byId(reopened, "cp-cur").props.value).toBe("");
     expect(byId(reopened, "cp-pw").props.value).toBe("");
     expect(byId(reopened, "cp-pw2").props.value).toBe("");
     expect(words(html(reopened))).not.toContain(dict("en").au_password8);
@@ -316,9 +331,127 @@ describe("the small promises", () => {
     type("short", "short");
     submit();
     const out = html(draw());
+    expect(out).toMatch(/<label[^>]*for="cp-cur"[^>]*>[^<]*<\/label>\s*<input[^>]*id="cp-cur"/);
     expect(out).toMatch(/<label[^>]*for="cp-pw"[^>]*>[^<]*<\/label>\s*<input[^>]*id="cp-pw"/);
     expect(out).toMatch(/<label[^>]*for="cp-pw2"[^>]*>[^<]*<\/label>\s*<input[^>]*id="cp-pw2"/);
     expect(out).toMatch(new RegExp(`<p[^>]*role="alert"[^>]*>${dict("en").au_password8.replace(/\./g, "\\.")}</p>`));
   });
 });
-const cancelOf = (tree: El) => all(tree).find((e) => e.props.type === "button" && typeof e.props.onClick === "function")!;
+/** Cancel is the ghost button (the reset link's button comes first in the form since cn-v1203). */
+const cancelOf = (tree: El) => all(tree).find((e) => e.props.type === "button" && e.props.variant === "ghost" && typeof e.props.onClick === "function")!;
+const resetOf = (tree: El) => all(tree).find((e) => e.type === "button" && e.props.type === "button" && typeof e.props.onClick === "function")!;
+
+describe("the current password (cn-v1203)", () => {
+  it("is the first box, focused; under it \"Forgot it?\" and the forgot page's own Send Reset Link as a button, Title Case in both languages, and no link to /forgot", () => {
+    const forgot = readFileSync(join(process.cwd(), "src/app/forgot/page.tsx"), "utf8");
+    expect(forgot).toContain('t("au_sendResetLink")');
+    for (const lang of ["en", "es"] as const) {
+      h.states = [];
+      h.lang = lang;
+      const tree = openRow();
+      const boxes = all(tree).filter((e) => e.props.type === "password");
+      expect(boxes.map((b) => [b.props.id, b.props.autoComplete, Boolean(b.props.autoFocus)])).toEqual([
+        ["cp-cur", "current-password", true],
+        ["cp-pw", "new-password", false],
+        ["cp-pw2", "new-password", false],
+      ]);
+      const out = html(tree);
+      expect(out).not.toContain('href="/forgot"');
+      expect(out).not.toMatch(/<a\b/);
+      expect(words(out)).toContain(dict(lang).au_forgotCurrent);
+      const btn = resetOf(tree);
+      expect(words(renderToStaticMarkup(btn))).toBe(dict(lang).au_sendResetLink);
+      expect(titleCaseIn(dict(lang).au_sendResetLink, lang)).toBe(true);
+      // It sits between the current box and the new one.
+      expect(out.indexOf('id="cp-cur"')).toBeLessThan(out.indexOf(dict(lang).au_sendResetLink));
+      expect(out.indexOf(dict(lang).au_sendResetLink)).toBeLessThan(out.indexOf('id="cp-pw"'));
+    }
+  });
+  it("Send Reset Link: called once on a double tap, with no argument; the answer under the box (status); disabled after a success; Cancel clears it", async () => {
+    let resolve!: (v: unknown) => void;
+    emailMyResetLink.mockImplementation(() => new Promise((r) => (resolve = r)));
+    openRow();
+    const first = resetOf(draw()).props.onClick();
+    const second = resetOf(draw()).props.onClick();
+    expect(resetOf(draw()).props.disabled).toBe(true);
+    resolve({ ok: true, message: dict("en").au_resetSentToYou });
+    await first;
+    await second;
+    expect(emailMyResetLink).toHaveBeenCalledTimes(1);
+    expect(emailMyResetLink.mock.calls).toEqual([[]]);
+    const tree = draw();
+    expect(html(tree)).toMatch(new RegExp(`<p[^>]*role="status"[^>]*>${dict("en").au_resetSentToYou}</p>`));
+    expect(resetOf(tree).props.disabled).toBe(true);
+    await resetOf(tree).props.onClick();
+    expect(emailMyResetLink).toHaveBeenCalledTimes(1);
+    expect(updateMyPassword).not.toHaveBeenCalled();
+    cancelOf(draw()).props.onClick();
+    expect(words(html(openRow()))).not.toContain(dict("en").au_resetSentToYou);
+    expect(resetOf(draw()).props.disabled).toBe(false);
+  });
+  it("a refusal shows as an alert under the box, and the button can be tapped again; a throw says could-not-send", async () => {
+    emailMyResetLink.mockResolvedValue({ ok: false, message: dict("es").au_tooManyEmails });
+    h.lang = "es";
+    openRow();
+    await resetOf(draw()).props.onClick();
+    const tree = draw();
+    expect(html(tree)).toMatch(new RegExp(`<p[^>]*role="alert"[^>]*>${dict("es").au_tooManyEmails}</p>`));
+    expect(resetOf(tree).props.disabled).toBe(false);
+    emailMyResetLink.mockRejectedValueOnce(new Error("network down"));
+    await resetOf(draw()).props.onClick();
+    expect(emailMyResetLink).toHaveBeenCalledTimes(2);
+    expect(words(html(draw()))).toContain(dict("es").au_resetNotSent);
+  });
+  it("done clears the reset link's answer", async () => {
+    emailMyResetLink.mockResolvedValue({ ok: true, message: dict("en").au_resetSentToYou });
+    updateMyPassword.mockResolvedValue({ ok: true, othersSignedOut: true });
+    openRow();
+    await resetOf(draw()).props.onClick();
+    type(typed(), typed());
+    submit();
+    await settle();
+    expect(words(html(openRow()))).not.toContain(dict("en").au_resetSentToYou);
+  });
+  it("an empty current box: needed, in the reader's language, and nothing sent; what was typed is kept", async () => {
+    for (const lang of ["en", "es"] as const) {
+      h.states = [];
+      h.lang = lang;
+      openRow();
+      const pw = typed();
+      type(pw, pw, "");
+      submit();
+      await settle();
+      const tree = draw();
+      expect(words(html(tree))).toContain(dict(lang).au_currentPasswordNeeded);
+      expect(byId(tree, "cp-pw").props.value).toBe(pw);
+    }
+    expect(updateMyPassword).not.toHaveBeenCalled();
+  });
+  it("the action is called once with (new, current), both exactly as typed", async () => {
+    updateMyPassword.mockResolvedValue({ ok: true, othersSignedOut: true });
+    openRow();
+    const [pw, cur] = [typed(), CURRENT()];
+    type(pw, pw, cur);
+    submit();
+    await settle();
+    expect(updateMyPassword.mock.calls).toEqual([[pw, cur]]);
+  });
+  it("a refusal (the wrong current password) keeps all three boxes as typed", async () => {
+    updateMyPassword.mockResolvedValue({ ok: false, error: dict("en").au_currentPasswordWrong });
+    openRow();
+    const [pw, cur] = [typed(), CURRENT()];
+    type(pw, pw, cur);
+    submit();
+    await settle();
+    const tree = draw();
+    expect(words(html(tree))).toContain("That's not your current password.");
+    expect([byId(tree, "cp-cur").props.value, byId(tree, "cp-pw").props.value, byId(tree, "cp-pw2").props.value]).toEqual([cur, pw, pw]);
+  });
+  it("Cancel empties all three", () => {
+    openRow();
+    type(typed(), typed());
+    cancelOf(draw()).props.onClick();
+    const reopened = openRow();
+    expect([byId(reopened, "cp-cur").props.value, byId(reopened, "cp-pw").props.value, byId(reopened, "cp-pw2").props.value]).toEqual(["", "", ""]);
+  });
+});

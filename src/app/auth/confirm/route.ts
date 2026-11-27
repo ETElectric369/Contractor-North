@@ -5,6 +5,8 @@ import { endSessionIfDeactivated } from "@/lib/deactivation-gate";
 import { translator } from "@/lib/i18n";
 import { langBeforeSession } from "@/lib/request-lang";
 import { collaboratorHome } from "@/lib/collaborator-home";
+import { adminConfigured, createAdminClient } from "@/lib/supabase/admin";
+import { reportError } from "@/lib/observe";
 
 /**
  * THE TOKEN-HASH DOOR (cn-v1134): where a one-time link made on the server lands.
@@ -118,15 +120,37 @@ export async function POST(request: Request) {
 
   if (tokenHash && type === "recovery") {
     const supabase = await createClient();
-    const { error } = await supabase.auth.verifyOtp({ type: "recovery", token_hash: tokenHash });
+    const { data, error } = await supabase.auth.verifyOtp({ type: "recovery", token_hash: tokenHash });
     if (!error) {
       if (await endSessionIfDeactivated(supabase)) {
         return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(t("au_deactivated"))}`, 303);
       }
       const home = isSignIn(field("for")) ? await collaboratorHome(supabase) : null;
       if (home) return NextResponse.redirect(`${origin}${home}`, 303);
+      // THE RESET EMAIL'S ARRIVAL IS MARKED (cn-v1203, 2026-11-26). must_reset_password is the app's one
+      // statement that this person chooses a password without the current one, and the (app) layout
+      // holds a flagged person on /set-password until they do. A person sent to exactly /set-password
+      // (a reset email, a crew setup link) is marked here; a sign-in link going home or elsewhere is not.
+      if (next === "/set-password") await markMustReset(supabase, data?.user?.id ?? null);
       return NextResponse.redirect(`${origin}${next}`, 303);
     }
   }
   return NextResponse.redirect(`${origin}/login?mode=code&error=${encodeURIComponent(t("au_linkUsed"))}`, 303);
+}
+
+/** Sets must_reset_password for the person the link just verified, through the admin client (such a
+ *  link is minted with it, so it is configured wherever such a link exists), else through the
+ *  person's own client. Zero rows, an error or a throw is reported once with its code only, and the
+ *  redirect happens all the same: the page and the action read the flag again. */
+async function markMustReset(own: Awaited<ReturnType<typeof createClient>>, userId: string | null): Promise<void> {
+  try {
+    if (!userId) throw new Error("no verified user");
+    const db = adminConfigured() ? createAdminClient() : own;
+    const { data, error } = await db.from("profiles").update({ must_reset_password: true }).eq("id", userId).select("id");
+    if (error) throw error;
+    if (!(data ?? []).length) throw new Error("no rows");
+  } catch (e) {
+    const code = String((e as { code?: unknown } | null)?.code ?? "") || null;
+    reportError("confirm-mark-reset", new Error("marking the reset arrival failed"), { code });
+  }
 }

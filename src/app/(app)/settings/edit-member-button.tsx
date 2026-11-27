@@ -40,7 +40,12 @@ interface Member {
  *  baseline stay whatever the switches: the Tax Report's mileage deduction reads them.
  *  ONE DOOR FOR ONE'S OWN PASSWORD (cn-v1202): on the person's own row the password box is not
  *  drawn, only a link to Settings › You › Change My Password, because a person's own password has
- *  one door, and this admin path (updateUserById) can end the very session making the change. */
+ *  one door, and this admin path (updateUserById) can end the very session making the change.
+ *  ONE'S OWN EMAIL ASKS FOR THE CURRENT PASSWORD (cn-v1203): on the person's own row, once the Email
+ *  box differs from the saved email, a Current password box appears under it and its value rides the
+ *  save as `currentPassword` (updateMemberAuth checks it before any admin call); it is emptied after a
+ *  save. Another member's row is unchanged. This file stays English: the box's label equals the
+ *  catalog's English au_currentPassword, pinned by own-password-one-door.test.tsx. */
 export function EditMemberButton({
   member,
   isSelf,
@@ -70,7 +75,11 @@ export function EditMemberButton({
   const [language, setLanguage] = useState<"en" | "es">(member.language === "es" ? "es" : "en");
   const [email, setEmail] = useState(member.email ?? "");
   const [password, setPassword] = useState("");
+  const [currentPw, setCurrentPw] = useState("");
   const [showPw, setShowPw] = useState(false);
+
+  // The one comparison: the save sends a new email, and the own row asks for the current password, on the same rule.
+  const emailChanged = email.trim().toLowerCase() !== (member.email ?? "").toLowerCase();
 
   function save() {
     setError(null);
@@ -95,16 +104,17 @@ export function EditMemberButton({
       if (!res.ok) return setError(res.error ?? "Could not save.");
 
       // Login changes go through the admin path only when something changed.
-      const emailChanged = email.trim().toLowerCase() !== (member.email ?? "").toLowerCase();
       if (emailChanged || password) {
         const authRes = await updateMemberAuth(member.id, {
           email: emailChanged ? email : undefined,
           password: password || undefined,
+          currentPassword: isSelf && emailChanged ? currentPw : undefined,
         });
         if (!authRes.ok) return setError(authRes.error ?? "Profile saved, but login change failed.");
       }
       setDone(password ? `Saved. New password: ${password}` : "Saved.");
       setPassword("");
+      setCurrentPw("");
       router.refresh();
     });
   }
@@ -227,6 +237,14 @@ export function EditMemberButton({
               <Label htmlFor="m-email">Email</Label>
               <Input id="m-email" type="email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} disabled={!authConfigured} />
             </div>
+            {isSelf && emailChanged && (
+              // cn-v1203: one's own login email needs the current password (checked by updateMemberAuth).
+              <div className="mt-3">
+                <Label htmlFor="m-cur">Current password</Label>
+                <Input id="m-cur" type="password" autoComplete="current-password" value={currentPw} onChange={(e) => setCurrentPw(e.target.value)} disabled={!authConfigured} />
+                <p className="mt-1 text-xs text-slate-400">Needed to change your own email.</p>
+              </div>
+            )}
             {isSelf ? (
               // One door for one's own password (cn-v1202): Settings › You › Change My Password. The
               // words match the catalog's English sh_changeMyPassword and sh_you (pinned by a test).

@@ -13,12 +13,29 @@ export const dynamic = "force-dynamic";
  *  profile is the one source of truth: callerLang, read once per request for the page and its title. */
 const pageLang = cache(async () => callerLang(await createClient()));
 
+/** The person's own must_reset_password: true or false as stored, null when it could not be read. */
+async function mustResetPassword(supabase: Awaited<ReturnType<typeof createClient>>, id: string): Promise<boolean | null> {
+  try {
+    const { data, error } = await supabase.from("profiles").select("must_reset_password").eq("id", id).maybeSingle();
+    if (error || !data) return null;
+    const v = (data as { must_reset_password?: unknown }).must_reset_password;
+    return typeof v === "boolean" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 export default async function SetPasswordPage() {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+  // THIS PAGE SERVES FLAGGED PEOPLE ONLY (cn-v1203). It sets a password without the current one, which
+  // only a must_reset_password person may do (the invited, and those who arrived by the reset email,
+  // which auth/confirm marks). Anyone else changes theirs at the one door, Settings › You. A failed
+  // read shows the form: the action reads the flag again, and it is the rule.
+  if ((await mustResetPassword(supabase, user.id)) === false) redirect("/settings?tab=you");
   const lang = await pageLang();
   const t = translator(lang);
 

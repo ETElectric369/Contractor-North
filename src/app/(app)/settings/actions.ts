@@ -13,6 +13,7 @@ import { requireStaff } from "@/lib/staff-guard";
 import { resolveSiteContext } from "@/lib/site-editor-guard";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 import { reportError } from "@/lib/observe";
+import { checkCurrentPassword } from "@/lib/supabase/password-check";
 import { sendEmail } from "@/lib/email";
 import { langFromWord } from "@/lib/locale";
 import { CREW_IMPORT_WORDS, crewSetupLink } from "./crew-setup-link";
@@ -805,10 +806,18 @@ export async function updateMember(
  *  service-role key). The owner hands the new password to the employee.
  *  NOT ONE'S OWN PASSWORD (cn-v1202): a password for the caller's own id is refused before any
  *  admin call, because a person's own password has one door (Settings › You › Change My Password),
- *  and this admin path can end the session doing the change. The caller's own email still changes here. */
+ *  and this admin path can end the session doing the change. The caller's own email still changes here,
+ *  with the current password since cn-v1203 (below).
+ *  ONE'S OWN EMAIL ASKS FOR THE CURRENT PASSWORD (cn-v1203, after skeptic #100): a new login email
+ *  for the caller's own id needs `currentPassword`, checked by lib/supabase/password-check before any
+ *  admin call; without it, change the email here and ask a reset to the new address, and the
+ *  current-password rule was walked around from the app's own screens. An unchanged own email (any
+ *  letter case) needs none; another member's email or password works as before. The English
+ *  sentences are the catalog's au_currentPasswordWrong / au_currentPasswordUnchecked (this file
+ *  speaks English; own-password-one-door.test.tsx pins them equal). */
 export async function updateMemberAuth(
   id: string,
-  patch: { email?: string; password?: string },
+  patch: { email?: string; password?: string; currentPassword?: string },
 ): Promise<Result> {
   const supabase = await createClient();
   const {
@@ -832,6 +841,19 @@ export async function updateMemberAuth(
   }
   if (id === user.id && patch.password) {
     return { ok: false, error: "Change your own password in Settings › You › Change My Password." };
+  }
+  const newEmail = typeof patch.email === "string" ? patch.email.trim().toLowerCase() : "";
+  if (id === user.id && newEmail && newEmail !== String(user.email ?? "").trim().toLowerCase()) {
+    const current = patch.currentPassword;
+    if (typeof current !== "string" || current === "") {
+      return { ok: false, error: "Enter your current password to change your own email." };
+    }
+    const check = user.email ? await checkCurrentPassword(user.email, current) : { result: "unknown" as const, code: null, status: null };
+    if (check.result === "wrong") return { ok: false, error: "That's not your current password." };
+    if (check.result !== "ok") {
+      reportError("member-auth-check-current", new Error("the current password could not be checked"), { code: check.code, status: check.status });
+      return { ok: false, error: "Couldn't check your current password just now. Try again in a few minutes." };
+    }
   }
 
   const { adminConfigured, createAdminClient } = await import("@/lib/supabase/admin");

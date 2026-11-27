@@ -23,7 +23,9 @@ import { Input } from "@/components/ui/input";
  *      "new-password" on a teammate's password;
  *      (the four sign-in doors below are left exactly as they are and are not judged by this rule);
  *   3. only the four sign-in doors (login, set-password, Settings' Change My Password, the portal's sign-in) may say
- *      "username" or "current-password";
+ *      "username" or "current-password" (cn-v1203: Change My Password's first box is the current password);
+ *      ONE named box elsewhere may say "current-password" and nothing else: the Team dialog's m-cur, the
+ *      current password one's own email change asks for (cn-v1203, CURRENT_PASSWORD_BOXES);
  *   4. on those four doors a password field (<PasswordInput>, or type="password") declares
  *      "new-password" or "current-password" — never the <Input> default "off", which hides it from
  *      every password manager (2026-11-05: the reset door's new password could not be offered or saved).
@@ -40,6 +42,8 @@ const SIGN_IN_FILES = [
   "src/app/(app)/settings/change-password.tsx",
   "src/components/portal/portal-sign-in.tsx",
 ];
+/** A box outside the sign-in doors that IS the person's current password: file, id. Nothing else. */
+const CURRENT_PASSWORD_BOXES: [string, string][] = [["src/app/(app)/settings/edit-member-button.tsx", "m-cur"]];
 const INPUT_TAGS = new Set(["input", "Input", "PasswordInput", "PhoneInput"]);
 const NOT_TYPING = new Set(["checkbox", "radio", "file", "hidden", "range", "color", "submit", "button", "reset", "image", "date", "time", "datetime-local", "month", "week"]);
 const LOGIN_WORDS = new Set(["user", "username", "email", "login", "account", "password", "pw", "name"]);
@@ -95,7 +99,8 @@ export function checkFields(src: string, file: string): { read: number; problems
 
       // Rule 3 applies to any element: the login tokens belong to the sign-in doors only.
       if (ac?.initializer && !signIn) {
-        const bad = stringsIn(ac.initializer).filter((s) => LOGIN_TOKENS.has(s));
+        const named = literal("type") === "password" && CURRENT_PASSWORD_BOXES.some(([f, id]) => file.endsWith(f) && literal("id") === id);
+        const bad = stringsIn(ac.initializer).filter((s) => LOGIN_TOKENS.has(s) && !(named && s === "current-password"));
         if (bad.length) problems.push({ line, tag, problem: `says autoComplete="${bad[0]}" outside the sign-in doors` });
       }
 
@@ -233,4 +238,33 @@ describe("a new-password form names its account (cn-v1202)", () => {
       expect(found).toEqual(['"text"']);
     });
   }
+});
+
+describe("the one named current-password box outside the sign-in doors (cn-v1203)", () => {
+  const f = "src/app/(app)/settings/edit-member-button.tsx";
+  it("the Team dialog's m-cur passes; the same token on another id, or username on m-cur, does not", () => {
+    expect(checkFields(`const A = () => <Input id="m-cur" type="password" autoComplete="current-password" />;`, f).problems).toEqual([]);
+    expect(checkFields(`const A = () => <Input id="m-pw" type="password" autoComplete="current-password" />;`, f).problems).toHaveLength(1);
+    expect(checkFields(`const A = () => <Input id="m-cur" type="password" autoComplete="username" />;`, f).problems).toHaveLength(1);
+    expect(checkFields(`const A = () => <Input id="m-cur" type="text" autoComplete="current-password" />;`, f).problems).toHaveLength(1);
+    expect(checkFields(`const A = () => <Input id="m-cur" type="password" autoComplete="current-password" />;`, "src/app/other.tsx").problems).toHaveLength(1);
+  });
+});
+
+describe("Settings' Change My Password asks for the current password (cn-v1203)", () => {
+  it("its password boxes, in order: current-password (cp-cur), then new-password twice", () => {
+    const f = "src/app/(app)/settings/change-password.tsx";
+    const src = readFileSync(join(ROOT, f), "utf8");
+    const sf = ts.createSourceFile(f, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const boxes: string[] = [];
+    const visit = (n: ts.Node) => {
+      if ((ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) && INPUT_TAGS.has(n.tagName.getText(sf))) {
+        const a = new Map(n.attributes.properties.filter(ts.isJsxAttribute).map((p) => [p.name.getText(sf), p.initializer?.getText(sf) ?? ""]));
+        if (a.get("type") === '"password"') boxes.push(`${a.get("id")} ${a.get("autoComplete")}`);
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+    expect(boxes).toEqual(['"cp-cur" "current-password"', '"cp-pw" "new-password"', '"cp-pw2" "new-password"']);
+  });
 });

@@ -9,7 +9,14 @@ import { renderToStaticMarkup } from "react-dom/server";
  * reads useLang(), and the action's refusals come back through callerLang. English reads what it
  * read before.
  */
-const state = vi.hoisted(() => ({ user: { id: "larkspur" } as { id: string } | null, language: "es" as string | null, updateError: null as null | { message: string } }));
+const state = vi.hoisted(() => ({
+  user: { id: "larkspur" } as { id: string } | null,
+  language: "es" as string | null,
+  updateError: null as null | { message: string },
+  // cn-v1203: the page and the action read the person's own must_reset_password.
+  mustReset: true as boolean | null,
+  flagReadThrows: false,
+}));
 vi.mock("next/navigation", () => ({
   redirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT ${url}`);
@@ -25,7 +32,15 @@ vi.mock("@/lib/supabase/server", () => ({
       signOut: async () => ({ error: null }),
     },
     from: () => ({
-      select: () => ({ eq: () => ({ limit: () => ({ maybeSingle: async () => ({ data: { language: state.language }, error: null }) }) }) }),
+      select: () => ({
+        eq: () => ({
+          limit: () => ({ maybeSingle: async () => ({ data: { language: state.language }, error: null }) }),
+          maybeSingle: async () => {
+            if (state.flagReadThrows) throw new Error("stand-in network failure");
+            return state.mustReset === null ? { data: null, error: { code: "PGRST301" } } : { data: { must_reset_password: state.mustReset }, error: null };
+          },
+        }),
+      }),
       update: () => ({ eq: () => ({ select: async () => ({ data: [{ id: "larkspur" }], error: null }) }) }),
     }),
   })),
@@ -42,6 +57,8 @@ beforeEach(() => {
   state.user = { id: "larkspur" };
   state.language = "es";
   state.updateError = null;
+  state.mustReset = true;
+  state.flagReadThrows = false;
 });
 
 describe("the page", () => {
@@ -97,5 +114,23 @@ describe("the first-password form after a save whose flag stuck (cn-v1202)", () 
     state.user = { id: "larkspur", email: "sam@example.com" } as { id: string };
     const named = renderToStaticMarkup(await SetPasswordPage());
     expect(named).toMatch(/<form[^>]*><input[^>]*name="username"[^>]*value="sam@example.com"/);
+  });
+});
+
+describe("the page serves flagged people only (cn-v1203)", () => {
+  it("not flagged: sent to Settings › You, the one door for changing a password", async () => {
+    state.mustReset = false;
+    await expect(SetPasswordPage()).rejects.toThrow("REDIRECT /settings?tab=you");
+  });
+  it("flagged: the form", async () => {
+    state.mustReset = true;
+    expect(renderToStaticMarkup(await SetPasswordPage())).toContain('type="password"');
+  });
+  it("a failed read (an error, or a throw): the form, because the action is the rule", async () => {
+    state.mustReset = null;
+    expect(renderToStaticMarkup(await SetPasswordPage())).toContain('type="password"');
+    state.mustReset = false;
+    state.flagReadThrows = true;
+    expect(renderToStaticMarkup(await SetPasswordPage())).toContain('type="password"');
   });
 });

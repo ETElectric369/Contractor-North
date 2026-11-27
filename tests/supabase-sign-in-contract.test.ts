@@ -66,6 +66,8 @@ import { updateSession } from "@/lib/supabase/middleware";
 import { createClient as createServerSb } from "@/lib/supabase/server";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
 import { CHECK_DEADLINE_MS, checkUser } from "@/lib/supabase/user-check";
+import { checkCurrentPassword } from "@/lib/supabase/password-check";
+import { createClient as createPlainSb } from "@supabase/supabase-js";
 
 // ── stand-ins ──────────────────────────────────────────────────────────────────────────────────────
 const PROJECT_URL = "https://example.supabase.co"; // resolves nowhere: every request goes to the stub
@@ -824,3 +826,98 @@ describe("7. Change My Password signs the OTHER sessions out and keeps this one 
     });
   }
 });
+
+// ── 8 ────────────────────────────────────────────────────────────────────────────────────────────
+describe("8. the current-password check signs in on a client of its own and leaves nothing behind (cn-v1203)", () => {
+  // lib/supabase/password-check builds a separate @supabase/supabase-js client from the two env
+  // names with persistSession, autoRefreshToken and detectSessionInUrl all false, signs in with the
+  // password as typed, and on a match ends that probe session with signOut({ scope: "local" }).
+  // A browser is put in place for these cases (window, document and a recording localStorage), so a
+  // client that kept its session anywhere but memory would write there: on a server auth-js has no
+  // localStorage to write to whatever it is told.
+  const OPTIONS = { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } } as const;
+  let stored: string[];
+  beforeEach(() => {
+    stored = [];
+    const box = new Map<string, string>();
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("document", {});
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => box.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        stored.push(k);
+        box.set(k, v);
+      },
+      removeItem: (k: string) => {
+        stored.push(`-${k}`);
+        box.delete(k);
+      },
+    });
+  });
+  /** The auth server's password grant: a session for exactly this email and password, else invalid_credentials. */
+  function passwordRoute(s: Session, password: string, seen: unknown[]): Route {
+    return ({ body }) => {
+      seen.push(body);
+      return body?.email === s.user.email && body?.password === password
+        ? json(200, s)
+        : json(400, { code: "invalid_credentials", msg: "stand-in: invalid login credentials" });
+    };
+  }
+  const typed = () => ` ${["snowbell", "ridge", randomBytes(3).toString("hex")].join("-")} `;
+
+  it("a client built the way the lib builds it: ONE request to the token endpoint, no cookie, no storage; its signOut({ scope: 'local' }) sends one logout with that scope", async () => {
+    const s = makeSession({ who: "Dana Rook" });
+    const pw = typed();
+    const grants: unknown[] = [];
+    const logouts: { scope: string | null; auth: string | null }[] = [];
+    routes["POST /auth/v1/token?grant_type=password"] = passwordRoute(s, pw, grants);
+    routes["POST /auth/v1/logout"] = ({ url, headers }) => {
+      logouts.push({ scope: url.searchParams.get("scope"), auth: headers.get("authorization") });
+      return new Response(null, { status: 204, headers: { "x-supabase-api-version": "2024-01-01" } });
+    };
+    // Another person's own session in the jar the SSR client reads: it must not be touched.
+    const other = storedCookies(makeSession({ who: "Sam Tillery" }));
+    h.jar = makeJar(other);
+    const probe = createPlainSb(PROJECT_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, OPTIONS);
+    const { data, error } = await probe.auth.signInWithPassword({ email: s.user.email, password: pw });
+    expect(error).toBeNull();
+    expect(data.session?.access_token).toBe(s.access_token);
+    expect(requests).toEqual(["POST /auth/v1/token?grant_type=password"]);
+    expect(grants).toEqual([{ email: s.user.email, password: pw, gotrue_meta_security: {} }]);
+    expect(stored).toEqual([]);
+    expect(h.setAllCalls).toEqual([]);
+    expect((h.jar as ReturnType<typeof makeJar>).writes).toEqual([]);
+    // A second client built the same way finds nothing: the first kept its session in its own memory.
+    expect((await createPlainSb(PROJECT_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, OPTIONS).auth.getSession()).data.session).toBeNull();
+    const out = await probe.auth.signOut({ scope: "local" });
+    expect(out.error).toBeNull();
+    expect(requests).toEqual(["POST /auth/v1/token?grant_type=password", "POST /auth/v1/logout"]);
+    expect(logouts).toEqual([{ scope: "local", auth: `Bearer ${s.access_token}` }]);
+    expect(stored).toEqual([]);
+    expect((h.jar as ReturnType<typeof makeJar>).writes).toEqual([]);
+    expect((h.jar as ReturnType<typeof makeJar>).all()).toEqual(other);
+  });
+
+  it("the lib itself: ok is one sign-in and one local logout; a wrong password is one sign-in, no logout, and 'wrong'", async () => {
+    const s = makeSession({ who: "Dana Rook" });
+    const pw = typed();
+    const grants: unknown[] = [];
+    const scopes: (string | null)[] = [];
+    routes["POST /auth/v1/token?grant_type=password"] = passwordRoute(s, pw, grants);
+    routes["POST /auth/v1/logout"] = ({ url }) => {
+      scopes.push(url.searchParams.get("scope"));
+      return new Response(null, { status: 204, headers: { "x-supabase-api-version": "2024-01-01" } });
+    };
+    expect(await checkCurrentPassword(s.user.email, pw)).toEqual({ result: "ok", code: null, status: null });
+    expect(requests).toEqual(["POST /auth/v1/token?grant_type=password", "POST /auth/v1/logout"]);
+    expect(scopes).toEqual(["local"]);
+    expect((grants[0] as { password: string }).password).toBe(pw);
+    requests = [];
+    expect(await checkCurrentPassword(s.user.email, pw.trim())).toEqual({ result: "wrong", code: "invalid_credentials", status: 400 });
+    expect(requests).toEqual(["POST /auth/v1/token?grant_type=password"]);
+    expect(scopes).toEqual(["local"]);
+    expect(stored).toEqual([]);
+    expect(h.setAllCalls).toEqual([]);
+  });
+});
+

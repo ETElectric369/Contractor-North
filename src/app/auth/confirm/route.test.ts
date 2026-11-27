@@ -15,18 +15,47 @@ const state = vi.hoisted(() => ({
   orgId: "org-1" as string | null,
   collaborator: false,
   rpcs: [] as string[],
+  // cn-v1203: the reset arrival's mark.
+  admin: true,
+  writes: [] as { via: string; table: string; patch: unknown; id: unknown }[],
+  writeRows: 1,
+  writeError: null as null | { code: string },
+  writeThrows: false,
+  order: [] as string[],
+}));
+const reportError = vi.fn();
+vi.mock("@/lib/observe", () => ({ reportError: (...a: unknown[]) => reportError(...a) }));
+/** A client's update chain, recording who wrote what. */
+const writer = (via: string) => (table: string) => ({
+  update: (patch: unknown) => ({
+    eq: (_col: string, id: unknown) => ({
+      select: async () => {
+        // A write lands a moment later: one the route did not wait for is not seen when its answer returns.
+        await new Promise((r) => setTimeout(r, 5));
+        state.order.push(`write:${via}`);
+        state.writes.push({ via, table, patch, id });
+        if (state.writeThrows) throw new Error("stand-in network failure");
+        return { data: state.writeError ? null : Array.from({ length: state.writeRows }, () => ({ id })), error: state.writeError };
+      },
+    }),
+  }),
+});
+vi.mock("@/lib/supabase/admin", () => ({
+  adminConfigured: () => state.admin,
+  createAdminClient: () => ({ from: writer("admin") }),
 }));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: vi.fn(async () => ({
     auth: {
       verifyOtp: vi.fn(async (input: unknown) => {
         state.verifyCalls.push(input);
-        return { error: state.verifyError };
+        return { data: state.verifyError ? { user: null, session: null } : { user: { id: "u-verified" }, session: {} }, error: state.verifyError };
       }),
       getUser: async () => ({ data: { user: { id: "u1" } } }),
       signOut: vi.fn(async () => ({ error: null })),
     },
     from: (table: string) => ({
+      ...writer("own")(table),
       select: () => ({
         eq: () => ({
           maybeSingle: async () => ({ data: table === "profiles" ? { active: state.active, org_id: state.orgId } : null }),
@@ -65,6 +94,13 @@ beforeEach(() => {
   state.orgId = "org-1";
   state.collaborator = false;
   state.rpcs = [];
+  state.admin = true;
+  state.writes = [];
+  state.writeRows = 1;
+  state.writeError = null;
+  state.writeThrows = false;
+  state.order = [];
+  reportError.mockClear();
 });
 
 describe("GET, the page", () => {
@@ -208,5 +244,59 @@ describe("the app's own sign-in email walks through the same door (cn-v1199)", (
     const res = await post({ token_hash: "h1", type: "recovery", next: "/planner", for: "signin" });
     expect(decodeURIComponent(res.headers.get("location") ?? "")).toBe("https://app.test/login?error=This account has been deactivated. Contact your office.");
     expect(state.rpcs).not.toContain("claim_site_collaborations");
+  });
+});
+
+describe("the reset email's arrival is marked (cn-v1203)", () => {
+  const MARK = { table: "profiles", patch: { must_reset_password: true }, id: "u-verified" };
+  it("a verified link going to /set-password sets the flag for that user through the admin client, before the redirect", async () => {
+    const res = await post({ token_hash: "h1", type: "recovery", next: "/set-password" });
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("https://app.test/set-password");
+    expect(state.writes).toEqual([{ via: "admin", ...MARK }]);
+    expect(reportError).not.toHaveBeenCalled();
+    // A link with no next lands on /set-password too (the default), and is marked.
+    state.writes = [];
+    await post({ token_hash: "h1", type: "recovery" });
+    expect(state.writes).toEqual([{ via: "admin", ...MARK }]);
+  });
+  it("a sign-in link (for=signin, next /planner) writes nothing; nor does any other next", async () => {
+    await post({ token_hash: "h1", type: "recovery", next: "/planner", for: "signin" });
+    await post({ token_hash: "h1", type: "recovery", next: "/settings" });
+    await post({ token_hash: "h1", type: "recovery", next: "/set-password-elsewhere" });
+    state.orgId = null;
+    state.collaborator = true;
+    await post({ token_hash: "h1", type: "recovery", next: "/set-password", for: "signin" }); // a collaborator's sign-in link goes home
+    expect(state.writes).toEqual([]);
+  });
+  it("a failed write (zero rows, an error, a throw) still redirects and makes one report with the code only", async () => {
+    const tries: (() => void)[] = [() => (state.writeRows = 0), () => (state.writeError = { code: "42501" }), () => (state.writeThrows = true)];
+    for (const set of tries) {
+      state.writeRows = 1;
+      state.writeError = null;
+      state.writeThrows = false;
+      reportError.mockClear();
+      set();
+      const res = await post({ token_hash: "h1", type: "recovery", next: "/set-password" });
+      expect(res.headers.get("location")).toBe("https://app.test/set-password");
+      expect(reportError).toHaveBeenCalledTimes(1);
+      expect(reportError.mock.calls[0][0]).toBe("confirm-mark-reset");
+      expect(Object.keys(reportError.mock.calls[0][2])).toEqual(["code"]);
+    }
+    expect(reportError.mock.calls[0][2]).toEqual({ code: null });
+  });
+  it("a failed verify writes nothing; a deactivated person writes nothing", async () => {
+    state.verifyError = { message: "Token has expired or is invalid" };
+    await post({ token_hash: "h1", type: "recovery", next: "/set-password" });
+    state.verifyError = null;
+    state.active = false;
+    await post({ token_hash: "h1", type: "recovery", next: "/set-password" });
+    expect(state.writes).toEqual([]);
+  });
+  it("admin not configured: the person's own client", async () => {
+    state.admin = false;
+    const res = await post({ token_hash: "h1", type: "recovery", next: "/set-password" });
+    expect(res.headers.get("location")).toBe("https://app.test/set-password");
+    expect(state.writes).toEqual([{ via: "own", ...MARK }]);
   });
 });

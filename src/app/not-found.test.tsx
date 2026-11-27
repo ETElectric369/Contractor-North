@@ -1,67 +1,53 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 
 /**
- * THE 404 PAGE: THE APP'S OWN MARK ONLY ON THE APP'S OWN HOST (cn-v1202). On the app's host it draws
- * /icon-192.png, the same tile the sign-in page draws. A dead customer link on a company's own domain
- * renders this page too, and that visitor is the company's customer: there it draws the bolt tile it
- * drew before this release, with no "Contractor North" in the markup. A host that cannot be read gets
- * the bolt tile. Its words and its one button are the same everywhere.
+ * THE 404 PAGE DRAWS THE APP'S MARK ON EVERY HOST (cn-v1203, 2026-11-26: the owner chose the mark
+ * everywhere). /icon-192.png, the tile the sign-in page draws, and no bolt, whatever the host: the
+ * app's own, a company's own domain, or none at all. The page reads no request header, so the host
+ * cannot change it; `next/headers` is stood in only so that a read of it would be seen. Its words
+ * and its one button are the same everywhere.
  */
-const h = vi.hoisted(() => ({ host: null as string | null, throws: false }));
+const h = vi.hoisted(() => ({ host: null as string | null, reads: 0 }));
 vi.mock("next/headers", () => ({
   headers: async () => {
-    if (h.throws) throw new Error("outside a request");
+    h.reads++;
     return new Headers(h.host === null ? {} : { host: h.host });
   },
 }));
 
 import NotFound from "./not-found";
 
-const render = async () => renderToStaticMarkup(await NotFound());
-/** The tile as the page drew it before cn-v1202. */
-const BOLT_TILE = /<div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand text-white"><svg[^>]*lucide-zap[^>]*>/;
+const render = () => renderToStaticMarkup(NotFound());
 
 beforeEach(() => {
   h.host = null;
-  h.throws = false;
+  h.reads = 0;
 });
 
 describe("the not-found page", () => {
-  it("on the app's own host: the app icon and no bolt", async () => {
-    for (const host of ["app.contractornorth.com", "localhost:3000"]) {
+  it("draws the app icon and no bolt with no host, on the app's host and on a company's host", () => {
+    for (const host of [null, "app.contractornorth.com", "larkspur-decks.example", "larkspur.contractornorth.com"]) {
       h.host = host;
-      const html = await render();
-      expect(html).toMatch(/<img[^>]*src="\/icon-192\.png"[^>]*alt="Contractor North"/);
-      expect(html).not.toMatch(/lucide-zap/);
+      const html = render();
+      expect(html, String(host)).toMatch(/<img[^>]*src="\/icon-192\.png"[^>]*alt="Contractor North"[^>]*class="mb-4 h-16 w-16 rounded-2xl shadow-sm"/);
+      expect(html, String(host)).not.toMatch(/lucide-zap|bg-brand/);
     }
+    expect(h.reads).toBe(0);
   });
-  it("on a company's own host: the bolt tile, no app icon, no Contractor North", async () => {
-    for (const host of ["larkspur-decks.example", "www.larkspur-decks.example", "larkspur.contractornorth.com"]) {
-      h.host = host;
-      const html = await render();
-      expect(html).toMatch(BOLT_TILE);
-      expect(html).not.toContain("/icon-192.png");
-      expect(html).not.toContain("Contractor North");
-    }
+  it("keeps its words and its button", () => {
+    const html = render();
+    expect(html).toContain("404");
+    expect(html).toContain("We couldn&#x27;t find that page.");
+    expect(html).toContain("Back to Dashboard");
+    expect(html).toContain('href="/planner"');
   });
-  it("no host, or headers that cannot be read: the bolt tile", async () => {
-    expect(await render()).toMatch(BOLT_TILE);
-    h.host = "";
-    expect(await render()).toMatch(BOLT_TILE);
-    h.throws = true;
-    const html = await render();
-    expect(html).toMatch(BOLT_TILE);
-    expect(html).not.toContain("/icon-192.png");
-  });
-  it("keeps its words and its button on both", async () => {
-    for (const host of ["app.contractornorth.com", "larkspur-decks.example"]) {
-      h.host = host;
-      const html = await render();
-      expect(html).toContain("404");
-      expect(html).toContain("We couldn&#x27;t find that page.");
-      expect(html).toContain("Back to Dashboard");
-      expect(html).toContain('href="/planner"');
-    }
+  it("is a plain component that imports nothing from next/headers and no bolt", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/not-found.tsx"), "utf8");
+    expect(src).not.toMatch(/from\s+["']next\/headers["']/);
+    expect(src).not.toMatch(/\bZap\b|isAppHostname|requestHost/);
+    expect(src).not.toMatch(/\basync\s+function\s+NotFound\b/);
   });
 });
