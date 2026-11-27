@@ -10,8 +10,10 @@
 
 /** Never narrower than this: below it a letter page is unreadable anyway, and 0 draws nothing. */
 const NARROWEST = 280;
-/** Never wider: past this a sheet on a desktop is bigger than the paper it prints on. */
-const WIDEST = 900;
+/** Never wider: past this a sheet on a desktop is bigger than the paper it prints on. Exported for
+ *  lib/pdf-zoom: the widest a zoomed sheet is laid out is twice this, and a sheet drawn sharp never
+ *  has more pixels across than this width at a short document's density. */
+export const WIDEST = 900;
 /** Breathing room around the sheet, so the shadow isn't flush against the scroller's edge. */
 const FRAME = 16;
 

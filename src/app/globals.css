@@ -354,6 +354,17 @@ main.turn-host > .turn-face[data-held] .pull-pill {
   overscroll-behavior: contain;
   padding: 0.5rem;
 }
+/* ── THE DOCUMENT PREVIEW ZOOMS ITS OWN SHEETS (print/pdf-preview/viewer.tsx, lib/pdf-zoom) ──
+   One finger pans, in both directions, and that is all a browser is asked to do
+   here: two fingers are read by the viewer, which makes the sheets themselves
+   bigger. Without this a browser that still has its own pinch (Safari, a touch
+   screen on a desktop) zooms the whole window underneath the viewer's zoom, toolbar
+   and all, and a double tap is held back a third of a second to see whether it is
+   the browser's. The turned face is named too, because sideways IT is the scroller. */
+.pdf-pages-scroll,
+.pdf-pages-scroll > .turn-face {
+  touch-action: pan-x pan-y;
+}
 .media-lightbox-body.turn-host > .turn-face[data-held] {
   display: flex;
   align-items: center;

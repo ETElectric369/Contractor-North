@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1207", date: "2026-11-27", line: "Pinch or double-tap a PDF preview to zoom in, then drag to move around. In the phone app a pinch used to do nothing. Turning the phone sideways still makes the page bigger too." },
   { version: "cn-v1206", date: "2026-11-27", line: "The engine that makes your PDFs (invoices, quotes, work orders) moved to a newer version. Nothing should look different; if a page break or a font does, send it with the bug button." },
   { version: "cn-v1205", date: "2026-11-27", line: "The phone app now picks up a new version when you come back to it, not only after being closed and reopened. It waits if you are typing, a sheet is open, or a scan, photo or card payment is under way." },
   { version: "cn-v1204", date: "2026-11-27", line: "Screenshots on bug reports are drawn more faithfully: cards, placeholders and multi-line text. The bug button no longer waits on the picture for more than 8 seconds." },

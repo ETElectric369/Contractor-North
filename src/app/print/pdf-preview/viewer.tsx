@@ -7,6 +7,26 @@ import { BackLink } from "@/components/back-link";
 import { pdfPreviewBackHref } from "@/lib/pdf-preview-back";
 import { pageWidthInside, worthRedrawing } from "@/lib/pdf-page-width";
 import { renderTurns } from "@/lib/pdf-render-turns";
+import {
+  FIT,
+  NO_GESTURE,
+  SHARP_MOST,
+  drawDensity,
+  gestureStep,
+  mouseDoubleClickCounts,
+  nearestFirst,
+  onScreen,
+  placeOnSheet,
+  scrollToKeep,
+  worthSharpening,
+  zoomAfterDoubleTap,
+  zoomAfterWheel,
+  zoomedSize,
+  type GestureAct,
+  type GestureEvent,
+  type GestureState,
+} from "@/lib/pdf-zoom";
+import { EVERY_WAY_HELD, type Box, type Held, type Point } from "@/lib/turned-geometry";
 import { Turned } from "@/components/turned";
 
 const MARGINS = [
@@ -25,6 +45,86 @@ const MARGINS = [
 function theScroller(box: HTMLElement | null): HTMLElement | null {
   if (!box) return null;
   return box.querySelector<HTMLElement>(":scope > .turn-face[data-held]") ?? box;
+}
+
+/**
+ * HOW THE PHONE IS BEING HELD, read off the same element theScroller() goes by: the turned face
+ * carries the word it was drawn with, and upright there is no such face. A gesture read here needs
+ * it for one thing, the same thing pull-to-refresh needs it for: a finger's place on the glass is a
+ * quarter turn away from its place on a sheet that is drawn turned (lib/pdf-zoom).
+ */
+function heldNow(box: HTMLElement | null): Held {
+  const word = box?.querySelector<HTMLElement>(":scope > .turn-face[data-held]")?.dataset.held;
+  return EVERY_WAY_HELD.find((h) => h === word) ?? "upright";
+}
+
+/** Every sheet in the list, in page order, whether or not it is in view. */
+function sheetsIn(host: HTMLElement | null): HTMLCanvasElement[] {
+  return host ? Array.from(host.querySelectorAll<HTMLCanvasElement>("canvas.pdf-page-canvas")) : [];
+}
+
+/** The size a sheet was FITTED at, which every zoomed size is worked out from (lib/pdf-zoom). */
+function fittedSizeOf(sheet: HTMLCanvasElement): Box {
+  return { width: Number(sheet.dataset.fitW) || 0, height: Number(sheet.dataset.fitH) || 0 };
+}
+
+/** The sheet on the screen for one page, found again each time: a sharper drawing replaces the element. */
+function sheetFor(host: HTMLElement, page: string): HTMLCanvasElement | null {
+  return host.querySelector<HTMLCanvasElement>(`canvas.pdf-page-canvas[data-page="${page}"]`);
+}
+
+/**
+ * GIVE A CANVAS'S MEMORY BACK NOW. Taking a canvas out of the page is not enough on an iPhone, which
+ * keeps its bitmap until the element is collected; a canvas of no size has no bitmap to keep.
+ */
+function release(canvas: HTMLCanvasElement | null) {
+  if (!canvas) return;
+  canvas.width = 0;
+  canvas.height = 0;
+}
+
+/**
+ * LET GO OF EVERY SHARP SHEET AND EVERY FITTED SHEET KEPT BEHIND ONE, before the list is emptied for a
+ * fresh draw or the screen is left: the sharp ones are in the list, the kept ones are only in the map.
+ */
+function letGoOfSharp(host: HTMLElement | null, bases: Map<string, HTMLCanvasElement>) {
+  for (const base of bases.values()) release(base);
+  bases.clear();
+  if (!host) return;
+  for (const sharp of host.querySelectorAll<HTMLCanvasElement>('canvas[data-sharp="1"]')) release(sharp);
+}
+
+/**
+ * WHICH SHEET IS BEING READ: the one nearest the middle of what the scroller shows. Measured on the
+ * glass, so it is the same question whichever way the phone is held.
+ */
+function sheetBeingRead(sheets: HTMLCanvasElement[], scroller: HTMLElement | null): number {
+  if (!scroller || sheets.length === 0) return 0;
+  const view = scroller.getBoundingClientRect();
+  const middle = { x: view.left + view.width / 2, y: view.top + view.height / 2 };
+  let best = 0;
+  let bestGap = Infinity;
+  sheets.forEach((sheet, i) => {
+    const r = sheet.getBoundingClientRect();
+    const gap = Math.hypot(r.left + r.width / 2 - middle.x, r.top + r.height / 2 - middle.y);
+    if (gap < bestGap) {
+      best = i;
+      bestGap = gap;
+    }
+  });
+  return best;
+}
+
+/**
+ * HOW SHARP THIS DOCUMENT IS DRAWN, by how many pages it has. These canvases ARE the print output,
+ * so resolution matters, but every page is retained at once, and at 3x a letter page is ~24 MB of
+ * bitmap. A 12-page material list blew past what an iOS PWA will hold and the tab reloaded
+ * mid-review. Budget the TOTAL pixels instead: full quality for a short doc, stepping down (never
+ * below 1.5x, which still prints cleanly) as the page count grows.
+ */
+function sharpnessFor(pages: number): number {
+  const HIGH = Math.min(Math.max(window.devicePixelRatio || 1, 2.5), 3);
+  return pages <= 4 ? HIGH : pages <= 10 ? 2 : 1.5;
 }
 
 /**
@@ -70,6 +170,37 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
   const placeKept = useRef(0);
   /** True while a repaint is emptying and refilling the list, when a scroll to 0 is not a place. */
   const repainting = useRef(false);
+  /**
+   * HOW FAR IN THE SHEETS ARE ZOOMED. FIT after every fresh draw; only a pinch, a double tap or
+   * ctrl + wheel moves it (the effect further down). A ref and never state: a pinch changes it sixty
+   * times a second and nothing React draws depends on it. The sheets' own CSS size IS the zoom.
+   */
+  const zoomRef = useRef(FIT);
+  /** The sharper drawing that follows a gesture, or a scroll while zoomed, waiting for it to stop. */
+  const sharpenSoon = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  /**
+   * THE WHOLE DOCUMENT IS ON THE SCREEN: false from the moment a load or a fresh draw starts, true only
+   * when a fresh draw finishes still owning the list. Nothing zooms and nothing sharpens until then,
+   * so a gesture never lands on sheets that are about to be replaced, and never on the sheets of a
+   * document that failed, which stay in the hidden list under the error.
+   */
+  const drawnWhole = useRef(false);
+  /** Moved by every load, every fresh draw and leaving the screen: a sharper drawing that sees it move stops. */
+  const epoch = useRef(0);
+  /** Moved by every sharper drawing that starts, and by every finger that lands on the sheets, so one
+   *  still running stops at its next wait. */
+  const sharpenRun = useRef(0);
+  /** THE FITTED SHEETS KEPT behind the sharp ones, by page number, to put back when a sheet goes out of view. */
+  const bases = useRef<Map<string, HTMLCanvasElement>>(new Map());
+  /**
+   * A FINGER IS ON THE SHEETS, AND NO SHEET IS SWAPPED UNDER A FINGER. A browser sends every later
+   * event of a touch to the element the finger first landed on, and once that element is off the page
+   * those events no longer reach the box: a second pinch, made while the sharper drawing of the first
+   * was still under way, stopped answering half way with the fingers still moving. So no sharper
+   * drawing starts while this is true, the one under way is stopped by the touch that makes it true,
+   * and the last finger up asks for it again (the gesture effect below).
+   */
+  const fingerDown = useRef(false);
 
   /**
    * How wide a page may be drawn right now. Measured from inside the scroller rather than from
@@ -100,6 +231,14 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
     // at the end hid an interrupted rotation from the repaint guard, which then declined to redraw and
     // left a 796px sheet in a portrait window that only sideways panning could read.
     const seq = turns.current.startPaint(containerW);
+    // Not whole again until this draw finishes as the owner, and a sharper drawing under way stops.
+    drawnWhole.current = false;
+    epoch.current++;
+    // A FRESH DRAW IS A FITTED ONE. The list is emptied below and every sheet is drawn at the width
+    // of the room, so whatever zoom the last sheets were at is gone with them, and a redraw that was
+    // waiting to sharpen them has nothing left to sharpen.
+    zoomRef.current = FIT;
+    clearTimeout(sharpenSoon.current);
     // Print goes back to disabled for the whole repaint (audit 7: enabling it at page 1 let a fast
     // tap print a money document with blank tail pages, and a repaint has exactly that gap again).
     setAllPainted(false);
@@ -111,14 +250,14 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
     const was = placeKept.current;
     repainting.current = true;
     try {
+      // The sharp sheets and the fitted ones kept behind them give their memory back first: emptying
+      // the list only takes them off the page.
+      letGoOfSharp(host, bases.current);
       host.innerHTML = "";
-      // These canvases ARE the print output, so resolution matters — but every page is
-      // retained at once, and at 3x a letter page is ~24 MB of bitmap. A 12-page material
-      // list blew past what an iOS PWA will hold and the tab reloaded mid-review. Budget
-      // the TOTAL pixels instead: full quality for a short doc, stepping down (never below
-      // 1.5x, which still prints cleanly) as the page count grows.
-      const HIGH = Math.min(Math.max(window.devicePixelRatio || 1, 2.5), 3);
-      const dpr = pdf.numPages <= 4 ? HIGH : pdf.numPages <= 10 ? 2 : 1.5;
+      // Whatever a finger had landed on has just gone off the page, so its lift will never reach the
+      // box (see fingerDown): the mark is cleared here, or nothing would sharpen until the next touch.
+      fingerDown.current = false;
+      const dpr = sharpnessFor(pdf.numPages);
       for (let n = 1; n <= pdf.numPages; n++) {
         const page = await pdf.getPage(n);
         if (!turns.current.paintOwns(seq)) return;
@@ -136,6 +275,11 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
         canvas.style.width = `${cssW}px`;
         canvas.style.height = `${cssH}px`;
         canvas.className = "pdf-page-canvas mx-auto mb-6 block bg-white shadow-md";
+        // WHICH PAGE THIS IS AND THE SIZE IT WAS FITTED AT: what a zoom works every later size out
+        // from, and how a sharper drawing of the same page finds the sheet it replaces.
+        canvas.dataset.page = String(n);
+        canvas.dataset.fitW = String(cssW);
+        canvas.dataset.fitH = String(cssH);
         host.appendChild(canvas);
         const ctx = canvas.getContext("2d")!;
         ctx.scale(dpr, dpr);
@@ -150,6 +294,7 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
       // A margin change or a newer rotation mid-paint owns the screen now, and a superseded paint
       // finishing late must not claim the width back either.
       if (!turns.current.finishedPaint(seq, containerW)) return;
+      drawnWhole.current = true;
       setState("ready");
       setAllPainted(true);
       // RESOLVED AGAIN HERE, never the element measured before the awaits above: a turn that landed
@@ -170,6 +315,349 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
     }
   }, []);
 
+  /**
+   * THE WHOLE DOCUMENT IS ON THE SCREEN AND NOTHING IS BEING FETCHED: the one question everything
+   * that zooms or sharpens asks. Not merely "not fetching": while a fresh draw is still filling the
+   * list, the sheets are about to be replaced, and a zoom then would resize half a document.
+   */
+  const ready = useCallback(
+    () => drawnWhole.current && !turns.current.isLoading() && !!pagesRef.current?.querySelector("canvas.pdf-page-canvas"),
+    [],
+  );
+
+  /**
+   * DRAW THE SHEETS A PERSON IS LOOKING AT AGAIN, SHARP, AT THE ZOOM THEY ARE SHOWN AT.
+   *
+   * A zoom only changes the CSS size of the sheets, so straight after a pinch a person is looking at
+   * a small bitmap stretched: readable at two times, soft at four, and softer still on a long
+   * document, which is drawn at a lower density to begin with. This draws the sheets that are on the
+   * screen again at the size they now have, the one being read first, never more than SHARP_MOST.
+   *
+   * A GUEST, NOT A PAINT TURN. It takes no turn and settles none, and touches neither Print nor the
+   * state of the screen: a fresh draw cannot be cancelled by it, and it stops at its next wait once a
+   * load, a fresh draw or leaving the screen has moved the epoch, or a newer sharpen has started;
+   * the sheet it was drawing then never goes on the screen. Print needs no guard:
+   * every page is on the screen at every moment of it, because one sheet is swapped for another in a
+   * single step, and every sheet prints the width of the paper whatever size it was drawn at.
+   *
+   * THE FITTED SHEETS ARE KEPT. The first time a page is drawn sharp, the sheet the fresh draw made is
+   * kept in `bases` and the sharp one takes its place in the list. A sharp sheet that has gone out of
+   * view, or every one at FIT, gets its fitted sheet back. MEMORY FALLS BEFORE IT RISES: every sheet
+   * that is going back is put back and released first, and only then are new ones drawn, one at a
+   * time, each releasing the sharp sheet it replaces at once.
+   *
+   * A sheet is drawn again only for clearly more detail than it has (lib/pdf-zoom, worthSharpening),
+   * at the density of a short document, since at most three are sharp however long it is (drawDensity).
+   */
+  const sharpen = useCallback(async (pdf: PDFDocumentProxy) => {
+    const host = pagesRef.current;
+    if (!host || !drawnWhole.current || turns.current.isLoading()) return;
+    const run = ++sharpenRun.current;
+    const ep = epoch.current;
+    const gone = () => sharpenRun.current !== run || epoch.current !== ep;
+    const kept = bases.current;
+
+    // WHICH PAGES ARE TO BE SHARP: none at FIT; zoomed, the ones on the glass, nearest the one being
+    // read first. Page numbers only: no element is held across a wait below.
+    const wanted: string[] = [];
+    {
+      const sheets = sheetsIn(host);
+      const scroller = theScroller(scrollRef.current);
+      if (zoomRef.current > FIT && scroller) {
+        const view = scroller.getBoundingClientRect();
+        for (const i of nearestFirst(sheets.length, sheetBeingRead(sheets, scroller))) {
+          if (wanted.length >= SHARP_MOST) break;
+          const page = sheets[i].dataset.page;
+          if (page && onScreen(sheets[i].getBoundingClientRect(), view)) wanted.push(page);
+        }
+      }
+      // PUT BACK FIRST, so memory falls before it rises.
+      for (const sharp of sheets) {
+        const page = sharp.dataset.page;
+        if (!page || sharp.dataset.sharp !== "1" || wanted.includes(page)) continue;
+        const base = kept.get(page);
+        if (!base) continue;
+        const size = zoomedSize(fittedSizeOf(base), zoomRef.current);
+        base.style.width = `${size.width}px`;
+        base.style.height = `${size.height}px`;
+        if (sharp.parentNode === host) host.replaceChild(base, sharp);
+        release(sharp);
+        kept.delete(page);
+      }
+    }
+
+    const dpr = sharpnessFor(1);
+    let drawing: HTMLCanvasElement | null = null;
+    try {
+      for (const n of wanted) {
+        const sheet = sheetFor(host, n);
+        if (!sheet) continue;
+        const fitted = fittedSizeOf(sheet);
+        if (!(fitted.width > 0)) continue;
+        const size = zoomedSize(fitted, zoomRef.current);
+        const density = drawDensity(size.width, dpr);
+        const across = Math.floor(size.width * density);
+        if (!worthSharpening(sheet.width, across)) continue;
+        const page = await pdf.getPage(Number(n));
+        if (gone()) return;
+        const base = page.getViewport({ scale: 1 });
+        const canvas = document.createElement("canvas");
+        drawing = canvas;
+        // The same rule as a fresh draw: the height from the floored width, so the sheet is the
+        // paper's shape exactly and a printed page never grows a sliver of a second one.
+        canvas.width = across;
+        canvas.height = Math.round((across * base.height) / base.width);
+        canvas.className = sheet.className;
+        canvas.dataset.page = n;
+        canvas.dataset.fitW = sheet.dataset.fitW;
+        canvas.dataset.fitH = sheet.dataset.fitH;
+        canvas.dataset.sharp = "1";
+        const ctx = canvas.getContext("2d");
+        // No context is a canvas the device would not give: the sheet that is there stays.
+        if (!ctx) {
+          release(canvas);
+          drawing = null;
+          continue;
+        }
+        ctx.scale(density, density);
+        await page.render({ canvasContext: ctx, viewport: page.getViewport({ scale: size.width / base.width }) }).promise;
+        if (gone()) return;
+        // FOUND AGAIN after the wait: a newer sheet may stand there, or none.
+        const there = sheetFor(host, n);
+        if (!there) {
+          release(canvas);
+          drawing = null;
+          continue;
+        }
+        // THE SIZE THE SCREEN SHOWS NOW, not the one this drawing was started for: a pinch that went
+        // on while the page was being drawn has already resized the sheet this one replaces.
+        const now = zoomedSize(fitted, zoomRef.current);
+        canvas.style.width = `${now.width}px`;
+        canvas.style.height = `${now.height}px`;
+        host.replaceChild(canvas, there);
+        drawing = null;
+        // A fitted sheet is kept to put back; a sharp one replaced by a sharper one is released now.
+        if (there.dataset.sharp === "1") release(there);
+        else kept.set(n, there);
+      }
+    } catch {
+      // A page that will not draw sharper is not an error anybody can act on: every sheet is still on
+      // the screen, as sharp as it was. Nothing is reported.
+    } finally {
+      // Whatever was being drawn and never went on the screen gives its memory back.
+      release(drawing);
+    }
+  }, []);
+
+  /**
+   * ASK FOR A SHARPER DRAWING once things have been still for a moment: after a gesture, and after a
+   * scroll while zoomed, so the sharp sheets follow a person down the document and the ones left
+   * behind give their memory back. It does nothing while a finger is on the sheets or the document is
+   * not whole on the screen.
+   */
+  const sharpenSoonAfter = useCallback(() => {
+    clearTimeout(sharpenSoon.current);
+    sharpenSoon.current = setTimeout(() => {
+      const pdf = pdfRef.current;
+      if (!pdf || fingerDown.current || !ready()) return;
+      void sharpen(pdf);
+    }, 220);
+  }, [ready, sharpen]);
+
+  // ── PINCH, DOUBLE TAP, CTRL + WHEEL ─────────────────────────────────────────────────────────────
+  // Read here because nothing else will: the phone app's shell has the web view's own pinch turned
+  // off for every screen (lib/pdf-zoom has the whole reason). The listeners sit on the box, which is
+  // there for the life of the screen, and resolve the sheets, the scroller and the way the phone is
+  // held at the moment of each gesture: a turn of the phone swaps the scroller underneath them, and
+  // a sharper drawing swaps a sheet. WHAT a touch means is lib/pdf-zoom's gestureStep(), pure and
+  // tested there; this only carries out the act it answers with.
+  useEffect(() => {
+    const box = scrollRef.current;
+    if (!box) return;
+    /** A place on one page: the thing a gesture holds on to. The page by NUMBER, never the element,
+     *  and the epoch it was taken in, because a fresh draw makes it a place on sheets that are gone. */
+    type Hold = { page: string; place: Point; epoch: number };
+    let gesture: GestureState = NO_GESTURE;
+    let hold: Hold | null = null;
+    /** The newest thing a pinch asked for, drawn once a frame however many moves arrive in it. */
+    let asked: { zoom: number; fingers: Point } | null = null;
+    let frame = 0;
+    /** When a finger last touched, so the double click a browser makes up after a double tap is not read twice. */
+    let touchedAt = 0;
+
+    const at = (t: { clientX: number; clientY: number }): Point => ({ x: t.clientX, y: t.clientY });
+    const points = (list: TouchList): Point[] => Array.from(list, at);
+    const room = () => turns.current.drawnAtW();
+
+    /** The page under a point of the glass (or the nearest one), and the place on it. */
+    const holdAt = (p: Point): Hold | null => {
+      let best: HTMLCanvasElement | null = null;
+      let bestGap = Infinity;
+      for (const sheet of sheetsIn(pagesRef.current)) {
+        const r = sheet.getBoundingClientRect();
+        const gapX = Math.max(r.left - p.x, 0, p.x - r.right);
+        const gapY = Math.max(r.top - p.y, 0, p.y - r.bottom);
+        const gap = Math.hypot(gapX, gapY);
+        if (gap < bestGap) {
+          best = sheet;
+          bestGap = gap;
+        }
+      }
+      if (!best || !best.dataset.page) return null;
+      return { page: best.dataset.page, place: placeOnSheet(p, best.getBoundingClientRect(), heldNow(box)), epoch: epoch.current };
+    };
+
+    /** Show the sheets at a zoom, with the held place under the fingers. Only on a whole document. */
+    const show = (zoom: number, hold: Hold, fingers: Point) => {
+      if (!ready() || hold.epoch !== epoch.current) return;
+      const sheets = sheetsIn(pagesRef.current);
+      for (const sheet of sheets) {
+        const size = zoomedSize(fittedSizeOf(sheet), zoom);
+        if (!(size.width > 0)) continue;
+        sheet.style.width = `${size.width}px`;
+        sheet.style.height = `${size.height}px`;
+      }
+      zoomRef.current = zoom;
+      const held = sheets.find((s) => s.dataset.page === hold.page);
+      const scroller = theScroller(box);
+      if (!held || !scroller) return;
+      const move = scrollToKeep({ place: hold.place, sheetNow: held.getBoundingClientRect(), fingers, held: heldNow(box) });
+      scroller.scrollLeft += move.dx;
+      scroller.scrollTop += move.dy;
+    };
+
+    /** The pinch is over, either way: no frame left to draw, nothing held. */
+    const letGo = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      hold = null;
+      asked = null;
+    };
+
+    const toggleAt = (p: Point) => {
+      if (!ready()) return;
+      const h = holdAt(p);
+      if (!h) return;
+      show(zoomAfterDoubleTap(zoomRef.current, room()), h, p);
+      sharpenSoonAfter();
+    };
+
+    /** Carry out what the gesture rule answered. `e` is the event to refuse the browser, if any. */
+    const carryOut = (act: GestureAct, e: Event | null) => {
+      if (!act) return;
+      if (act.kind === "hold") {
+        hold = holdAt(act.at);
+        asked = null;
+        return;
+      }
+      if (act.kind === "show") {
+        // Nothing held is nothing to zoom, and then the move is not ours to refuse either.
+        if (!hold) return;
+        // TWO FINGERS ON THE SHEETS ARE OURS. Without this the scroller drags the page about under the
+        // pinch, and a browser that still has its own pinch zooms the whole window as well.
+        e?.preventDefault();
+        asked = { zoom: act.zoom, fingers: act.fingers };
+        if (frame) return;
+        frame = requestAnimationFrame(() => {
+          frame = 0;
+          if (hold && asked) show(asked.zoom, hold, asked.fingers);
+        });
+        return;
+      }
+      if (act.kind === "finish") {
+        // The last thing the fingers asked for is drawn NOW rather than left to a frame that a lifted
+        // finger may never get.
+        if (frame) cancelAnimationFrame(frame);
+        frame = 0;
+        if (hold && asked) show(asked.zoom, hold, asked.fingers);
+        letGo();
+        sharpenSoonAfter();
+        return;
+      }
+      if (act.kind === "drop") {
+        letGo();
+        return;
+      }
+      toggleAt(act.at);
+    };
+
+    const step = (ev: GestureEvent, e: Event | null) => {
+      const next = gestureStep(gesture, ev);
+      gesture = next.state;
+      carryOut(next.act, e);
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      touchedAt = Date.now();
+      // NO SHEET IS SWAPPED UNDER A FINGER (fingerDown has the reason). The sharper drawing under way
+      // stops at its next wait, having swapped nothing since this finger landed, and none starts
+      // until the last finger is up.
+      fingerDown.current = true;
+      sharpenRun.current++;
+      step({ kind: "start", touches: points(e.touches), at: e.timeStamp, ready: ready(), zoom: zoomRef.current }, null);
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      step({ kind: "move", touches: points(e.touches), ready: ready(), cancelable: e.cancelable, room: room() }, e);
+    };
+
+    /** After a lift: `still` are the fingers left on the glass. Once it is clear, the sharper drawing
+     *  the touch stopped is asked for again, while anything is zoomed or any sharp sheet is left. */
+    const afterLift = (still: Point[]) => {
+      fingerDown.current = still.length > 0;
+      if (!fingerDown.current && (zoomRef.current > FIT || bases.current.size > 0)) sharpenSoonAfter();
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      touchedAt = Date.now();
+      const still = points(e.touches);
+      const lifted = e.changedTouches[0];
+      step({ kind: "end", touches: still, lifted: lifted ? at(lifted) : null, at: e.timeStamp, ready: ready() }, null);
+      afterLift(still);
+    };
+
+    const onTouchCancel = (e: TouchEvent) => {
+      step({ kind: "cancel" }, null);
+      afterLift(points(e.touches));
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      // A trackpad pinch reaches a page as a wheel with ctrl held, and so does ctrl + scroll. A plain
+      // wheel is the scroller's.
+      if (!e.ctrlKey || !ready()) return;
+      const p = at(e);
+      const h = holdAt(p);
+      if (!h) return;
+      // Or the browser zooms the whole window, toolbar and all, which is the thing this replaces.
+      e.preventDefault();
+      show(zoomAfterWheel(zoomRef.current, e.deltaY, room(), e.deltaMode === 1), h, p);
+      sharpenSoonAfter();
+    };
+
+    const onDoubleClick = (e: MouseEvent) => {
+      // A mouse's double click. A finger's double tap was read above, and the double click some
+      // browsers make up after it would undo it.
+      if (!mouseDoubleClickCounts(Date.now(), touchedAt)) return;
+      toggleAt(at(e));
+    };
+
+    box.addEventListener("touchstart", onTouchStart, { passive: true });
+    box.addEventListener("touchmove", onTouchMove, { passive: false });
+    box.addEventListener("touchend", onTouchEnd);
+    box.addEventListener("touchcancel", onTouchCancel);
+    box.addEventListener("wheel", onWheel, { passive: false });
+    box.addEventListener("dblclick", onDoubleClick);
+    return () => {
+      letGo();
+      box.removeEventListener("touchstart", onTouchStart);
+      box.removeEventListener("touchmove", onTouchMove);
+      box.removeEventListener("touchend", onTouchEnd);
+      box.removeEventListener("touchcancel", onTouchCancel);
+      box.removeEventListener("wheel", onWheel);
+      box.removeEventListener("dblclick", onDoubleClick);
+    };
+  }, [ready, sharpenSoonAfter]);
+
   // ── WHERE HE IS, WRITTEN DOWN AS HE SCROLLS ────────────────────────────────────────────────────
   // CAPTURE, on the box, so it sees whichever element is actually scrolling: the box itself upright, the
   // quarter-turned face inside it once the phone is turned. A `scroll` event does not bubble, but a
@@ -180,6 +668,9 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
     if (!box) return;
     const remember = (e: Event) => {
       if (repainting.current) return;
+      // Zoomed, the sharp sheets follow him down the document once he stops, and the ones he left
+      // behind give their memory back. At FIT there is nothing sharp to move.
+      if (zoomRef.current > FIT) sharpenSoonAfter();
       const el = e.target as HTMLElement | null;
       if (!el || !(el instanceof HTMLElement)) return;
       if (el.scrollHeight <= el.clientHeight) return;
@@ -187,12 +678,14 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
     };
     box.addEventListener("scroll", remember, true);
     return () => box.removeEventListener("scroll", remember, true);
-  }, []);
+  }, [sharpenSoonAfter]);
 
   const load = useCallback(async () => {
     // A LOAD TURN outranks everything: the document on screen is about to be replaced, so a repaint of
     // it is cancelled too — and until this one has the bytes in hand, nothing else may repaint at all.
     const seq = turns.current.startLoad();
+    drawnWhole.current = false;
+    epoch.current++;
     setState("loading");
     setAllPainted(false);
     setError("");
@@ -301,10 +794,21 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
   const turnsOnLeaving = turns.current;
   useEffect(() => {
     const host = pagesHost.current;
+    const keptOnLeaving = bases.current;
+    // The counter itself moves on leaving, never a number read from it now: that is the whole point.
+    const moveTheEpochOnLeaving = () => {
+      epoch.current++;
+    };
     return () => {
       // Abort any in-flight fetch/paint loop (audit 7): tapping Back mid-load still rasterized
       // every page into detached canvases and leaked the multi-MB blob on the page you fled to.
       turnsOnLeaving.abandonAll();
+      // …and the sharper drawing a last pinch left waiting, which would otherwise wake on the page
+      // he fled to and find nothing to draw, and the one under way, which stops at its next wait.
+      clearTimeout(sharpenSoon.current);
+      drawnWhole.current = false;
+      moveTheEpochOnLeaving();
+      letGoOfSharp(host, keptOnLeaving);
       setBlobUrl((old) => {
         if (old) URL.revokeObjectURL(old);
         return null;
