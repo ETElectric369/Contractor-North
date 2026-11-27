@@ -1,13 +1,19 @@
 import Link from "next/link";
 import { headers } from "next/headers";
-import { shellFromUserAgent } from "@/lib/native-shell";
 import { NO_INDEX } from "@/lib/no-index";
-import { Zap } from "lucide-react";
 import { requestPasswordReset } from "@/app/login/actions";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
+import { translator } from "@/lib/i18n";
+import { langFromAcceptLanguage } from "@/lib/request-lang";
 
 export const dynamic = "force-dynamic";
+
+/** Nobody is signed in here, so the page speaks the phone's language: the same header read as the
+ *  login page and as the action this form posts to (login/actions.ts), so page and answer agree. */
+async function pageLang() {
+  return langFromAcceptLanguage((await headers()).get("accept-language"));
+}
 
 export default async function ForgotPage({
   searchParams,
@@ -15,29 +21,28 @@ export default async function ForgotPage({
   searchParams: Promise<{ error?: string; message?: string }>;
 }) {
   const { error, message } = await searchParams;
-  // IN THE APP, THE RESET LINK IS A DEAD END (audit v921 high). The emailed link carries a PKCE
-  // code that can only be exchanged in the browser context that ASKED for it; the shell (and the
-  // installed PWA) hand the link to Safari, whose cookie jar has no verifier — the exchange fails
-  // every time. The 6-digit code path has no such problem, so in the shell that is the door we
-  // lead with. Web keeps the link.
-  const inShell = shellFromUserAgent((await headers()).get("user-agent")).native;
+  const t = translator(await pageLang());
+  // ONE PAGE FOR THE BROWSER AND THE PHONE APP (cn-v1200). Until cn-v1199 the emailed reset link
+  // carried a PKCE code that only the browser which asked for it could exchange, so in the phone
+  // app this page hid the form, pointed at the code door, said the link could not finish in the
+  // phone's browser, and named a password door in Settings that a person does not have. The link
+  // is now the app's own (lib/auth-mail: a token hash, verified on the person's own tap at
+  // /auth/confirm), and it finishes in ANY browser: the phone hands it to its browser, the person
+  // sets the password there and signs in to the app with it. So the form is the same everywhere,
+  // and the code door stays below it as the second way in.
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand to-brand-dark px-4">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand to-brand-dark px-4 pt-[var(--sat,0px)]">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center text-white">
-          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 backdrop-blur">
-            <Zap className="h-7 w-7" />
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight">Reset your password</h1>
+          {/* The tile IS the app icon, the same asset as the login page (cn-v1200: it was a bolt). */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/icon-192.png" alt={t("au_appName")} className="mx-auto mb-3 h-16 w-16 rounded-2xl shadow-lg ring-1 ring-white/15" />
+          <h1 className="text-2xl font-bold tracking-tight">{t("au_resetHeading")}</h1>
         </div>
 
         <div className="rounded-2xl bg-white p-8 shadow-xl">
-          <p className="mb-6 text-sm text-slate-500">
-            {inShell
-              ? "In the app, sign in with a 6-digit code — then set a new password in Settings. A reset link would open in Safari and can't finish there."
-              : "Enter your email and we'll send you a link to set a new password."}
-          </p>
+          <p className="mb-6 text-sm text-slate-500">{t("au_resetSub")}</p>
 
           {error && (
             <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -50,36 +55,26 @@ export default async function ForgotPage({
             </div>
           )}
 
-          {inShell ? (
-            <Link href="/login?mode=code" className="block">
-              <Button size="lg" className="w-full">
-                Sign In with a Code
-              </Button>
-            </Link>
-          ) : (
-            <form action={requestPasswordReset} className="space-y-4">
-              <div>
-                <Label htmlFor="email">Email</Label>
-                <Input autoComplete="email" id="email" name="email" type="email" placeholder="you@company.com" required />
-              </div>
-              <Button type="submit" size="lg" className="w-full">
-                Send Reset Link
-              </Button>
-            </form>
-          )}
+          <form action={requestPasswordReset} className="space-y-4">
+            <div>
+              <Label htmlFor="email">{t("au_email")}</Label>
+              <Input autoComplete="email" id="email" name="email" type="email" placeholder={t("au_emailPlaceholder")} required />
+            </div>
+            <Button type="submit" size="lg" className="w-full">
+              {t("au_sendResetLink")}
+            </Button>
+          </form>
 
-          {!inShell && (
-            <p className="mt-4 text-center text-sm text-slate-500">
-              Didn&apos;t get it, or the link won&apos;t open?{" "}
-              <Link href="/login?mode=code" className="font-medium text-brand hover:underline">
-                Sign In with a Code
-              </Link>
-            </p>
-          )}
+          <p className="mt-4 text-center text-sm text-slate-500">
+            {t("au_resetNoLink")}{" "}
+            <Link href="/login?mode=code" className="font-medium text-brand hover:underline">
+              {t("au_signInWithACode")}
+            </Link>
+          </p>
 
           <p className="mt-6 text-center text-sm text-slate-500">
             <Link href="/login" className="font-medium text-brand hover:underline">
-              Back to Sign In
+              {t("au_backToSignIn")}
             </Link>
           </p>
         </div>
@@ -91,4 +86,6 @@ export default async function ForgotPage({
 // Never index auth/utility chrome — on a tenant's custom domain this page previously leaked a
 // "Contractor North" title into crawlers with no noindex (the SEO vendor's "hosted on
 // contractornorth" ammunition). Both layers per the no-index doctrine: this metadata + robots.txt.
-export const metadata = { title: "Reset your password", robots: NO_INDEX };
+export async function generateMetadata() {
+  return { title: translator(await pageLang())("au_resetHeading"), robots: NO_INDEX };
+}

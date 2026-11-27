@@ -4,7 +4,8 @@ import type { WordCatalog } from "./types";
  * THE DOORS BEFORE A SESSION EXISTS (au_, cn-v1138): sign-in (the password form, the emailed code,
  * sign-up), the errors those actions answer, Set A Password (the page, its form and its action) and
  * the crew import's one-time door (/auth/confirm), and since cn-v1199 the app's own sign-in and reset
- * emails (lib/auth-mail, au_mail_: the reader's profile language when the address has an account). With no profile to read yet, login and the
+ * emails (lib/auth-mail, au_mail_: the reader's profile language when the address has an account), and since cn-v1200
+ * the Forgot Password page (forgot/page.tsx: one page for the browser and the phone app). With no profile to read yet, login and the
  * confirm door speak the phone's Accept-Language (lib/request-lang: the header's first tag, or the
  * `?lang=` the link carries); Set A Password has the session the link just made and asks callerLang.
  * The English is byte-for-byte what each screen said before. Every door label is Title Case in both
@@ -26,6 +27,7 @@ export const words: WordCatalog = {
     "src/app/auth/join/page.tsx",
     "src/app/auth/join/actions.ts",
     "src/lib/auth-mail.ts",
+    "src/app/forgot/page.tsx",
   ],
   sameInBoth: ["au_appName"],
   en: {
@@ -69,6 +71,13 @@ export const words: WordCatalog = {
     au_password6: "Password must be at least 6 characters.",
     au_enterCode: "Enter the whole code from your email.",
     au_tooManyEmails: "Too many emails asked for. Try again in an hour.",
+    // forgot/page.tsx (cn-v1200): one page for the browser and the phone app, in the phone's language.
+    au_resetHeading: "Reset your password",
+    au_resetSub: "Enter your email and we'll send you a link to set a new password.",
+    au_sendResetLink: "Send Reset Link",
+    au_resetNoLink: "Didn't get it, or the link won't open?",
+    au_signInWithACode: "Sign In with a Code",
+    au_backToSignIn: "Back to Sign In",
     // lib/auth-mail.ts (cn-v1199): the app's own sign-in and reset emails. No digit in a subject, no
     // minutes promised (the clock is the auth host's); the buttons are au_signIn and au_setMyPassword.
     au_mail_signInSubject: "Your Contractor North sign-in code",
@@ -158,6 +167,12 @@ export const words: WordCatalog = {
     au_password6: "La contraseña debe tener al menos 6 caracteres.",
     au_enterCode: "Escribe el código completo de tu correo.",
     au_tooManyEmails: "Se pidieron demasiados correos. Vuelve a intentarlo en una hora.",
+    au_resetHeading: "Restablece tu contraseña",
+    au_resetSub: "Escribe tu correo y te enviamos un enlace para crear una nueva contraseña.",
+    au_sendResetLink: "Enviar Enlace",
+    au_resetNoLink: "¿No te llegó o el enlace no abre?",
+    au_signInWithACode: "Iniciar Sesión con un Código",
+    au_backToSignIn: "Volver a Iniciar Sesión",
     au_mail_signInSubject: "Tu código para entrar a Contractor North",
     au_mail_signInHow: "Escríbelo en la pantalla de inicio o toca el botón. Sirve una vez y por poco tiempo.",
     au_mail_foot: "¿No lo pediste? Ignora este correo. Tu cuenta sigue igual.",
