@@ -18,6 +18,8 @@ const state = vi.hoisted(() => ({
   noKey: false,
   /** What subscriptions.retrieve answers (the declined-card branch asks Stripe for the subscription). */
   subscription: null as any,
+  /** The ids subscriptions.retrieve was asked for, in order. */
+  subscriptionLookups: [] as any[],
   /** The Checkout sessions Stripe would list by PaymentIntent (the refund branch's way back to a top-up). */
   sessions: [] as any[],
   sessionLookups: [] as any[],
@@ -32,7 +34,12 @@ vi.mock("@/lib/stripe", () => ({
         return state.event;
       },
     },
-    subscriptions: { retrieve: async () => state.subscription },
+    subscriptions: {
+      retrieve: async (id: unknown) => {
+        state.subscriptionLookups.push(id);
+        return state.subscription;
+      },
+    },
     checkout: {
       sessions: {
         list: async (params: { payment_intent: string; limit: number }) => {
@@ -462,6 +469,7 @@ describe("the company's own billing (cn-v1137)", () => {
       return { data: null, error: { message: `unknown function ${fn}` } };
     });
     state.subscription = subscription();
+    state.subscriptionLookups = [];
     vi.mocked(reportError).mockClear();
   });
 
@@ -482,6 +490,37 @@ describe("the company's own billing (cn-v1137)", () => {
       ["admin-1", "billing", "Your Card Was Declined"],
     ]);
     expect(reportError).not.toHaveBeenCalled();
+  });
+
+  /**
+   * THE NEWER EVENT SHAPE (cn-v1209). From the 2025-03-31 API an invoice no longer has
+   * `subscription`; the id is at parent.subscription_details.subscription. Which shape arrives is
+   * the ENDPOINT's API version, set in the Stripe dashboard. Read only the old place and this
+   * decline is skipped whole: no mirror, no claim, nobody told.
+   */
+  it("a declined card in the newer event shape (no invoice.subscription): the same mirror, the same claim, the same ONE push", async () => {
+    const inv = { customer: "cus_1", parent: { type: "subscription_details", subscription_details: { subscription: "sub_1", metadata: {} } } };
+    expect((await ourEvent("invoice.payment_failed", inv, "evt_pf_new")).status).toBe(200);
+    expect(state.subscriptionLookups).toEqual(["sub_1"]);
+    expect(org()).toMatchObject({ subscription_status: "past_due", stripe_subscription_id: "sub_1", current_period_end: PERIOD_END_ISO });
+    expect(rpcs).toEqual([["claim_billing_notice", { p_org: ORG, p_key: `past_due:${PERIOD_END_ISO}` }]]);
+    expect(state.pushes).toHaveLength(1);
+    expect(state.pushes[0][0]).toEqual(["owner-1", "admin-1"]);
+    expect(state.pushes[0][2].title).toBe("Your Card Was Declined");
+  });
+
+  it("the older event shape asks Stripe for the id it names, and an expanded subscription in the newer shape gives its id", async () => {
+    await ourEvent("invoice.payment_failed", { subscription: "sub_1", customer: "cus_1" }, "evt_pf_old_shape");
+    await ourEvent("invoice.payment_failed", { customer: "cus_1", parent: { type: "subscription_details", subscription_details: { subscription: { id: "sub_1" } } } }, "evt_pf_expanded");
+    expect(state.subscriptionLookups).toEqual(["sub_1", "sub_1"]);
+  });
+
+  it("an invoice that belongs to no subscription (a one-off, in either shape): Stripe is not asked, nothing is claimed, nothing is pushed", async () => {
+    expect((await ourEvent("invoice.payment_failed", { customer: "cus_1", subscription: null, parent: null }, "evt_pf_oneoff")).status).toBe(200);
+    expect((await ourEvent("invoice.payment_failed", { customer: "cus_1", parent: { type: "quote_details", quote_details: { quote: "qt_1" }, subscription_details: null } }, "evt_pf_quote")).status).toBe(200);
+    expect(state.subscriptionLookups).toEqual([]);
+    expect(rpcs).toEqual([]);
+    expect(state.pushes).toHaveLength(0);
   });
 
   it("Stripe's retry of the decline (a second payment_failed for the same period): the claim answers false, nothing is pushed, nothing is written to the bell", async () => {
@@ -505,6 +544,8 @@ describe("the company's own billing (cn-v1137)", () => {
 
   it("a decline on a connected account (a contractor's own customer) is not our billing: nothing claimed, nothing pushed", async () => {
     await deliver("invoice.payment_failed", { subscription: "sub_x", customer: "cus_x" }, "evt_pf_connect");
+    await deliver("invoice.payment_failed", { customer: "cus_x", parent: { type: "subscription_details", subscription_details: { subscription: "sub_x" } } }, "evt_pf_connect_new");
+    expect(state.subscriptionLookups).toEqual([]);
     expect(rpcs).toEqual([]);
     expect(state.pushes).toHaveLength(0);
   });

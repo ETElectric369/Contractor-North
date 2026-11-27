@@ -6,6 +6,7 @@ import { formatCurrency } from "@/lib/utils";
 import { claimedInvoice, recordStripeInvoicePayment, tapPaymentKey, TAP_VIA, type RecordVia } from "@/lib/record-invoice-payment";
 import { declineReason } from "@/lib/stripe-decline-words";
 import { accountUpdateFields } from "@/lib/stripe-connect";
+import { invoiceSubscriptionId } from "@/lib/stripe-invoice";
 import { tierForPriceId } from "@/lib/plans";
 import { reportError, reportErrorAwaited } from "@/lib/observe";
 import { reportBlockerAwaited } from "@/lib/observe-blocker";
@@ -368,10 +369,15 @@ export async function POST(req: Request) {
     // sends — so the retries claim nothing and push nothing; the grace countdown itself is the daily
     // cron's (lib/billing-notices). Under the `billing` kind, to the owner and admins only: they are
     // the ones who can update the card.
+    //
+    // THE SUBSCRIPTION IS FOUND IN EITHER SHAPE (cn-v1209): the endpoint's own API version decides
+    // where an invoice names it, and this branch read only the older place, so on a newer endpoint
+    // a decline was skipped whole and nobody was told (lib/stripe-invoice).
     case "invoice.payment_failed": {
       const inv = event.data.object as Stripe.Invoice;
-      if (!fromConnectedAccount && inv.subscription) {
-        const sub = await getStripe().subscriptions.retrieve(inv.subscription as string);
+      const subId = invoiceSubscriptionId(inv);
+      if (!fromConnectedAccount && subId) {
+        const sub = await getStripe().subscriptions.retrieve(subId);
         const landed = await syncSubscription(sub);
         // A decline on a subscription that is no longer the company's current one is not the
         // company's card (S5): nothing was mirrored above, nothing is claimed, nobody is told.
