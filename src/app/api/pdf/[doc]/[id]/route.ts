@@ -7,6 +7,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { normalizeDocStyle } from "@/lib/doc-style";
 import { docFileName, rowPlace } from "@/lib/doc-place";
 import { printRefusal } from "@/lib/print-refusal";
+import { launchPdfBrowser } from "@/lib/pdf-browser";
 
 export const dynamic = "force-dynamic";
 /** Concurrent chromium renders allowed per function instance (each is ~150MB). */
@@ -191,23 +192,6 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
     }
   }
 
-  // Chromium: the Vercel lambda build on prod; a local Chrome for dev.
-  const isVercel = !!process.env.VERCEL;
-  // @sparticuz/chromium only extracts its shared libs (libnss3 et al) when it detects an
-  // AWS runtime via AWS_EXECUTION_ENV / AWS_LAMBDA_JS_RUNTIME — and Vercel STRIPS those,
-  // so no lib branch ever fired ("libnss3.so: cannot open shared object file"). Declare
-  // the runtime ourselves BEFORE the module loads; Vercel functions run Amazon Linux 2023,
-  // which is exactly the al2023 lib set this selects.
-  if (isVercel && !process.env.AWS_LAMBDA_JS_RUNTIME) {
-    process.env.AWS_LAMBDA_JS_RUNTIME = "nodejs22.x";
-  }
-  const [{ default: puppeteer }, chromium] = await Promise.all([
-    import("puppeteer-core"),
-    isVercel ? import("@sparticuz/chromium").then((mod) => mod.default) : Promise.resolve(null as any),
-  ]);
-  const executablePath = isVercel
-    ? await chromium.executablePath()
-    : process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
   // One chromium per instance at a time: each launch is ~150MB and the render makes a SECOND
   // request back into this same deployment, so an unbounded fan-out (a user dragging the margin
   // control) can exhaust the function's memory and stall unrelated requests.
@@ -217,12 +201,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
   inFlight++;
   let browser;
   try {
-    browser = await puppeteer.launch({
-      args: isVercel ? chromium.args : [],
-      defaultViewport: isVercel ? chromium.defaultViewport : undefined,
-      executablePath,
-      headless: isVercel ? chromium.headless : true,
-    });
+    // Chromium: the serverless build on Vercel, a local Chrome on a developer's machine. How it
+    // is started, and the order that start depends on, live in ONE place: lib/pdf-browser. The
+    // binary is unpacked inside this call, so a busy instance answers 429 above without touching
+    // it, and a failed unpack releases the slot like any other failed launch.
+    browser = await launchPdfBrowser({ lambda: !!process.env.VERCEL });
   } catch (e) {
     // A launch failure must release the slot — otherwise the counter leaks and this
     // instance answers 429 forever.

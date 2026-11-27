@@ -14,6 +14,8 @@ const nextConfig: NextConfig = {
   // The chromium package loads its brotli-packed binary + shared libs (libnss3 et al) from
   // bin/ with fs at runtime — the file tracer misses them, and the lambda then dies with
   // "libnss3.so: cannot open shared object file". Force the whole bin/ dir into the bundle.
+  // Both packages are ESM-only since the 2026-11 update (lib/pdf-browser imports them with
+  // import()); bin/ is still one flat folder of four .br files.
   outputFileTracingIncludes: {
     "/api/pdf/**": ["./node_modules/@sparticuz/chromium/bin/**"],
   },
