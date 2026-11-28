@@ -24,7 +24,8 @@ function onPhone() {
 }
 
 type Tone = ReceiptTone | "busy";
-/** `differentDoc`: a bill already carries this paper's number and nothing was written; the line
+/** `differentDoc`: a bill already carries this paper's number AND its total agrees (cn-v1211), so
+ *  no bill was written; the line
  *  offers Different Purchase: Record It Anyway for the paper filed as this document. `sameBillId`
  *  (d1ff7c5a): that bill is on THIS job, so the line also offers Same Purchase: It's That Bill,
  *  which ties the paper to it instead of reading it again or billing it twice. */

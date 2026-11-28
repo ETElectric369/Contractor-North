@@ -59,7 +59,7 @@ import {
   looksProvisionallyPriced,
   RECEIPT_LINE_CATEGORY_SCHEMA_HINT,
 } from "@/app/(app)/bills/receipt-billing";
-import { billLabel, billsCarryingNumber, purchaseOf } from "@/lib/same-purchase";
+import { billLabel, billsCarryingNumber, namesakeSaid, readNumberMatch } from "@/lib/same-purchase";
 import {
   billStatusFromItem,
   cleanDocNumber,
@@ -479,7 +479,8 @@ export async function billJobReceipt(
   ok: boolean;
   error?: string;
   already?: boolean;
-  /** A bill already carries this paper's number: nothing was written, and this says which. */
+  /** The purchase this paper IS (its number AND its total agree, cn-v1211): no bill was written, and
+   *  this says which. */
   sameAs?: string;
   /** THAT bill (d1ff7c5a): so a door can say "Same Purchase: It's That Bill" and tie the paper to it
    *  (linkReceiptToBill) instead of a second paid read or a second bill. `sameOnThisJob` is whether
@@ -564,7 +565,7 @@ Respond with ONLY a JSON object (no prose):
   "vendor": store/supplier name or null,
   "amount": grand total in dollars as a number (the amount actually paid), or null only if you truly cannot read it,
   "date": "YYYY-MM-DD" printed on the receipt, or null,
-  "document_number": the invoice, ticket or receipt number printed on it, exactly as printed, or null,
+  "document_number": the number that belongs to THIS paper alone (its invoice, ticket, receipt or credit memo number), exactly as printed, or null. Never the store number, a register, terminal, cashier or clerk number, a customer or account number, a PO number, a phone number or a date: those are the same on every paper from that store. If the paper carries no number of its own, null,
   "line_items": [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": ${RECEIPT_LINE_CATEGORY_SCHEMA_HINT}, "pen": "struck" | "quantity" | "unclear" | null, "hand_quantity": number | null}],${scopeSchemaLine}
   "hand_total": a total written by hand on the paper (a number), or null,
   "pricing_provisional": true | false — true when the price column is masked (*****), blank or "N/A", or the paper is a quote/counter preview rather than this account's own pricing,
@@ -642,18 +643,35 @@ ${PEN_MARKS_PROMPT_RULE}`,
   const accountId = exactVendor.accountId;
   const vendor = exactVendor.name || vendorTyped;
 
+  // A NUMBER ALONE NEVER SAYS "SAME PURCHASE"; THE MONEY MUST AGREE (cn-v1211). A counter slip of
+  // Bayberry Lumber read as number "417" for $18.40 met a bill "417" for $61.75, three weeks older and on
+  // another job: "417" was the store's number, printed on every slip, this block filed the photo with
+  // the old bill on the number alone, and $18.40 never reached the slip's job. The owner's rule: number
+  // AND total agree, say plainly that this paper is that bill; otherwise record it; never a question.
+  // So the number only finds the candidates and readNumberMatch decides. `same`: filed with it as
+  // below. Otherwise the normal write runs as if no bill carried the number, and when exactly ONE bill
+  // carries it at another total (the namesake) the answer's warning says so once, after the write's
+  // own words. The reading takes the paper's OWN date (a date the person set, else the one the reader
+  // read), never the form's seeded fallback, which is not the paper's.
+  //
   // IS THIS PURCHASE ALREADY ON THE BOOKS? (audit v994, DB1.) This door never asked. A CED ticket
   // filed from the tray, then snapped again on the job page, is a new photo, so a new document and
   // a new fingerprint, and this wrote a second bill with the same number and no word: double job
   // cost, and Import Costs billing the customer twice. The same reading every door uses
   // (billsCarryingNumber: the number in either column, same supplier, live bills only). A match
-  // writes NOTHING and says so; the person decides, and "Different Purchase: Record It Anyway"
-  // comes back through here with differentPurchase. It is `ok` with a warning, not a refusal: the
-  // Add Cost sheet falls back to a typed bill on a refusal, which is the second bill again.
+  // wrote no bill and said so, and the person decided, with "Different Purchase: Record It Anyway"
+  // coming back through here with differentPurchase; since 2026-09-30 the photo is also filed with
+  // that bill (below), and since cn-v1211 only a match whose money agrees is one. It is `ok` with a
+  // warning, not a refusal: the Add Cost sheet falls back to a typed bill on a refusal, which is the
+  // second bill again.
+  let namesakeLine: string | null = null;
   if (docNumber && !stated?.differentPurchase) {
     const books = await loadBooks(supabase, ctx.orgId);
     const same = billsCarryingNumber(docNumber, { accountId, supplier: vendor }, books.bills, books.aliases);
-    if (same.length) {
+    const reading = readNumberMatch({ number: docNumber, amount, date: stated?.billDate || itemDate || null }, same);
+    if (reading.namesake) namesakeLine = namesakeSaid(billLabel(reading.namesake.original, reading.namesake.corrections));
+    if (reading.same) {
+      const original = reading.same.original;
       // THE FACT ONLY, NO DOOR (review of the fix). Each caller names the button it actually
       // renders: the Add Cost sheet and Snap the Bill offer Different Purchase in place, and a
       // sentence here pointing at "Receipts & Documents" sent him to a button that only appears
@@ -664,14 +682,14 @@ ${PEN_MARKS_PROMPT_RULE}`,
       // write NOTHING, so the second photo of the same ticket stayed a Receipt on no tie: the job
       // page called it loose, counted it on the Costs chip, flagged it "Not on a bill yet." and
       // offered Record as Cost, whose only answer was this sentence again, forever. The paper IS
-      // that bill's, by the same reading every door trusts, so it is filed against the bill the way
-      // Same Purchase: Tie Them files one (tied_bill_id, never bill_id: no teardown can take the
+      // that bill's, by its number AND its money (cn-v1211, above), so it is filed against the bill
+      // the way Same Purchase: Tie Them files one (tied_bill_id, never bill_id: no teardown can take the
       // bill down through it, and the idempotency read above still lets Different Purchase through).
       // No money moves. Once, so a second read of the same photo doesn't stack ties.
       const tie = await tieDocumentToBill(supabase, ctx, {
         documentId,
         doc,
-        billId: same[0].id,
+        billId: original.id,
         vendor,
         amount,
         itemDate: stated?.billDate || itemDate || stated?.fallbackBillDate || null,
@@ -683,7 +701,8 @@ ${PEN_MARKS_PROMPT_RULE}`,
       });
       if (tie.ok) revalidatePath(`/jobs/${doc.job_id}`);
       // The purchase whole (0381): a bill and the corrections under it, named once with the together total.
-      const label = billLabel(same[0], purchaseOf(same[0], same).corrections);
+      // With two purchases carrying the number this is the TWIN, never simply the first.
+      const label = billLabel(original, reading.same.corrections);
       const said = tie.ok
         ? `Already on the books: ${label}. This photo is filed with that bill; nothing was recorded twice.`
         : `Already on the books: ${label}. Nothing was recorded twice, but this photo couldn't be filed with that bill, so the job's Costs tab will keep saying it is not on a bill yet.`;
@@ -692,7 +711,7 @@ ${PEN_MARKS_PROMPT_RULE}`,
       // or Different Purchase (a SECOND bill for the same money). Naming the bill lets the door
       // offer Same Purchase: It's That Bill, which writes the one missing tie by hand
       // (linkReceiptToBill, job containment checked there). A tie that landed needs no door.
-      const sameOnThisJob = (same[0].job_id ?? null) === doc.job_id;
+      const sameOnThisJob = (original.job_id ?? null) === doc.job_id;
       return {
         ok: true,
         already: true,
@@ -700,9 +719,10 @@ ${PEN_MARKS_PROMPT_RULE}`,
         amount,
         sameAs: said,
         warning: said,
-        ...(!tie.ok && sameOnThisJob ? { sameBillId: same[0].id, sameOnThisJob } : {}),
+        ...(!tie.ok && sameOnThisJob ? { sameBillId: original.id, sameOnThisJob } : {}),
       };
     }
+    // Not the same purchase: the normal write below, exactly as if no bill carried the number.
   }
 
   // Paid ONLY when the receipt itself shows tender (the reasons are at the write below). Named once,
@@ -839,7 +859,9 @@ ${PEN_MARKS_PROMPT_RULE}`,
     lineCount: written.linesLost ? 0 : lines.length,
     // Both facts or neither: a receipt that did not add up AND did not get linked has two things
     // wrong with it, and hiding one behind the other is how the second one gets found in a month.
-    warning: [check.mismatch ? check.note : null, linkWarning, untieWarning, lostWarning].filter(Boolean).join(" ") || undefined,
+    // The namesake line comes LAST (cn-v1211): the write's own words first, then, once, the bill that
+    // carries this number at another total.
+    warning: [check.mismatch ? check.note : null, linkWarning, untieWarning, lostWarning, namesakeLine].filter(Boolean).join(" ") || undefined,
     // The pen sentence on its own field (skeptic #84, S7): not a warning, drawn slate by every caller.
     // The credit's next door rides on the same slate line, so every caller shows it without a change.
     ...(slate ? { pen: slate } : {}),

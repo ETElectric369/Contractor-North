@@ -12,7 +12,8 @@
  *
  *   · billsCarryingNumber: a LIVE bill (never a set-aside copy, 0271) that carries this printed
  *     number in EITHER column, from the same supplier. Certain: the same number on the same
- *     account is the same purchase.
+ *     account is the same purchase, for every door but the job's reader, which asks the money too
+ *     (readNumberMatch, cn-v1211: a store's number repeats on every slip it prints).
  *   · samePurchaseCandidates: CED's counter ticket carries a sales-order number (8802-SO-257555)
  *     that never appears on the invoice CED issues for it later (8802-11xxxxx). No number can join
  *     them, so the supplier's document is offered the bills on that account, on that job, that no
@@ -192,6 +193,76 @@ export function billsCarryingNumber(
   }
   // ONE PURCHASE (0381): the number on a correction finds its original too, and the other way round.
   return wholePurchases(out, bills, opts.exceptBillId);
+}
+
+/** What a paper's number says once the money is asked too. */
+export type NumberReading = {
+  /** The purchase this paper IS: file the paper with it and record nothing. Null: a purchase of its own. */
+  same: Purchase | null;
+  /** Only when `same` is null: the ONE other purchase that carries this number as its own, at another
+   *  total. The paper is recorded, and the answer says so once. Null when none carries it or several do. */
+  namesake: Purchase | null;
+};
+
+/**
+ * A NUMBER ALONE NEVER SAYS "SAME PURCHASE"; THE MONEY MUST AGREE (cn-v1211).
+ *
+ * Why: a counter slip of Bayberry Lumber read as number "417" for $18.40 was filed with a bill "417"
+ * for $61.75, three weeks older and on another job, and the slip's cost was never recorded. "417" was the
+ * STORE's number, printed on every slip it hands out. The number matched; the money never did.
+ *
+ * The owner's rule, as he said it: when the number AND the total agree, say plainly that this paper
+ * is that bill; otherwise record it as its own purchase; never ask a question. In this order:
+ *   1. nothing carries the number: a purchase of its own;
+ *   2. the paper's total was not read: an unread total cannot disagree, so the number stands alone,
+ *      exactly as before this rule (the purchase that carries it as its own number first);
+ *   3. a purchase that carries it as its OWN number (bill_number or supplier_invoice_number) at the
+ *      paper's total (together, or one member's own; a purchase with no amount on any member has no
+ *      total to agree with) AND on the paper's day: that purchase, the first;
+ *   4. exactly ONE purchase carries it as its own number, at the paper's total: that purchase, whatever
+ *      the dates. A counter ticket and the invoice for it are dated apart, and a number carried by one
+ *      purchase only is that purchase's own. When SEVERAL carry it, the number repeats, so only the
+ *      day as well (step 3) picks one of them out;
+ *   5. a statement whose lines name the number: that statement, as before (it covers the papers it
+ *      names, and its total is never one paper's, so the money test does not apply to it);
+ *   6. otherwise a purchase of its own. When exactly ONE purchase carries the number as its own at
+ *      another total, it is the NAMESAKE: a real invoice number recorded twice at two totals would
+ *      double a job's cost in silence, so the answer SAYS it, once, and never asks. Two or more carrying
+ *      one number prove the number repeats on that supplier's papers (a store number read as the
+ *      slip's number), and a repeating number has nothing to say.
+ */
+export function readNumberMatch(
+  paper: { number: string | null | undefined; amount: number | string | null | undefined; date?: string | null },
+  carrying: readonly LedgerBill[],
+): NumberReading {
+  const purchases = purchasesOf(carrying).purchases;
+  if (!purchases.length) return { same: null, namesake: null };
+  const n = normalizeDocNumber(paper.number);
+  const ownNumber = (p: Purchase) =>
+    !!n && p.members.some((m) => normalizeDocNumber(m.bill_number) === n || normalizeDocNumber(m.supplier_invoice_number) === n);
+  const own = purchases.filter(ownNumber);
+  const namedOnly = purchases.filter((p) => !ownNumber(p));
+  const read = paper.amount !== null && paper.amount !== undefined && Number.isFinite(Number(paper.amount));
+  if (!read) return { same: own[0] ?? purchases[0], namesake: null };
+  const paperCents = cents(paper.amount);
+  const hasAmount = (m: LedgerBill) => m.amount !== null && m.amount !== undefined && Number.isFinite(Number(m.amount));
+  const memberAgrees = (m: LedgerBill) => hasAmount(m) && cents(m.amount) === paperCents;
+  // A purchase none of whose members has an amount has no total to agree with (its together total
+  // would read 0, and a paper of 0.00 would "agree").
+  const totalAgrees = (p: Purchase) => p.members.some(hasAmount) && (cents(p.amount) === paperCents || p.members.some(memberAgrees));
+  const day = paper.date ? String(paper.date).slice(0, 10) : "";
+  const dayAgrees = (p: Purchase) => !!day && p.members.some((m) => !!m.bill_date && String(m.bill_date).slice(0, 10) === day);
+
+  const twin = own.find((p) => totalAgrees(p) && dayAgrees(p));
+  if (twin) return { same: twin, namesake: null };
+  if (own.length === 1 && totalAgrees(own[0])) return { same: own[0], namesake: null };
+  if (namedOnly.length) return { same: namedOnly[0], namesake: null };
+  return { same: null, namesake: own.length === 1 ? own[0] : null };
+}
+
+/** The plain line said once when a paper is recorded beside a namesake (readNumberMatch). */
+export function namesakeSaid(label: string): string {
+  return `Recorded as its own purchase. A bill with the same number is already on the books at another total: ${label}.`;
 }
 
 /**

@@ -4,7 +4,9 @@ import {
   billsCarryingNumber,
   billsCoveredByDocuments,
   billsMaybeCarryingNumber,
+  namesakeSaid,
   normalizeDocNumber,
+  readNumberMatch,
   samePurchaseCandidates,
   samePurchaseSentence,
   type LedgerBill,
@@ -297,5 +299,131 @@ describe("the same purchase at another price: a reprice offer, never a tie", () 
     expect(samePurchaseCandidates(invoice, [{ ...ticket, amount: "354.58" }], new Set(), aliases, { namedJobId: J011 })).toEqual([]);
     expect(samePurchaseCandidates(invoice, [{ ...ticket, amount: "1418.36" }], new Set(), aliases, { namedJobId: J011 })).toHaveLength(1);
     expect(samePurchaseCandidates(invoice, [{ ...ticket, amount: "1418.37" }], new Set(), aliases, { namedJobId: J011 })).toEqual([]);
+  });
+});
+
+/**
+ * A NUMBER ALONE NEVER SAYS "SAME PURCHASE"; THE MONEY MUST AGREE (cn-v1211). Stand-ins only: a
+ * lumber store's counter slip read as number "417" for $18.40, and the bills of that store carrying 417.
+ */
+describe("readNumberMatch: the money must agree", () => {
+  const bill = (id: string, over: Partial<LedgerBill> = {}): LedgerBill => ({
+    id,
+    supplier: "Bayberry Lumber",
+    supplier_account_id: "acct-bayberry",
+    bill_number: "417",
+    supplier_invoice_number: null,
+    amount: "61.75",
+    bill_date: "2026-11-02",
+    job_id: "job-902",
+    ...over,
+  });
+  const slip = { number: "417", amount: 18.40 as number | string | null, date: "2026-11-23" as string | null };
+  const reading = (paper: Partial<typeof slip>, bills: LedgerBill[]) => {
+    const r = readNumberMatch({ ...slip, ...paper }, bills);
+    return { same: r.same?.original.id ?? null, namesake: r.namesake?.original.id ?? null };
+  };
+  const STATEMENT = { bill_number: "STMT-11", amount: "900.00", named_numbers: ["417"] };
+
+  it("no purchases: a purchase of its own, no namesake, whether or not the total was read", () => {
+    expect(reading({}, [])).toEqual({ same: null, namesake: null });
+    expect(readNumberMatch({ ...slip, amount: null }, [])).toStrictEqual({ same: null, namesake: null });
+  });
+  it("one purchase, the same total, the same day: same", () => {
+    expect(reading({}, [bill("b1", { amount: "18.40", bill_date: "2026-11-23" })])).toEqual({ same: "b1", namesake: null });
+  });
+  it("one purchase, the same total, another day: same (a ticket and its invoice are dated apart)", () => {
+    expect(reading({}, [bill("b1", { amount: "18.40" })])).toEqual({ same: "b1", namesake: null });
+  });
+  it("one purchase at another total (the stand-in story): not same, and it is the namesake", () => {
+    expect(reading({}, [bill("b1")])).toEqual({ same: null, namesake: "b1" });
+  });
+  it("an original and a correction, the number on the correction only, the paper at the together total: same", () => {
+    expect(reading({}, [bill("o1", { bill_number: "SO-88", amount: "10.00" }), bill("c1", { amount: "8.40", corrects_bill_id: "o1" })])).toEqual({ same: "o1", namesake: null });
+  });
+  it("that family, the paper at one member's own amount: same", () => {
+    expect(reading({}, [bill("o1", { bill_number: "SO-88", amount: "40.00" }), bill("c1", { amount: "18.40", corrects_bill_id: "o1" })])).toEqual({ same: "o1", namesake: null });
+  });
+  it("two purchases, one a twin by total and day: same, and it is the twin, never the first", () => {
+    expect(reading({}, [bill("b1"), bill("b2", { amount: "18.40", bill_date: "2026-11-23" })])).toEqual({ same: "b2", namesake: null });
+  });
+  it("two purchases, the same total on another day: not same, no namesake (the number repeats)", () => {
+    expect(reading({}, [bill("b1"), bill("b2", { amount: "18.40" })])).toEqual({ same: null, namesake: null });
+  });
+  it("two purchases, no total agrees: not same, no namesake", () => {
+    expect(reading({}, [bill("b1"), bill("b2", { amount: "8.00", bill_date: "2026-11-23" })])).toEqual({ same: null, namesake: null });
+  });
+  it("a superseded copy is no purchase", () => {
+    expect(reading({}, [bill("b1", { amount: "18.40", bill_date: "2026-11-23", superseded_by_bill_id: "keeper" })])).toEqual({ same: null, namesake: null });
+  });
+  it("a credit whose negative totals agree: same", () => {
+    expect(reading({ amount: -18.40 }, [bill("b1", { amount: "-18.40" })])).toEqual({ same: "b1", namesake: null });
+  });
+  it("18.40 against 18.400000001 agrees (cents decide)", () => {
+    expect(reading({ amount: 18.400000001 }, [bill("b1", { amount: "18.40" })])).toEqual({ same: "b1", namesake: null });
+  });
+  it("a total that was not read (null, NaN, \"abc\") cannot disagree: same, as before", () => {
+    for (const amount of [null, Number.NaN, "abc"]) expect(reading({ amount }, [bill("b1")])).toEqual({ same: "b1", namesake: null });
+  });
+  it("an unread total takes the purchase carrying the number as its own before a statement", () => {
+    expect(reading({ amount: null }, [bill("st1", STATEMENT), bill("b1")])).toEqual({ same: "b1", namesake: null });
+    expect(reading({ amount: null }, [bill("st1", STATEMENT)])).toEqual({ same: "st1", namesake: null });
+  });
+  it("a string amount \"18.40\" agrees", () => {
+    expect(reading({ amount: "18.40" }, [bill("b1", { amount: 18.40 })])).toEqual({ same: "b1", namesake: null });
+  });
+  it("a statement that names the number on its lines, alone: same (the money test does not apply)", () => {
+    expect(reading({}, [bill("st1", STATEMENT)])).toEqual({ same: "st1", namesake: null });
+  });
+  it("a statement beside one own-number purchase at another total: same, the statement", () => {
+    expect(reading({}, [bill("b1"), bill("st1", STATEMENT)])).toEqual({ same: "st1", namesake: null });
+  });
+  it("a statement beside one own-number purchase at the paper's total: same, the own one", () => {
+    expect(reading({}, [bill("st1", STATEMENT), bill("b1", { amount: "18.40" })])).toEqual({ same: "b1", namesake: null });
+  });
+  it("a member whose own amount is null is never agreed by a paper of 0.00", () => {
+    expect(reading({ amount: 0 }, [bill("o1", { bill_number: "SO-88", amount: "5.00" }), bill("c1", { amount: null, corrects_bill_id: "o1" })])).toEqual({ same: null, namesake: "o1" });
+  });
+  it("no paper date, two purchases of the same total: not same", () => {
+    expect(reading({ date: null }, [bill("b1", { amount: "18.40" }), bill("b2", { amount: "18.40" })])).toEqual({ same: null, namesake: null });
+  });
+  it("the number in supplier_invoice_number is the purchase's own", () => {
+    expect(reading({}, [bill("b1", { bill_number: null, supplier_invoice_number: "#417" })])).toEqual({ same: null, namesake: "b1" });
+  });
+  // The reviewer's surviving mutants (skeptic #105) and the hardening of fixer 1211.
+  it("a purchase with no amount on any member has no total: a paper of 0.00 never agrees with it", () => {
+    expect(reading({ amount: 0 }, [bill("b1", { amount: null, bill_date: "2026-11-23" })])).toEqual({ same: null, namesake: "b1" });
+    expect(reading({ amount: "0.00" }, [bill("o1", { bill_number: "SO-88", amount: null }), bill("c1", { amount: null, corrects_bill_id: "o1" })])).toEqual({ same: null, namesake: "o1" });
+  });
+  it("the day is read from EVERY member: only the correction dated on the paper's day, beside a second purchase, is the twin", () => {
+    expect(
+      reading({}, [bill("b2"), bill("o1", { bill_number: "SO-88", amount: "10.00" }), bill("c1", { amount: "8.40", bill_date: "2026-11-23", corrects_bill_id: "o1" })]),
+    ).toEqual({ same: "o1", namesake: null });
+  });
+  it("a bill_date that is a timestamp agrees by its first ten characters", () => {
+    expect(reading({}, [bill("b1"), bill("b2", { amount: "18.40", bill_date: "2026-11-23T08:15:00+00:00" })])).toEqual({ same: "b2", namesake: null });
+  });
+  it("a paper date that is a timestamp agrees by its first ten characters", () => {
+    expect(reading({ date: "2026-11-23T17:40:00Z" }, [bill("b1"), bill("b2", { amount: "18.40", bill_date: "2026-11-23" })])).toEqual({ same: "b2", namesake: null });
+  });
+  it("the sign counts: a paper of -50.00 does not agree with a bill of 50.00, nor the reverse", () => {
+    expect(reading({ amount: -50 }, [bill("b1", { amount: "50.00" })])).toEqual({ same: null, namesake: "b1" });
+    expect(reading({ amount: 50 }, [bill("b1", { amount: "-50.00" })])).toEqual({ same: null, namesake: "b1" });
+    expect(reading({ amount: "-50.00" }, [bill("b1", { amount: "50.00", bill_date: "2026-11-23" }), bill("b2", { amount: "8.00" })])).toEqual({ same: null, namesake: null });
+  });
+  it("two twins by total and day: the FIRST", () => {
+    const twin = { amount: "18.40", bill_date: "2026-11-23" };
+    expect(reading({}, [bill("b1"), bill("t1", twin), bill("t2", twin)])).toEqual({ same: "t1", namesake: null });
+  });
+  it("two statements naming the number: the FIRST", () => {
+    expect(reading({}, [bill("st1", STATEMENT), bill("st2", { ...STATEMENT, bill_number: "STMT-12" })])).toEqual({ same: "st1", namesake: null });
+  });
+});
+
+describe("namesakeSaid: the plain line beside a recorded paper", () => {
+  it("says it was recorded and names the bill, in fixed words", () => {
+    expect(namesakeSaid("Bayberry Lumber #417, $61.75, 2026-11-02, on J-902 Stand-in Deck")).toBe(
+      "Recorded as its own purchase. A bill with the same number is already on the books at another total: Bayberry Lumber #417, $61.75, 2026-11-02, on J-902 Stand-in Deck.",
+    );
   });
 });

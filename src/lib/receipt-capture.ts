@@ -34,8 +34,10 @@ export type ReceiptTone = "ok" | "warn" | "fail";
 export const DIFFERENT_PURCHASE_DOOR = "If this is a different purchase, press Different Purchase: Record It Anyway.";
 
 export type ReceiptOutcome =
-  /** The reader wrote the bill. `warning` = its lines didn't add up to its total; the bill is in
-   *  and the warning is on its notes — the door should still say it out loud. */
+  /** The reader wrote the bill. `warning` = what the door should still say out loud, the bill being
+   *  in: its lines didn't add up to its total (that one is on its notes too), something after the
+   *  write did not land, or (cn-v1211) a bill with the same number is already on the books at
+   *  another total, so this paper was recorded as its own purchase. */
   | {
       kind: "billed";
       docId: string;
@@ -49,10 +51,12 @@ export type ReceiptOutcome =
       pen: string | null;
     }
   /** This file already produced a bill — nothing added twice (organized_items.document_id). Or
-   *  `samePurchase`: a bill already carries this paper's printed number (audit v994), so nothing
-   *  was written, and the door offers Different Purchase: Record It Anyway — and, when that bill is
-   *  on this paper's own job (`sameOnThisJob`, d1ff7c5a), Same Purchase: It's That Bill, which ties
-   *  the paper to `sameBillId` (linkReceiptToBill) instead of reading it again or billing it twice. */
+   *  `samePurchase`: a bill already carries this paper's printed number AND its total agrees
+   *  (audit v994; the money since cn-v1211), so no bill was written and the photo is filed with
+   *  that bill. The door still offers Different Purchase: Record It Anyway — and, when the filing
+   *  did not land and that bill is on this paper's own job (`sameOnThisJob`, d1ff7c5a), Same
+   *  Purchase: It's That Bill, which ties the paper to `sameBillId` (linkReceiptToBill) instead of
+   *  reading it again or billing it twice. */
   | { kind: "already"; docId: string; tone: "ok" | "warn"; sentence: string; samePurchase?: boolean; sameBillId?: string; sameOnThisJob?: boolean }
   /** Filed on the job as a document. The reader wasn't asked (a Plan, a Permit), or the file is
    *  over its cap, or it refused (a name it can't read, no total) — the sentence names which. */

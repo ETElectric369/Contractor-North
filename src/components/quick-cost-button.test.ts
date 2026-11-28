@@ -400,3 +400,27 @@ describe("the sheet as it is drawn", () => {
     }
   });
 });
+
+describe("the save button says what a tap does (cn-v1211, skeptic #105 S3)", () => {
+  it("saved WITH a warning, the receipt cleared from the form: Done (a tap only closes the sheet)", async () => {
+    const { costSheetSaveLabel } = await import("./quick-cost-button");
+    expect(costSheetSaveLabel({ sameAsDoc: false, costSaved: true, receiptWaits: false, useReader: true })).toBe("Done");
+    expect(costSheetSaveLabel({ sameAsDoc: false, costSaved: true, receiptWaits: false, useReader: false })).toBe("Done");
+  });
+  it("saved, a receipt still waiting (its attach failed): Retry Receipt, which is what a tap retries", async () => {
+    const { costSheetSaveLabel } = await import("./quick-cost-button");
+    expect(costSheetSaveLabel({ sameAsDoc: false, costSaved: true, receiptWaits: true, useReader: false })).toBe("Retry Receipt");
+  });
+  it("before a save, and on a same-number answer, the labels are as they were", async () => {
+    const { costSheetSaveLabel } = await import("./quick-cost-button");
+    expect(costSheetSaveLabel({ sameAsDoc: true, costSaved: false, receiptWaits: false, useReader: true })).toBe("Different Purchase: Record It Anyway");
+    expect(costSheetSaveLabel({ sameAsDoc: false, costSaved: false, receiptWaits: true, useReader: true })).toBe("Read the Receipt");
+    expect(costSheetSaveLabel({ sameAsDoc: false, costSaved: false, receiptWaits: false, useReader: false })).toBe("Save Cost");
+  });
+  it("the sheet's footer reads its label from that one function", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(process.cwd(), "src/components/quick-cost-button.tsx"), "utf8");
+    expect(src).toContain("saveLabel={costSheetSaveLabel({ sameAsDoc: !!sameAsDoc, costSaved, receiptWaits: !!receipt, useReader })}");
+  });
+});

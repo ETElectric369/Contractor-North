@@ -73,7 +73,8 @@ type BillNote = {
   text: string;
   done: boolean;
   tone: ReceiptTone;
-  /** A bill already carries this paper's number, so nothing was written (audit v994): the row
+  /** A bill already carries this paper's number AND its total agrees (cn-v1211), so no bill was
+   *  written (audit v994): the row
    *  offers Different Purchase: Record It Anyway, because only a person can say it isn't the same. */
   different?: boolean;
   /** …and, when that bill is on this job (d1ff7c5a), Same Purchase: It's That Bill, which ties the

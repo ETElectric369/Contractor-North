@@ -195,8 +195,9 @@ function SnapCostButton({
   // The bill the first save created, kept so a later successful receipt upload can LINK to
   // it. Without the link, re-uploading that same photo files a second bill for the same money.
   const [savedBillId, setSavedBillId] = useState<string | null>(null);
-  // SAME NUMBER, NOTHING WRITTEN (review of audit v994's fix). The reader found a bill already
-  // carrying this paper's printed number and wrote nothing. The paper is filed on the job (this
+  // SAME NUMBER AND SAME TOTAL, NO BILL WRITTEN (review of audit v994's fix; the money since
+  // cn-v1211). The reader found a bill already carrying this paper's printed number at this paper's
+  // total and wrote no bill. The paper is filed on the job (this
   // id); the sheet stays open and offers Different Purchase: Record It Anyway right here, since
   // the button under Receipts & Papers only appears after another paid read.
   const [sameAsDoc, setSameAsDoc] = useState<string | null>(null);
@@ -463,10 +464,10 @@ function SnapCostButton({
       setCostSaved(true);
       return;
     }
-    // A BILL ALREADY CARRIES THIS NUMBER: NOTHING WAS SAVED. Not the "saved with a warning" branch
-    // below: that one labels the footer Retry Receipt, and here there is no cost to retry. The
-    // receipt is filed on the job, so it is cleared from the form and never uploaded again; the
-    // footer offers the one real choice, and Done closes.
+    // A BILL ALREADY CARRIES THIS NUMBER AND ITS TOTAL AGREES (cn-v1211): NO BILL WAS WRITTEN, and
+    // the photo is filed with that bill. Not the "saved with a warning" branch below: here there is
+    // no cost of this sheet's to retry. The receipt is filed on the job, so it is cleared from the
+    // form and never uploaded again; the footer offers the one real choice, and Done closes.
     if (res.already && res.sameAs) {
       setReceipt(null);
       setSameAsDoc(docId);
@@ -722,7 +723,7 @@ function SnapCostButton({
             onSave={onSave}
             saving={pending}
             cancelLabel={sameAsDoc ? "Done" : undefined}
-            saveLabel={sameAsDoc ? "Different Purchase: Record It Anyway" : costSaved ? "Retry Receipt" : useReader ? "Read the Receipt" : "Save Cost"}
+            saveLabel={costSheetSaveLabel({ sameAsDoc: !!sameAsDoc, costSaved, receiptWaits: !!receipt, useReader })}
           />
         }
       >
@@ -834,6 +835,17 @@ const NEW_ITEM = "__new";
  */
 export const NO_PICKER_LINE = (what: string) =>
   `Couldn't open ${what} on this device. Type the cost here without the receipt, or close this and use Snap the Bill on the job's Costs tab, which reads the cost off the paper. Not both: that would record it twice.`;
+/**
+ * WHAT THE ADD COST SHEET'S SAVE BUTTON SAYS (cn-v1211, skeptic #105 S3). After a cost saved WITH a
+ * warning the receipt is cleared from the form, and a tap only closes the sheet (onSave's costSaved
+ * branch: no receipt, finishOk), so the button says Done. Retry Receipt only while a receipt still
+ * waits in the form (its attach failed), which is what a tap then retries.
+ */
+export function costSheetSaveLabel(s: { sameAsDoc: boolean; costSaved: boolean; receiptWaits: boolean; useReader: boolean }): string {
+  if (s.sameAsDoc) return "Different Purchase: Record It Anyway";
+  if (s.costSaved) return s.receiptWaits ? "Retry Receipt" : "Done";
+  return s.useReader ? "Read the Receipt" : "Save Cost";
+}
 export const RETRY_HERE_LINE =
   "The cost is saved: tap Retry Receipt when you have signal. Don't put this receipt in through the job's Snap the Bill or Upload, which would record the cost a second time.";
 

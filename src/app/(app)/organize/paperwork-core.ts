@@ -498,7 +498,7 @@ Respond with ONLY a JSON object (no prose):
   "kind": "receipt" | "note" | "job_document" — "receipt" for receipts and bills, "note" for handwriting, otherwise "job_document",
   "title": short label, e.g. "Home Depot — $84.12" or "Note: call inspector Tuesday",
   "summary": receipt/bill → brief list of what was bought; note → full clean transcription of the handwriting; otherwise what the document is,
-  "document_number": the invoice, ticket or receipt number printed on it, exactly as printed, or null,
+  "document_number": the number that belongs to THIS paper alone (its invoice, ticket, receipt or credit memo number), exactly as printed, or null. Never the store number, a register, terminal, cashier or clerk number, a customer or account number, a PO number, a phone number or a date: those are the same on every paper from that store. If the paper carries no number of its own, null,
   "po_number": what is printed or written in its PO, customer order or job box, copied exactly as it appears (a contractor often writes the job's name or street there instead of a number), or null,
   "line_items": receipts, bills and credit memos ONLY — an array of every purchased or returned line: [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": ${RECEIPT_LINE_CATEGORY_SCHEMA_HINT}, "pen": "struck" | "quantity" | "unclear" | null, "hand_quantity": number | null}]. Transcribe EVERY line you can read, including tax as its own line. On a credit memo or a return, every line that comes back (and its tax) has a NEGATIVE amount and unit_price; a restocking fee the supplier keeps stays positive. Use [] otherwise,
   "vendor": store/supplier name or null,

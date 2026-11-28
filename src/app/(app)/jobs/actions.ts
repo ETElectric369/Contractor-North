@@ -1804,8 +1804,9 @@ export async function createBill(input: {
  *  "already recorded". Same containment rule: the document must be visible and on the bill's job.
  *
  *  THE DOOR FOR A LOOSE RECEIPT (d1ff7c5a). Two paths leave a receipt "Not on a bill yet" while its
- *  bill exists: the reader answering "already on the books" (billJobReceipt writes nothing then),
- *  and a bill typed by hand with the receipt uploaded separately. This is the tie both were
+ *  bill exists: the reader answering "already on the books" when its own tie did not land
+ *  (billJobReceipt writes no bill then, and since cn-v1211 only when the number AND the total
+ *  agree), and a bill typed by hand with the receipt uploaded separately. This is the tie both were
  *  missing: Same Purchase: It's That Bill beside the reader's answer, and Already on a Bill → Tie It
  *  on the receipt's own row. After it the row reads "On the CED bill #…", the Costs chip drops by
  *  one and Needs You's Receipts Not on a Bill row goes (all read the same sortJobPapers.loose). */
