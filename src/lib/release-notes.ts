@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1210", date: "2026-11-27", line: "Payments: the Stripe library behind card payments, pay links and subscriptions is updated. Nothing changes in how you or your customers pay." },
   { version: "cn-v1209", date: "2026-11-27", line: "Billing: a declined subscription card is now caught whichever way Stripe reports it, so the owner and admins get the one notice to update the card." },
   { version: "cn-v1208", date: "2026-11-27", line: "In the phone app, the job-site watch now reads location through the phone itself, meant to end the extra allow-location question after a refresh. Leaving a job is still confirmed by a precise read." },
   { version: "cn-v1207", date: "2026-11-27", line: "Pinch or double-tap a PDF preview to zoom in, then drag to move around. In the phone app a pinch used to do nothing. Turning the phone sideways still makes the page bigger too." },

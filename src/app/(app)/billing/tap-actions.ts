@@ -485,8 +485,14 @@ export async function ensureTerminalLocation(): Promise<TerminalLocationResult> 
     if (theirs) {
       // Lost the race. The one we just made is a stray on the tenant's account — tidy it, best
       // effort; a leftover Location is harmless but untidy in THEIR dashboard.
+      // THE ACCOUNT IS THE THIRD ARGUMENT (cn-v1210). Since SDK 22 a method that takes an id reads
+      // its second argument as parameters and only its third as request options: written as
+      // del(id, { stripeAccount }) the account went into the query string, no Stripe-Account header
+      // was sent, and the delete was asked of OUR account and not the tenant's. What Stripe answers
+      // to that was not seen; the catch below would have swallowed it either way, and the stray
+      // stayed. Seen on the wire, old SDK against new.
       try {
-        await getStripe().terminal.locations.del(locationId, { stripeAccount: connect.accountId! });
+        await getStripe().terminal.locations.del(locationId, {}, { stripeAccount: connect.accountId! });
       } catch {
         /* best effort */
       }
@@ -495,7 +501,7 @@ export async function ensureTerminalLocation(): Promise<TerminalLocationResult> 
     // Not a race: the row simply wasn't ours to write (RLS said no, quietly). Say so; nothing
     // moved — and the Location we just made would be a stray per attempt, so it goes too.
     try {
-      await getStripe().terminal.locations.del(locationId, { stripeAccount: connect.accountId! });
+      await getStripe().terminal.locations.del(locationId, {}, { stripeAccount: connect.accountId! });
     } catch {
       /* best effort */
     }
@@ -653,7 +659,9 @@ export async function createTapPaymentIntent(invoiceId: string, opts?: { sendIt?
         currency: "usd",
         // Terminal payments MUST include card_present; nothing else, so this PI can never be paid
         // through any door but the reader.
-        payment_method_types: ["card_present"],
+        // Passed past the SDK's types: they describe a later API that no longer names this
+        // parameter, and the version the app speaks (lib/stripe) takes it.
+        ...({ payment_method_types: ["card_present"] } as object),
         // Authorize and capture in one step — no two-day capture window to reconcile.
         capture_method: "automatic",
         description: invoiceNumber ? `Invoice ${invoiceNumber}` : "Invoice payment",

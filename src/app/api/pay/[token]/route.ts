@@ -204,7 +204,9 @@ export async function GET(
         // be a surcharge on a bank transfer, which is both wrong and the exact confusion this
         // build exists to remove. And a bank door that silently falls back to a card is how the
         // $231 day happens again. Apple Pay and Google Pay ride inside "card" and are unaffected.
-        payment_method_types: [method === "bank" ? "us_bank_account" : "card"],
+        // Passed past the SDK's types: they describe a later API that no longer names this
+        // parameter, and the version the app speaks (lib/stripe) takes it.
+        ...({ payment_method_types: [method === "bank" ? "us_bank_account" : "card"] } as object),
         line_items: [
           {
             price_data: {

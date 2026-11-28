@@ -1,0 +1,418 @@
+{
+  "recordedFrom": "stripe 17.7.0",
+  "apiVersion": "2025-02-24.acacia",
+  "calls": [
+    {
+      "name": "refund: read the charge",
+      "method": "GET",
+      "path": "/v1/charges/ch_1",
+      "query": [],
+      "body": [],
+      "account": "acct_1",
+      "idempotency": "none"
+    },
+    {
+      "name": "tap: make the location (two address lines)",
+      "method": "POST",
+      "path": "/v1/terminal/locations",
+      "query": [],
+      "body": [
+        "display_name=Larkspur Electric",
+        "address[line1]=100 Example Street",
+        "address[line2]=Unit 2",
+        "address[city]=Tupelo",
+        "address[state]=CA",
+        "address[postal_code]=96100",
+        "address[country]=US",
+        "metadata[org_id]=org-1"
+      ],
+      "account": "acct_1",
+      "idempotency": "automatic"
+    },
+    {
+      "name": "tap: make the location (one address line)",
+      "method": "POST",
+      "path": "/v1/terminal/locations",
+      "query": [],
+      "body": [
+        "display_name=Larkspur & Sons, Inc.",
+        "address[line1]=100 Example Street",
+        "address[city]=Tupelo",
+        "address[state]=CA",
+        "address[postal_code]=96100",
+        "address[country]=US",
+        "metadata[org_id]=org-1"
+      ],
+      "account": "acct_1",
+      "idempotency": "automatic"
+    },
+    {
+      "name": "tap: delete a stray location",
+      "method": "DELETE",
+      "path": "/v1/terminal/locations/tml_1",
+      "query": [],
+      "body": [],
+      "account": "acct_1",
+      "idempotency": "none"
+    },
+    {
+      "name": "tap: create the payment",
+      "method": "POST",
+      "path": "/v1/payment_intents",
+      "query": [],
+      "body": [
+        "amount=12345",
+        "currency=usd",
+        "payment_method_types[0]=card_present",
+        "capture_method=automatic",
+        "description=Invoice INV-900",
+        "metadata[kind]=invoice_payment",
+        "metadata[source]=tap_to_pay",
+        "metadata[invoice_id]=inv-1",
+        "metadata[org_id]=org-1",
+        "metadata[user_id]=user-1"
+      ],
+      "account": "acct_1",
+      "idempotency": "automatic"
+    },
+    {
+      "name": "tap: read the payment",
+      "method": "GET",
+      "path": "/v1/payment_intents/pi_1",
+      "query": [],
+      "body": [],
+      "account": "acct_1",
+      "idempotency": "none"
+    },
+    {
+      "name": "tap: cancel the payment",
+      "method": "POST",
+      "path": "/v1/payment_intents/pi_1/cancel",
+      "query": [],
+      "body": [],
+      "account": "acct_1",
+      "idempotency": "automatic"
+    },
+    {
+      "name": "subscribe: make the customer (no email)",
+      "method": "POST",
+      "path": "/v1/customers",
+      "query": [],
+      "body": [
+        "name=Larkspur Electric",
+        "metadata[org_id]=org-1"
+      ],
+      "account": null,
+      "idempotency": "automatic"
+    },
+    {
+      "name": "subscribe: make the customer (email)",
+      "method": "POST",
+      "path": "/v1/customers",
+      "query": [],
+      "body": [
+        "name=Larkspur Electric",
+        "email=office@example.test",
+        "metadata[org_id]=org-1"
+      ],
+      "account": null,
+      "idempotency": "automatic"
+    },
+    {
+      "name": "subscribe: checkout",
+      "method": "POST",
+      "path": "/v1/checkout/sessions",
+      "query": [],
+      "body": [
+        "mode=subscription",
+        "customer=cus_1",
+        "line_items[0][price]=price_1",
+        "line_items[0][quantity]=1",
+        "success_url=https://app.example.test/settings?tab=getpaid&billing=success",
+        "cancel_url=https://app.example.test/settings?tab=getpaid&billing=cancelled",
+        "metadata[org_id]=org-1",
+        "subscription_data[metadata][org_id]=org-1"
+      ],
+      "account": null,
+      "idempotency": "automatic"
+    },
+    {
+      "name": "billing portal",
+      "method": "POST",
+      "path": "/v1/billing_portal/sessions",
+      "query": [],
+      "body": [
+        "customer=cus_1",
+        "return_url=https://app.example.test/settings?tab=getpaid"
+      ],
+      "account": null,
+      "idempotency": "automatic"
+    },
+    {
+      "name": "top-up: read the price with its product",
+      "method": "GET",
+      "path": "/v1/prices/price_1",
+      "query": [
+        "expand[0]=product"
+      ],
+      "body": [],
+      "account": null,
+      "idempotency": "none"
+    },
+    {
+      "name": "top-up: checkout (known customer)",
+      "method": "POST",
+      "path": "/v1/checkout/sessions",
+      "query": [],
+      "body": [
+        "mode=payment",
+        "customer=cus_1",
+        "line_items[0][price]=price_1",
+        "line_items[0][quantity]=1",
+        "success_url=https://app.example.test/settings?tab=getpaid&usage=added",
+        "cancel_url=https://app.example.test/settings?tab=getpaid",
+        "metadata[kind]=extra_usage",
+        "metadata[org_id]=org-1",
+        "metadata[month]=2026-11",
+        "metadata[usage_usd]=15"
+      ],
+      "account": null,
+      "idempotency": "automatic"
+    },
+    {
+      "name": "top-up: checkout (email only)",
+      "method": "POST",
+      "path": "/v1/checkout/sessions",
+      "query": [],
+      "body": [
+        "mode=payment",
+        "customer_email=office@example.test",
+        "line_items[0][price]=price_1",
+        "line_items[0][quantity]=1",
+        "success_url=https://app.example.test/settings?tab=getpaid&usage=added",
+        "cancel_url=https://app.example.test/settings?tab=getpaid",
+        "metadata[kind]=extra_usage",
+        "metadata[org_id]=org-1",
+        "metadata[month]=2026-11",
+        "metadata[usage_usd]=15"
+      ],
+      "account": null,
+      "idempotency": "automatic"
+    },
+    {
+      "name": "top-up: checkout (no customer, no email)",
+      "method": "POST",
+      "path": "/v1/checkout/sessions",
+      "query": [],
+      "body": [
+        "mode=payment",
+        "line_items[0][price]=price_1",
+        "line_items[0][quantity]=1",
+        "success_url=https://app.example.test/settings?tab=getpaid&usage=added",
+        "cancel_url=https://app.example.test/settings?tab=getpaid",
+        "metadata[kind]=extra_usage",
+        "metadata[org_id]=org-1",
+        "metadata[month]=2026-11",
+        "metadata[usage_usd]=15"
+      ],
+      "account": null,
+      "idempotency": "automatic"
+    },
+    {
+      "name": "connect: make the account (all fields)",
+      "method": "POST",
+      "path": "/v1/accounts",
+      "query": [],
+      "body": [
+        "type=express",
+        "email=office@example.test",
+        "business_profile[name]=Larkspur Electric",
+        "business_profile[support_email]=office@example.test",
+        "capabilities[card_payments][requested]=true",
+        "capabilities[transfers][requested]=true",
+        "metadata[org_id]=org-1"
+      ],
+      "account": null,
+      "idempotency": "ours: connect-account-org-1-1960000"
+    },
+    {
+      "name": "connect: make the account (no email, no name)",
+      "method": "POST",
+      "path": "/v1/accounts",
+      "query": [],
+      "body": [
+        "type=express",
+        "capabilities[card_payments][requested]=true",
+        "capabilities[transfers][requested]=true",
+        "metadata[org_id]=org-1"
+      ],
+      "account": null,
+      "idempotency": "ours: connect-account-org-1-1960000"
+    },
+    {
+      "name": "connect: onboarding link",
+      "method": "POST",
+      "path": "/v1/account_links",
+      "query": [],
+      "body": [
+        "account=acct_1",
+        "refresh_url=https://app.example.test/settings?tab=getpaid&connect=refresh",
+        "return_url=https://app.example.test/settings?tab=getpaid&connect=done",
+        "type=account_onboarding"
+      ],
+      "account": null,
+      "idempotency": "automatic"
+    },
+    {
+      "name": "connect: login link",
+      "method": "POST",
+      "path": "/v1/accounts/acct_1/login_links",
+      "query": [],
+      "body": [],
+      "account": null,
+      "idempotency": "automatic"
+    },
+    {
+      "name": "connect: read the account",
+      "method": "GET",
+      "path": "/v1/accounts/acct_1",
+      "query": [],
+      "body": [],
+      "account": null,
+      "idempotency": "none"
+    },
+    {
+      "name": "health: balance",
+      "method": "GET",
+      "path": "/v1/balance",
+      "query": [],
+      "body": [],
+      "account": null,
+      "idempotency": "none"
+    },
+    {
+      "name": "health: a price",
+      "method": "GET",
+      "path": "/v1/prices/price_1",
+      "query": [],
+      "body": [],
+      "account": null,
+      "idempotency": "none"
+    },
+    {
+      "name": "pay link: card with a fee line",
+      "method": "POST",
+      "path": "/v1/checkout/sessions",
+      "query": [],
+      "body": [
+        "mode=payment",
+        "payment_method_types[0]=card",
+        "line_items[0][price_data][currency]=usd",
+        "line_items[0][price_data][product_data][name]=Larkspur Electric Invoice INV-900",
+        "line_items[0][price_data][unit_amount]=283089",
+        "line_items[0][quantity]=1",
+        "line_items[1][price_data][currency]=usd",
+        "line_items[1][price_data][product_data][name]=Card processing fee (2.9%)",
+        "line_items[1][price_data][unit_amount]=8210",
+        "line_items[1][quantity]=1",
+        "customer_email=customer@example.test",
+        "success_url=https://app.example.test/i/tok?paid=1",
+        "cancel_url=https://app.example.test/i/tok",
+        "metadata[kind]=invoice_payment",
+        "metadata[invoice_id]=inv-1",
+        "metadata[org_id]=org-1",
+        "metadata[pay_method]=card",
+        "metadata[invoice_amount]=2830.89",
+        "metadata[card_fee]=82.10",
+        "payment_intent_data[metadata][invoice_id]=inv-1",
+        "payment_intent_data[metadata][org_id]=org-1",
+        "payment_intent_data[metadata][pay_method]=card",
+        "payment_intent_data[metadata][invoice_amount]=2830.89",
+        "payment_intent_data[metadata][card_fee]=82.10"
+      ],
+      "account": "acct_1",
+      "idempotency": "automatic"
+    },
+    {
+      "name": "pay link: bank, no fee, no email",
+      "method": "POST",
+      "path": "/v1/checkout/sessions",
+      "query": [],
+      "body": [
+        "mode=payment",
+        "payment_method_types[0]=us_bank_account",
+        "line_items[0][price_data][currency]=usd",
+        "line_items[0][price_data][product_data][name]=Larkspur Electric Invoice INV-900",
+        "line_items[0][price_data][unit_amount]=283089",
+        "line_items[0][quantity]=1",
+        "success_url=https://app.example.test/i/tok?paid=bank",
+        "cancel_url=https://app.example.test/i/tok",
+        "metadata[kind]=invoice_payment",
+        "metadata[invoice_id]=inv-1",
+        "metadata[org_id]=org-1",
+        "metadata[pay_method]=bank",
+        "metadata[invoice_amount]=2830.89",
+        "metadata[card_fee]=0.00",
+        "payment_intent_data[metadata][invoice_id]=inv-1",
+        "payment_intent_data[metadata][org_id]=org-1",
+        "payment_intent_data[metadata][pay_method]=bank",
+        "payment_intent_data[metadata][invoice_amount]=2830.89",
+        "payment_intent_data[metadata][card_fee]=0.00"
+      ],
+      "account": "acct_1",
+      "idempotency": "automatic"
+    },
+    {
+      "name": "card reader: connection token",
+      "method": "POST",
+      "path": "/v1/terminal/connection_tokens",
+      "query": [],
+      "body": [],
+      "account": "acct_1",
+      "idempotency": "automatic"
+    },
+    {
+      "name": "webhook: read a subscription",
+      "method": "GET",
+      "path": "/v1/subscriptions/sub_1",
+      "query": [],
+      "body": [],
+      "account": null,
+      "idempotency": "none"
+    },
+    {
+      "name": "refund: find the top-up session",
+      "method": "GET",
+      "path": "/v1/checkout/sessions",
+      "query": [
+        "payment_intent=pi_1",
+        "limit=1"
+      ],
+      "body": [],
+      "account": null,
+      "idempotency": "none"
+    },
+    {
+      "name": "fee: read the payment with its fee (connected)",
+      "method": "GET",
+      "path": "/v1/payment_intents/pi_1",
+      "query": [
+        "expand[0]=latest_charge.balance_transaction"
+      ],
+      "body": [],
+      "account": "acct_1",
+      "idempotency": "none"
+    },
+    {
+      "name": "fee: read the payment with its fee (platform)",
+      "method": "GET",
+      "path": "/v1/payment_intents/pi_1",
+      "query": [
+        "expand[0]=latest_charge.balance_transaction"
+      ],
+      "body": [],
+      "account": null,
+      "idempotency": "none"
+    }
+  ]
+}
