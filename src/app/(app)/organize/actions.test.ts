@@ -516,13 +516,15 @@ describe("billJobReceipt — a paper whose number is already on the books is FIL
   });
 });
 
-describe("billJobReceipt — a number alone never says same purchase; the money must agree (cn-v1211)", () => {
+describe("billJobReceipt — the one rule: the store, the total and the day (cn-v1212)", () => {
   /**
-   * Stand-ins only. A counter slip of Bayberry Lumber read as number "417" for $18.40 on J-901; a
-   * bill "417" for $61.75, three weeks older, on J-902. "417" was the store's number, printed on every
-   * slip. Filed with the old bill on the number alone, the slip's $18.40 never reached J-901.
+   * Stand-ins only. A counter slip of Bayberry Lumber read as number "417" for $18.40 on 2026-11-23,
+   * for J-901; a bill "417" for $61.75, three weeks older, on J-902. "417" was the store's number,
+   * printed on every slip. cn-v1211 asked the number AND the total; cn-v1212 asks the store, the
+   * total and the day, and lets a LONG number (INV-9001417, 7 digits and more) stand in for the day.
    */
   const DOC = { id: "doc-901", name: "bayberry-slip.jpg", file_url: "org-1/receipts/bayberry-slip.jpg", size_bytes: 80_000, job_id: "job-901" };
+  const LONG = "INV-9001417";
   const bill = (id: string, over: Record<string, unknown> = {}) => ({
     id,
     supplier: "Bayberry Lumber",
@@ -536,8 +538,13 @@ describe("billJobReceipt — a number alone never says same purchase; the money 
     jobs: { job_number: "J-902", name: "Stand-in Deck" },
     ...over,
   });
+  /** The namesake line, for a bill carrying the LONG number at $61.75. */
   const NAMESAKE =
-    "Recorded as its own purchase. A bill with the same number is already on the books at another total: Bayberry Lumber #417, $61.75, 2026-11-02, on J-902 Stand-in Deck.";
+    "Recorded as its own purchase. A bill with the same number is already on the books at another total: Bayberry Lumber #INV-9001417, $61.75, 2026-11-02, on J-902 Stand-in Deck.";
+  const longBill = (id: string, over: Record<string, unknown> = {}) => bill(id, { bill_number: LONG, ...over });
+  const readLong = () => {
+    ai.parsed = { ...ai.parsed, document_number: LONG };
+  };
 
   beforeEach(() => {
     ai.parsed = {
@@ -554,7 +561,7 @@ describe("billJobReceipt — a number alone never says same purchase; the money 
     };
   });
 
-  /** The reads every case makes: the "already billed?" read, loadBooks' papers read, the bills carrying 417. */
+  /** The reads every case makes: the "already billed?" read, loadBooks' papers read, the bills. */
   const reads = (bills: any[]): Record<string, any[]> => ({
     "documents.select": [{ data: DOC, error: null }],
     "organized_items.select": [
@@ -578,57 +585,135 @@ describe("billJobReceipt — a number alone never says same purchase; the money 
     "organized_items.insert": [{ data: [{ id: "oi-new" }], error: null }],
   });
   const inserts = () => calls.filter((c) => c.table === "organized_items" && c.verb === "insert");
-
-  it("the stand-in story: one bill on ANOTHER job at another total: recorded on the paper's job, no tie, and said once", async () => {
-    state.client = fakeSupabase(writeScript([bill("bill-902")]), calls);
-    const res = await billJobReceipt(DOC.id);
+  /** Recorded as its own purchase on the paper's job, nothing tied. */
+  const expectRecorded = (res: any) => {
     expect(res.ok).toBe(true);
     expect(res.already).not.toBe(true);
     expect(res.sameAs).toBeUndefined();
     expect(res.sameBillId).toBeUndefined();
-    expect(res.warning).toBe(NAMESAKE);
-    expect(did("bills", "insert")?.payload).toMatchObject({ bill_number: "417", amount: 18.40, job_id: "job-901" });
+    expect(did("bills", "insert")?.payload).toMatchObject({ amount: 18.40, job_id: "job-901" });
     expect(inserts()).toHaveLength(1);
     expect(inserts()[0].payload).toMatchObject({ bill_id: "bill-new", document_id: DOC.id });
     expect(inserts()[0].payload.tied_bill_id).toBeUndefined();
-  });
-
-  it("two bills carry the number and neither is the twin: the number repeats, recorded with no namesake line", async () => {
-    state.client = fakeSupabase(writeScript([bill("bill-a"), bill("bill-b", { amount: 18.40, bill_date: "2026-11-02" })]), calls);
-    const res = await billJobReceipt(DOC.id);
+  };
+  /** Filed with that bill: the tie, no bill written. */
+  const expectTied = (res: any, billId: string) => {
     expect(res.ok).toBe(true);
-    expect(res.already).not.toBe(true);
+    expect(res.already).toBe(true);
+    expect(res.sameAs).toContain("This photo is filed with that bill; nothing was recorded twice.");
+    expect(did("organized_items", "insert")?.payload).toMatchObject({ tied_bill_id: billId, bill_id: null, document_id: DOC.id });
+    expect(did("bills", "insert")).toBeUndefined();
+  };
+
+  // ── the paper with NO number: the store, the total and the day decide ──
+  it("no number, a bill of its store at its total on its day: filed with it, in the same words", async () => {
+    ai.parsed = { ...ai.parsed, document_number: null };
+    state.client = fakeSupabase(tieScript([bill("bill-here", { bill_number: null, amount: 18.4, bill_date: "2026-11-23", job_id: "job-901", jobs: { job_number: "J-901", name: "Stand-in Porch" } })]), calls);
+    const res = await billJobReceipt(DOC.id);
+    expectTied(res, "bill-here");
+    expect(res.sameAs).toBe("Already on the books: Bayberry Lumber, $18.40, 2026-11-23, on J-901 Stand-in Porch. This photo is filed with that bill; nothing was recorded twice.");
+  });
+  it("no number, a bill of its store at ANOTHER total on its day: recorded, nothing said", async () => {
+    ai.parsed = { ...ai.parsed, document_number: null };
+    state.client = fakeSupabase(writeScript([bill("bill-a", { bill_number: null, amount: 18.41, bill_date: "2026-11-23" })]), calls);
+    const res = await billJobReceipt(DOC.id);
+    expectRecorded(res);
     expect(res.warning).toBeUndefined();
-    expect(did("bills", "insert")?.payload).toMatchObject({ bill_number: "417", job_id: "job-901" });
-    expect(inserts()).toHaveLength(1);
-    expect(inserts()[0].payload).toMatchObject({ bill_id: "bill-new" });
+  });
+  it("no number, a bill of its store at its total on ANOTHER day: recorded, nothing said", async () => {
+    ai.parsed = { ...ai.parsed, document_number: null };
+    state.client = fakeSupabase(writeScript([bill("bill-a", { bill_number: null, amount: 18.4, bill_date: "2026-11-22" })]), calls);
+    const res = await billJobReceipt(DOC.id);
+    expectRecorded(res);
+    expect(res.warning).toBeUndefined();
+  });
+  it("ANOTHER store at the same total on the same day: recorded, nothing said", async () => {
+    state.client = fakeSupabase(writeScript([bill("bill-n", { supplier: "Northline Supply", amount: 18.4, bill_date: "2026-11-23" })]), calls);
+    const res = await billJobReceipt(DOC.id);
+    expectRecorded(res);
+    expect(res.warning).toBeUndefined();
+  });
+  it("two spellings normalizeSupplierName joins are one store: filed with that bill", async () => {
+    state.client = fakeSupabase(tieScript([bill("bill-inc", { supplier: "Bayberry Lumber, Inc.", bill_number: null, amount: 18.4, bill_date: "2026-11-23" })]), calls);
+    expectTied(await billJobReceipt(DOC.id), "bill-inc");
+  });
+  it("two accounts are never joined by a name: the paper's account and the bill's differ, so it is recorded", async () => {
+    const script = writeScript([bill("bill-acct", { supplier_account_id: "acct-other", bill_number: null, amount: 18.4, bill_date: "2026-11-23" })]);
+    // exactSupplierFor reads the accounts: the paper's spelling is the name of account acct-bayberry.
+    script["supplier_accounts.select"] = [{ data: [{ id: "acct-bayberry", name: "Bayberry Lumber" }], error: null }];
+    state.client = fakeSupabase(script, calls);
+    const res = await billJobReceipt(DOC.id);
+    expectRecorded(res);
+    expect(did("bills", "insert")?.payload).toMatchObject({ supplier_account_id: "acct-bayberry" });
   });
 
-  it("two bills carry the number and one is the twin by total and day: tied to the TWIN, the sentence unchanged", async () => {
+  // ── a short number decides nothing ──
+  it("the stand-in story: the short number on a bill of ANOTHER job at another total: recorded on the paper's job, no tie, and nothing said", async () => {
+    state.client = fakeSupabase(writeScript([bill("bill-902")]), calls);
+    const res = await billJobReceipt(DOC.id);
+    expectRecorded(res);
+    expect(did("bills", "insert")?.payload).toMatchObject({ bill_number: "417" });
+    expect(res.warning).toBeUndefined();
+  });
+  it("REVERSED from cn-v1211: a short number at the same total on another day is recorded, and SAID once (skeptic #106, S2: it was silent)", async () => {
+    state.client = fakeSupabase(writeScript([bill("bill-902", { amount: 18.40 })]), calls);
+    const res = await billJobReceipt(DOC.id);
+    expectRecorded(res);
+    expect(res.warning).toBe(
+      "Recorded as its own purchase. A bill with the same number and the same total is already on the books on another day: Bayberry Lumber #417, $18.40, 2026-11-02, on J-902 Stand-in Deck.",
+    );
+  });
+  it("one bill carries the short number at the same total on another day, another at another total: the \"day\" line names the one at the total", async () => {
+    state.client = fakeSupabase(writeScript([bill("bill-a"), bill("bill-b", { amount: 18.40, bill_date: "2026-11-09" })]), calls);
+    const res = await billJobReceipt(DOC.id);
+    expectRecorded(res);
+    expect(res.warning).toContain("on another day: Bayberry Lumber #417, $18.40, 2026-11-09");
+  });
+  it("two bills carry the short number at the paper's total on other days: the number repeats, recorded with no line", async () => {
+    state.client = fakeSupabase(writeScript([bill("bill-a", { amount: 18.40, bill_date: "2026-11-09" }), bill("bill-b", { amount: 18.40, bill_date: "2026-11-02" })]), calls);
+    const res = await billJobReceipt(DOC.id);
+    expectRecorded(res);
+    expect(res.warning).toBeUndefined();
+  });
+  it("two bills carry the number and one agrees by total and day: tied to THAT one, the sentence unchanged", async () => {
     state.client = fakeSupabase(
       tieScript([bill("bill-a"), bill("bill-twin", { amount: 18.40, bill_date: "2026-11-23", job_id: "job-901", jobs: { job_number: "J-901", name: "Stand-in Porch" } })]),
       calls,
     );
     const res = await billJobReceipt(DOC.id);
-    expect(res.already).toBe(true);
+    expectTied(res, "bill-twin");
     expect(res.sameAs).toBe("Already on the books: Bayberry Lumber #417, $18.40, 2026-11-23, on J-901 Stand-in Porch. This photo is filed with that bill; nothing was recorded twice.");
-    expect(did("organized_items", "insert")?.payload).toMatchObject({ tied_bill_id: "bill-twin", bill_id: null, document_id: DOC.id });
-    expect(did("bills", "insert")).toBeUndefined();
   });
 
-  it("one bill at the same total on another day, on another job: tied as before", async () => {
-    state.client = fakeSupabase(tieScript([bill("bill-902", { amount: 18.40 })]), calls);
+  // ── a long number and the total ──
+  it("a LONG number at the same total on another day, on another job: filed with that bill", async () => {
+    readLong();
+    state.client = fakeSupabase(tieScript([longBill("bill-902", { amount: 18.40 })]), calls);
     const res = await billJobReceipt(DOC.id);
-    expect(res.already).toBe(true);
-    expect(res.sameAs).toContain("This photo is filed with that bill");
+    expectTied(res, "bill-902");
     expect(res.sameBillId).toBeUndefined();
-    expect(did("organized_items", "insert")?.payload).toMatchObject({ tied_bill_id: "bill-902", job_id: "job-901" });
-    expect(did("bills", "insert")).toBeUndefined();
+    expect(did("organized_items", "insert")?.payload).toMatchObject({ job_id: "job-901" });
+  });
+  it("a LONG number at another total: recorded on the paper's job, with the line said once", async () => {
+    readLong();
+    state.client = fakeSupabase(writeScript([longBill("bill-902")]), calls);
+    const res = await billJobReceipt(DOC.id);
+    expectRecorded(res);
+    expect(did("bills", "insert")?.payload).toMatchObject({ bill_number: LONG });
+    expect(res.warning).toBe(NAMESAKE);
+  });
+  it("two bills carry the LONG number at other totals: the number repeats, recorded with no line", async () => {
+    readLong();
+    state.client = fakeSupabase(writeScript([longBill("bill-a"), longBill("bill-b", { amount: 9 })]), calls);
+    const res = await billJobReceipt(DOC.id);
+    expectRecorded(res);
+    expect(res.warning).toBeUndefined();
   });
 
   it("a write that already warns, beside a namesake: both sentences, the write's own first", async () => {
+    readLong();
     ai.parsed = { ...ai.parsed, line_items: [{ description: "2x4 stud", quantity: 2, unit_price: 4.70, amount: 9.40, category: "Materials" }] };
-    state.client = fakeSupabase(writeScript([bill("bill-902")]), calls);
+    state.client = fakeSupabase(writeScript([longBill("bill-902")]), calls);
     const res = await billJobReceipt(DOC.id);
     expect(res.warning?.endsWith(` ${NAMESAKE}`)).toBe(true);
     const own = res.warning!.slice(0, res.warning!.length - NAMESAKE.length - 1);
@@ -645,12 +730,13 @@ describe("billJobReceipt — a number alone never says same purchase; the money 
     expect(inserts()[0].payload.tied_bill_id).toBeUndefined();
   });
 
-  // The reviewer's surviving mutants at the door (skeptic #105, D1-D12), each a fixture of its own.
+  // cn-v1211's door fixtures (skeptic #105, D1-D12), on the new rule.
   const TWIN_HERE = { amount: 18.4, bill_date: "2026-11-23", job_id: "job-901", jobs: { job_number: "J-901", name: "Stand-in Porch" } };
-  /** An original with no 417 on it and a correction carrying 417: one purchase, on J-901. */
-  const family = (correctionAmount: number, over: Record<string, unknown> = {}) => [
+  /** An original with no number of the paper on it and a correction carrying the paper's number, dated
+   *  on the paper's day: one purchase. */
+  const family = (correctionAmount: number, over: Record<string, unknown> = {}, number = "417") => [
     bill("o1", { bill_number: "SO-88", amount: 10, bill_date: "2026-11-02", ...over }),
-    bill("c1", { amount: correctionAmount, bill_date: "2026-11-03", corrects_bill_id: "o1", ...over }),
+    bill("c1", { bill_number: number, amount: correctionAmount, bill_date: "2026-11-23", corrects_bill_id: "o1", ...over }),
   ];
 
   it("D1: a date the person set beats the date read: only the person's date makes the twin, so it is tied", async () => {
@@ -668,20 +754,21 @@ describe("billJobReceipt — a number alone never says same purchase; the money 
     expect(inserts()[0].payload.tied_bill_id).toBeUndefined();
   });
 
-  it("D2: no printed total, the lines sum to the bill's total: the reading takes that sum, and the paper is filed with the bill", async () => {
+  it("D2: no printed total, the lines sum to the bill's total on its day: the reading takes that sum, and the paper is filed with the bill", async () => {
     ai.parsed = { ...ai.parsed, amount: null };
-    state.client = fakeSupabase(tieScript([bill("bill-902", { amount: 18.4 })]), calls);
+    state.client = fakeSupabase(tieScript([bill("bill-902", { amount: 18.4, bill_date: "2026-11-23" })]), calls);
     const res = await billJobReceipt(DOC.id);
     expect(res.already).toBe(true);
     expect(did("organized_items", "insert")?.payload).toMatchObject({ tied_bill_id: "bill-902", amount: 18.4 });
   });
 
   it("D2: no printed total, the lines sum to another total: the reading takes that sum, so it is recorded beside the namesake", async () => {
+    readLong();
     ai.parsed = { ...ai.parsed, amount: null };
-    state.client = fakeSupabase(writeScript([bill("bill-902")]), calls);
+    state.client = fakeSupabase(writeScript([longBill("bill-902")]), calls);
     const res = await billJobReceipt(DOC.id);
     expect(res.already).not.toBe(true);
-    expect(did("bills", "insert")?.payload).toMatchObject({ bill_number: "417", amount: 18.4 });
+    expect(did("bills", "insert")?.payload).toMatchObject({ bill_number: LONG, amount: 18.4 });
     expect(res.warning).toBe(NAMESAKE);
   });
 
@@ -698,15 +785,16 @@ describe("billJobReceipt — a number alone never says same purchase; the money 
   });
 
   it("D5: the namesake line names the purchase whole, with what billLabel adds for corrections", async () => {
-    state.client = fakeSupabase(writeScript(family(40)), calls);
+    readLong();
+    state.client = fakeSupabase(writeScript(family(40, {}, LONG)), calls);
     const res = await billJobReceipt(DOC.id);
     expect(res.already).not.toBe(true);
     expect(res.warning).toBe(
-      "Recorded as its own purchase. A bill with the same number is already on the books at another total: Bayberry Lumber #SO-88 corrected by 417, $50.00 together, 2026-11-02, on J-902 Stand-in Deck.",
+      "Recorded as its own purchase. A bill with the same number is already on the books at another total: Bayberry Lumber #SO-88 corrected by INV-9001417, $50.00 together, 2026-11-02, on J-902 Stand-in Deck.",
     );
   });
 
-  it("D6, D7: a tie that did not land hands the door the TWIN (on the paper's job), never the first bill (on another job)", async () => {
+  it("D6, D7: a tie that did not land hands the door the bill it found (on the paper's job), never the first bill (on another job)", async () => {
     const script = tieScript([bill("bill-a"), bill("bill-twin", TWIN_HERE)]);
     script["organized_items.insert"] = [{ data: null, error: { message: "rls says no" } }];
     state.client = fakeSupabase(script, calls);
@@ -717,7 +805,7 @@ describe("billJobReceipt — a number alone never says same purchase; the money 
     expect(res.sameOnThisJob).toBe(true);
   });
 
-  /** Different Purchase, scripted so that a door which DID enter the number block could tie cleanly. */
+  /** Different Purchase, scripted so that a door which DID enter the block could tie cleanly. */
   const differentScript = (bills: any[]): Record<string, any[]> => ({
     "documents.select": [{ data: DOC, error: null }],
     "organized_items.select": [
@@ -732,25 +820,70 @@ describe("billJobReceipt — a number alone never says same purchase; the money 
     "organized_items.delete": [{ data: [], error: null }],
   });
 
-  it("D9: Different Purchase never enters the number block: with a twin on the books it still writes its own bill and ties nothing", async () => {
+  it("D9: Different Purchase never enters the block: with a bill at its total on its day it still writes its own bill and ties nothing", async () => {
     state.client = fakeSupabase(differentScript([bill("bill-twin", TWIN_HERE)]), calls);
     const res = await billJobReceipt(DOC.id, { differentPurchase: true });
     expect(res.already).toBeUndefined();
     expect(did("bills", "insert")?.payload).toMatchObject({ bill_number: "417", job_id: "job-901" });
+    expect(did("bills", "insert")?.payload.notes).toContain("A person checked: a different purchase from the one already on the books.");
+    expect(did("bills", "select")).toBeUndefined();
     expect(inserts()).toHaveLength(1);
     expect(inserts()[0].payload).toMatchObject({ bill_id: "bill-new" });
     expect(inserts()[0].payload.tied_bill_id).toBeUndefined();
   });
 
+  it("D9: Different Purchase with no number never enters the block either", async () => {
+    ai.parsed = { ...ai.parsed, document_number: null };
+    state.client = fakeSupabase(differentScript([bill("bill-twin", { ...TWIN_HERE, bill_number: null })]), calls);
+    const res = await billJobReceipt(DOC.id, { differentPurchase: true });
+    expect(res.already).toBeUndefined();
+    expect(did("bills", "select")).toBeUndefined();
+    expect(did("bills", "insert")).toBeDefined();
+  });
+
+  // ── F4 (skeptic #106, S1): Read Again of a paper that had its OWN bill ──
+  it("S1: Read Again (rereadOfOwnBill) beside another bill of the store at its total on its day: the cost back on its own job, nothing tied, no note", async () => {
+    // Two real stand-in slips of $18.40 on one day, one on J-901 and one on J-902; Read Again on the
+    // first has just taken its own bill down and reads it again with that bill's date.
+    state.client = fakeSupabase(differentScript([bill("bill-902", { amount: 18.4, bill_date: "2026-11-23" })]), calls);
+    const res = await billJobReceipt(DOC.id, { billDate: "2026-11-23", rereadOfOwnBill: true });
+    expect(res.ok).toBe(true);
+    expect(res.already).toBeUndefined();
+    expect(res.sameAs).toBeUndefined();
+    expect(did("bills", "select")).toBeUndefined();
+    expect(did("bills", "insert")?.payload).toMatchObject({ amount: 18.4, job_id: "job-901", bill_date: "2026-11-23" });
+    expect(did("bills", "insert")?.payload.notes).not.toContain("A person checked");
+    expect(inserts()).toHaveLength(1);
+    expect(inserts()[0].payload).toMatchObject({ bill_id: "bill-new" });
+    expect(inserts()[0].payload.tied_bill_id).toBeUndefined();
+    // No tie existed, so none is taken off: the Different Purchase untie never runs.
+    expect(did("organized_items", "delete")).toBeUndefined();
+    expect(res.warning).toBeUndefined();
+  });
+  it("S1: Read Again beside a long-number namesake says no namesake line", async () => {
+    readLong();
+    state.client = fakeSupabase(differentScript([longBill("bill-902")]), calls);
+    const res = await billJobReceipt(DOC.id, { rereadOfOwnBill: true });
+    expect(did("bills", "insert")).toBeDefined();
+    expect(res.warning).toBeUndefined();
+  });
+  it("S1: Read Again of a paper a person had called a different purchase keeps that person's note", async () => {
+    state.client = fakeSupabase(differentScript([bill("bill-902", { amount: 18.4, bill_date: "2026-11-23" })]), calls);
+    await billJobReceipt(DOC.id, { billDate: "2026-11-23", rereadOfOwnBill: true, differentPurchase: true });
+    expect(did("bills", "insert")?.payload.notes).toContain("A person checked: a different purchase from the one already on the books.");
+  });
+
   it("D9: Different Purchase beside a namesake carries NO namesake line", async () => {
-    state.client = fakeSupabase(differentScript([bill("bill-902")]), calls);
+    readLong();
+    state.client = fakeSupabase(differentScript([longBill("bill-902")]), calls);
     const res = await billJobReceipt(DOC.id, { differentPurchase: true });
     expect(did("bills", "insert")).toBeDefined();
     expect(res.warning).toBeUndefined();
   });
 
   it("D10: the namesake line survives the link-row failure: both sentences are in the warning, the link's first", async () => {
-    const script = writeScript([bill("bill-902")]);
+    readLong();
+    const script = writeScript([longBill("bill-902")]);
     script["organized_items.insert"] = [{ data: null, error: { message: "rls says no" } }];
     state.client = fakeSupabase(script, calls);
     const res = await billJobReceipt(DOC.id);

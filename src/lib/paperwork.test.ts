@@ -6,6 +6,7 @@ import {
   describePaper,
   fileRefusal,
   findSameNumber,
+  offeredToTie,
   firstAnswer,
   paperKindWords,
   paperSays,
@@ -798,6 +799,150 @@ describe("sameMoneyFromBank: a purchase a bank download already wrote", () => {
   });
 });
 
+/**
+ * THE TRAY ON THE ONE RULE (cn-v1212): the store, the total and the day, with a long number standing
+ * in for the day. Stand-ins only: Bayberry Lumber, Northline Supply, J-901/J-902, made-up amounts.
+ */
+describe("findSameNumber: the one rule for a photographed paper (cn-v1212)", () => {
+  const LONG = "INV-9001417";
+  const slip = (over: Partial<PaperItem> = {}): PaperItem =>
+    receipt({ vendor: "Bayberry Lumber", amount: 18.4, item_date: "2026-11-23", doc_number: null, ...over });
+  const b = (id: string, over: Record<string, unknown> = {}) => ({
+    id,
+    supplier: "Bayberry Lumber",
+    supplier_account_id: null,
+    bill_number: null as string | null,
+    supplier_invoice_number: null,
+    amount: 61.75 as number | string | null,
+    bill_date: "2026-11-02",
+    job_id: "job-902",
+    jobs: { job_number: "J-902", name: "Stand-in Deck" },
+    ...over,
+  });
+  const HERE = { amount: 18.4, bill_date: "2026-11-23", job_id: "job-901", jobs: { job_number: "J-901", name: "Stand-in Porch" } };
+
+  it("a paper with NO number is checked: a bill of its store at its total on its day is the bill, in today's words", () => {
+    const m = findSameNumber(slip(), { bills: [b("here", HERE)] });
+    expect(m).toEqual([{ kind: "bill", billId: "here", jobId: "job-901", sentence: "Already on the books: Bayberry Lumber, $18.40, 2026-11-23, on J-901 Stand-in Porch." }]);
+  });
+  it("no number: another day, another total, or another store is nothing", () => {
+    expect(findSameNumber(slip(), { bills: [b("x", { ...HERE, bill_date: "2026-11-22" })] })).toEqual([]);
+    expect(findSameNumber(slip(), { bills: [b("x", { ...HERE, amount: 18.41 })] })).toEqual([]);
+    expect(findSameNumber(slip(), { bills: [b("x", { ...HERE, supplier: "Northline Supply" })] })).toEqual([]);
+  });
+  it("a paper whose total was not read finds no bill by the rule", () => {
+    expect(findSameNumber(slip({ amount: null, doc_number: LONG }), { bills: [b("x", { ...HERE, bill_number: LONG })] })).toEqual([]);
+  });
+  it("a short number at another total is nothing", () => {
+    expect(findSameNumber(slip({ doc_number: "417" }), { bills: [b("x", { bill_number: "417" })] })).toEqual([]);
+  });
+  it("RE-PINNED (skeptic #106, S2; it was nothing): a short number at the same total on another day is a MAYBE (why: day), never tied, in a sentence true for it", () => {
+    expect(findSameNumber(slip({ doc_number: "417" }), { bills: [b("x", { bill_number: "417", amount: 18.4 })] })).toEqual([
+      {
+        kind: "maybe_bill",
+        why: "day",
+        billId: "x",
+        jobId: "job-902",
+        sentence: "Maybe already on the books: Bayberry Lumber #417, $18.40, 2026-11-02, on J-902 Stand-in Deck. It carries this number at the same total on another day.",
+      },
+    ]);
+  });
+  it("K32: a maybe names the ORIGINAL bill (the one a tie links), never the correction that carries the number", () => {
+    const fam = [b("orig", { bill_number: "SO-88", amount: 10 }), b("corr", { bill_number: LONG, amount: 40, corrects_bill_id: "orig" })];
+    expect(findSameNumber(slip({ doc_number: LONG }), { bills: fam })).toEqual([expect.objectContaining({ kind: "maybe_bill", why: "total", billId: "orig" })]);
+    const famDay = [b("orig", { bill_number: "SO-88", amount: 10 }), b("corr", { bill_number: "417", amount: 8.4, corrects_bill_id: "orig" })];
+    expect(findSameNumber(slip({ doc_number: "417" }), { bills: famDay })).toEqual([expect.objectContaining({ kind: "maybe_bill", why: "day", billId: "orig" })]);
+  });
+  it("offeredToTie: only a bill the one rule found; never a maybe of any kind (the owner, 2026-11-27)", () => {
+    const at = (why: "spelling" | "day" | "total") => ({ kind: "maybe_bill" as const, why, billId: "x", sentence: "" });
+    expect(offeredToTie({ kind: "bill", billId: "x", sentence: "" })).toBe(true);
+    expect(offeredToTie(at("spelling"))).toBe(false);
+    expect(offeredToTie(at("day"))).toBe(false);
+    expect(offeredToTie(at("total"))).toBe(false);
+    expect(offeredToTie({ kind: "supplier_invoice", supplierInvoiceId: "si", invoiceNumber: "1", sentence: "" })).toBe(false);
+    expect(offeredToTie({ kind: "paper", itemId: "p", sentence: "" })).toBe(false);
+  });
+  it("a long number at the same total on another day is the bill", () => {
+    expect(findSameNumber(slip({ doc_number: LONG }), { bills: [b("x", { bill_number: LONG, amount: 18.4 })] })).toEqual([
+      expect.objectContaining({ kind: "bill", billId: "x", jobId: "job-902" }),
+    ]);
+  });
+  it("a long number at another total is a MAYBE (why: total), never offered to tie, in a sentence true for it", () => {
+    const m = findSameNumber(slip({ doc_number: LONG }), { bills: [b("x", { bill_number: LONG })] });
+    expect(m).toEqual([
+      {
+        kind: "maybe_bill",
+        why: "total",
+        billId: "x",
+        jobId: "job-902",
+        sentence: "Maybe already on the books: Bayberry Lumber #INV-9001417, $61.75, 2026-11-02, on J-902 Stand-in Deck. It carries this number at another total.",
+      },
+    ]);
+  });
+  it("two bills of the store carry the long number at other totals: nothing (the number repeats)", () => {
+    expect(findSameNumber(slip({ doc_number: LONG }), { bills: [b("x", { bill_number: LONG }), b("y", { bill_number: LONG, amount: 9 })] })).toEqual([]);
+  });
+  it("the bill the paper itself made is never its own match", () => {
+    expect(findSameNumber(slip({ bill_id: "here" }), { bills: [b("here", HERE)] })).toEqual([]);
+  });
+
+  const doc = (over: Record<string, unknown> = {}) => ({
+    id: "si-9",
+    invoice_number: LONG,
+    supplier_account_id: null,
+    total: 18.4 as number | string | null,
+    covered_by: { id: "cov", job_id: "job-902", jobs: { job_number: "J-902", name: "Stand-in Deck" } },
+    ...over,
+  });
+  it("D4: a covered supplier document at the paper's total is the bill", () => {
+    expect(findSameNumber(slip({ doc_number: LONG }), { supplierInvoices: [doc()] })).toEqual([
+      { kind: "bill", billId: "cov", jobId: "job-902", sentence: "Already on the books: supplier document INV-9001417, $18.40, covered by a bill on J-902 Stand-in Deck." },
+    ]);
+  });
+  it("D4: a covered supplier document at another total is a MAYBE (why: total), in a sentence true for it", () => {
+    expect(findSameNumber(slip({ doc_number: LONG }), { supplierInvoices: [doc({ total: 61.75 })] })).toEqual([
+      {
+        kind: "maybe_bill",
+        why: "total",
+        billId: "cov",
+        jobId: "job-902",
+        sentence: "Maybe already on the books: supplier document INV-9001417, $61.75, covered by a bill on J-902 Stand-in Deck. It carries this number at another total.",
+      },
+    ]);
+  });
+  it("D4: a covered supplier document beside a paper whose total was not read: a maybe that says so", () => {
+    const m = findSameNumber(slip({ doc_number: LONG, amount: null }), { supplierInvoices: [doc()] });
+    expect(m).toEqual([expect.objectContaining({ kind: "maybe_bill", why: "total", billId: "cov" })]);
+    expect(m[0].sentence).toBe("Maybe already on the books: supplier document INV-9001417, $18.40, covered by a bill on J-902 Stand-in Deck. It carries this number; this paper's total wasn't read.");
+  });
+  it("D4: a covered document with no total is never the bill", () => {
+    expect(findSameNumber(slip({ doc_number: LONG }), { supplierInvoices: [doc({ total: null })] })).toEqual([expect.objectContaining({ kind: "maybe_bill", why: "total" })]);
+  });
+  it("D4: the covering bill's purchase already a namesake is named once, as the namesake", () => {
+    const bills = [b("cov", { bill_number: LONG })];
+    const m = findSameNumber(slip({ doc_number: LONG }), { bills, supplierInvoices: [doc({ total: 61.75 })] });
+    expect(m).toEqual([expect.objectContaining({ kind: "maybe_bill", why: "total", billId: "cov" })]);
+    expect(m[0].sentence).toContain("Bayberry Lumber #INV-9001417");
+  });
+  it("D4: a covered document at the paper's total over a namesake of its family: the bill only, never also the maybe", () => {
+    const bills = [b("orig", { bill_number: "SO-88", amount: 10 }), b("corr", { bill_number: LONG, amount: 50, corrects_bill_id: "orig" })];
+    const m = findSameNumber(slip({ doc_number: LONG }), { bills, supplierInvoices: [doc({ covered_by: { id: "corr", job_id: "job-902" } })] });
+    expect(m).toEqual([expect.objectContaining({ kind: "bill", billId: "corr" })]);
+  });
+  it("D4: a short-numbered document keeps its own gate: nothing without an account", () => {
+    expect(findSameNumber(slip({ doc_number: "417" }), { supplierInvoices: [doc({ invoice_number: "417" })] })).toEqual([]);
+  });
+  it("an uncovered supplier document stays as it is, at any total", () => {
+    expect(findSameNumber(slip({ doc_number: LONG }), { supplierInvoices: [doc({ covered_by: null, total: 61.75 })] })).toEqual([
+      expect.objectContaining({ kind: "supplier_invoice", supplierInvoiceId: "si-9" }),
+    ]);
+  });
+  it("a bill of the store at another total is the rule's namesake, never ALSO the other-spelling warning", () => {
+    const m = findSameNumber(slip({ doc_number: LONG, vendor: "Bayberry Lumber, Inc." }), { bills: [b("x", { bill_number: LONG })] });
+    expect(m.map((x) => [x.kind, (x as any).why])).toEqual([["maybe_bill", "total"]]);
+  });
+});
+
 describe("findSameNumber: the same purchase already on the books", () => {
   const bill = {
     id: "bill-1",
@@ -820,8 +965,10 @@ describe("findSameNumber: the same purchase already on the books", () => {
     expect(normalizeDocNumber("INV# 8802-1108330")).toBe(normalizeDocNumber("8802 1108330"));
   });
 
-  it("same number, same account through an exact alias: offered as a tie", () => {
-    const m = findSameNumber(receipt({ vendor: "CED", doc_number: "8802-1108330", doc_type: "bill" }), { bills: [bill] }, aliases);
+  // RE-PINNED (cn-v1212): the paper is at the bill's total. The old fixture's paper was $84.12 against
+  // a $653.25 bill, which only the number joined; under the one rule that is the namesake, below.
+  it("same long number, same account through an exact alias, at the bill's total: offered as a tie", () => {
+    const m = findSameNumber(receipt({ vendor: "CED", doc_number: "8802-1108330", doc_type: "bill", amount: 653.25 }), { bills: [bill] }, aliases);
     expect(m).toHaveLength(1);
     expect(m[0]).toMatchObject({ kind: "bill", billId: "bill-1" });
     expect(m[0].sentence).toContain("J-046");
@@ -831,12 +978,22 @@ describe("findSameNumber: the same purchase already on the books", () => {
   // DB5, ERIK'S CALL (audit v994): "a long supplier number matches even when the supplier name is
   // spelled differently, as a WARNING only". Never the certain "bill" (which refuses File It), and
   // never a guess at the account.
-  it("a long number under a spelling on no account is a WARNING, never the certain match that refuses", () => {
-    const m = findSameNumber(receipt({ vendor: "Consolidated Electrical Distributors (CED)", doc_number: "8802-1108330" }), { bills: [bill] }, aliases);
+  // RE-PINNED (cn-v1212): "Consolidated Electrical Distributors (CED)" and "Consolidated Electrical
+  // Dist." are now ONE STORE (normalizeSupplierName joins them while one side is on no account), so
+  // the warning is shown with a spelling that key does not join.
+  it("a long number under a spelling of another store on no account is a WARNING, never the certain match that refuses", () => {
+    const m = findSameNumber(receipt({ vendor: "Consolidated Electric (CED)", doc_number: "8802-1108330", amount: 653.25 }), { bills: [bill] }, aliases);
     expect(m.filter((x) => x.kind === "bill")).toEqual([]);
-    expect(m).toEqual([expect.objectContaining({ kind: "maybe_bill", billId: "bill-1", jobId: "job-046" })]);
+    expect(m).toEqual([expect.objectContaining({ kind: "maybe_bill", why: "spelling", billId: "bill-1", jobId: "job-046" })]);
     expect(m[0].sentence).toContain("Maybe already on the books");
-    expect(m[0].sentence).toContain('"Consolidated Electrical Distributors (CED)" here, "Consolidated Electrical Dist." there');
+    expect(m[0].sentence).toContain('"Consolidated Electric (CED)" here, "Consolidated Electrical Dist." there');
+  });
+
+  it("the spelling normalizeSupplierName joins is the same store: the one rule decides, at the total a bill, at another total the namesake", () => {
+    const same = findSameNumber(receipt({ vendor: "Consolidated Electrical Distributors (CED)", doc_number: "8802-1108330", amount: 653.25 }), { bills: [bill] }, aliases);
+    expect(same).toEqual([expect.objectContaining({ kind: "bill", billId: "bill-1" })]);
+    const other = findSameNumber(receipt({ vendor: "Consolidated Electrical Distributors (CED)", doc_number: "8802-1108330" }), { bills: [bill] }, aliases);
+    expect(other).toEqual([expect.objectContaining({ kind: "maybe_bill", why: "total", billId: "bill-1" })]);
   });
 
   it("no alias at all and a different spelling: still only a warning (exact only for the certain match)", () => {
@@ -862,8 +1019,9 @@ describe("findSameNumber: the same purchase already on the books", () => {
     expect(findSameNumber(receipt({ vendor: "Consolidated Electric", doc_number: "8802-1108330" }), { bills: [copy] }, aliases)).toEqual([]);
   });
 
-  it("a paper with no number matches nothing", () => {
-    expect(findSameNumber(receipt({ doc_number: null }), { bills: [bill] }, aliases)).toEqual([]);
+  // RE-TITLED (cn-v1212): a paper with no number is asked too now; this one is another store's.
+  it("a paper with no number from another store matches nothing", () => {
+    expect(findSameNumber(receipt({ doc_number: null, amount: 653.25, item_date: "2026-09-17" }), { bills: [bill] }, aliases)).toEqual([]);
   });
 
   it("the bill this paper made is not a duplicate of itself", () => {
@@ -882,9 +1040,10 @@ describe("findSameNumber: the same purchase already on the books", () => {
     expect(m[0].sentence).toBe("On the supplier documents list with no bill yet: 8802-1108330, $653.25. Filing it makes the bill and links it to that document.");
   });
 
-  it("a CED document a bill already covers IS that bill's purchase: offered as a tie to the covering bill", () => {
+  // RE-PINNED (cn-v1212): the paper is at the document's total; another total is a maybe (below).
+  it("a CED document a bill already covers, at the paper's total, IS that bill's purchase: offered as a tie to the covering bill", () => {
     const m = findSameNumber(
-      receipt({ vendor: "CED", doc_number: "8802-1108330", doc_type: "bill" }),
+      receipt({ vendor: "CED", doc_number: "8802-1108330", doc_type: "bill", amount: 653.25 }),
       {
         supplierInvoices: [
           {
@@ -902,6 +1061,7 @@ describe("findSameNumber: the same purchase already on the books", () => {
     expect(m[0].sentence).toBe("Already on the books: supplier document 8802-1108330, $653.25, covered by a bill on J-046 Jason Wexley.");
   });
 
+  // RE-PINNED (cn-v1212): the paper is at the purchase's together total, $709.18.
   it("a CED document tied to a CORRECTION is the purchase its original names: found once, whole (0381, task 2)", () => {
     // Correct This Bill from the supplier's paper ties the document to the correction row, which
     // carries the paper's number. The tray names the purchase once, by its original, never a second
@@ -909,7 +1069,7 @@ describe("findSameNumber: the same purchase already on the books", () => {
     const original = { ...bill, id: "orig", bill_number: "8802-SO-257899", amount: "613.19", bill_date: "2026-09-24", job_id: "job-011", jobs: { job_number: "J-011", name: "13897 Honeysuckle" } };
     const correction = { ...original, id: "corr", bill_number: "8802-1109100", amount: "95.99", bill_date: "2026-10-07", corrects_bill_id: "orig" };
     const m = findSameNumber(
-      receipt({ vendor: "Consolidated Electrical Dist.", doc_number: "8802-1109100", doc_type: "bill" }),
+      receipt({ vendor: "Consolidated Electrical Dist.", doc_number: "8802-1109100", doc_type: "bill", amount: 709.18 }),
       {
         bills: [original, correction],
         supplierInvoices: [
@@ -930,9 +1090,10 @@ describe("findSameNumber: the same purchase already on the books", () => {
     );
   });
 
+  // RE-PINNED (cn-v1212): the paper is at the bill's total.
   it("a covering bill that also carries the number is found once, not twice", () => {
     const m = findSameNumber(
-      receipt({ vendor: "CED", doc_number: "8802-1108330", doc_type: "bill" }),
+      receipt({ vendor: "CED", doc_number: "8802-1108330", doc_type: "bill", amount: 653.25 }),
       {
         bills: [bill],
         supplierInvoices: [{ id: "si-1", invoice_number: "8802-1108330", supplier_account_id: "acct-ced", total: 653.25, covered_by: { id: "bill-1" } }],

@@ -35,9 +35,11 @@ import {
   RETURN_NEEDS_LINES,
   SHELF_TRAY_NEEDS_LINES,
   shelfRowsOf,
+  type MaybeWhy,
   type NumberMatch,
   type PaperItem,
   type Readiness,
+  offeredToTie,
 } from "@/lib/paperwork";
 import { ShelfTicketSheet, type ShelfCountLine } from "@/components/shelf-count";
 import { OpenListCard } from "@/components/open-list-card";
@@ -163,20 +165,34 @@ export function pickJobOf(j: JobOption): PickJob {
  * records it as a different purchase.", so every answer then carries the flag. Missing it, the
  * server would refuse the answer the card just offered.
  *
- * A MAYBE (the same long number under another spelling) never sends it: the server takes a maybe
- * as a warning, not a refusal, and only without the flag does it still link a supplier document
- * the card promised to link and write which other-spelling bill the person saw.
+ * A MAYBE (the same long number under another spelling, or this number at the same total on another
+ * day or at another total, cn-v1212) never sends it: the server takes a maybe as a warning, not a refusal, and only without the flag
+ * does it still link a supplier document the card promised to link and write which maybe the
+ * person saw.
  */
 export function differentPurchaseOf(state: Readiness["state"], matches: readonly NumberMatch[]): boolean {
   return state === "ready" && matches.some((m) => m.kind === "bill");
 }
 
-/** The one line under the Same Purchase box: what every other answer does, per what it shows. */
-export function samePurchaseLine(state: Readiness["state"], onBooks: number): string {
-  if (state !== "ready") return "Tying files this paper against it and adds nothing new.";
-  return onBooks > 0
-    ? "Any other button below records it as a different purchase."
-    : "If it isn't the same purchase, any other button below files it, and its bill notes the other spelling.";
+/**
+ * The one line under the Same Purchase box: what every other answer does, per what it shows. A box
+ * of maybes alone has NO Tie button (offeredToTie: a tie only where the one rule matched, the owner
+ * 2026-11-27), so it says every button files the paper as its own purchase, and that the bill a
+ * filing writes notes what each maybe was (cn-v1212), by the maybes' own `why`: the other
+ * spelling, the same total on another day, the other total.
+ */
+export function samePurchaseLine(state: Readiness["state"], onBooks: number, maybeWhys: readonly MaybeWhy[] = ["spelling"]): string {
+  // Off "ready" (a supplier's documents) the box's only door is the Tie; with maybes alone there is
+  // none, so there is nothing to say about one.
+  if (state !== "ready") return onBooks > 0 ? "Tying files this paper against it and adds nothing new." : "";
+  if (onBooks > 0) return "Any other button below records it as a different purchase.";
+  const said = [
+    maybeWhys.includes("spelling") ? "the other spelling" : null,
+    maybeWhys.includes("day") ? "the same total on another day" : null,
+    maybeWhys.includes("total") ? "the other total" : null,
+  ].filter((x): x is string => !!x);
+  const notes = said.length ? said.slice(0, -1).join(", ") + (said.length > 1 ? " and " : "") + said[said.length - 1] : "the other spelling";
+  return `Any button below files it as its own purchase, and its bill notes ${notes}.`;
 }
 
 /** The ⋯ rows, per state, minus any door the card already shows (one door, one home). */
@@ -423,7 +439,8 @@ export function PaperworkRow({
   const onBooks = matches.filter((m): m is Extract<NumberMatch, { kind: "bill" }> => m.kind === "bill");
   const toLink = matches.filter((m): m is Extract<NumberMatch, { kind: "supplier_invoice" }> => m.kind === "supplier_invoice");
   const papers = matches.filter((m) => m.kind === "paper");
-  // THE SAME LONG NUMBER UNDER ANOTHER SPELLING (Erik, audit v994 DB5): a warning with a Tie.
+  // A MAYBE (the same long number under another spelling, DB5; this number at the same total on
+  // another day, or at another total, cn-v1212): a plain warning, never a Tie.
   const maybes = matches.filter((m): m is Extract<NumberMatch, { kind: "maybe_bill" }> => m.kind === "maybe_bill");
   const samePurchase = onBooks.length ? onBooks : maybes;
   // WITH A BILL ON THE BOOKS SHOWING, EVERY ANSWER IS A DIFFERENT PURCHASE: the card says so above
@@ -970,23 +987,28 @@ export function PaperworkRow({
           </div>
         )}
 
-        {/* THE SAME PURCHASE: Tie Them per match, and one line saying what every other answer means. */}
+        {/* THE SAME PURCHASE: Tie Them per match the one rule made (a maybe is a sentence only), and one line saying what every other answer means. */}
         {samePurchase.length > 0 && (r.state === "ready" || r.state === "supplier_documents") && (
           <div className="mt-2 space-y-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
             {samePurchase.map((m) => (
               <div key={matchKey(m)}>
                 <p>{m.sentence}</p>
-                <Button
-                  variant="outline"
-                  className="mt-1.5"
-                  disabled={working}
-                  onClick={() => run("tie", () => tiePaperwork(item.id, { billId: m.billId }), "Tied to what was already on the books.")}
-                >
-                  {spin("tie") ? <Loader2 className="animate-spin" /> : <Link2 />} Same Purchase: Tie Them
-                </Button>
+                {/* A tie only where the one rule matched: a maybe is said, never offered (tiePaperwork refuses it). */}
+                {offeredToTie(m) && (
+                  <Button
+                    variant="outline"
+                    className="mt-1.5"
+                    disabled={working}
+                    onClick={() => run("tie", () => tiePaperwork(item.id, { billId: m.billId }), "Tied to what was already on the books.")}
+                  >
+                    {spin("tie") ? <Loader2 className="animate-spin" /> : <Link2 />} Same Purchase: Tie Them
+                  </Button>
+                )}
               </div>
             ))}
-            <p className="text-xs">{samePurchaseLine(r.state, onBooks.length)}</p>
+            {samePurchaseLine(r.state, onBooks.length, maybes.map((m) => m.why)) && (
+              <p className="text-xs">{samePurchaseLine(r.state, onBooks.length, maybes.map((m) => m.why))}</p>
+            )}
           </div>
         )}
         {toLink.length > 0 && onBooks.length === 0 && r.state === "ready" && (

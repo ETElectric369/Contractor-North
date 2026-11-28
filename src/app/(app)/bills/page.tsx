@@ -59,7 +59,7 @@ import { NeedsYou, PaperworkDropZone } from "./bills-drop";
 import { SnapOrNoteButton } from "@/components/snap-or-note";
 import type { PaperRowItem } from "@/components/paperwork-row";
 import { answeredOnReconcile, readinessOf, TRAY_WINDOW, type NumberMatch } from "@/lib/paperwork";
-import { loadBooks, loadMarkContext, matchesOnBooks, PAPER_JOB_STATUSES, rematchTray } from "@/app/(app)/organize/paperwork-core";
+import { daysOfWaitingPapers, loadBooks, loadMarkContext, matchesOnBooks, PAPER_JOB_STATUSES, rematchTray } from "@/app/(app)/organize/paperwork-core";
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { billOfTie, billPapers, type PaperTie } from "@/lib/job-photos";
 import {
@@ -225,6 +225,22 @@ export default async function BillsPage({
   const canChangeSettings = profile?.role === "owner" || profile?.role === "admin";
   const t = translator(await currentLangFor(user?.id));
 
+  // ── PAPER WAITING FOR FILE IT (0295) ────────────────────────────────────────────────────
+  // One inbox with Organize: every receipt or bill that has been read and not filed, whichever
+  // door it came in by. `*` so a database without 0295 still answers (the new columns simply
+  // are not there), and filtered in code for the same reason. Wrapped once so it is sent once: the
+  // books below read only the bills on these papers' days.
+  const trayRead = Promise.resolve(
+    supabase
+      .from("organized_items")
+      .select("*, jobs(job_number, name)")
+      .eq("status", "needs_review")
+      .order("created_at", { ascending: false })
+      // ONE WINDOW, SHARED WITH RECONCILE (TRAY_WINDOW, beside `answeredOnReconcile`): this page counts
+      // every statement it finds as "waiting on Reconcile" and links there, so a wider window here than
+      // there would point at a paper that page never reads.
+      .limit(TRAY_WINDOW),
+  );
   // EVERYTHING THIS PAGE NEEDS, IN ONE BREATH. The supplier reads (0270) join the existing five
   // rather than hanging off them, because a serial hop added to a page read is the phone-lag class
   // all over again (audit v921: the app was awaiting a ~31-query badge before every page). None of
@@ -314,21 +330,11 @@ export default async function BillsPage({
     // those ids (superseded, on a job, on this account) could ever have been written. The failure
     // is always a select list - and `?? ""` cannot defend a column that was never asked for.
     supabase.from("bill_supplier_invoices").select("bill_id, supplier_invoice_id").limit(5000),
-    // ── PAPER WAITING FOR FILE IT (0295) ────────────────────────────────────────────────────
-    // One inbox with Organize: every receipt or bill that has been read and not filed, whichever
-    // door it came in by. `*` so a database without 0295 still answers (the new columns simply
-    // are not there), and filtered in code for the same reason.
-    supabase
-      .from("organized_items")
-      .select("*, jobs(job_number, name)")
-      .eq("status", "needs_review")
-      .order("created_at", { ascending: false })
-      // ONE WINDOW, SHARED WITH RECONCILE (TRAY_WINDOW, beside `answeredOnReconcile`): this page counts
-      // every statement it finds as "waiting on Reconcile" and links there, so a wider window here than
-      // there would point at a paper that page never reads.
-      .limit(TRAY_WINDOW),
-    // Every printed number already on the books, for "Same Purchase: Tie Them".
-    loadBooks(supabase, orgId),
+    // PAPER WAITING FOR FILE IT (0295): the tray read above.
+    trayRead,
+    // The bills that can match the waiting papers (numbered, or on a paper's day; loadBooks never
+    // reads every bill), for "Same Purchase: Tie Them".
+    trayRead.then((r: { data: unknown }) => loadBooks(supabase, orgId, { days: daysOfWaitingPapers(r?.data as unknown[]) })),
     // What a waiting paper names, matched again by today's rules (rematchTray: no model, no write).
     loadMarkContext(supabase, orgId),
     // THE ROLLS ON THE SHELF, by the receipt line each came off (Shop Stock, Phase 2): the receipt

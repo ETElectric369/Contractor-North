@@ -36,8 +36,9 @@ export const DIFFERENT_PURCHASE_DOOR = "If this is a different purchase, press D
 export type ReceiptOutcome =
   /** The reader wrote the bill. `warning` = what the door should still say out loud, the bill being
    *  in: its lines didn't add up to its total (that one is on its notes too), something after the
-   *  write did not land, or (cn-v1211) a bill with the same number is already on the books at
-   *  another total, so this paper was recorded as its own purchase. */
+   *  write did not land, or (cn-v1212) a bill with the same number is already on the books at
+   *  another total, or at the same total on another day, so this paper was recorded as its own
+   *  purchase. */
   | {
       kind: "billed";
       docId: string;
@@ -51,9 +52,9 @@ export type ReceiptOutcome =
       pen: string | null;
     }
   /** This file already produced a bill — nothing added twice (organized_items.document_id). Or
-   *  `samePurchase`: a bill already carries this paper's printed number AND its total agrees
-   *  (audit v994; the money since cn-v1211), so no bill was written and the photo is filed with
-   *  that bill. The door still offers Different Purchase: Record It Anyway — and, when the filing
+   *  `samePurchase`: a bill of this paper's store already has its total, on its day or with its
+   *  long number (audit v994; the one rule since cn-v1212, readPaperMatch), so no bill was written
+   *  and the photo is filed with that bill. The door still offers Different Purchase: Record It Anyway — and, when the filing
    *  did not land and that bill is on this paper's own job (`sameOnThisJob`, d1ff7c5a), Same
    *  Purchase: It's That Bill, which ties the paper to `sameBillId` (linkReceiptToBill) instead of
    *  reading it again or billing it twice. */

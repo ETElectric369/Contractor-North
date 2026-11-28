@@ -744,13 +744,58 @@ export type Books = {
   bankBills?: BookedBill[];
 };
 
+/** The columns of a bill on the books (BookedBill), read the same way by every bills read that feeds
+ *  the one rule; created_at only orders the merged list. corrects_bill_id rides withCorrections. */
+const BOOK_BILL_COLUMNS =
+  "id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id, created_at, jobs(job_number, name)";
+/** At most this many distinct paper days are asked for in one read (a tray holds far fewer). */
+const MAX_BOOK_DAYS = 400;
+/** At most this many missing originals are asked for by id in the follow-up read. */
+const MAX_MISSING_ORIGINALS = 200;
+
+/** The papers' own days, as the one rule reads them: the first ten characters, a real date, each once,
+ *  newest first, under MAX_BOOK_DAYS. */
+export function bookDays(days: readonly (string | null | undefined)[] | null | undefined): string[] {
+  const out = new Set<string>();
+  for (const d of days ?? []) {
+    const day = String(d ?? "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day)) out.add(day);
+  }
+  return [...out].sort().reverse().slice(0, MAX_BOOK_DAYS);
+}
+
+/** The days of the WAITING papers a page or card checks against the books (loadBooks' `days`):
+ *  matches are asked only for a paper still in needs_review. */
+export function daysOfWaitingPapers(rows: readonly unknown[] | null | undefined): string[] {
+  return bookDays(
+    ((rows ?? []) as { status?: string | null; item_date?: string | null }[])
+      .filter((r) => r?.status === "needs_review")
+      .map((r) => r.item_date ?? null),
+  );
+}
+
 /**
- * Every printed number this org already holds: bills with a number, the supplier's own documents,
- * and papers read here. One read of each, filtered in code, because "8802-1108330" and
- * "#8802 1108330" are the same number and SQL equality would call them two. A read that fails is
- * an empty list: the offer to tie is a convenience, and File It stays open either way.
+ * What this org already holds, for the papers at hand: the live bills that CAN match them, the
+ * supplier's own documents, and papers read here with a number. Numbers are compared in code,
+ * because "8802-1108330" and "#8802 1108330" are the same number and SQL equality would call them
+ * two. A read that fails is an empty list: the offer to tie is a convenience, and File It stays open
+ * either way.
+ *
+ * NEVER EVERY BILL (the owner, 2026-11-27: "why does the app have to read all 5000 bills every
+ * time"). The one rule (readPaperMatch) matches a bill by a number it carries, or by its total on the
+ * paper's DAY, so the bills read are, merged once each and newest first:
+ *   1. the live bills with a number in either column (as before cn-v1212);
+ *   2. the live bills dated on one of `days`, the papers' own days (bookDays); no day, no read;
+ *   3. the rest of the purchases those rows belong to (0381): every live correction whose original is
+ *      in the list, and the original, read by id, of a correction that is in it alone, so the
+ *      together total is whole.
+ * Every match by total and day has a member on the paper's day, so 2 and 3 find them all.
  */
-export async function loadBooks(supabase: any, orgId: string | null | undefined): Promise<Books> {
+export async function loadBooks(
+  supabase: any,
+  orgId: string | null | undefined,
+  opts: { days?: readonly (string | null | undefined)[] | null } = {},
+): Promise<Books> {
   const empty: Books = { bills: [], papers: [], supplierInvoices: [], aliases: new Map() };
   if (!orgId) return empty;
   // A THUNK, so a query that can't even be built (a client without a filter, a column not on this
@@ -779,7 +824,8 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
     }
     return safe<T>(() => q(cols));
   };
-  const [bills, papers, supplierInvoices, aliasRows, links, bankBills, plainCosts] = await Promise.all([
+  const days = bookDays(opts.days);
+  const [numbered, papers, supplierInvoices, aliasRows, links, bankBills, plainCosts, onDays, corrections] = await Promise.all([
     withCorrections<BookedBill>((cols) =>
       supabase
         .from("bills")
@@ -789,15 +835,16 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
         //
         // FILTERED IN SQL, NEWEST FIRST (review of that fix). Reading every bill in the org under a
         // 5000 cap with no order would, past the cap, drop an arbitrary set, and a match missed
-        // here is a second bill. Only a bill with a number in either column can match, only a live
-        // one counts, and if the cap is ever reached it is the oldest that fall off.
+        // here is a second bill. Only a bill with a number in either column can match by its number
+        // (a bill with none is read below, by the papers' days), only a live one counts, and if the
+        // cap is ever reached it is the oldest that fall off.
         .select(cols)
         .eq("org_id", orgId)
         .or("bill_number.not.is.null,supplier_invoice_number.not.is.null")
         .is("superseded_by_bill_id", null)
         .order("created_at", { ascending: false })
         .limit(5000),
-      "id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id, jobs(job_number, name)",
+      BOOK_BILL_COLUMNS,
     ),
     safe<BookedPaper>(() =>
       supabase
@@ -862,7 +909,69 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
         .limit(2000),
       "id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id",
     ),
+    // 2. THE LIVE BILLS ON THE PAPERS' OWN DAYS (cn-v1212), numbered or not: the one rule's total and
+    // day. No day, no read.
+    days.length
+      ? withCorrections<BookedBill>(
+          (cols) =>
+            supabase
+              .from("bills")
+              .select(cols)
+              .eq("org_id", orgId)
+              .in("bill_date", days)
+              .is("superseded_by_bill_id", null)
+              .order("created_at", { ascending: false })
+              .limit(5000),
+          BOOK_BILL_COLUMNS,
+        )
+      : Promise.resolve([] as BookedBill[]),
+    // 3a. THE LIVE CORRECTIONS (0381), kept below only when their original is on the list. Few in
+    // any company; a database before 0381 answers none.
+    withCorrections<BookedBill>(
+      (cols) =>
+        supabase
+          .from("bills")
+          .select(cols)
+          .eq("org_id", orgId)
+          .not("corrects_bill_id", "is", null)
+          .is("superseded_by_bill_id", null)
+          .order("created_at", { ascending: false })
+          .limit(2000),
+      BOOK_BILL_COLUMNS,
+    ),
   ]);
+  // ONE LIST, EACH BILL ONCE.
+  const byId = new Map<string, BookedBill>();
+  const add = (b: BookedBill) => {
+    if (b?.id && !b.superseded_by_bill_id && !byId.has(String(b.id))) byId.set(String(b.id), b);
+  };
+  for (const b of numbered) add(b);
+  for (const b of onDays) add(b);
+  // 3b. THE ORIGINAL OF A CORRECTION THAT CAME ALONE (a correction on the paper's day, its original
+  // unnumbered and dated another): read by id, one bounded follow-up.
+  const missing = [...new Set([...byId.values()].map((b) => b.corrects_bill_id).filter((id): id is string => !!id && !byId.has(String(id))))].slice(
+    0,
+    MAX_MISSING_ORIGINALS,
+  );
+  if (missing.length) {
+    const originals = await withCorrections<BookedBill>(
+      (cols) => supabase.from("bills").select(cols).eq("org_id", orgId).in("id", missing).is("superseded_by_bill_id", null).limit(MAX_MISSING_ORIGINALS),
+      BOOK_BILL_COLUMNS,
+    );
+    for (const b of originals) add(b);
+  }
+  // 3a. Every correction under an original now on the list.
+  for (const c of corrections) if (c?.corrects_bill_id && byId.has(String(c.corrects_bill_id))) add(c);
+  // NEWEST FIRST, as the one read was: by created_at, a row without one keeping its place.
+  const created = (b: BookedBill) => String((b as { created_at?: string | null }).created_at ?? "");
+  const bills = [...byId.values()]
+    .map((b, i) => ({ b, i }))
+    .sort((x, y) => {
+      const a = created(x.b);
+      const c = created(y.b);
+      return a && c && a !== c ? (a < c ? 1 : -1) : x.i - y.i;
+    })
+    .map((x) => x.b);
   const cover = new Map<string, NonNullable<BookedSupplierInvoice["covered_by"]>>();
   for (const l of links) {
     if (!l?.supplier_invoice_id || !l.bill_id) continue;

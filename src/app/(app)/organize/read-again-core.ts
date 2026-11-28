@@ -39,6 +39,9 @@ export type BillJobStated = {
   billDate?: string | null;
   scope?: string | null;
   differentPurchase?: boolean;
+  /** Always true from here: the paper had its own bill, just taken down, so the job's reader never
+   *  files it with ANOTHER bill of that store at that total on that day (skeptic #106, S1). */
+  rereadOfOwnBill?: boolean;
 };
 export type BillJobResult = { ok: boolean; error?: string; already?: boolean; sameAs?: string; amount?: number | null; warning?: string; pen?: string };
 
@@ -208,6 +211,7 @@ export async function readFiledPaperAgainWith(db: Db, billId: string, doors: Rea
       category: bill.category ?? null,
       billDate: bill.bill_date ?? null,
       scope,
+      rereadOfOwnBill: true,
       ...(differentPurchase ? { differentPurchase: true } : {}),
     };
     const made = await doors.billJob(String(paper.document_id), stated);

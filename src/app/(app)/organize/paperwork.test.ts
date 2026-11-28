@@ -1375,19 +1375,22 @@ describe("AI Suggest on the 13897 HONEYSUCKLE ticket (Erik, 2026-09-24)", () => 
 });
 
 describe("Tie and Undo", () => {
-  it("Tie only to a record the number check actually found", async () => {
+  // RE-PINNED (cn-v1212): the bill is also on another day. A bill of the paper's store at its total
+  // ON ITS DAY is found by the one rule whatever its number, and may be tied to.
+  it("Tie only to a record the check actually found", async () => {
     state.client = fakeSupabase(
       {
         "organized_items.select": [
           { data: PAPER, error: null },
           { data: [], error: null },
         ],
-        ...books([{ ...BOOKED_BILL, bill_number: "999" }]),
+        ...books([{ ...BOOKED_BILL, bill_number: "999", bill_date: "2026-09-01" }]),
       },
       calls,
     );
     const res = await tiePaperwork("oi-9", { billId: "bill-1" });
     expect(res.ok).toBe(false);
+    expect(res.error).toBe("That bill isn't one the check found for this paper, so they weren't tied. Nothing changed.");
     expect(did("organized_items", "update")).toBeUndefined();
   });
 
@@ -2582,19 +2585,20 @@ describe("TOOLS in the PO box, read fresh (Erik, 2026-09-24)", () => {
 });
 
 // ── loadBooks: the read every "already on the books?" door leans on (review of audit v994) ─────
-describe("loadBooks reads the bills that can match, in SQL, newest first", () => {
-  it("only bills with a number in either column, only live ones, ordered, under the cap", async () => {
-    const { loadBooks } = await import("./paperwork-core");
-    const seen: { table: string; ops: [string, ...unknown[]][] }[] = [];
+describe("loadBooks reads only the bills that can match, in SQL, newest first (F7: never every bill)", () => {
+  type Rec = { table: string; ops: [string, ...unknown[]][] };
+  /** A recording client: each read answers what `answer` gives for its table and its filters. */
+  const recorder = (answer: (rec: Rec) => unknown[] = () => []) => {
+    const seen: Rec[] = [];
     const client = {
       from(table: string) {
-        const rec = { table, ops: [] as [string, ...unknown[]][] };
+        const rec: Rec = { table, ops: [] };
         seen.push(rec);
         const chain: any = new Proxy(
           {},
           {
             get(_t, prop: string) {
-              if (prop === "then") return (resolve: any) => resolve({ data: [], error: null });
+              if (prop === "then") return (resolve: any) => resolve({ data: answer(rec), error: null });
               return (...args: unknown[]) => {
                 rec.ops.push([prop, ...args]);
                 return chain;
@@ -2605,19 +2609,145 @@ describe("loadBooks reads the bills that can match, in SQL, newest first", () =>
         return chain;
       },
     };
+    return { client, seen };
+  };
+  const has = (rec: Rec, op: string, ...args: unknown[]) => rec.ops.some((o) => o[0] === op && JSON.stringify(o.slice(1)) === JSON.stringify(args));
+  const billReads = (seen: Rec[]) => seen.filter((r) => r.table === "bills");
+  const numberedRead = (r: Rec) => has(r, "or", "bill_number.not.is.null,supplier_invoice_number.not.is.null");
+  const dayRead = (r: Rec) => r.ops.some((o) => o[0] === "in" && o[1] === "bill_date");
+  const correctionsRead = (r: Rec) => has(r, "not", "corrects_bill_id", "is", null);
+  const byIdRead = (r: Rec) => r.ops.some((o) => o[0] === "in" && o[1] === "id");
+
+  // RE-PINNED (F7, the owner 2026-11-27: "why does the app have to read all 5000 bills every time"):
+  // the numbered filter is back, exactly as before cn-v1212.
+  it("the numbered read is as it was: live, a number in either column, newest first, under the cap", async () => {
+    const { loadBooks } = await import("./paperwork-core");
+    const { client, seen } = recorder();
     await loadBooks(client, "org-1");
-    const bills = seen.find((s) => s.table === "bills")!;
-    expect(bills.ops).toContainEqual(["eq", "org_id", "org-1"]);
-    expect(bills.ops).toContainEqual(["or", "bill_number.not.is.null,supplier_invoice_number.not.is.null"]);
-    expect(bills.ops).toContainEqual(["is", "superseded_by_bill_id", null]);
-    expect(bills.ops).toContainEqual(["order", "created_at", { ascending: false }]);
+    const numbered = billReads(seen).find(numberedRead)!;
+    expect(numbered).toBeDefined();
+    expect(numbered.ops).toContainEqual(["eq", "org_id", "org-1"]);
+    expect(numbered.ops).toContainEqual(["limit", 5000]);
+    expect(numbered.ops).toContainEqual(["is", "superseded_by_bill_id", null]);
+    expect(numbered.ops).toContainEqual(["order", "created_at", { ascending: false }]);
+    // No bills read is unfiltered: every one is the numbered, a day's, the corrections, the bank's or the plain costs'.
+    for (const r of billReads(seen))
+      expect(numberedRead(r) || dayRead(r) || correctionsRead(r) || byIdRead(r) || r.ops.some((o) => o[0] === "not" && o[1] === "bank_line_id") || has(r, "is", "job_id", null)).toBe(true);
+  });
+
+  it("a paper with no day causes no day read", async () => {
+    const { loadBooks } = await import("./paperwork-core");
+    for (const days of [undefined, [], [null], [""], ["not a day"]]) {
+      const { client, seen } = recorder();
+      await loadBooks(client, "org-1", { days });
+      expect(billReads(seen).some(dayRead)).toBe(false);
+    }
+  });
+
+  it("the day read asks for the papers' own days only, each once, live, newest first, under the cap", async () => {
+    const { loadBooks } = await import("./paperwork-core");
+    const { client, seen } = recorder();
+    await loadBooks(client, "org-1", { days: ["2026-11-23T17:40:00Z", "2026-11-23", null, "2026-11-20"] });
+    const day = billReads(seen).filter(dayRead);
+    expect(day).toHaveLength(1);
+    expect(day[0].ops).toContainEqual(["in", "bill_date", ["2026-11-23", "2026-11-20"]]);
+    expect(day[0].ops).toContainEqual(["eq", "org_id", "org-1"]);
+    expect(day[0].ops).toContainEqual(["is", "superseded_by_bill_id", null]);
+    expect(day[0].ops).toContainEqual(["order", "created_at", { ascending: false }]);
+    expect(day[0].ops).toContainEqual(["limit", 5000]);
+  });
+
+  it("an unnumbered bill on the paper's day is found; one on another day is never asked for", async () => {
+    const { loadBooks } = await import("./paperwork-core");
+    const onDay = { id: "b-day", supplier: "Bayberry Lumber", bill_number: null, supplier_invoice_number: null, amount: 18.4, bill_date: "2026-11-23", created_at: "2026-11-23T10:00:00Z" };
+    const other = { ...onDay, id: "b-other", bill_date: "2026-11-22" };
+    // The fake answers a day read with the bills whose day it asked for, as the database would.
+    const { client, seen } = recorder((r) => {
+      const asked = r.ops.find((o) => o[0] === "in" && o[1] === "bill_date")?.[2] as string[] | undefined;
+      return asked ? [onDay, other].filter((b) => asked.includes(b.bill_date)) : [];
+    });
+    const books = await loadBooks(client, "org-1", { days: ["2026-11-23"] });
+    expect(books.bills.map((b) => b.id)).toEqual(["b-day"]);
+    expect(billReads(seen).filter(dayRead).flatMap((r) => r.ops.filter((o) => o[0] === "in").map((o) => o[2]))).toEqual([["2026-11-23"]]);
+  });
+
+  it("a family is completed: the unnumbered original on another day, read by id; corrections under a listed original; never one under an original not on the list", async () => {
+    const { loadBooks } = await import("./paperwork-core");
+    const bill = (id: string, over: Record<string, unknown> = {}) => ({
+      id,
+      supplier: "Bayberry Lumber",
+      bill_number: null,
+      supplier_invoice_number: null,
+      superseded_by_bill_id: null,
+      amount: 10,
+      bill_date: "2026-11-02",
+      corrects_bill_id: null,
+      created_at: "2026-11-02T10:00:00Z",
+      ...over,
+    });
+    const numbered = bill("n1", { bill_number: "INV-9001417", created_at: "2026-11-01T10:00:00Z" });
+    const dayCorrection = bill("c1", { amount: 8.4, bill_date: "2026-11-23", corrects_bill_id: "o1", created_at: "2026-11-23T10:00:00Z" });
+    const original = bill("o1");
+    const underNumbered = bill("c2", { amount: 1, corrects_bill_id: "n1", created_at: "2026-11-05T10:00:00Z" });
+    const underStranger = bill("c3", { amount: 2, corrects_bill_id: "x9", created_at: "2026-11-06T10:00:00Z" });
+    const { client, seen } = recorder((r) => {
+      if (r.table !== "bills") return [];
+      if (numberedRead(r)) return [numbered];
+      if (dayRead(r)) return [dayCorrection];
+      if (correctionsRead(r)) return [dayCorrection, underNumbered, underStranger];
+      if (byIdRead(r)) return [original];
+      return [];
+    });
+    const books = await loadBooks(client, "org-1", { days: ["2026-11-23"] });
+    // One list, each once, newest first.
+    expect(books.bills.map((b) => b.id)).toEqual(["c1", "c2", "o1", "n1"]);
+    const byId = billReads(seen).filter(byIdRead);
+    expect(byId).toHaveLength(1);
+    expect(byId[0].ops).toContainEqual(["in", "id", ["o1"]]);
+    expect(byId[0].ops).toContainEqual(["is", "superseded_by_bill_id", null]);
+    expect(byId[0].ops).toContainEqual(["eq", "org_id", "org-1"]);
+  });
+
+  it("no correction alone: no follow-up read by id", async () => {
+    const { loadBooks } = await import("./paperwork-core");
+    const { client, seen } = recorder((r) => (r.table === "bills" && dayRead(r) ? [{ id: "b1", bill_date: "2026-11-23", amount: 1 }] : []));
+    await loadBooks(client, "org-1", { days: ["2026-11-23"] });
+    expect(billReads(seen).some(byIdRead)).toBe(false);
+  });
+
+  it("every caller passes the papers' days (source)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+    const actions = src("src/app/(app)/organize/actions.ts");
+    expect(actions).toContain("loadBooks(supabase, ctx.orgId, { days: [paperDay] })");
+    expect(actions).toContain("const reading = readPaperMatch({ amount, date: paperDay, number: docNumber }, store);");
+    expect(actions.match(/loadBooks\(supabase, ctx\.orgId, \{ days: \[item\.item_date \?\? null\] \}\)/g)?.length).toBe(2);
+    expect(actions).not.toMatch(/loadBooks\(supabase, ctx\.orgId\)/);
+    for (const f of ["src/app/(app)/organize/page.tsx", "src/app/(app)/bills/page.tsx", "src/app/(app)/snap-or-note-actions.ts"])
+      expect(src(f), f).toMatch(/loadBooks\(supabase, .*\{ days: daysOfWaitingPapers\(/);
+  });
+
+  it("daysOfWaitingPapers: only the waiting papers' real days", async () => {
+    const { daysOfWaitingPapers } = await import("./paperwork-core");
+    expect(
+      daysOfWaitingPapers([
+        { status: "needs_review", item_date: "2026-11-23" },
+        { status: "needs_review", item_date: "2026-11-23" },
+        { status: "filed", item_date: "2026-11-20" },
+        { status: "needs_review", item_date: null },
+        { status: "needs_review", item_date: "2026-11-21" },
+      ]),
+    ).toEqual(["2026-11-23", "2026-11-21"]);
   });
 });
 
 describe("audit v994 wave 2: the paperwork doors say what they did", () => {
+  // RE-PINNED (cn-v1212): the paper's spelling is one normalizeSupplierName does NOT join to the bill's.
+  // "Consolidated Electrical Distributors (CED)" now IS that store, and the one rule decides it.
   it("DB5: a bill carrying the same long number under another spelling WARNS and never refuses; the bill says a person filed it anyway", async () => {
     const elsewhere = { ...BOOKED_BILL, supplier: "Consolidated Electrical Dist.", supplier_account_id: "acct-ced" };
-    const paper = { ...PAPER, vendor: "Consolidated Electrical Distributors (CED)" };
+    const paper = { ...PAPER, vendor: "Consolidated Electric (CED)" };
     state.client = fakeSupabase(
       {
         "organized_items.select": [{ data: paper, error: null }],
@@ -2637,12 +2767,16 @@ describe("audit v994 wave 2: the paperwork doors say what they did", () => {
     expect(did("bills", "insert")!.payload.supplier_account_id).toBeUndefined();
   });
 
-  it("DB5: Same Purchase: Tie Them ties to a bill the warning found", async () => {
+  /** The sentence every tie to a maybe is refused with (the owner, 2026-11-27: a tie only where the one rule matches). */
+  const NOT_THE_SAME_PURCHASE =
+    "Only a bill of the same store at the same total, on the same day or with the same long number, is the same purchase, so they weren't tied. Nothing changed.";
+
+  it("RE-PINNED (the owner, 2026-11-27: a tie only where the one rule matches): DB5's other-spelling warning is NOT tied, nothing written", async () => {
     const elsewhere = { ...BOOKED_BILL, supplier: "Consolidated Electrical Dist.", supplier_account_id: "acct-ced" };
     state.client = fakeSupabase(
       {
         "organized_items.select": [
-          { data: { ...PAPER, vendor: "Consolidated Electrical Distributors (CED)" }, error: null },
+          { data: { ...PAPER, vendor: "Consolidated Electric (CED)" }, error: null },
           { data: [], error: null },
         ],
         ...books([elsewhere]),
@@ -2651,10 +2785,169 @@ describe("audit v994 wave 2: the paperwork doors say what they did", () => {
       calls,
     );
     const res = await tiePaperwork("oi-9", { billId: "bill-1" });
+    expect(res).toEqual({ ok: false, error: NOT_THE_SAME_PURCHASE });
+    expect(did("organized_items", "update")).toBeUndefined();
+  });
+
+  // ── cn-v1212: the tray on the one rule. Stand-ins: Bayberry Lumber, J-901/J-902, made-up amounts. ──
+  const LONG = "INV-9001417";
+  const SLIP = {
+    ...PAPER,
+    doc_type: "receipt",
+    vendor: "Bayberry Lumber",
+    doc_number: null as string | null,
+    title: "Bayberry Lumber — $18.40",
+    amount: 18.4,
+    item_date: "2026-11-23",
+    payment: "paid_at_purchase",
+    pricing_provisional: false,
+    proposal: { jobId: "job-901" },
+    line_items: [{ description: "Deck screws", quantity: 1, unit_price: 18.4, amount: 18.4, category: "Materials" }],
+  };
+  const STORE_BILL = {
+    id: "bill-902",
+    supplier: "Bayberry Lumber",
+    bill_number: null as string | null,
+    supplier_invoice_number: null,
+    supplier_account_id: null,
+    amount: 61.75,
+    bill_date: "2026-11-02",
+    job_id: "job-902",
+    jobs: { job_number: "J-902", name: "Stand-in Deck" },
+  };
+  const fileScript = (paper: any, bills: any[]) => ({
+    "organized_items.select": [{ data: paper, error: null }],
+    ...books(bills),
+    "organized_items.update": [{ data: [{ id: "oi-9" }], error: null }, { data: [{ id: "oi-9" }], error: null }],
+    "documents.insert": [{ data: { id: "doc-2" }, error: null }],
+    "bills.insert": [{ data: { id: "bill-3" }, error: null }],
+    "bill_line_items.insert": [{ data: [{ id: "l1" }], error: null }],
+  });
+
+  it("cn-v1212: File It asks a paper with NO number too: a bill of its store at its total on its day refuses and names the Tie", async () => {
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [
+          { data: SLIP, error: null },
+          { data: [], error: null },
+        ],
+        ...books([{ ...STORE_BILL, amount: 18.4, bill_date: "2026-11-23", job_id: "job-901", jobs: { job_number: "J-901", name: "Stand-in Porch" } }]),
+      },
+      calls,
+    );
+    const res = await fileItem("oi-9", { type: "job", jobId: "job-901" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Already on the books: Bayberry Lumber, $18.40, 2026-11-23, on J-901 Stand-in Porch.");
+    expect(res.error).toContain("Same Purchase: Tie Them");
+    expect(did("bills", "insert")).toBeUndefined();
+  });
+
+  it("cn-v1212: File It beside a namesake (the long number at another total) files, and the bill's note says the other TOTAL", async () => {
+    state.client = fakeSupabase(fileScript({ ...SLIP, doc_number: LONG }, [{ ...STORE_BILL, bill_number: LONG }]), calls);
+    const res = await fileItem("oi-9", { type: "job", jobId: "job-901" });
     expect(res.ok).toBe(true);
-    expect(res.message).toMatch(/^Tied\. Filed against Consolidated Electrical Dist\. #8802-1108330/);
-    expect(res.message).not.toContain("spelled another way");
-    expect(did("organized_items", "update")!.payload).toMatchObject({ tied_bill_id: "bill-1", status: "filed" });
+    const notes = String(did("bills", "insert")!.payload.notes);
+    expect(notes).toContain("A person filed this with a bill carrying the same number at another total on the books: Bayberry Lumber #INV-9001417, $61.75, 2026-11-02, on J-902 Stand-in Deck.");
+    expect(notes).not.toContain("another supplier spelling");
+    expect(notes).not.toContain("It carries this number");
+  });
+
+  it("cn-v1212: both kinds of maybe beside one paper: one true line for each", async () => {
+    const otherSpelling = { ...STORE_BILL, id: "bill-yard", supplier: "Bayberry Yard", bill_number: LONG, amount: 7 };
+    state.client = fakeSupabase(fileScript({ ...SLIP, doc_number: LONG }, [{ ...STORE_BILL, bill_number: LONG }, otherSpelling]), calls);
+    const res = await fileItem("oi-9", { type: "job", jobId: "job-901" });
+    expect(res.ok).toBe(true);
+    const notes = String(did("bills", "insert")!.payload.notes);
+    expect(notes).toContain("A person filed this with a bill carrying the same number under another supplier spelling on the books: Bayberry Yard #INV-9001417, $7.00, 2026-11-02, on J-902 Stand-in Deck.");
+    expect(notes).toContain("A person filed this with a bill carrying the same number at another total on the books: Bayberry Lumber #INV-9001417, $61.75");
+  });
+
+
+  it("RE-PINNED (skeptic #106, S3; the owner: a different total makes it a different receipt): a tie to the namesake at another total is REFUSED, nothing written", async () => {
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [
+          { data: { ...SLIP, doc_number: LONG }, error: null },
+          { data: [], error: null },
+        ],
+        ...books([{ ...STORE_BILL, bill_number: LONG }]),
+        "organized_items.update": [{ data: [{ id: "oi-9" }], error: null }],
+      },
+      calls,
+    );
+    const res = await tiePaperwork("oi-9", { billId: "bill-902" });
+    expect(res).toEqual({ ok: false, error: NOT_THE_SAME_PURCHASE });
+    expect(did("organized_items", "update")).toBeUndefined();
+  });
+
+  it("the owner, 2026-11-27 (a tie only where the one rule matches): the \"day\" maybe (the same number at the same total on another day) is NOT tied", async () => {
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [
+          { data: { ...SLIP, doc_number: "417" }, error: null },
+          { data: [], error: null },
+        ],
+        ...books([{ ...STORE_BILL, bill_number: "417", amount: 18.4 }]),
+        "organized_items.update": [{ data: [{ id: "oi-9" }], error: null }],
+      },
+      calls,
+    );
+    const res = await tiePaperwork("oi-9", { billId: "bill-902" });
+    expect(res).toEqual({ ok: false, error: NOT_THE_SAME_PURCHASE });
+    expect(did("organized_items", "update")).toBeUndefined();
+  });
+
+  it("cn-v1212: File It beside a \"day\" maybe files, and the bill's note says the same total on another day", async () => {
+    state.client = fakeSupabase(fileScript({ ...SLIP, doc_number: "417" }, [{ ...STORE_BILL, bill_number: "417", amount: 18.4 }]), calls);
+    const res = await fileItem("oi-9", { type: "job", jobId: "job-901" });
+    expect(res.ok).toBe(true);
+    const notes = String(did("bills", "insert")!.payload.notes);
+    expect(notes).toContain("A person filed this with a bill carrying the same number at the same total on another day on the books: Bayberry Lumber #417, $18.40, 2026-11-02, on J-902 Stand-in Deck.");
+    expect(notes).not.toContain("at another total");
+    expect(notes).not.toContain("It carries this number");
+  });
+
+  it("RE-PINNED (S3): a tie to a covered supplier document at another total is REFUSED; the bill found by the rule is still tied", async () => {
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [
+          { data: { ...SLIP, doc_number: LONG }, error: null },
+          { data: [], error: null },
+        ],
+        "bills.select": [{ data: [], error: null }],
+        "supplier_invoices.select": [{ data: [{ id: "si-9", invoice_number: LONG, supplier_account_id: null, total: 61.75 }], error: null }],
+        "supplier_aliases.select": [{ data: [], error: null }],
+        "bill_supplier_invoices.select": [{ data: [{ supplier_invoice_id: "si-9", bill_id: "bill-cov", bills: { id: "bill-cov", job_id: "job-902", jobs: { job_number: "J-902", name: "Stand-in Deck" } } }], error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-9" }], error: null }],
+      },
+      calls,
+    );
+    const res = await tiePaperwork("oi-9", { billId: "bill-cov" });
+    expect(res).toEqual({ ok: false, error: NOT_THE_SAME_PURCHASE });
+    expect(did("organized_items", "update")).toBeUndefined();
+
+    calls.length = 0;
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [
+          { data: SLIP, error: null },
+          { data: [], error: null },
+        ],
+        ...books([{ ...STORE_BILL, amount: 18.4, bill_date: "2026-11-23" }]),
+        "organized_items.update": [{ data: [{ id: "oi-9" }], error: null }],
+      },
+      calls,
+    );
+    const byRule = await tiePaperwork("oi-9", { billId: "bill-902" });
+    expect(byRule.ok).toBe(true);
+    expect(byRule.message).toBe("Tied. Filed against Bayberry Lumber, $18.40, 2026-11-23, on J-902 Stand-in Deck. Nothing new was added.");
+  });
+
+  it("cn-v1212: a bill found by the rule AND by the bank's money and day appears once", async () => {
+    const { matchesOnBooks } = await import("./paperwork-core");
+    const bank = { ...STORE_BILL, amount: 18.4, bill_date: "2026-11-23", job_id: null, jobs: null };
+    const found = matchesOnBooks(SLIP as any, { bills: [bank], papers: [], supplierInvoices: [], aliases: new Map(), bankBills: [{ ...bank, from_bank: true }] });
+    expect(found).toEqual([expect.objectContaining({ kind: "bill", billId: "bill-902" })]);
   });
 
   it("MR6: a total that doesn't match its lines is written into the bill's notes, never corrected and never refused", async () => {

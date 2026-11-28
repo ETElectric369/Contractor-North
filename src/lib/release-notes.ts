@@ -16,6 +16,7 @@ import { APP_VERSION } from "@/lib/version";
 export type ReleaseNote = { version: string; date: string; line: string };
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  { version: "cn-v1212", date: "2026-11-27", line: "A receipt counts as a bill you already have only when the store, the total and the date all match, or a long invoice number and the total do. A different total is always recorded as its own cost." },
   { version: "cn-v1211", date: "2026-11-27", line: "A receipt photographed for a job counts as a bill you already have only when its number and total both match; otherwise it is recorded. The reader is told a store's number is not the receipt's own." },
   { version: "cn-v1210", date: "2026-11-27", line: "Payments: the Stripe library behind card payments, pay links and subscriptions is updated. Nothing changes in how you or your customers pay." },
   { version: "cn-v1209", date: "2026-11-27", line: "Billing: a declined subscription card is now caught whichever way Stripe reports it, so the owner and admins get the one notice to update the card." },

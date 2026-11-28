@@ -12,7 +12,7 @@ import { openListFromText } from "@/lib/supplier-open-list";
 import type { NumberMatch } from "@/lib/paperwork";
 import type { PaperRowItem } from "@/components/paperwork-row";
 import { whichJobLabel, type ChoiceJob } from "@/app/(app)/timeclock/which-job-choices";
-import { loadBooks, loadMarkContext, matchesOnBooks, OPEN_JOBS_FOR_PAPER, PAPER_JOB_STATUSES, rematchTray } from "@/app/(app)/organize/paperwork-core";
+import { daysOfWaitingPapers, loadBooks, loadMarkContext, matchesOnBooks, OPEN_JOBS_FOR_PAPER, PAPER_JOB_STATUSES, rematchTray } from "@/app/(app)/organize/paperwork-core";
 import { openListViews } from "@/app/(app)/bills/open-list-core";
 import { bankLinesStayHere, bankViews } from "@/app/(app)/bills/bank-core";
 import { importCedInvoices } from "@/app/(app)/bills/supplier-import-actions";
@@ -131,8 +131,13 @@ export async function snapPaperRows(ids: string[]): Promise<SnapRows> {
   const want = [...new Set((ids ?? []).map(String).filter((id) => UUID.test(id)))].slice(0, 50);
   if (!want.length) return { ok: true, items: [], jobs: [], matches: {}, shopStock: true };
 
-  const [itemsR, jobsR, orgR, books, markCtx] = await Promise.all([
+  // The papers first in the same breath, so the books read only the bills on THESE papers' days
+  // (loadBooks: never every bill). Wrapped once, so the read is sent once.
+  const itemsRead = Promise.resolve(
     supabase.from("organized_items").select("*, jobs(job_number, name)").eq("org_id", orgId).eq("status", "needs_review").in("id", want),
+  );
+  const [itemsR, jobsR, orgR, books, markCtx] = await Promise.all([
+    itemsRead,
     supabase
       .from("jobs")
       .select("id, job_number, name, status")
@@ -141,7 +146,7 @@ export async function snapPaperRows(ids: string[]): Promise<SnapRows> {
       .order("created_at", { ascending: false })
       .limit(OPEN_JOBS_FOR_PAPER),
     supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle(),
-    loadBooks(supabase, orgId),
+    itemsRead.then((r: { data: unknown }) => loadBooks(supabase, orgId, { days: daysOfWaitingPapers(r?.data as unknown[]) })),
     loadMarkContext(supabase, orgId),
   ]);
   if (itemsR.error) return { ok: false, error: `Couldn't read your papers just now. ${dbError(itemsR.error)}` };

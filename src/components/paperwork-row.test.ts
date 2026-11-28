@@ -32,7 +32,7 @@ vi.mock("@/app/(app)/organize/paperwork-actions", () => ({
   updatePaperwork: vi.fn(),
 }));
 
-import { PaperworkRow, differentPurchaseOf, paperMenuRows, pickJobOf, type PaperRowItem } from "./paperwork-row";
+import { PaperworkRow, differentPurchaseOf, paperMenuRows, pickJobOf, samePurchaseLine, type PaperRowItem } from "./paperwork-row";
 import { RETURN_NEEDS_LINES } from "@/lib/paperwork";
 
 const JOBS = [
@@ -143,7 +143,7 @@ describe("the cost card: the Supplier Bills grammar", () => {
     expect(differentPurchaseOf("needs_total", matches as any)).toBe(false);
   });
 
-  it("a maybe beside a supplier document no bill covers: no flag, so filing still links the document, and the box says what the answers do", () => {
+  it("a maybe beside a supplier document no bill covers: no flag, no Tie, so filing still links the document, and the box says what the answers do", () => {
     const matches = [
       { kind: "maybe_bill", billId: "bill-9", sentence: "Maybe already on the books: C.E.D. Reno #8802110, $120.00. It carries this number under another spelling." },
       {
@@ -155,11 +155,43 @@ describe("the cost card: the Supplier Bills grammar", () => {
     ];
     expect(differentPurchaseOf("ready", matches as any)).toBe(false);
     const html = render({ doc_type: "bill", vendor: "CED", doc_number: "8802110", proposal: { jobId: "job-046", jobFrom: "po" } }, matches);
-    expect(html).toContain("Same Purchase: Tie Them");
+    // RE-PINNED (the owner, 2026-11-27: a tie only where the one rule matches): the maybe is a sentence, no Tie.
+    expect(html).not.toContain("Same Purchase: Tie Them");
     expect(html).toContain("Filing it makes the bill and links it to that document.");
     expect(html).not.toContain("Any other button below records it as a different purchase.");
-    expect(html).toContain("If it isn&#x27;t the same purchase, any other button below files it, and its bill notes the other spelling.");
-    expect(answers(html)[1]).toBe("Put It on J-046");
+    expect(html).toContain("Any button below files it as its own purchase, and its bill notes the other spelling.");
+    expect(answers(html)[0]).toBe("Put It on J-046");
+  });
+
+  it("cn-v1212: the line under a box of maybes is true for each kind: no Tie, every button files it, and the bill notes which", () => {
+    expect(samePurchaseLine("ready", 0, ["spelling"])).toBe("Any button below files it as its own purchase, and its bill notes the other spelling.");
+    expect(samePurchaseLine("ready", 0, ["day"])).toBe("Any button below files it as its own purchase, and its bill notes the same total on another day.");
+    expect(samePurchaseLine("ready", 0, ["total"])).toBe("Any button below files it as its own purchase, and its bill notes the other total.");
+    expect(samePurchaseLine("ready", 0, ["total", "spelling"])).toBe("Any button below files it as its own purchase, and its bill notes the other spelling and the other total.");
+    expect(samePurchaseLine("ready", 0, ["total", "day", "spelling"])).toBe(
+      "Any button below files it as its own purchase, and its bill notes the other spelling, the same total on another day and the other total.",
+    );
+    expect(samePurchaseLine("ready", 1, ["total"])).toBe("Any other button below records it as a different purchase.");
+    expect(samePurchaseLine("supplier_documents", 1, [])).toBe("Tying files this paper against it and adds nothing new.");
+    // A supplier's documents with maybes alone: no Tie, so no line about one.
+    expect(samePurchaseLine("supplier_documents", 0, ["total"])).toBe("");
+  });
+
+  it("RE-PINNED (the owner, 2026-11-27: a tie only where the one rule matches): a maybe of ANY kind has no Tie Them, and the line says every button files it", () => {
+    for (const why of ["total", "day", "spelling"] as const) {
+      const matches = [{ kind: "maybe_bill", why, billId: "bill-902", sentence: `Maybe already on the books: Bayberry Lumber #INV-9001417, $61.75. Kind ${why}.` }];
+      expect(differentPurchaseOf("ready", matches as any)).toBe(false);
+      const html = render({ vendor: "Bayberry Lumber", doc_number: "INV-9001417", proposal: { jobId: "job-046", jobFrom: "po" } }, matches);
+      expect(html).toContain(`Kind ${why}.`);
+      expect(html).not.toContain("Same Purchase: Tie Them");
+      expect(html).not.toContain("If it isn&#x27;t the same purchase");
+      expect(html).toContain("Any button below files it as its own purchase, and its bill notes");
+      expect(answers(html)[0]).toBe("Put It on J-046");
+    }
+  });
+
+  it("K29: with no kinds passed, the line's default is the other SPELLING (the oldest maybe), never the other total", () => {
+    expect(samePurchaseLine("ready", 0)).toBe("Any button below files it as its own purchase, and its bill notes the other spelling.");
   });
 
   it("every answer that files sends the flag (missing it recreates the duplicate-bill refusal)", () => {

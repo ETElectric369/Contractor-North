@@ -20,7 +20,7 @@ import { BUSINESS_COST_BUCKETS, isBusinessCostBucket, looksLikeSupplierFee, type
 import { accountForSupplier, type SupplierAliasIndex } from "@/lib/supplier-identity";
 import type { StoredOpenList } from "@/lib/supplier-open-list";
 import type { StoredBank } from "@/lib/bank-download";
-import { billLabel, billsCarryingLongNumberElsewhere, billsCarryingNumber, normalizeDocNumber, purchasesOf, sameSupplier, type LedgerBill } from "@/lib/same-purchase";
+import { billLabel, billsCarryingLongNumberElsewhere, normalizeDocNumber, purchasesOf, readPaperMatch, sameSupplier, storeBillsOf, type LedgerBill } from "@/lib/same-purchase";
 import { cleanLines, type BillLine as PaperLine } from "@/lib/paper-lines";
 import { SHELF_NEEDS_LINES, SHELF_NO_RETURNS } from "@/lib/shelf-plan";
 import { isLinelessReturn, RETURN_ON_JOB_WHY } from "@/lib/job-cost-guard";
@@ -1355,34 +1355,57 @@ export type BookedSupplierInvoice = {
 };
 
 /**
- * What the number check found.
- *   · "bill": the same purchase is already a cost (a bill with this number, or the bill that
- *     already covers a CED document with this number). File It refuses and offers Tie Them.
+ * What the check found (findSameNumber).
+ *   · "bill": the same purchase is already a cost (a bill of this store at the paper's total, on
+ *     its day or with its long number, by readPaperMatch; or the bill that already covers a CED
+ *     document with this number at the paper's total). File It refuses and offers Tie Them.
  *   · "supplier_invoice": a CED document with this number that NO bill covers yet. It is not a
  *     cost (owner-money counts only bills), so there is nothing to tie to: File It goes ahead and
  *     links the new bill to it, and the button says so.
- *   · "maybe_bill": a live bill carrying the same LONG number (7+ digits) under another spelling
- *     of the supplier (Erik, audit v994 DB5). A WARNING only: File It is not refused, and a person
- *     may tie the two or file it as a different purchase.
+ *   · "maybe_bill": a WARNING only, a plain sentence: File It is not refused, and NO maybe is ever
+ *     offered to tie (offeredToTie; tiePaperwork refuses it): a tie is made only where the one rule
+ *     matched. `why` says which kind, so every sentence about it stays true: "spelling", a live
+ *     bill carrying the same LONG number (7+ digits) under another spelling of the supplier (Erik,
+ *     audit v994 DB5); "day", the one bill of this store carrying this number at the same total on
+ *     another day (cn-v1212); "total", a bill of this store, or a supplier document a bill covers,
+ *     that carries this number at another total, or whose total this paper's unread total can't
+ *     confirm.
  *   · "paper": another paper in the tray with the same number. Said, never blocking.
  */
+/** Why a bill is only maybe this paper (NumberMatch "maybe_bill"). */
+export type MaybeWhy = "spelling" | "day" | "total";
+/**
+ * May a person tie this paper to that bill? ONLY where the one rule made the match: a "bill" (the
+ * purchase readPaperMatch found, a covered supplier document at the paper's total, or the bank's
+ * match). Never a maybe, of any kind (the owner, 2026-11-27: "requiring all three, i dont think it
+ * should be different rules ... single source of truth").
+ */
+export function offeredToTie(m: NumberMatch): boolean {
+  return m.kind === "bill";
+}
 export type NumberMatch =
   | { kind: "bill"; billId: string; jobId?: string | null; sentence: string }
-  | { kind: "maybe_bill"; billId: string; jobId?: string | null; sentence: string }
+  | { kind: "maybe_bill"; billId: string; jobId?: string | null; sentence: string; why: MaybeWhy }
   | { kind: "supplier_invoice"; supplierInvoiceId: string; invoiceNumber: string; sentence: string }
   | { kind: "paper"; itemId: string; sentence: string };
 
 /**
- * Every record already on the books with this paper's printed number AND the same supplier, by
- * exact spelling or exact alias only (supplier-identity.ts: the fuzzy match is for suggestions,
- * and this one decides which button shows). A supplier's own document (supplier_invoices) is
- * keyed on its number alone when it has no account yet, but only for a long number: "1234" from
- * two stores is two purchases, "8802-1108330" is not.
+ * Every record already on the books that this paper may be, for the tray (File It, the card's Same
+ * Purchase: Tie Them, Snap or Note, the Bills page's papers).
  *
- * A BILL IS FOUND BY THE SAME READING EVERY OTHER DOOR USES (billsCarryingNumber, audit v994):
- * the number in bill_number OR supplier_invoice_number, on a live bill only. Before, this door
- * read bill_number and the supplier's door read supplier_invoice_number, so each was blind to the
- * bills the other one wrote.
+ * A BILL IS FOUND BY THE ONE RULE EVERY PHOTOGRAPHED PAPER IS ASKED (readPaperMatch, cn-v1212): the
+ * live bills of the paper's own store (storeBillsOf), and of those the one whose total agrees with
+ * the paper's AND whose day does, or which carries the paper's LONG number as its own. That is the
+ * certain "bill". A paper with no number is asked too: the total and the day decide. The one bill of
+ * the store carrying the paper's number at its total on another day is a "maybe" (why "day"); the one
+ * bill of the store carrying the paper's long number at another total is a "maybe" (why "total").
+ * Each is said, never refused and never offered to tie. Otherwise a short number decides nothing.
+ *
+ * By number, as before: a live bill carrying the same LONG number under a spelling of another store
+ * (DB5, why "spelling"); a supplier's own document (supplier_invoices), found by its number alone
+ * when it has no account yet, but only for a long number ("1234" from two stores is two purchases,
+ * "8802-1108330" is not), and once covered by a bill the same purchase only at the paper's total;
+ * and another paper waiting with the same number.
  */
 export function findSameNumber(
   item: PaperItem,
@@ -1390,81 +1413,114 @@ export function findSameNumber(
   aliases: SupplierAliasIndex | null = null,
 ): NumberMatch[] {
   const number = normalizeDocNumber(item.doc_number);
-  if (!number) return [];
   const me = { name: item.vendor ?? null, account: null };
+  const bills = books.bills ?? [];
   const out: NumberMatch[] = [];
-  // The bill THIS paper made is never "already on the books" against itself. A bill and the
-  // corrections under it (0381) are named once, as the purchase they are: "#8802-SO-257899
+  const { of } = purchasesOf(bills);
+  const familyOf = (id: string) => of.get(id)?.members.map((m) => m.id) ?? [id];
+  // THE ONE RULE. The bill THIS paper made is never "already on the books" against itself. A bill and
+  // the corrections under it (0381) are named once, as the purchase they are: "#8802-SO-257899
   // corrected by 8802-1109100, $709.18 together".
-  const carrying = billsCarryingNumber(item.doc_number, { supplier: item.vendor }, books.bills ?? [], aliases, { exceptBillId: item.bill_id });
-  for (const p of purchasesOf(carrying).purchases) {
-    const b = p.original;
-    out.push({
-      kind: "bill",
-      billId: b.id,
-      jobId: b.job_id ?? null,
-      sentence: `Already on the books: ${billLabel(b, p.corrections)}.`,
-    });
+  const store = storeBillsOf({ supplier: item.vendor }, bills, aliases, { exceptBillId: item.bill_id });
+  const reading = readPaperMatch({ amount: amountOf(item), date: item.item_date ?? null, number: item.doc_number ?? null }, store);
+  if (reading.same) {
+    const b = reading.same.original;
+    out.push({ kind: "bill", billId: b.id, jobId: b.job_id ?? null, sentence: `Already on the books: ${billLabel(b, reading.same.corrections)}.` });
   }
-  // THE SAME LONG NUMBER UNDER ANOTHER SPELLING (DB5): said, never refused, never tied for them.
-  for (const b of billsCarryingLongNumberElsewhere(item.doc_number, { supplier: item.vendor }, books.bills ?? [], aliases, { exceptBillId: item.bill_id })) {
-    const amount = amountOf(b);
-    const job = b.jobs?.job_number ? `${b.jobs.job_number}${b.jobs.name ? ` ${b.jobs.name}` : ""}` : b.job_id ? "a job" : "business costs";
-    const here = String(item.vendor ?? "").trim();
-    const there = String(b.supplier ?? "").trim();
+  if (reading.namesake && reading.why) {
+    // Named by its ORIGINAL, the bill a tie links, never a correction under it.
+    const b = reading.namesake.original;
+    const label = billLabel(b, reading.namesake.corrections);
     out.push({
       kind: "maybe_bill",
+      why: reading.why,
       billId: b.id,
       jobId: b.job_id ?? null,
-      sentence: `Maybe already on the books: ${there || "a bill"} #${b.bill_number || b.supplier_invoice_number}${amount !== null ? `, ${money(amount)}` : ""}${b.bill_date ? `, ${b.bill_date}` : ""}, on ${job}. It carries this number, but the supplier is spelled another way${here && there ? ` ("${here}" here, "${there}" there)` : ""}.`,
+      sentence:
+        reading.why === "day"
+          ? `Maybe already on the books: ${label}. It carries this number at the same total on another day.`
+          : `Maybe already on the books: ${label}. It carries this number at another total.`,
     });
   }
-  for (const si of books.supplierInvoices ?? []) {
-    if (normalizeDocNumber(si.invoice_number) !== number) continue;
-    if (si.supplier_account_id) {
-      const mine = accountForSupplier(item.vendor, aliases);
-      if (mine && mine !== si.supplier_account_id) continue;
-      if (!mine && number.replace(/\D/g, "").length < 7) continue;
-    } else if (number.replace(/\D/g, "").length < 7) continue;
-    const total = amountOf({ amount: si.total });
-    const said = `${si.invoice_number}${total !== null ? `, ${money(total)}` : ""}`;
-    const cover = si.covered_by;
-    if (cover?.id) {
-      // Already a cost: the bill that covers it is the purchase. Found once, whichever way: a
-      // document tied to a CORRECTION (Correct This Bill from the supplier's paper) is the same
-      // purchase the rows above name by its original (0381: one purchase, one answer).
-      const family = purchasesOf(books.bills ?? []).of.get(cover.id)?.members.map((m) => m.id) ?? [cover.id];
-      if (cover.id === item.bill_id || out.some((m) => m.kind === "bill" && family.includes(m.billId))) continue;
-      const job = cover.jobs?.job_number ? `${cover.jobs.job_number}${cover.jobs.name ? ` ${cover.jobs.name}` : ""}` : cover.job_id ? "a job" : "business costs";
+  if (number) {
+    // THE SAME LONG NUMBER UNDER ANOTHER SPELLING (DB5): said, never refused, never tied for them. A
+    // bill of this paper's own store is the rule's above and never also this.
+    const ofStore = new Set(store.map((b) => b.id));
+    for (const b of billsCarryingLongNumberElsewhere(item.doc_number, { supplier: item.vendor }, bills, aliases, { exceptBillId: item.bill_id })) {
+      if (ofStore.has(b.id)) continue;
+      const amount = amountOf(b);
+      const job = b.jobs?.job_number ? `${b.jobs.job_number}${b.jobs.name ? ` ${b.jobs.name}` : ""}` : b.job_id ? "a job" : "business costs";
+      const here = String(item.vendor ?? "").trim();
+      const there = String(b.supplier ?? "").trim();
       out.push({
-        kind: "bill",
-        billId: cover.id,
-        jobId: cover.job_id ?? null,
-        sentence: `Already on the books: supplier document ${said}, covered by a bill on ${job}.`,
+        kind: "maybe_bill",
+        why: "spelling",
+        billId: b.id,
+        jobId: b.job_id ?? null,
+        sentence: `Maybe already on the books: ${there || "a bill"} #${b.bill_number || b.supplier_invoice_number}${amount !== null ? `, ${money(amount)}` : ""}${b.bill_date ? `, ${b.bill_date}` : ""}, on ${job}. It carries this number, but the supplier is spelled another way${here && there ? ` ("${here}" here, "${there}" there)` : ""}.`,
       });
-      continue;
     }
-    out.push({
-      kind: "supplier_invoice",
-      supplierInvoiceId: si.id,
-      invoiceNumber: si.invoice_number,
-      sentence: `On the supplier documents list with no bill yet: ${said}. Filing it makes the bill and links it to that document.`,
-    });
+    const paperTotal = amountOf(item);
+    for (const si of books.supplierInvoices ?? []) {
+      if (normalizeDocNumber(si.invoice_number) !== number) continue;
+      if (si.supplier_account_id) {
+        const mine = accountForSupplier(item.vendor, aliases);
+        if (mine && mine !== si.supplier_account_id) continue;
+        if (!mine && number.replace(/\D/g, "").length < 7) continue;
+      } else if (number.replace(/\D/g, "").length < 7) continue;
+      const total = amountOf({ amount: si.total });
+      const said = `${si.invoice_number}${total !== null ? `, ${money(total)}` : ""}`;
+      const cover = si.covered_by;
+      if (cover?.id) {
+        // Already a cost: the bill that covers it is the purchase. Found once, whichever way: a
+        // document tied to a CORRECTION (Correct This Bill from the supplier's paper) is the same
+        // purchase the rows above name by its original (0381: one purchase, one answer).
+        const family = familyOf(cover.id);
+        if (cover.id === item.bill_id || out.some((m) => m.kind === "bill" && family.includes(m.billId))) continue;
+        const job = cover.jobs?.job_number ? `${cover.jobs.job_number}${cover.jobs.name ? ` ${cover.jobs.name}` : ""}` : cover.job_id ? "a job" : "business costs";
+        // THE TOTAL MUST AGREE (cn-v1212): the document's number found it, and only the paper's total
+        // to the cent makes it the same purchase. Otherwise it is a maybe, said truly and offered to
+        // tie, never a refusal.
+        const agrees = paperTotal !== null && total !== null && Math.round(paperTotal * 100) === Math.round(total * 100);
+        if (agrees) {
+          out.push({ kind: "bill", billId: cover.id, jobId: cover.job_id ?? null, sentence: `Already on the books: supplier document ${said}, covered by a bill on ${job}.` });
+          continue;
+        }
+        if (out.some((m) => m.kind === "maybe_bill" && family.includes(m.billId))) continue;
+        out.push({
+          kind: "maybe_bill",
+          why: "total",
+          billId: cover.id,
+          jobId: cover.job_id ?? null,
+          sentence: `Maybe already on the books: supplier document ${said}, covered by a bill on ${job}. ${
+            paperTotal === null ? "It carries this number; this paper's total wasn't read." : "It carries this number at another total."
+          }`,
+        });
+        continue;
+      }
+      out.push({
+        kind: "supplier_invoice",
+        supplierInvoiceId: si.id,
+        invoiceNumber: si.invoice_number,
+        sentence: `On the supplier documents list with no bill yet: ${said}. Filing it makes the bill and links it to that document.`,
+      });
+    }
+    for (const p of books.papers ?? []) {
+      if (p.id === item.id) continue;
+      if (normalizeDocNumber(p.doc_number) !== number) continue;
+      if (!sameSupplier(me, { name: p.vendor, account: null }, aliases)) continue;
+      // A paper that made a bill is found above as that bill (File It writes bill_number).
+      if (p.bill_id) continue;
+      out.push({
+        kind: "paper",
+        itemId: p.id,
+        sentence: `Another paper here has the same number (${p.title ?? p.vendor ?? "untitled"}), ${p.status === "needs_review" ? "still waiting to be filed" : "set aside"}.`,
+      });
+    }
   }
-  for (const p of books.papers ?? []) {
-    if (p.id === item.id) continue;
-    if (normalizeDocNumber(p.doc_number) !== number) continue;
-    if (!sameSupplier(me, { name: p.vendor, account: null }, aliases)) continue;
-    // A paper that made a bill is found above as that bill (File It writes bill_number).
-    if (p.bill_id) continue;
-    out.push({
-      kind: "paper",
-      itemId: p.id,
-      sentence: `Another paper here has the same number (${p.title ?? p.vendor ?? "untitled"}), ${p.status === "needs_review" ? "still waiting to be filed" : "set aside"}.`,
-    });
-  }
-  // A bill found for certain (a CED document it covers) is never also a "maybe".
-  const certain = new Set(out.flatMap((m) => (m.kind === "bill" ? [m.billId] : [])));
+  // A purchase found for certain (by the rule, or by a supplier document its bill covers) is never
+  // also a "maybe", under any of its members' ids.
+  const certain = new Set(out.flatMap((m) => (m.kind === "bill" ? familyOf(m.billId) : [])));
   return out.filter((m) => m.kind !== "maybe_bill" || !certain.has(m.billId));
 }
 
@@ -1483,9 +1539,10 @@ export function findSameNumber(
  * the Unbilled card billed the customer for it twice — the incident same-purchase.ts was written
  * about. So a bill the BANK wrote counts whether or not it is on a job.
  *
- * A JOB'S BILL WRITTEN ANY OTHER WAY DOES NOT, and that is not the same rule twisted: a hand-filed
- * job cost carries its printed number, which findSameNumber matches exactly, and matching a job's
- * cost on money and day alone would tie two different trips to the supply house for the same $120.
+ * A JOB'S BILL WRITTEN ANY OTHER WAY DOES NOT, and that is not the same rule twisted: this read
+ * asks no store and allows three days, and on those terms it would tie two different trips to the
+ * supply house for the same $120. A job's bill of the paper's OWN store at its total on its day is
+ * findSameNumber's, by the one rule (readPaperMatch, cn-v1212).
  *
  * NOT ONLY THE BANK DOOR'S (review of release/v1026): a business cost with no job and no number
  * written any other way (Add by Hand, or a company's fill-ups loaded by hand from a bank

@@ -195,9 +195,9 @@ function SnapCostButton({
   // The bill the first save created, kept so a later successful receipt upload can LINK to
   // it. Without the link, re-uploading that same photo files a second bill for the same money.
   const [savedBillId, setSavedBillId] = useState<string | null>(null);
-  // SAME NUMBER AND SAME TOTAL, NO BILL WRITTEN (review of audit v994's fix; the money since
-  // cn-v1211). The reader found a bill already carrying this paper's printed number at this paper's
-  // total and wrote no bill. The paper is filed on the job (this
+  // THE SAME PURCHASE, NO BILL WRITTEN (review of audit v994's fix; the one rule since cn-v1212,
+  // readPaperMatch). The reader found a bill of this paper's store already at its total, on its day
+  // or with its long number, and wrote no bill. The paper is filed on the job (this
   // id); the sheet stays open and offers Different Purchase: Record It Anyway right here, since
   // the button under Receipts & Papers only appears after another paid read.
   const [sameAsDoc, setSameAsDoc] = useState<string | null>(null);
@@ -464,7 +464,8 @@ function SnapCostButton({
       setCostSaved(true);
       return;
     }
-    // A BILL ALREADY CARRIES THIS NUMBER AND ITS TOTAL AGREES (cn-v1211): NO BILL WAS WRITTEN, and
+    // A BILL OF THIS STORE IS ALREADY AT ITS TOTAL, ON ITS DAY OR WITH ITS LONG NUMBER (cn-v1212,
+    // readPaperMatch): NO BILL WAS WRITTEN, and
     // the photo is filed with that bill. Not the "saved with a warning" branch below: here there is
     // no cost of this sheet's to retry. The receipt is filed on the job, so it is cleared from the
     // form and never uploaded again; the footer offers the one real choice, and Done closes.

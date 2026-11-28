@@ -5,7 +5,7 @@ import { translator } from "@/lib/i18n";
 import { currentLang } from "@/lib/current-lang";
 import { OrganizeManager, type OrganizedItemRow } from "./organize-manager";
 import { SnapOrNoteButton } from "@/components/snap-or-note";
-import { loadBooks, loadMarkContext, matchesOnBooks, OPEN_JOBS_FOR_PAPER, PAPER_JOB_STATUSES, rematchTray } from "./paperwork-core";
+import { daysOfWaitingPapers, loadBooks, loadMarkContext, matchesOnBooks, OPEN_JOBS_FOR_PAPER, PAPER_JOB_STATUSES, rematchTray } from "./paperwork-core";
 import { openListViews } from "@/app/(app)/bills/open-list-core";
 import { bankLinesStayHere, bankViews } from "@/app/(app)/bills/bank-core";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -26,13 +26,18 @@ export default async function OrganizePage() {
   // `settings` rides along for the Shop Stock switch (0352): off, and no paper here offers the shelf.
   const orgRead = supabase.from("organizations").select("id, settings").limit(1).maybeSingle();
   const orgIdOf = (r: { data: unknown }) => (r.data as { id?: string } | null)?.id ?? null;
-  const [{ data: org }, { data: items }, { data: jobs }, books, markCtx] = await Promise.all([
-    orgRead,
+  // The papers, wrapped once so the read is sent once: the books read only the bills on the waiting
+  // papers' days (loadBooks: never every bill).
+  const itemsRead = Promise.resolve(
     supabase
       .from("organized_items")
       .select("*, jobs(job_number, name)")
       .order("created_at", { ascending: false })
       .limit(100),
+  );
+  const [{ data: org }, { data: items }, { data: jobs }, books, markCtx] = await Promise.all([
+    orgRead,
+    itemsRead,
     supabase
       .from("jobs")
       .select("id, job_number, name, status")
@@ -41,8 +46,8 @@ export default async function OrganizePage() {
       .in("status", PAPER_JOB_STATUSES)
       .order("created_at", { ascending: false })
       .limit(OPEN_JOBS_FOR_PAPER),
-    // Every printed number already on the books, for "Same Purchase: Tie Them" (0295).
-    Promise.resolve(orgRead).then((r) => loadBooks(supabase, orgIdOf(r))),
+    // The bills that can match the waiting papers (numbered, or on a paper's day), for "Same Purchase: Tie Them" (0295).
+    Promise.all([Promise.resolve(orgRead), itemsRead]).then(([r, it]) => loadBooks(supabase, orgIdOf(r), { days: daysOfWaitingPapers(it.data as unknown[]) })),
     // The open jobs, POs and the company's own names, so a paper already waiting is matched again
     // by the rules it was read before (rematchTray: in memory, no model, nothing written).
     Promise.resolve(orgRead).then((r) => loadMarkContext(supabase, orgIdOf(r))),

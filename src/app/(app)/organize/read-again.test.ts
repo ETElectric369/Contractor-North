@@ -315,7 +315,9 @@ describe("Read Again: the job-upload path", () => {
     const res = await run();
     expect(doors.readTray).not.toHaveBeenCalled();
     expect(doors.fileTray).not.toHaveBeenCalled();
-    expect(doors.billJob).toHaveBeenCalledWith("doc-job", { paid: true, category: "Receipt", billDate: "2026-11-03", scope: "Rough-In" });
+    // rereadOfOwnBill (cn-v1212, skeptic #106 S1): the paper had its own bill, just taken down, so the
+    // job's reader never files it with ANOTHER bill of that store at that total on that day.
+    expect(doors.billJob).toHaveBeenCalledWith("doc-job", { paid: true, category: "Receipt", billDate: "2026-11-03", scope: "Rough-In", rereadOfOwnBill: true });
     expect(res.ok).toBe(true);
     expect(res.message).toContain("The total was $283.00 and is $290.50 now.");
     expect(res.message).toContain("Pen marks read: 1 line crossed out.");

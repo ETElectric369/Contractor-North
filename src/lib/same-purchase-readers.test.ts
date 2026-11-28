@@ -44,9 +44,11 @@ describe("every reader of 'is this purchase already on the books?' reads correct
     const src = read("src/app/(app)/organize/paperwork-core.ts");
     expect(src).toContain("const first = await q(`${cols}, corrects_bill_id`)");
     expect(src).not.toMatch(/safe<BookedBill>/);
-    // Each bills column list in the file rides the ladder: none is read by `safe` alone.
+    // Each bills column list in the file rides the ladder: none is read by `safe` alone. F7 (cn-v1212):
+    // the numbered, day, corrections and by-id reads share BOOK_BILL_COLUMNS, beside the bank's and
+    // the plain costs' lists; six reads, every one on the ladder.
     expect(billColumnLists(src).length).toBe(3);
-    expect(src.match(/withCorrections<BookedBill>/g)?.length).toBe(3);
+    expect(src.match(/withCorrections<BookedBill>/g)?.length).toBe(6);
   });
 
   it("every LedgerBill the readers build carries the column through", () => {
