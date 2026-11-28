@@ -1,14 +1,13 @@
-import { dirname } from "path";
-import { fileURLToPath } from "url";
-import { FlatCompat } from "@eslint/eslintrc";
+import { defineConfig, globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTs from "eslint-config-next/typescript";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const compat = new FlatCompat({ baseDirectory: __dirname });
-
-const eslintConfig = [
-  ...compat.extends("next/core-web-vitals", "next/typescript"),
+// Next 16 ships its lint rules as flat configs and took `next lint` away, so `npm run lint` is plain
+// `eslint .` and this file imports the two configs directly. (The compatibility wrapper this file used
+// through Next 15 cannot load them: it dies turning a config with a circular plugin reference into JSON.)
+const eslintConfig = defineConfig([
+  ...nextVitals,
+  ...nextTs,
   {
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
@@ -23,6 +22,8 @@ const eslintConfig = [
     files: ["**/*.cjs"],
     rules: { "@typescript-eslint/no-require-imports": "off" },
   },
-];
+  // The config already ignores these four by itself; they are repeated so the list to add to is in view.
+  globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts"]),
+]);
 
 export default eslintConfig;

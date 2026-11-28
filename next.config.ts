@@ -1,8 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Lint is run separately in CI; don't fail production builds on lint.
-  eslint: { ignoreDuringBuilds: true },
   // Pin every client to the deployment that served it. Alone this only stamps requests with
   // x-deployment-id; with Vercel Skew Protection switched on in the project settings, an old
   // tab keeps talking to ITS build instead of the new one — the "e[o] is not a function" /
@@ -20,7 +18,7 @@ const nextConfig: NextConfig = {
     "/api/pdf/**": ["./node_modules/@sparticuz/chromium/bin/**"],
   },
   experimental: {
-    // Server Actions are stable in Next 15; keep body limit generous for
+    // Server Actions are stable; keep body limit generous for
     // photo / sketch / document uploads handled through actions — incl. plan
     // PDFs sent to the estimator (server validates the PDF itself at ≤20 MB).
     serverActions: { bodySizeLimit: "22mb" },

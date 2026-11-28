@@ -293,7 +293,7 @@ async function tellOfficeAboutAddition(supabase: Db, actor: Actor, listId: strin
     // Every add lands on the bell; the push waits out 15 minutes per (person, job) — the ring the
     // Panel tab shares (src/lib/notifications.ts ringOffice).
     await ringOffice(actor.orgId, bosses, { type: "materials_added", title, body, url, windowMinutes: 15, mode: "bell_each_push_once" });
-    // Still lands from behind after(): Next 15.5 runs after-callbacks under the request's work
+    // Still lands from behind after(): Next (15.5 and 16.4 alike) runs after-callbacks under the request's work
     // store (withExecuteRevalidates), so the job tab's list refreshes the same as before.
     revalidatePath(`/jobs/${jobId}`);
   } catch (e) {

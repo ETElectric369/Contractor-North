@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   appleWebApp: { capable: true, statusBarStyle: "default", title: "North" },
   icons: { icon: "/favicon.ico", apple: "/apple-touch-icon.png" }, // explicit rel=icon — SERP/browser favicon pickup was unreliable without it
   other: {
-    // Next 15's `appleWebApp.capable` now emits only the modern `mobile-web-app-capable`.
+    // Since Next 15 (and still in 16) `appleWebApp.capable` emits only the modern `mobile-web-app-capable`.
     // OLDER iOS still needs the legacy `apple-mobile-web-app-capable` to launch an
     // installed PWA standalone — without it, the home-screen app opens inside Safari
     // with the browser controls (what Brian's older iPhone showed).

@@ -4,8 +4,11 @@ AI-powered field service platform for electrical contractors (built for a CED
 contractor). CRM, AI-assisted quoting, scheduling, work orders, and a full
 timeclock — with a Claude-powered assistant throughout.
 
-Built with **Next.js 15** (App Router) · **Supabase** (Postgres + Auth + RLS) ·
+Built with **Next.js 16** (App Router) · **Supabase** (Postgres + Auth + RLS) ·
 **Anthropic Claude** · **Tailwind CSS v4** · deployed on **Vercel**.
+
+Opens in Chrome, Edge and Firefox 111 or newer and in Safari / iOS 16.4 or newer: the framework's own
+floor since Next.js 16, kept on purpose (`tests/next-build-uses-webpack.test.ts`).
 
 ---
 

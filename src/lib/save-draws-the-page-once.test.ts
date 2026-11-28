@@ -8,13 +8,22 @@ import { join } from "node:path";
  *
  * THE PROOF, FROM THE INSTALLED NEXT (pinned below, so an upgrade that changes it turns this red):
  * - the client posts a server action to the page the person is on (server-action-reducer.js:
- *   `fetch(state.canonicalUrl, ...)`), with no RSC header, so the server renders from the root;
- * - any revalidatePath / revalidateTag sets `store.pathWasRevalidated = true` (revalidate.js);
- * - the action handler then renders that page's tree into the answer
- *   (action-handler.js: `skipFlight: !workStore.pathWasRevalidated || actionWasForwarded`);
- * - the client lays that tree in as the page (server-action-reducer.js: `mutable.cache = cache`).
+ *   `fetch(state.canonicalUrl, ...)`), so the server renders from the root;
+ * - revalidatePath hands no cache profile, so it marks the request as revalidated, static and
+ *   dynamic (revalidate.js: `store.pathWasRevalidated = …ActionDidRevalidateStaticAndDynamic`);
+ * - the action handler skips the page only when nothing was revalidated (action-handler.js:
+ *   `skipPageRendering ||= workStore.pathWasRevalidated === undefined || … ActionDidNotRevalidate`),
+ *   so that page's tree is rendered into the answer;
+ * - the client lays that tree in as the page (server-action-reducer.js: a navigation seeded with
+ *   the answer's own data, `navigateToKnownRoute(…, redirectSeed, …)`).
  * So a `router.refresh()` right after an action that revalidated draws the page, layout included,
  * a second time.
+ *
+ * RE-PINNED FOR NEXT 16.4.6 (cn-v1214, 2026-11-27), after the check by hand an upgrade owes this
+ * file: one source, built on 15.5.29 and on 16.4.6, driven in a real browser engine. On both, a
+ * save that revalidates is ONE request and ONE draw of the page; a save that revalidates nothing
+ * draws nothing; a save followed by router.refresh() draws twice. The rule below stands as it was.
+ * (New in 16 and outside this file: the links on screen are fetched again after such a save.)
  *
  * THE RULE: in the six doors the scout named, a refresh after an action goes only where EVERY success
  * path of that action revalidates the page the door is drawn on. Where one does not, it stays, with
@@ -77,12 +86,23 @@ const TABLE: Row[] = [
 describe("the proof, in the installed Next", () => {
   it("an action that revalidated hands the current page's tree back, and the client lays it in", () => {
     const handler = read("node_modules/next/dist/server/app-render/action-handler.js");
-    expect(handler).toContain("skipFlight: !workStore.pathWasRevalidated || actionWasForwarded");
+    expect(handler).toContain(
+      "skipPageRendering ||= workStore.pathWasRevalidated === undefined || workStore.pathWasRevalidated === _actionrevalidationkind.ActionDidNotRevalidate;",
+    );
+    // The same rule a second time, on the path of an action that THREW: one that revalidated before it
+    // failed still gets the page's tree in its answer. (Skeptic #107's gap: this copy was not pinned.)
+    expect(handler).toContain(
+      "const skipPageRendering = workStore.pathWasRevalidated === undefined || workStore.pathWasRevalidated === _actionrevalidationkind.ActionDidNotRevalidate || shouldSkipPageRendering;",
+    );
     const revalidate = read("node_modules/next/dist/server/web/spec-extension/revalidate.js");
-    expect(revalidate).toContain("store.pathWasRevalidated = true;");
+    // revalidatePath calls revalidate() with no profile, and with no profile the request is marked.
+    expect(revalidate).toContain("return revalidate(tags, `revalidatePath(${JSON.stringify(originalPath)})`);");
+    expect(revalidate).toMatch(
+      /if \(!profile \|\| \(cacheLife == null \? void 0 : cacheLife\.expire\) === 0\) \{[\s\S]{0,120}?store\.pathWasRevalidated = _actionrevalidationkind\.ActionDidRevalidateStaticAndDynamic;/,
+    );
     const reducer = read("node_modules/next/dist/client/components/router-reducer/reducers/server-action-reducer.js");
-    expect(reducer).toContain("const res = await fetch(state.canonicalUrl, {");
-    expect(reducer).toContain("mutable.cache = cache;");
+    expect(reducer).toContain("res = await (0, _fetch.fetch)(state.canonicalUrl, {");
+    expect(reducer).toContain("return (0, _approuterstate.navigateToKnownRoute)(now, state, redirectUrl, redirectCanonicalUrl, redirectSeed,");
   });
 });
 

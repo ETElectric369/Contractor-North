@@ -15,7 +15,9 @@ import { join } from "node:path";
  *
  *   1. The caller hears the answer while the action is still on the queue.
  *   2. A navigation or a Back dispatched then TAKES ITS PLACE: the action's state is never applied,
- *      and the queue owes a refresh to wherever it ends up.
+ *      and the queue owes a refresh to wherever it ends up, IF the action revalidated (since Next
+ *      16; Next 15 owed it for every discarded action). The reducer marks the action as one that
+ *      revalidated before it answers the caller, so the mark is there when the queue looks.
  *   3. A Back that lands while a navigation is in flight takes THAT one's place too.
  *
  * (2) is the fix: the visit's doors navigate in the tick the answer arrives, so the dead page is
@@ -28,8 +30,22 @@ import { join } from "node:path";
  * A TRIPWIRE ON PURPOSE. It reads Next's internals; a Next upgrade that moves them fails here, and
  * that is the moment to check a visit's delete doors (and every await-then-navigate delete in the
  * app) by hand before re-pinning.
+ *
+ * RE-PINNED FOR NEXT 16.4.6 (cn-v1214, 2026-11-27), AFTER THAT CHECK. The doors were driven in a real
+ * browser engine on 15.5.29 and on 16.4.6, the same source built twice with the app's own Modal:
+ * a delete that navigates in the tick never shows the 404 on either, in a sheet or out of one, with
+ * fast pages and with slow ones. What changed in 16, and is pinned below as it is now:
+ *   · the queue runs the reducer directly (15 wrapped it in an async function), and the reducer
+ *     answers the caller with no await before it; the caller is still heard first;
+ *   · the refresh after a discarded action is owed only when that action revalidated, and in the
+ *     engine it is really sent now: the page a door lands on is asked for twice (15 sent it once);
+ *   · once the queue drains after a navigation took an action's place, the queue publishes its own
+ *     state once more, so a state can be handed to React twice;
+ *   · the old close-then-push shape no longer ends on the 404: the owed refresh is requested and
+ *     its answer is never drawn, so the page of the deleted record stays on screen. Still a door
+ *     that must not be written.
  */
-type Action = { type: string; url?: string; resolve?: (v: unknown) => void; reject?: (e: unknown) => void };
+type Action = { type: string; url?: string; didRevalidate?: boolean; resolve?: (v: unknown) => void; reject?: (e: unknown) => void };
 type State = { name: string };
 type Queue = {
   state: State;
@@ -74,9 +90,15 @@ const tick = () => new Promise<void>((r) => setTimeout(r, 0));
  * One door, played through the real queue. `inTheTick` is what the door does the moment its awaited
  * action answers; `later` is what arrives afterwards (a popstate, a fetch coming back). The stand-in
  * reducer keeps the real server-action reducer's promise shape (pinned at the bottom of this file):
- * fetch(...).then(async () => { await …; resolve(result); return state }).
+ * fetchServerAction(...).then(async () => { mark the action as one that revalidated; resolve(result);
+ * return state }), with no await before the caller is answered. `revalidated` is what the server's
+ * answer said: every delete door's action revalidates, so it is true unless a test says otherwise.
  */
-async function play(inTheTick: (q: Queue, set: (s: State | Promise<State>) => void) => void, later?: (q: Queue, set: (s: State | Promise<State>) => void, land: () => void) => Promise<void> | void) {
+async function play(
+  inTheTick: (q: Queue, set: (s: State | Promise<State>) => void) => void,
+  later?: (q: Queue, set: (s: State | Promise<State>) => void, land: () => void) => Promise<void> | void,
+  revalidated = true,
+) {
   const applied: string[] = [];
   const heard: string[] = [];
   const set = (s: State | Promise<State>) => {
@@ -92,7 +114,7 @@ async function play(inTheTick: (q: Queue, set: (s: State | Promise<State>) => vo
   const reduce = (state: State, action: Action): Promise<State> | State => {
     if (action.type === types.ACTION_SERVER_ACTION) {
       return new Promise<void>((r) => (answer = r)).then(async () => {
-        await Promise.resolve();
+        if (revalidated) action.didRevalidate = true;
         action.resolve?.("deleted");
         return { name: DEAD };
       });
@@ -102,8 +124,8 @@ async function play(inTheTick: (q: Queue, set: (s: State | Promise<State>) => vo
     if (action.type === types.ACTION_REFRESH) return { name: `refresh of: ${state.name}` };
     return state;
   };
-  // The queue's own wrapper, as createMutableActionQueue writes it: async, whatever the reducer returns.
-  queue.action = async (state, action) => reduce(state, action);
+  // As createMutableActionQueue wires it since Next 16: the reducer itself, with no async wrapper around it.
+  queue.action = reduce;
   // Next's callServer, in shape: an async function that returns a new Promise the reducer resolves.
   const callServer = async () => new Promise((resolve, reject) => queue.dispatch({ type: types.ACTION_SERVER_ACTION, resolve, reject }, set));
   const door = (async () => {
@@ -141,9 +163,17 @@ describe("next's action queue, as installed: a navigation or a Back takes a pend
 
   it("the doors now: a navigation in the tick the answer arrives, and the dead page is never applied", async () => {
     const r = await play(navigate("/inspections"), (_q, _set, land) => land());
-    expect(r.applied).toEqual(["navigated to /inspections", "refresh of: navigated to /inspections"]);
+    // The queue's own publish once it drains, the owed refresh, then the navigation's own promise.
+    expect(r.applied).toEqual(["navigated to /inspections", "refresh of: navigated to /inspections", "navigated to /inspections"]);
     expect(r.applied).not.toContain(DEAD);
     expect(r.endsOn).toBe("refresh of: navigated to /inspections");
+  });
+
+  it("the same door after an action that revalidated nothing: the dead page is still thrown away, and no refresh is owed", async () => {
+    const r = await play(navigate("/inspections"), (_q, _set, land) => land(), false);
+    expect(r.applied).toEqual(["navigated to /inspections", "navigated to /inspections"]);
+    expect(r.applied).not.toContain(DEAD);
+    expect(r.endsOn).toBe("navigated to /inspections");
   });
 
   it("the old Edit Details › Delete (close, then push): the sheet's Back displaces the push, and the owed refresh asks for the deleted visit", async () => {
@@ -152,18 +182,28 @@ describe("next's action queue, as installed: a navigation or a Back takes a pend
       await tick();
       land(); // the push's page comes back, too late: it was discarded
     });
-    expect(r.applied).toEqual(["back on /appointments/abc123", "refresh of: back on /appointments/abc123"]);
+    expect(r.applied).toEqual(["back on /appointments/abc123", "back on /appointments/abc123", "refresh of: back on /appointments/abc123"]);
     expect(r.applied.some((s) => s.startsWith("navigated"))).toBe(false);
     expect(r.endsOn).toBe("refresh of: back on /appointments/abc123");
   });
 
   it("the stand-in reducer keeps the real one's shape: the caller is answered before the reducer returns its state", () => {
     const reducer = readFileSync(join(NEXT, "router-reducer/reducers/server-action-reducer.js"), "utf8");
-    expect(reducer).toMatch(/return fetchServerAction\(state, nextUrl, action\)\.then\(async \(param\)=>\{/);
-    expect(reducer).toMatch(/\} else \{\s*resolve\(actionResult\);\s*\}\s*return \(0, _handlemutable\.handleMutable\)\(state, mutable\);/);
-    expect(reducer).toMatch(/await \(0, _refetchinactiveparallelsegments\.refreshInactiveParallelSegments\)\(/);
-    // And the queue wraps whatever reducer it runs in an async function, as the stand-in above does.
+    expect(reducer).toMatch(/return fetchServerAction\(state, nextUrl, action\)\.then\(async \(\{ revalidationKind, actionResult, /);
+    // The action is marked as one that revalidated BEFORE the caller is answered, and nothing is
+    // awaited in between: no `await` stands anywhere between the two lines.
+    const from = reducer.indexOf("return fetchServerAction(state, nextUrl, action).then(async (");
+    const marked = reducer.indexOf("action.didRevalidate = true;", from);
+    const answered = reducer.search(/\} else \{\s*\/\/ If there's no redirect, resolve the action with the result\.\s*resolve\(actionResult\);/);
+    expect(from).toBeGreaterThan(-1);
+    expect(marked).toBeGreaterThan(from);
+    expect(answered).toBeGreaterThan(marked);
+    expect(reducer.slice(from, answered)).not.toMatch(/\bawait\b/);
+    // The queue runs the reducer itself, as the stand-in above is wired, and owes the refresh only
+    // for a discarded server action that revalidated.
     const instance = readFileSync(join(NEXT, "app-router-instance.js"), "utf8");
-    expect(instance).toMatch(/action: async \(state, action\)=>\{\s*const result = \(0, _routerreducer\.reducer\)\(state, action\);\s*return result;\s*\}/);
+    expect(instance).toMatch(/action: _routerreducer\.reducer,/);
+    expect(instance).toMatch(/if \(action\.payload\.type === _routerreducertypes\.ACTION_SERVER_ACTION && action\.payload\.didRevalidate\) \{[\s\S]{0,260}?actionQueue\.needsRefresh = true;/);
+    expect(instance).toMatch(/actionQueue\.pending\.discarded = true;\s*actionQueue\.wasPreempted = true;/);
   });
 });

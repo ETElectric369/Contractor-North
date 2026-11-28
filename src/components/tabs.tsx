@@ -145,7 +145,8 @@ function UrlSyncedTabs({ tabs, paramKey, maxVisible, look, barAnchor }: { tabs: 
   // URL and left the old panel showing. (Keying <Tabs> on the linked tab is the tempting fix
   // and the wrong one: it remounts the whole tab tree — client state gone — on the first server
   // refresh after any strip tap, and does nothing on the second click of the same link.)
-  // Next 15 routes window.history.replaceState through its router, so the strip's own taps
+  // Next (15 and 16 alike: seen in a real browser on both, cn-v1214) routes
+  // window.history.replaceState through its router, so the strip's own taps
   // (onSelect below) and a real <Link> navigation both arrive here as a changed
   // useSearchParams(): a tap already set `active`, so this is a no-op; a link sets it.
   // Deps are the URL's tab ONLY — never `active`: the router applies a replaceState inside a
