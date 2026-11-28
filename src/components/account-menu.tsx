@@ -25,6 +25,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { helpRows, openSetup } from "@/lib/onboarding/help-rows";
 import type { Answers } from "@/lib/playbook/types";
 import type { Profile } from "@/lib/types";
+import { APP_VERSION } from "@/lib/version";
 
 /** Every row in this menu: a 44px target, icon then words, the glass tint on hover. */
 const ROW = "relative z-10 flex min-h-[44px] w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15";
@@ -332,6 +333,14 @@ export function AccountMenu({
           <form action={signOutAfterUnbindingPush}>
             <SignOutButton t={t} />
           </form>
+          {/* THE RELEASE THIS PAGE RUNS (cn-v1213; the owner, 2026-11-27: "Yes to release name"). The
+              build's own stamp, the one the sign-in page shows, read from the bundle this page loaded
+              and never from the server: the phone app keeps the build it opened with until it reloads
+              (lib/release-on-return), so this line is how a person tells which release a screen is
+              from. A line, not a door: no tap, no word to translate, the same in both languages. */}
+          <p data-release className="relative z-10 px-4 pb-1.5 pt-1 text-[11px] font-medium tracking-wider text-slate-400">
+            {APP_VERSION}
+          </p>
         </div>
       )}
     </div>

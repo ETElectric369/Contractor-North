@@ -30,6 +30,7 @@ vi.mock("next/link", () => ({ default: ({ children, href }: { children: unknown;
 
 import { AccountMenu, bugWatchLabel } from "./account-menu";
 import { ALL_ON } from "@/lib/features";
+import { APP_VERSION } from "@/lib/version";
 
 const off = (...keys: (keyof FeatureMap)[]) => ({ ...ALL_ON, ...Object.fromEntries(keys.map((k) => [k, false])) }) as FeatureMap;
 const render = (features?: FeatureMap, role = "owner", extra: Record<string, unknown> = {}) =>
@@ -197,3 +198,47 @@ describe("the role under the name", () => {
     expect(roleLine(renderToStaticMarkup(createElement(AccountMenu, { profile: null as never, features: ALL_ON })))).toBe("user");
   });
 });
+
+/**
+ * THE RELEASE THIS PAGE RUNS (cn-v1213; the owner, 2026-11-27: "Yes to release name"). The phone app
+ * keeps the build it opened with until it reloads, and nothing on a screen said which release that
+ * was: a proof tap was read on the release before the one it was meant for, twice. The menu's last
+ * line is the build's own stamp. A line, never a door.
+ */
+describe("the release name at the bottom of the menu", () => {
+  const releaseLines = (html: string) => [...html.matchAll(/<p data-release[^>]*>([\s\S]*?)<\/p>/g)].map((m) => m[1].trim());
+
+  it("shows the stamp this build carries, once, to every role, lapsed or not, in both languages", () => {
+    expect(APP_VERSION).toMatch(/^cn-v\d+$/);
+    const menus = [
+      render(),
+      render(ALL_ON, "admin"),
+      render(ALL_ON, "office"),
+      render(ALL_ON, "tech"),
+      render(ALL_ON, "tech", { lang: "es" }),
+      render(ALL_ON, "owner", { lang: "es" }),
+      render(off("nort"), "owner", { lapsed: true, onboarded: false, setup: {} }),
+      renderToStaticMarkup(createElement(AccountMenu, { profile: null as never, features: ALL_ON })),
+    ];
+    for (const html of menus) expect(releaseLines(html)).toEqual([APP_VERSION]);
+  });
+
+  it("is the last thing in the menu, after Sign Out, and is no door: in no button, link or form", () => {
+    for (const html of [render(), render(ALL_ON, "tech", { lang: "es" })]) {
+      expect(html.indexOf("data-release")).toBeGreaterThan(html.lastIndexOf("</form>"));
+      expect(html.slice(html.indexOf("data-release"))).not.toMatch(/<(button|a|form)\b/);
+      for (const m of html.matchAll(/<(button|a|form)\b[\s\S]*?<\/\1>/g)) expect(m[0]).not.toContain(APP_VERSION);
+      expect(buttonWords(html).join(" ")).not.toContain(APP_VERSION);
+    }
+  });
+
+  it("is read from the bundle this page loaded, never handed down by the server", () => {
+    const src = readFileSync(join(process.cwd(), "src/components/account-menu.tsx"), "utf8");
+    expect(src).toMatch(/^import \{ APP_VERSION \} from "@\/lib\/version";$/m);
+    expect(src).toMatch(/<p data-release[^>]*>\s*\{APP_VERSION\}\s*<\/p>/);
+    // The stamp is no prop: a server-rendered value would name the release that ANSWERED, which on
+    // an old page is still the old one, but a prop could be wired to anything later.
+    expect(src).not.toMatch(/\b(version|release)\??:\s*string/i);
+  });
+});
+
